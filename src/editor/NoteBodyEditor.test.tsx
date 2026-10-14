@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Spy mode: every read still reaches the mock disk, and a case can count them.
+vi.mock('@/lib/ipc', { spy: true });
 import { makeEntry } from '@/engine/testHelpers';
+import { readNote } from '@/lib/ipc';
 import { resetMockFs } from '@/lib/mockIpc';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -171,25 +175,29 @@ describe('NoteBodyEditor', () => {
 });
 
 /**
- * Reconciling with the disk (M17.4, M53.6).
+ * Outside writes land in the open page in place (M55.6).
  *
- * The agent writes straight to disk through its MCP tools while you have the
- * file open. Nothing reloaded the editor, the watcher drops the echo of every
- * write the app makes (the agent's included), and the next keystroke's
- * debounce saved the stale buffer back over the agent's work — the guaranteed
- * outcome of asking the assistant to revise a note you are looking at, not a
- * narrow race. A write announced for the page's path is handled by that
- * announcement; anything else still has the modifiedAt stamp.
+ * The agent writes straight to disk through its MCP tools while the file is
+ * open. Its writes announce their path; any other change shows as a new
+ * content hash. The page reads the body again and applies what changed as
+ * edits: a clean page takes the write block by block, and a page with
+ * unsaved typing merges three ways, leaving only overlaps as choices. One
+ * onReady per test is one editor: nothing remounts.
  */
 describe('NoteBodyEditor when the file changes underneath it', () => {
-  const at = (iso: string) =>
+  const FILE = '---\ntype: Doc\n---\n\n# Test page\n\nFirst line.\n\nSecond line.\n';
+  const withBody = (body: string) => `---\ntype: Doc\n---\n\n${body}`;
+  const BODY = '# Test page\n\nFirst line.\n\nSecond line.\n';
+  const AGENT = withBody(BODY.replace('First line.', 'First, by the agent.'));
+
+  const hashed = (hash: string) =>
     useVaultStore.setState({
-      entries: [makeEntry({ path: PAGE, filename: 'test-page.md', modifiedAt: iso })],
+      entries: [makeEntry({ path: PAGE, filename: 'test-page.md', hash })],
     });
 
   beforeEach(() => {
     resetMockFs();
-    fs().set(PAGE, '---\ntype: Doc\n---\n\n# Test page\n\nBody line here.\n');
+    fs().set(PAGE, FILE);
     useVaultStore.setState({
       vaultPath: '/demo-vault',
       entries: [],
@@ -202,94 +210,50 @@ describe('NoteBodyEditor when the file changes underneath it', () => {
       rescan: vi.fn(async () => undefined),
     });
     useUiStore.setState({ toasts: [] });
-    at('2026-08-03T10:00:00Z');
+    hashed('h1');
   });
   afterEach(() => {
     cleanup();
     __resetOpenPages();
   });
 
-  /** Every editor instance this component mounts, newest last — a reload is a
-   *  remount, so the new body arrives as a new onReady. */
-  async function renderTracking(debounceMs: number): Promise<ReadyInfo[]> {
-    const seen: ReadyInfo[] = [];
-    render(
-      <NoteBodyEditor path={PAGE} debounceMs={debounceMs} onReady={(i) => void seen.push(i)} />,
-    );
-    await waitFor(() => expect(seen.length).toBe(1), DISK_ROUND_TRIP);
-    return seen;
+  interface Tracked {
+    seen: ReadyInfo[];
+    loadedBodies: string[];
   }
 
-  const bodyOf = (info: ReadyInfo) => JSON.stringify(info.editor.document);
+  /** Every editor this component mounts, newest last, and every body it pins. */
+  async function renderTracking(debounceMs: number): Promise<Tracked> {
+    const seen: ReadyInfo[] = [];
+    const loadedBodies: string[] = [];
+    render(
+      <NoteBodyEditor
+        path={PAGE}
+        debounceMs={debounceMs}
+        onReady={(i) => void seen.push(i)}
+        onBodyLoaded={(_p, raw) => void loadedBodies.push(raw)}
+      />,
+    );
+    await waitFor(() => expect(seen.length).toBe(1), DISK_ROUND_TRIP);
+    return { seen, loadedBodies };
+  }
 
-  it('reloads a clean buffer instead of letting it overwrite the new version', async () => {
-    const seen = await renderTracking(20);
-    expect(bodyOf(seen[0])).toContain('Body line here');
-
-    // The agent rewrites the file and the rescan lands.
-    fs().set(PAGE, '---\ntype: Doc\n---\n\n# Test page\n\nRewritten by the agent.\n');
-    at('2026-08-03T10:05:00Z');
-
-    await waitFor(() => expect(seen.length).toBe(2), DISK_ROUND_TRIP);
-    expect(bodyOf(seen[1])).toContain('Rewritten by the agent');
-    // Silently — a dialog on every agent write would be its own bug.
-    expect(screen.queryByTestId('external-change-banner')).toBeNull();
-  });
-
-  it('asks before discarding edits the user has typed', async () => {
-    // A debounce long enough that the edit is still UNSAVED when the agent's
-    // write lands. That is the whole conflict: settle it first and the buffer
-    // is clean, and a clean buffer has nothing to protect.
-    const seen = await renderTracking(10_000);
-    appendParagraph(seen[0].editor, 'my unsaved sentence');
-
-    fs().set(PAGE, '---\ntype: Doc\n---\n\n# Test page\n\nRewritten by the agent.\n');
-    at('2026-08-03T10:05:00Z');
-
-    await waitFor(() => expect(screen.getByTestId('external-change-banner')).toBeTruthy());
-    // Nothing was taken away while the question was open.
-    expect(seen.length).toBe(1);
-    expect(bodyOf(seen[0])).toContain('my unsaved sentence');
-
-    fireEvent.click(screen.getByTestId('external-change-reload'));
-    await waitFor(() => expect(seen.length).toBe(2), DISK_ROUND_TRIP);
-    expect(bodyOf(seen[1])).toContain('Rewritten by the agent');
-  });
-
-  it('lets the user keep theirs, and stops asking once they have answered', async () => {
-    const seen = await renderTracking(10_000);
-    appendParagraph(seen[0].editor, 'my unsaved sentence');
-    fs().set(PAGE, '---\ntype: Doc\n---\n\n# Test page\n\nRewritten by the agent.\n');
-    at('2026-08-03T10:05:00Z');
-    await waitFor(() => expect(screen.getByTestId('external-change-banner')).toBeTruthy());
-
-    fireEvent.click(screen.getByTestId('external-change-keep'));
-    expect(screen.queryByTestId('external-change-banner')).toBeNull();
-    // A later rescan reporting the SAME mtime must not re-ask a question the
-    // user has already answered.
-    at('2026-08-03T10:05:00Z');
-    await settle();
-    expect(screen.queryByTestId('external-change-banner')).toBeNull();
-    expect(seen.length).toBe(1);
-  });
-
-  it('does not mistake the user’s own save for someone else’s write', async () => {
-    const info = await renderReady(PAGE);
-    appendParagraph(info.editor, 'typed by me');
-    await settle();
-    // The save landed and the rescan moved the file's mtime.
-    at('2026-08-03T10:05:00Z');
-    await settle();
-    expect(screen.queryByTestId('external-change-banner')).toBeNull();
-  });
-
-  // --- An agent write announced for this path (M53.6) ---------------------
-  //
-  // Rust stamps modifiedAt to the second, so the stamp cannot carry a write
-  // in the same second as the last one. None of these move it: the
-  // announcement alone has to do the work.
-
-  const AGENT = '---\ntype: Doc\n---\n\n# Test page\n\nRewritten by the agent.\n';
+  const ids = (info: ReadyInfo) => info.editor.document.map((b) => b.id);
+  /** Every block that was there is still there, by id (a trailing paragraph
+   *  the view adds on its first change may join them). */
+  const keptAll = (info: ReadyInfo, before: string[]) =>
+    expect(ids(info)).toEqual(expect.arrayContaining(before));
+  const textOf = (info: ReadyInfo) => info.serialize();
+  const blockWith = (info: ReadyInfo, text: string) => {
+    const block = info.editor.document.find((b) => JSON.stringify(b.content).includes(text));
+    if (block === undefined) throw new Error(`no block holds ${text}`);
+    return block;
+  };
+  /** Type over a block, as the person would. */
+  const typeOver = (info: ReadyInfo, holding: string, text: string) =>
+    act(() => {
+      info.editor.updateBlock(blockWith(info, holding), { content: text });
+    });
 
   /** Announce a write to PAGE whose catch-up waits until `caughtUp()`. */
   function announcePending(): { announced: Promise<void>; caughtUp: () => void } {
@@ -304,9 +268,71 @@ describe('NoteBodyEditor when the file changes underneath it', () => {
     return { announced, caughtUp };
   }
 
-  /** The agent writes PAGE; the announcement holds until the test lets it land. */
-  async function agentWritesWhileTyped(seen: ReadyInfo[]): Promise<void> {
-    appendParagraph(seen[0].editor, 'my unsaved sentence');
+  /** The agent writes `file` to PAGE and announces it, caught up at once. */
+  const agentWrites = (file: string) => {
+    fs().set(PAGE, file);
+    return act(() => announceExternalWrites([PAGE], async () => undefined));
+  };
+
+  /** Write, announce, and wait for the choice bar. */
+  async function overlap(tracked: Tracked): Promise<void> {
+    await typeOver(tracked.seen[0], 'First line.', 'First, typed by me.');
+    await agentWrites(AGENT);
+    await waitFor(() => expect(screen.getAllByTestId('merge-choice')).toHaveLength(1));
+  }
+
+  it('applies an announced write to a clean page in place, with no remount', async () => {
+    const tracked = await renderTracking(20);
+    const before = ids(tracked.seen[0]);
+    const first = blockWith(tracked.seen[0], 'First line.').id;
+    await agentWrites(AGENT);
+    await waitFor(() => expect(textOf(tracked.seen[0])).toContain('First, by the agent.'));
+    expect(tracked.seen).toHaveLength(1);
+    keptAll(tracked.seen[0], before);
+    expect(blockWith(tracked.seen[0], 'First, by the agent.').id).toBe(first);
+    expect(tracked.loadedBodies.at(-1)).toContain('First, by the agent.');
+    expect(screen.queryByTestId('merge-choices')).toBeNull();
+  });
+
+  it('applies a content-hash change nobody announced the same way', async () => {
+    const tracked = await renderTracking(20);
+    const before = ids(tracked.seen[0]);
+    fs().set(PAGE, AGENT);
+    act(() => hashed('h2'));
+    await waitFor(() => expect(textOf(tracked.seen[0])).toContain('First, by the agent.'));
+    expect(tracked.seen).toHaveLength(1);
+    keptAll(tracked.seen[0], before);
+  });
+
+  it('reads a frontmatter-only change once and leaves the page alone', async () => {
+    const tracked = await renderTracking(20);
+    const before = ids(tracked.seen[0]);
+    const reads = vi.mocked(readNote).mock.calls.length;
+    fs().set(PAGE, FILE.replace('type: Doc', 'type: Doc\nstatus: done'));
+    act(() => hashed('h2'));
+    await waitFor(() => expect(vi.mocked(readNote).mock.calls.length).toBe(reads + 1));
+    await settle();
+    expect(vi.mocked(readNote).mock.calls.length).toBe(reads + 1);
+    expect(ids(tracked.seen[0])).toEqual(before);
+    expect(fs().get(PAGE)).toContain('status: done');
+  });
+
+  it('never re-applies its own save', async () => {
+    const tracked = await renderTracking(20);
+    await typeOver(tracked.seen[0], 'Second line.', 'Second, typed by me.');
+    await waitFor(() => expect(fs().get(PAGE)).toContain('Second, typed by me.'), DISK_ROUND_TRIP);
+    const before = ids(tracked.seen[0]);
+    // The save's rescan brings the new hash.
+    act(() => hashed('h2'));
+    await settle();
+    expect(ids(tracked.seen[0])).toEqual(before);
+    expect(tracked.seen).toHaveLength(1);
+    expect(screen.queryByTestId('merge-choices')).toBeNull();
+  });
+
+  it('holds what is typed while a write lands, then merges it, and both reach disk', async () => {
+    const tracked = await renderTracking(20);
+    await typeOver(tracked.seen[0], 'Second line.', 'Second, typed by me.');
     fs().set(PAGE, AGENT);
     const { announced, caughtUp } = announcePending();
     // The debounce fires while the write is catching up: held, not written.
@@ -316,78 +342,100 @@ describe('NoteBodyEditor when the file changes underneath it', () => {
       caughtUp();
       await announced;
     });
-    await waitFor(() => expect(screen.getByTestId('external-change-banner')).toBeTruthy());
-  }
-
-  it('reloads a clean buffer when a write to its file is announced, with modifiedAt unchanged', async () => {
-    const seen = await renderTracking(20);
-    fs().set(PAGE, AGENT);
-    await act(() => announceExternalWrites([PAGE], async () => undefined));
-    await waitFor(() => expect(seen.length).toBe(2), DISK_ROUND_TRIP);
-    expect(bodyOf(seen[1])).toContain('Rewritten by the agent');
-    expect(screen.queryByTestId('external-change-banner')).toBeNull();
+    await waitFor(() => expect(fs().get(PAGE)).toContain('Second, typed by me.'), DISK_ROUND_TRIP);
+    expect(fs().get(PAGE)).toContain('First, by the agent.');
+    expect(textOf(tracked.seen[0])).toContain('First, by the agent.');
+    expect(tracked.seen).toHaveLength(1);
+    expect(screen.queryByTestId('merge-choices')).toBeNull();
   });
 
-  it('holds what was typed while an announced write lands, then asks', async () => {
-    const seen = await renderTracking(20);
-    await agentWritesWhileTyped(seen);
-    // Nothing was taken away, and nothing was written over the agent's text.
-    expect(seen.length).toBe(1);
-    expect(bodyOf(seen[0])).toContain('my unsaved sentence');
-    appendParagraph(seen[0].editor, 'and one more');
+  it('shows one choice where both changed a block, and saves nothing while it is open', async () => {
+    const tracked = await renderTracking(10_000);
+    await overlap(tracked);
+    expect(screen.getByRole('group', { name: 'Choose a version' }).textContent).toContain(
+      'Nothing saves until you do.',
+    );
+    expect(screen.getByTestId('merge-choice').textContent).toContain('First, typed by me.');
+    expect(screen.getByTestId('merge-choice').textContent).toContain('First, by the agent.');
+    expect(textOf(tracked.seen[0])).toContain('First, typed by me.');
+    // More typing, landed by a turn's flush: held, so the disk keeps the agent's text.
+    await typeOver(tracked.seen[0], 'Second line.', 'Second, typed too.');
+    await act(() => flushOpenPages());
     await settle();
     expect(fs().get(PAGE)).toBe(AGENT);
   });
 
-  it('Keep writes what was held', async () => {
-    const seen = await renderTracking(20);
-    await agentWritesWhileTyped(seen);
-    appendParagraph(seen[0].editor, 'and one more');
-    await settle();
-    fireEvent.click(screen.getByTestId('external-change-keep'));
-    expect(screen.queryByTestId('external-change-banner')).toBeNull();
-    await waitFor(() => expect(fs().get(PAGE)).toContain('and one more'), DISK_ROUND_TRIP);
-    expect(fs().get(PAGE)).toContain('my unsaved sentence');
-    expect(fs().get(PAGE)).not.toContain('Rewritten by the agent');
+  it('Keep yours writes yours', async () => {
+    const tracked = await renderTracking(10_000);
+    await overlap(tracked);
+    fireEvent.click(screen.getByTestId('merge-keep-mine'));
+    expect(screen.queryByTestId('merge-choices')).toBeNull();
+    await waitFor(() => expect(fs().get(PAGE)).toContain('First, typed by me.'), DISK_ROUND_TRIP);
+    expect(tracked.seen).toHaveLength(1);
   });
 
-  it('Load drops what was held and writes nothing back, then or on leaving', async () => {
-    const seen = await renderTracking(20);
-    await agentWritesWhileTyped(seen);
-    fireEvent.click(screen.getByTestId('external-change-reload'));
-    await waitFor(() => expect(seen.length).toBe(2), DISK_ROUND_TRIP);
-    expect(bodyOf(seen[1])).toContain('Rewritten by the agent');
+  it('Use new takes the agent’s block and writes nothing', async () => {
+    const tracked = await renderTracking(10_000);
+    await overlap(tracked);
+    fireEvent.click(screen.getByTestId('merge-take-theirs'));
+    expect(screen.queryByTestId('merge-choices')).toBeNull();
+    expect(textOf(tracked.seen[0])).toContain('First, by the agent.');
+    expect(textOf(tracked.seen[0])).not.toContain('typed by me');
     await settle();
     expect(fs().get(PAGE)).toBe(AGENT);
+    expect(tracked.seen).toHaveLength(1);
+  });
+
+  it('leaving the page with a choice open writes yours', async () => {
+    const tracked = await renderTracking(10_000);
+    await overlap(tracked);
     cleanup();
-    await settle();
-    expect(fs().get(PAGE)).toBe(AGENT);
+    await waitFor(() => expect(fs().get(PAGE)).toContain('First, typed by me.'), DISK_ROUND_TRIP);
   });
 
-  // The remount Load causes used to run the unmount flush, which wrote the
-  // discarded buffer straight back over the version being loaded.
-  it('Load cancels a save still waiting on its debounce', async () => {
-    const seen = await renderTracking(10_000);
-    appendParagraph(seen[0].editor, 'my unsaved sentence');
-    fs().set(PAGE, AGENT);
-    await act(() => announceExternalWrites([PAGE], async () => undefined));
-    await waitFor(() => expect(screen.getByTestId('external-change-banner')).toBeTruthy());
-    fireEvent.click(screen.getByTestId('external-change-reload'));
-    await waitFor(() => expect(seen.length).toBe(2), DISK_ROUND_TRIP);
-    await settle();
-    expect(fs().get(PAGE)).toBe(AGENT);
+  it('lands a second write elsewhere while a choice is open, and keeps the choice', async () => {
+    const tracked = await renderTracking(10_000);
+    await overlap(tracked);
+    const again = AGENT.replace('Second line.', 'Second, by the agent.');
+    await agentWrites(again);
+    await waitFor(() => expect(textOf(tracked.seen[0])).toContain('Second, by the agent.'));
+    expect(screen.getAllByTestId('merge-choice')).toHaveLength(1);
+    expect(textOf(tracked.seen[0])).toContain('First, typed by me.');
+    expect(fs().get(PAGE)).toBe(again);
   });
 
-  it('leaving the page writes what was held: theirs wins', async () => {
-    const seen = await renderTracking(20);
-    await agentWritesWhileTyped(seen);
-    cleanup();
-    await waitFor(() => expect(fs().get(PAGE)).toContain('my unsaved sentence'), DISK_ROUND_TRIP);
+  it('remounts a clean page read-only for a write the editor cannot show', async () => {
+    const tracked = await renderTracking(20);
+    await agentWrites(withBody(`${BODY}\n<div align="center">raw html island</div>\n`));
+    await waitFor(() => expect(tracked.seen).toHaveLength(2), DISK_ROUND_TRIP);
+    await waitFor(() => expect(screen.getByTestId('lossy-import-banner')).toBeTruthy());
+  });
+
+  it('offers a dirty page the whole page for such a write, and Use new remounts', async () => {
+    const tracked = await renderTracking(10_000);
+    await typeOver(tracked.seen[0], 'Second line.', 'Second, typed by me.');
+    const lossy = withBody(`${BODY}\n<div align="center">raw html island</div>\n`);
+    await agentWrites(lossy);
+    await waitFor(() => expect(screen.getAllByTestId('merge-choice')).toHaveLength(1));
+    expect(tracked.seen).toHaveLength(1);
+    fireEvent.click(screen.getByTestId('merge-take-theirs'));
+    await waitFor(() => expect(tracked.seen).toHaveLength(2), DISK_ROUND_TRIP);
+    await settle();
+    expect(fs().get(PAGE)).toBe(lossy);
+  });
+
+  it('re-reads a locked lossy page', async () => {
+    fs().set(PAGE, withBody(LOSSY_BODY));
+    const tracked = await renderTracking(20);
+    await waitFor(() => expect(screen.getByTestId('lossy-import-banner')).toBeTruthy());
+    await agentWrites(withBody(LOSSY_BODY.replace('# Page', '# Page, renamed')));
+    await waitFor(() => expect(tracked.seen).toHaveLength(2), DISK_ROUND_TRIP);
+    expect(textOf(tracked.seen[1])).toContain('Page, renamed');
   });
 
   it('lands a pending edit when a turn flushes the open pages', async () => {
-    const seen = await renderTracking(10_000);
-    appendParagraph(seen[0].editor, 'typed just before asking');
+    const tracked = await renderTracking(10_000);
+    appendParagraph(tracked.seen[0].editor, 'typed just before asking');
     await act(() => flushOpenPages());
     // Landed by the time the flush resolves, not ten seconds out.
     expect(fs().get(PAGE)).toContain('typed just before asking');

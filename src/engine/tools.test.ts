@@ -9,7 +9,9 @@ import {
   matchedToolset,
   proposalConsequence,
   showsAsChange,
+  toolFold,
   toolIconName,
+  toolRenderer,
   TOOLSETS,
   unknownTools,
   writesAnything,
@@ -175,6 +177,43 @@ describe('showsAsChange and toolIconName', () => {
     expect(toolIconName('mcp__cerebro__hand_to')).toBe('forward');
     expect(toolIconName('Task')).toBe('bot');
     expect(toolIconName('mcp__gmail__send')).toBe('wrench');
+  });
+});
+
+describe('toolRenderer and toolFold (M56.8)', () => {
+  // The shared cases are Rust's `renderer` and `fold`, replayed here from the
+  // same bytes, so a row the panel draws and the one Rust names agree.
+  it.each(TOOL_CASES.cases.map((c) => [c.tool, c.renderer, c.fold] as const))(
+    'replays shared case %# for %s: %s',
+    (tool, renderer, fold) => {
+      expect(toolRenderer(tool)).toBe(renderer);
+      expect(toolFold(tool)).toEqual(fold);
+    },
+  );
+
+  it('names the rows a cerebro tool owns', () => {
+    expect(toolRenderer('mcp__cerebro__write_concept')).toBe('concept');
+    expect(toolRenderer('mcp__cerebro__recheck_concept')).toBe('concept');
+    expect(toolRenderer('mcp__cerebro__hand_to')).toBe('handoff');
+    expect(toolRenderer('mcp__cerebro__commit_proposals')).toBe('commit');
+    expect(toolRenderer('mcp__cerebro__propose_create_belief')).toBe('step');
+  });
+
+  it('folds a read, never a write, and reads a connector tool as a step that never folds', () => {
+    expect(toolFold('mcp__cerebro__get_note')).toEqual({
+      one: 'read a note',
+      many: 'read {n} notes',
+    });
+    expect(toolFold('Grep')?.many).toBe('searched files {n} times');
+    expect(toolFold('mcp__cerebro__create_note')).toBeNull();
+    expect(toolRenderer('mcp__gmail__search')).toBe('step');
+    expect(toolFold('mcp__gmail__search')).toBeNull();
+  });
+
+  it('keeps a concept a change card, its path in view', () => {
+    expect(showsAsChange('mcp__cerebro__write_concept')).toBe(true);
+    expect(showsAsChange('mcp__cerebro__commit_proposals')).toBe(false);
+    expect(showsAsChange('mcp__cerebro__hand_to')).toBe(false);
   });
 });
 

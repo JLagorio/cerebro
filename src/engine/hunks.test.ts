@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyHunks, describeHunk, isUnchanged, rewriteHunks } from './hunks';
+import { applyHunks, describeHunk, isUnchanged, lcsPairs, lcsTable, rewriteHunks } from './hunks';
 
 const accept = (before: string, after: string, ids: number[]) =>
   applyHunks(rewriteHunks(before, after), new Set(ids));
@@ -105,5 +105,39 @@ describe('degenerate input', () => {
     const rewrite = rewriteHunks('aaa bbb', 'ccc ddd');
     expect(applyHunks(rewrite, new Set(rewrite.hunks.map((h) => h.id)))).toBe('ccc ddd');
     expect(applyHunks(rewrite, new Set())).toBe('aaa bbb');
+  });
+});
+
+/* M55.6 — the LCS the open page's blocks pair through, exported. */
+describe('lcsPairs', () => {
+  const caseless = (x: string, y: string) => x.toLowerCase() === y.toLowerCase();
+
+  it('returns the matched pairs in ascending order, under the equality it is given', () => {
+    expect(lcsPairs(['A', 'b', 'c', 'D'], ['a', 'x', 'C', 'd', 'e'], caseless)).toEqual([
+      [0, 0],
+      [2, 2],
+      [3, 3],
+    ]);
+  });
+
+  it('pairs nothing when nothing is equal, and nothing against an empty side', () => {
+    expect(lcsPairs([1, 2], [3, 4], (x, y) => x === y)).toEqual([]);
+    expect(lcsPairs([], [1], (x, y) => x === y)).toEqual([]);
+  });
+
+  it('keeps every pair strictly ascending when an item repeats', () => {
+    const pairs = lcsPairs(['p', 'p', 'q'], ['p', 'q', 'p'], (x, y) => x === y);
+    expect(pairs).toHaveLength(2);
+    for (let k = 1; k < pairs.length; k++) {
+      expect(pairs[k][0]).toBeGreaterThan(pairs[k - 1][0]);
+      expect(pairs[k][1]).toBeGreaterThan(pairs[k - 1][1]);
+    }
+  });
+
+  it('agrees with the table it walks', () => {
+    const a = ['x', 'y', 'z', 'y'];
+    const b = ['y', 'z', 'x', 'y'];
+    const same = (x: string, y: string) => x === y;
+    expect(lcsPairs(a, b, same)).toHaveLength(lcsTable(a, b, same)[0][0]);
   });
 });

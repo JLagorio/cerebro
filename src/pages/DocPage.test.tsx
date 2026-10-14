@@ -550,19 +550,39 @@ describe('DocPage', () => {
     expect(useNavStore.getState().selection).toEqual({ kind: 'home' });
   });
 
-  // 'Add page' and 'Move to folder' both live in the overflow menu; the
+  // 'Add sub-page' and 'Move to folder' both live in the overflow menu; the
   // toolbar's only LABELLED control used to be a duplicate of the action
   // users need least.
   it('does not duplicate overflow-menu actions in the toolbar', () => {
     render(<DocPage selection={{ kind: 'doc', path: DOC }} />);
-    expect(screen.queryByRole('button', { name: 'Add page' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add sub-page' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Move to folder' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Page options' }));
     const labels = screen.getAllByRole('menuitem').map((el) => el.textContent);
-    expect(labels).toContain('Add page');
+    expect(labels).toContain('Add sub-page');
     expect(labels).toContain('Move to folder…');
     // Rename is reachable without going back to the file tree.
     expect(labels).toContain('Rename…');
+  });
+
+  // M55.9 — Open with sits in the header beside the star, with every item.
+  it('has Open with in its header', () => {
+    render(<DocPage selection={{ kind: 'doc', path: DOC }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open with' }));
+    const menu = screen.getByRole('menu', { name: 'Open with' });
+    const labels = within(menu)
+      .getAllByRole('menuitem')
+      .map((el) => el.querySelector('span')?.textContent);
+    expect(labels).toEqual([
+      'Copy as prompt',
+      'Copy path',
+      'Reveal in Finder',
+      'Open in default editor',
+      'Claude Code on the web',
+      'Codex',
+      'Cursor',
+      'Zed',
+    ]);
   });
 
   // M45.2 — the third door: a record's Page options opens the layout editor
@@ -596,7 +616,7 @@ describe('DocPage', () => {
 
   // Move already operated on the whole doc folder; Trash deleted one file,
   // removing the folder note and dissolving the doc without warning.
-  it('trashing a multi-page doc from its main page takes the whole doc', async () => {
+  it('trashing a page with sub-pages takes them all', async () => {
     fs().set(DOC_MAIN, '# Spec\n');
     fs().set(`${DOC_FOLDER}/two.md`, '# Two\n');
     await useVaultStore.getState().rescan();
@@ -650,6 +670,114 @@ describe('DocPage', () => {
     });
   });
 
+  // M55.13 — sub-pages: Add sub-page grows a plain page into a folder of its
+  // own, by rename, and adds a child; on a sub-page it adds a grandchild under
+  // that page, never a sibling.
+  describe('sub-pages (M55.13)', () => {
+    const PLAIN = 'notes/plan.md';
+    const addSubPageNamed = async (name: string) => {
+      fireEvent.click(screen.getByRole('button', { name: 'Page options' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Add sub-page' }));
+      fireEvent.change(screen.getByPlaceholderText('Page name'), { target: { value: name } });
+      fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    };
+
+    it('grows a plain page, keeps its bytes, and opens the child', async () => {
+      fs().set(PLAIN, '# Plan\n\nBody.\n');
+      await useVaultStore.getState().rescan();
+      render(<DocPage selection={{ kind: 'doc', path: PLAIN }} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Page options' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Add sub-page' }));
+      expect(
+        screen.getByText('"Plan" moves into a folder of its own. Its text does not change.'),
+      ).toBeTruthy();
+      fireEvent.change(screen.getByPlaceholderText('Page name'), { target: { value: 'Goals' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+      await waitFor(
+        () =>
+          expect(useNavStore.getState().selection).toEqual({
+            kind: 'doc',
+            path: 'notes/plan/goals.md',
+          }),
+        { timeout: 5_000 },
+      );
+      expect(fs().get('notes/plan/plan.md')).toBe('# Plan\n\nBody.\n');
+      expect(fs().has(PLAIN)).toBe(false);
+      expect(fs().get('notes/plan/goals.md')).toBe('# Goals\n');
+    });
+
+    it('on a sub-page, adds a grandchild under that page’s own folder', async () => {
+      fs().set(DOC_MAIN, '# Spec\n');
+      fs().set(`${DOC_FOLDER}/two.md`, '# Two\n');
+      await useVaultStore.getState().rescan();
+      render(<DocPage selection={{ kind: 'doc', path: `${DOC_FOLDER}/two.md` }} />);
+      await addSubPageNamed('Deeper');
+      await waitFor(() => expect(fs().has(`${DOC_FOLDER}/two/deeper.md`)).toBe(true), {
+        timeout: 5_000,
+      });
+      expect(fs().get(`${DOC_FOLDER}/two/two.md`)).toBe('# Two\n');
+      expect(fs().has(`${DOC_FOLDER}/deeper.md`)).toBe(false);
+    });
+
+    it('on a page with sub-pages, says it adds inside it', () => {
+      fs().set(DOC_MAIN, '# Spec\n');
+      return useVaultStore
+        .getState()
+        .rescan()
+        .then(() => {
+          render(<DocPage selection={{ kind: 'doc', path: DOC_MAIN }} />);
+          fireEvent.click(screen.getByRole('button', { name: 'Page options' }));
+          fireEvent.click(screen.getByRole('menuitem', { name: 'Add sub-page' }));
+          expect(screen.getByText('Adds a page inside "Spec".')).toBeTruthy();
+        });
+    });
+
+    it('crumbs show each ancestor page as a button that opens it', async () => {
+      fs().set(DOC_MAIN, '# Spec\n');
+      fs().set(`${DOC_FOLDER}/two/two.md`, '# Two\n');
+      fs().set(`${DOC_FOLDER}/two/three.md`, '# Three\n');
+      await useVaultStore.getState().rescan();
+      render(<DocPage selection={{ kind: 'doc', path: `${DOC_FOLDER}/two/three.md` }} />);
+      const crumbs = screen.getByTestId('doc-page').firstElementChild as HTMLElement;
+      expect(within(crumbs).getByRole('button', { name: 'Spec' })).toBeTruthy();
+      fireEvent.click(within(crumbs).getByRole('button', { name: 'Two' }));
+      expect(useNavStore.getState().selection).toEqual({
+        kind: 'doc',
+        path: `${DOC_FOLDER}/two/two.md`,
+      });
+      // A plain folder stays a label.
+      expect(within(crumbs).queryByRole('button', { name: 'Projects' })).toBeNull();
+      expect(within(crumbs).getByText('Projects')).toBeTruthy();
+    });
+
+    it('Move on a sub-page moves only that page', async () => {
+      fs().set(DOC_MAIN, '# Spec\n');
+      fs().set(`${DOC_FOLDER}/two.md`, '# Two\n');
+      await useVaultStore.getState().rescan();
+      render(<DocPage selection={{ kind: 'doc', path: `${DOC_FOLDER}/two.md` }} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Page options' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Move to folder…' }));
+      expect(screen.getByText('Move page "Two"')).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Vault root' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Move' }));
+      await waitFor(() => expect(fs().get('two.md')).toBe('# Two\n'), { timeout: 5_000 });
+      // The page it sat in stays where it was.
+      expect(fs().get(DOC_MAIN)).toBe('# Spec\n');
+      expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'two.md' });
+    });
+
+    it('the delete count includes grandchildren', async () => {
+      fs().set(DOC_MAIN, '# Spec\n');
+      fs().set(`${DOC_FOLDER}/two/two.md`, '# Two\n');
+      fs().set(`${DOC_FOLDER}/two/three.md`, '# Three\n');
+      await useVaultStore.getState().rescan();
+      render(<DocPage selection={{ kind: 'doc', path: DOC_MAIN }} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Page options' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Move doc to Trash' }));
+      expect(screen.getByText(/and its 2 other pages to Trash\?/)).toBeTruthy();
+    });
+  });
+
   it('trashing a non-main page of a doc still takes only that page', async () => {
     fs().set(DOC_MAIN, '# Spec\n');
     fs().set(`${DOC_FOLDER}/two.md`, '# Two\n');
@@ -663,9 +791,128 @@ describe('DocPage', () => {
   });
 });
 
+// M55.11 — a page's own icon and cover: above the title, in the crumbs, and
+// on the cover band, read from the page's frontmatter and never written by
+// being shown.
+describe('a page icon and cover (M55.11)', () => {
+  const ROCKET = '\u{1F680}';
+  const PAGE = 'inbox/launch-notes.md';
+
+  beforeEach(async () => {
+    resetMockFs();
+    await useVaultStore.getState().openVault('/demo-vault');
+    useNavStore.setState({
+      selection: { kind: 'doc', path: PAGE },
+      history: [{ kind: 'home' }],
+      historyIndex: 0,
+    });
+    useUiStore.setState({ docPanelOpen: false, docPanelTab: 'outline' });
+  });
+  afterEach(cleanup);
+
+  it('shows the icon above the title and in the title crumb, and draws the cover', async () => {
+    fs().set(PAGE, `---\nicon: ${ROCKET}\ncover: blue\n---\n# Launch notes\n`);
+    await useVaultStore.getState().rescan();
+    render(<DocPage selection={{ kind: 'doc', path: PAGE }} />);
+    expect(within(screen.getByTestId('page-icon')).getByRole('img', { name: ROCKET })).toBeTruthy();
+    expect(within(screen.getByTestId('doc-title')).getByRole('img', { name: ROCKET })).toBeTruthy();
+    expect(screen.getByTestId('page-cover').style.background).toBe('var(--opt-blue)');
+    // Drawing it wrote nothing.
+    expect(fs().get(PAGE)).toBe(`---\nicon: ${ROCKET}\ncover: blue\n---\n# Launch notes\n`);
+  });
+
+  it('a page with neither draws no icon and no band, only the hidden Add row', async () => {
+    fs().set(PAGE, '# Launch notes\n');
+    await useVaultStore.getState().rescan();
+    render(<DocPage selection={{ kind: 'doc', path: PAGE }} />);
+    expect(screen.queryByTestId('page-icon')).toBeNull();
+    expect(screen.queryByTestId('page-cover')).toBeNull();
+    expect(screen.getByTestId('page-add-icon')).toBeTruthy();
+    // The title crumb keeps the lucide glyph it always drew.
+    expect(screen.getByTestId('doc-title').querySelector('[data-icon="file-text"]')).not.toBe(null);
+  });
+
+  it("a sub-page's doc crumb shows the main page's icon", async () => {
+    fs().set(DOC_MAIN, `---\nicon: ${ROCKET}\n---\n# Spec\n`);
+    fs().set(`${DOC_FOLDER}/two.md`, '# Two\n');
+    await useVaultStore.getState().rescan();
+    render(<DocPage selection={{ kind: 'doc', path: `${DOC_FOLDER}/two.md` }} />);
+    // The crumb bar is the page's first row; the Pages panel names Spec too.
+    const crumbs = screen.getByTestId('doc-page').firstElementChild as HTMLElement;
+    const docCrumb = within(crumbs).getByRole('button', { name: `${ROCKET} Spec` });
+    expect(within(docCrumb).getByRole('img', { name: ROCKET })).toBeTruthy();
+    // The sub-page itself has no icon: no header icon, and its crumb has none.
+    expect(screen.queryByTestId('page-icon')).toBeNull();
+    expect(within(screen.getByTestId('doc-title')).queryByRole('img')).toBeNull();
+  });
+
+  it('a concept page offers no Add row', () => {
+    render(
+      <DocPage selection={{ kind: 'doc', path: 'knowledge/playbooks/warehouse-cutover.md' }} />,
+    );
+    expect(screen.queryByTestId('page-add-icon')).toBeNull();
+    expect(screen.queryByTestId('page-add-cover')).toBeNull();
+  });
+});
+
 // M50.1 — a concept is a page: the same canvas, editor and side panel as any
 // page. What differs is where its title lives (frontmatter), where its review
 // sits (a bar under the title, M51.3), and which actions its folder refuses.
+// M70.2b — a comment thread is a place: `{kind: 'doc', path, thread}` opens
+// the page with its panel on Comments and that thread in focus.
+describe('a comment thread is a place (M70.2b)', () => {
+  const THREAD = '00000000000000aa';
+
+  beforeEach(async () => {
+    resetMockFs();
+    await useVaultStore.getState().openVault('/demo-vault');
+    fs().set(
+      `.comments/${DOC}.json`,
+      JSON.stringify(
+        {
+          format: 1,
+          threads: [
+            {
+              comments: [
+                {
+                  id: THREAD,
+                  author: 'human:owner',
+                  created: '2026-10-14T09:00:00Z',
+                  body: 'Who owns the follow-ups?',
+                },
+              ],
+            },
+          ],
+        },
+        null,
+        2,
+      ) + '\n',
+    );
+    useUiStore.setState({ docPanelOpen: false, docPanelTab: 'outline', toasts: [] });
+  });
+  afterEach(cleanup);
+
+  it('a deep link opens the panel on Comments and focuses its thread', async () => {
+    render(<DocPage selection={{ kind: 'doc', path: DOC, thread: THREAD }} />);
+    const card = await screen.findByTestId('comment-thread');
+    expect(card.dataset.threadId).toBe(THREAD);
+    await waitFor(() => expect(card.dataset.focused).toBe('true'));
+    expect(useUiStore.getState().docPanelOpen).toBe(true);
+    expect(useUiStore.getState().docPanelTab).toBe('comments');
+    expect(screen.getByTestId('doc-panel-comment-count').textContent).toBe('1');
+  });
+
+  it('a deep link to a thread that is gone says so once', async () => {
+    render(<DocPage selection={{ kind: 'doc', path: DOC, thread: 'ffffffffffffffff' }} />);
+    await waitFor(() =>
+      expect(useUiStore.getState().toasts.map((t) => t.message)).toEqual([
+        'That comment is no longer on this page.',
+      ]),
+    );
+    expect(useUiStore.getState().docPanelTab).toBe('comments');
+  });
+});
+
 describe('a concept is a page (M50.1)', () => {
   const CONCEPT = 'knowledge/playbooks/warehouse-cutover.md';
 
@@ -735,6 +982,15 @@ describe('a concept is a page (M50.1)', () => {
     expect(items).toEqual(['Ask to revise', 'Show in Knowledge']);
   });
 
+  // M55.9, Q17 — a concept is edited in the app or not at all.
+  it('offers Open with, but no default editor', () => {
+    render(<DocPage selection={{ kind: 'doc', path: CONCEPT }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open with' }));
+    expect(screen.getByTestId('open-with-copy-prompt')).toBeTruthy();
+    expect(screen.getByTestId('open-with-reveal')).toBeTruthy();
+    expect(screen.queryByTestId('open-with-default-editor')).toBeNull();
+  });
+
   it('verifies the body the editor loaded, through the M49.3 pin', async () => {
     render(<DocPage selection={{ kind: 'doc', path: CONCEPT }} />);
     const verify = () => screen.getByRole('button', { name: /^Verify$/ });
@@ -743,6 +999,23 @@ describe('a concept is a page (M50.1)', () => {
     });
     fireEvent.click(verify());
     await waitFor(() => expect(fs().get(CONCEPT)).toContain('human:josef'), { timeout: 5_000 });
+  });
+
+  // M70.2b, Q5 — a concept takes comments like any page: the sidecar sits
+  // outside the bundle, and a thread can neither write nor verify it.
+  it("offers Comments in its panel, and the concept's file is untouched", async () => {
+    const before = fs().get(CONCEPT);
+    render(<DocPage selection={{ kind: 'doc', path: CONCEPT }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Show panel' }));
+    fireEvent.click(screen.getByTestId('doc-panel-tab-comments'));
+    expect(useUiStore.getState().conceptPanelTab).toBe('comments');
+    fireEvent.change(await screen.findByTestId('discussion-submit-input'), {
+      target: { value: 'Is the rollback rehearsed?' },
+    });
+    fireEvent.click(screen.getByTestId('discussion-submit'));
+    await waitFor(() => expect(screen.getByText('Is the rollback rehearsed?')).toBeTruthy());
+    expect(fs().get(`.comments/${CONCEPT}.json`)).toContain('Is the rollback rehearsed?');
+    expect(fs().get(CONCEPT)).toBe(before);
   });
 
   it('opens the rest of the folder read-only — the log is the system’s', async () => {
@@ -800,14 +1073,20 @@ describe('an agent is a page (M55.12)', () => {
     expect(screen.queryByTestId('new-record-tab')).toBeNull();
   });
 
-  it('offers no Add page or Save as template, and keeps Rename and Trash', () => {
+  it('offers no Add sub-page or Save as template, and keeps Rename and Trash', () => {
     render(<DocPage selection={{ kind: 'doc', path: AGENT }} />);
     fireEvent.click(screen.getByRole('button', { name: 'Page options' }));
     const labels = screen.getAllByRole('menuitem').map((el) => el.textContent);
-    expect(labels).not.toContain('Add page');
+    expect(labels).not.toContain('Add sub-page');
     expect(labels).not.toContain('Save as template');
     expect(labels).toContain('Rename…');
     expect(labels).toContain('Move to Trash');
+  });
+
+  it('has Open with, like every page (M55.9)', () => {
+    render(<DocPage selection={{ kind: 'doc', path: AGENT }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open with' }));
+    expect(screen.getByTestId('open-with-default-editor')).toBeTruthy();
   });
 
   it('Info is a read-only note, never the generic property editor', () => {

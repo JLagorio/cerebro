@@ -92,7 +92,7 @@ function resolve(body: string, prefix: string, i: number, edit: QuoteEdit): numb
     return [`Edit ${i}: \`new\` is the same as \`old\`, so it changes nothing.`];
   }
   if (edit.occurrence === 0) return [`Edit ${i}: \`occurrence\` counts from 1.`];
-  const found = matches(body, edit.old);
+  const found = occurrencesOf(body, edit.old);
   const n = found.length;
   const k = edit.occurrence;
   if (n === 0) {
@@ -124,9 +124,13 @@ function resolve(body: string, prefix: string, i: number, edit: QuoteEdit): numb
   return found[k - 1];
 }
 
-/** Every start of `quote` in `body`, overlapping ones included: after a
- * match the search goes on one code point later, so `aa` is in `aaa` twice. */
-function matches(body: string, quote: string): number[] {
+/** Every start of `quote` in `body`, as UTF-16 offsets, overlapping ones
+ * included: after a match the search goes on one code point later, so `aa` is
+ * in `aaa` twice. The one matcher (M70.1): comment anchors filter what it
+ * finds (`validMatches` in commentAnchor.ts) and never search on their own.
+ * An empty quote is in no body: it would match everywhere, and forever. */
+export function occurrencesOf(body: string, quote: string): number[] {
+  if (quote === '') return [];
   const found: number[] = [];
   let from = 0;
   for (;;) {

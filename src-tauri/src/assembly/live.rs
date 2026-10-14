@@ -162,6 +162,7 @@ fn request(prompt: &str, token: &str, url: &str) -> AgentRequest {
         disallowed_tools: None,
         // The meter records `assembly` itself (M56.7).
         cause: None,
+        effort: None,
         // No lane: an attended synthesis run is metered, never gated
         // (M34.2.4's lane field is the unattended path to the dispatcher).
         lane: None,

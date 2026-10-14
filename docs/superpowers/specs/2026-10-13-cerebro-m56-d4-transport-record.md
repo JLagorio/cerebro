@@ -177,7 +177,8 @@ call (Q2: default no).
   spawn; the stream's id still wins at finish (resumes keep it, F2).
 - **M56.12:** under (a), `result.usage` is that process's own calls (F3), and every session-file
   assistant line carries its call's usage. Which TTL bucket (`ephemeral_5m_input_tokens` or
-  `ephemeral_1h_input_tokens`) the writes land in is owed: .12 measures it in its own runs.
+  `ephemeral_1h_input_tokens`) the writes land in is owed: `cache.ts` reads both buckets, and
+  the A/B records them when it runs. What .12 found is the next section.
 - **M57.1:** a defer is an outcome, not a failure: `success`, `is_error: false`, `tool_deferred` and
   the call in `deferred_tool_use` (F4). The answer must be readable by the hook before `--resume`,
   which needs a prompt (`Continue.` here) and the same `--permission-mode` (F5). Ask one call at a time
@@ -193,6 +194,53 @@ call (Q2: default no).
   (F15).
 - **M57.6:** re-attach is a journal question, not a transport one; the child outlives the panel either
   way.
+
+## Resumed-turn cache (M56.12)
+
+Each attended turn's `--append-system-prompt` carries where the person stands and the context
+snapshot, and both change as they move, so a resumed turn may write its whole cached prefix again.
+Two gates decide whether that context moves into a leading block of the user message
+(`scripts/cli-record/cache.ts`; thresholds Q28):
+
+- **Gate 1, the field** (`cache-report.ts`, no model calls): at least 20 warm resumed turns (the gap
+  since the last call is under the TTL that call's entries were written with), and a median warm
+  first-call write share (creation over creation plus read) above 0.5.
+- **Gate 2, the A/B** (`cache-ab.ts`, about twelve haiku turns, with the owner's OK): B, the move,
+  costs at most 0.8 of A, today's shape, summed over turns 2 to 6, with a final prompt at most 1.5
+  times A's. It writes `spike/cache-ab.json` through the spike's reducer.
+
+**Measured 2026-10-14**, CLI 2.1.250, read-only over the owner's four Cerebro vaults (two under
+Documents, the last one opened, and the repo's demo-vault). No Cerebro session file is left on this
+Mac: the 2026-09-29 session the plan cites (three turns, each first call writing the whole prefix
+into 1-hour entries: 33,657, 35,672 and 53,595 tokens, hours apart) is gone with its project
+folder's contents, and no other file says `entrypoint: sdk-cli`. The field summary:
+
+```json
+{
+  "sessions": 0,
+  "turns": 0,
+  "resumed": 0,
+  "unmetered": 0,
+  "untimed": 0,
+  "uncached": 0,
+  "warm": 0,
+  "cold": 0,
+  "warmShare": { "median": null, "p90": null },
+  "coldShare": { "median": null }
+}
+```
+
+- **Decision:** keep. Gate 1 failed: not enough warm resumed turns (0 of 20). The A/B did not run,
+  and `spike/cache-ab.json` does not exist.
+- **What stays:** the system prompt is unchanged. The looking-at line and the snapshot still ride
+  `--append-system-prompt`; `contextBlock.ts` is not written.
+- **Why keep is safe to hold:** only a warm turn can pay (a resume past the TTL rewrites the prefix
+  whatever the prompt holds), and the only Cerebro turns ever seen here were cold.
+- **To decide again** (owner): use the panel with follow-ups inside the hour until 20 or more warm
+  resumed turns exist, then `pnpm tsx scripts/cli-record/cache-report.ts <vault>...`. If it passes,
+  `pnpm tsx scripts/cli-record/cache-ab.ts run` (add `--git` when the vault is a git repo) after
+  the login above, then `cache-ab.ts reduce`, and update this section; `cache.test.ts` fails while
+  its decision disagrees with the numbers.
 
 ## How to re-record
 

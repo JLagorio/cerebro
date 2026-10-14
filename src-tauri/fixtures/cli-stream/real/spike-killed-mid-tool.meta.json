@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "cli_version": "2.1.250",
+  "source": "spike",
+  "recorded": "derived",
+  "derived_from": [
+    "spike/kill-resume.json step 0",
+    "the 2.1.250 bundle (stream_event, assistant and result schemas)",
+    "real/spike-not-signed-in (the 2.1.250 init and session-file framing)"
+  ],
+  "transport": "per-turn",
+  "scenario": "kill-resume step 0",
+  "proves": "A run stopped while its tool runs ends with the call unanswered and no result.",
+  "ends": "killed",
+  "session": "00000000-0000-4000-8000-000000000001.jsonl",
+  "sanitizer": 1
+}

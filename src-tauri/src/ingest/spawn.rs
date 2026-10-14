@@ -173,6 +173,7 @@ fn request(session: &Session, url: &str) -> AgentRequest {
         // The claim recorded this run's cause, and the ingest prompt is a
         // versioned contract, so no WHY block is prepended (M56.7).
         cause: None,
+        effort: None,
         // Claimed by this driver's own dispatch, never by the request
         // (M34.2.4's lane field is the renderer's path to the same gate).
         lane: None,

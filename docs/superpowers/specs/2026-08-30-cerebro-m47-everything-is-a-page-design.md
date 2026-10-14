@@ -258,6 +258,10 @@ can grow a database-less form then, with instances to design against.
 - Moving existing record files (D6).
 - Renaming the `types/` folder on disk (D5).
 - Notion's synced blocks, permissions, or comments.
+  _Amended 2026-10-14: comments are no longer a non-goal. The macro-port
+  roadmap's D10 (b) put them in M70: threads live in a sidecar beside the
+  page (`.comments/<page>.json`), anchored by quote and occurrence, and the
+  page's `.md` bytes never change. Synced blocks and permissions stay out._
 - Retiring the Dashboard surface — it keeps its widget grid; only the embed
   component is shared.
 

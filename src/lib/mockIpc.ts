@@ -2,12 +2,28 @@
 // "disk" is a Map<vault-relative path, raw file content>, seeded at module
 // load from the committed demo-vault/ and mutated by the write commands.
 // The map is exposed as window.__cerebroMockFs so Playwright can assert on
-// "disk" state. 'vault-changed' has no equivalent here: startWatcher is a
-// no-op and writers trigger rescans directly (see vaultStore).
+// "disk" state, page comment sidecars (`.comments/<page>.json`, M70.2)
+// included. Neither 'vault-changed' nor 'comments-changed' has an equivalent
+// here: startWatcher is a no-op, writers trigger rescans directly (see
+// vaultStore), and a comment write answers the file it wrote.
 import YAML, { type Document } from 'yaml';
+import type { CommentAnchor } from '@/engine/commentAnchor';
+import {
+  applyCommentOp,
+  carriedRel,
+  emptyComments,
+  OWNER,
+  parseComments,
+  serializeComments,
+  sizeRefusal,
+  sidecarPathOf,
+  type CommentOp,
+  type CommentsFile,
+} from '@/engine/comments';
 import type { ConnectorStatusRow } from '@/engine/connectors';
 import { diskFolded, hfsHeard, isKnowledgePath, KNOWLEDGE_DIR } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
+import type { AgentStreamEvent, TranscriptRead } from '@/agent/types';
 import { normalizeAliasV1 } from './epistemic/normalize';
 import { validateFieldPath, validateOverridePointer } from './epistemic/schema';
 import { humanize, splitFrontmatter } from '@/engine/frontmatter';
@@ -26,6 +42,7 @@ import {
   demoReviewCards,
   demoRevertables,
 } from './demoOperational';
+import { demoRunTranscripts } from './demoTranscripts';
 import { loadRegistry } from './trigger/registry';
 import type { ParentRule, Variant as TriggerVariant } from './trigger/registry';
 
@@ -98,10 +115,13 @@ export function resetOperational(): void {
   fleetRuns = demoFleetRuns();
   fleetDetails = demoFleetDetails();
   runWrites = demoRunWrites();
+  runTranscripts = demoRunTranscripts();
   fleetAvailable = true;
   connectorStatusRows = [];
   connectorStatusFails = false;
   resetAgentPauses();
+  resetPanelAgents();
+  resetCliTranscripts();
 }
 
 /** Re-seed the file map alone. Split from `resetMockFs` because module init
@@ -177,6 +197,42 @@ export async function openDemoVault(): Promise<string> {
 
 export async function getLastVault(): Promise<string | null> {
   return '/demo-vault';
+}
+
+// --- The panel's agent (M56.6) ----------------------------------------------
+//
+// app_config.rs keeps it in config.json by vault path; the browser keeps it
+// here, in memory, so a reload unbinds it.
+
+/** `vault` → the handle its panel answers as. Absent is the plain assistant. */
+const panelAgentByVault = new Map<string, string>();
+
+function resetPanelAgents(): void {
+  panelAgentByVault.clear();
+}
+
+/** The longest handle a binding takes, in characters (app_config.rs). */
+const HANDLE_MAX = 64;
+const HANDLE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export async function getPanelAgent(vault: string): Promise<string | null> {
+  return panelAgentByVault.get(vault) ?? null;
+}
+
+/** Bind or unbind, refusing what Rust refuses in Rust's words: a value
+ * outside the slug grammar, cut at 64 characters, and nothing stored. */
+export async function setPanelAgent(vault: string, handle: string | null): Promise<void> {
+  const named = handle?.trim() ?? '';
+  if (named === '') {
+    panelAgentByVault.delete(vault);
+    return;
+  }
+  const chars = Array.from(named);
+  if (named.length > HANDLE_MAX || !HANDLE.test(named)) {
+    const cut = chars.length > HANDLE_MAX ? '…' : '';
+    throw new Error(`"${chars.slice(0, HANDLE_MAX).join('')}${cut}" is not an agent handle`);
+  }
+  panelAgentByVault.set(vault, named);
 }
 
 /**
@@ -642,7 +698,11 @@ async function writeFrontmatter(path: string, patch: Record<string, unknown>): P
     if (value === null) doc.delete(key);
     else doc.set(key, value);
   }
-  files.set(path, `---\n${doc.toString()}---\n${body}`);
+  // Parity with write.rs `serialize_mapping`: a mapping the patch emptied
+  // leaves no fence block, only the body (M55.11: removing a page's last key,
+  // its icon, gives back exactly the page it was).
+  const emptied = YAML.isMap(doc.contents) && doc.contents.items.length === 0;
+  files.set(path, emptied ? body : `---\n${doc.toString()}---\n${body}`);
   touch(path);
 }
 
@@ -1220,7 +1280,37 @@ export async function createFolder(_vault: string, path: string): Promise<void> 
   folders.add(path);
 }
 
-/** Move a note — or a whole folder prefix — within the vault. */
+/**
+ * Carry a page's comment sidecar, or a folder's mirrored sidecar folder, from
+ * `from` to `to` (write.rs `rename_note_with`): an orphan at the target goes
+ * first, then the sidecars move.
+ */
+function carryComments(from: string, to: string, isDir: boolean): void {
+  const sideFrom = carriedRel(from, isDir);
+  const sideTo = carriedRel(to, isDir);
+  if (sideFrom === null || sideTo === null) return;
+  if (!isDir) {
+    files.delete(sideTo);
+    const sidecar = files.get(sideFrom);
+    if (sidecar !== undefined) {
+      files.set(sideTo, sidecar);
+      files.delete(sideFrom);
+    }
+    return;
+  }
+  for (const p of [...files.keys()]) {
+    if (p.startsWith(`${sideTo}/`)) files.delete(p);
+  }
+  for (const p of [...files.keys()]) {
+    if (p.startsWith(`${sideFrom}/`)) {
+      files.set(`${sideTo}/${p.slice(sideFrom.length + 1)}`, files.get(p)!);
+      files.delete(p);
+    }
+  }
+}
+
+/** Move a note — or a whole folder prefix — within the vault, and its
+ * comments with it (M70.2). */
 export async function renameNote(_vault: string, from: string, to: string): Promise<void> {
   // Refused from both sides: out would strip the boundary, in would smuggle
   // human content into the agent's corpus.
@@ -1228,6 +1318,7 @@ export async function renameNote(_vault: string, from: string, to: string): Prom
   guardHumanWrite(to);
   if (files.has(to) || folders.has(to)) throw new Error(`target already exists: ${to}`);
   if (files.has(from)) {
+    carryComments(from, to, false);
     files.set(to, files.get(from)!);
     files.delete(from);
     const t = times.get(from);
@@ -1242,6 +1333,7 @@ export async function renameNote(_vault: string, from: string, to: string): Prom
   const prefix = `${from}/`;
   const moved = [...files.keys()].filter((p) => p.startsWith(prefix));
   if (moved.length === 0 && !folders.has(from)) throw new Error(`Note not found: ${from}`);
+  carryComments(from, to, true);
   for (const p of moved) {
     const dest = `${to}/${p.slice(prefix.length)}`;
     files.set(dest, files.get(p)!);
@@ -1255,7 +1347,8 @@ export async function renameNote(_vault: string, from: string, to: string): Prom
   if (folders.delete(from)) folders.add(to);
 }
 
-/** Delete a note or folder (the real backend moves it to the OS trash). */
+/** Delete a note or folder (the real backend moves it to the OS trash), and
+ * its comment sidecars after it (M70.2). */
 export async function deleteNote(_vault: string, path: string): Promise<void> {
   // Mirrors lib.rs delete_note (M17.1). This was the one write path with no
   // guard on either backend — parity here is the point of this file.
@@ -1273,6 +1366,141 @@ export async function deleteNote(_vault: string, path: string): Promise<void> {
   }
   const hadFolder = folders.delete(path);
   if (!hadFile && !hadChildren && !hadFolder) throw new Error(`Note not found: ${path}`);
+  const side = carriedRel(path, !hadFile);
+  if (side !== null) {
+    files.delete(side);
+    for (const p of [...files.keys()]) {
+      if (p.startsWith(`${side}/`)) files.delete(p);
+    }
+  }
+}
+
+// --- Page comments (M70.2) --------------------------------------------------
+//
+// Mirrors src-tauri/src/vault/comments.rs in its order and its words: the
+// page is judged as a note (`guardNoteTarget`, note_join's mirror) and must
+// exist; the sidecar is read and parsed, and one that can't be read refuses
+// and is never overwritten; the op applies; nothing is written when nothing
+// changed; the result must fit the cap and read back; then it lands in the
+// files Map. No knowledge guard: a comment writes no page byte. Both backends
+// replay src-tauri/fixtures/comment-cases.json.
+
+/** The page a comment belongs to: a markdown note that exists. */
+function commentPage(path: string): void {
+  guardNoteTarget(path, MARKDOWN);
+  if (!files.has(path)) throw new Error(`no note at ${path}`);
+}
+
+/** A page's sidecar as a file, or the reason it can't be read. */
+function readSidecar(path: string): CommentsFile | { reason: string } {
+  const text = files.get(sidecarPathOf(path));
+  if (text === undefined) return emptyComments();
+  const parsed = parseComments(text);
+  return parsed.ok ? parsed.file : { reason: parsed.reason };
+}
+
+/** Sixteen random lowercase hex characters no comment in `file` has. */
+function freshCommentId(file: CommentsFile): string {
+  const taken = new Set(file.threads.flatMap((t) => t.comments.map((c) => c.id)));
+  for (;;) {
+    const bytes = crypto.getRandomValues(new Uint8Array(8));
+    const id = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+    if (!taken.has(id)) return id;
+  }
+}
+
+/** Now, RFC 3339 UTC to the second. */
+const nowSecs = (): string => `${new Date().toISOString().slice(0, 19)}Z`;
+
+/**
+ * `vault::comments::rewrite`: apply `op` to `path`'s sidecar as `by`, with
+ * the run that asked. Exported for the agent comment tools (M70.3).
+ */
+export function writeMockComment(
+  path: string,
+  op: CommentOp,
+  by: string,
+  runId: string | null,
+): CommentsFile {
+  commentPage(path);
+  const current = readSidecar(path);
+  if ('reason' in current) {
+    throw new Error(
+      `Comments for ${path} can't be read (${current.reason}), so nothing was written.`,
+    );
+  }
+  const outcome = applyCommentOp(current, op, {
+    ids: [freshCommentId(current)],
+    now: nowSecs(),
+    by,
+    run_id: runId,
+    page: path,
+  });
+  if (!outcome.ok) throw new Error(outcome.error);
+  if (outcome.file === null) return current;
+  const text = serializeComments(outcome.file);
+  const tooBig = sizeRefusal(path, text);
+  if (tooBig !== null) throw new Error(tooBig);
+  const back = parseComments(text);
+  if (!back.ok) {
+    throw new Error(
+      `Comments for ${path} would not read back (${back.reason}), so nothing was written.`,
+    );
+  }
+  files.set(sidecarPathOf(path), text);
+  return outcome.file;
+}
+
+export async function listComments(_vault: string, path: string): Promise<CommentsFile> {
+  commentPage(path);
+  const current = readSidecar(path);
+  if ('reason' in current)
+    throw new Error(`Comments for ${path} can't be read: ${current.reason}.`);
+  return current;
+}
+
+export async function startCommentThread(
+  _vault: string,
+  path: string,
+  anchor: CommentAnchor | null,
+  body: string,
+): Promise<CommentsFile> {
+  return writeMockComment(path, { op: 'start', anchor, body }, OWNER, null);
+}
+
+export async function replyToCommentThread(
+  _vault: string,
+  path: string,
+  thread: string,
+  body: string,
+): Promise<CommentsFile> {
+  return writeMockComment(path, { op: 'reply', thread, body }, OWNER, null);
+}
+
+export async function setCommentThreadResolved(
+  _vault: string,
+  path: string,
+  thread: string,
+  resolved: boolean,
+): Promise<CommentsFile> {
+  return writeMockComment(path, { op: 'set_resolved', thread, resolved }, OWNER, null);
+}
+
+export async function deleteComment(
+  _vault: string,
+  path: string,
+  thread: string,
+  comment: string,
+): Promise<CommentsFile> {
+  return writeMockComment(path, { op: 'delete_comment', thread, comment }, OWNER, null);
+}
+
+export async function deleteCommentThread(
+  _vault: string,
+  path: string,
+  thread: string,
+): Promise<CommentsFile> {
+  return writeMockComment(path, { op: 'delete_thread', thread }, OWNER, null);
 }
 
 // --- Attachments (M16.13c) --------------------------------------------------
@@ -2061,17 +2289,49 @@ export interface FleetAssemblyMetrics {
   recorded_at: string;
 }
 
+/** One refusal recorded against a run in `operational_log` (M56.9). */
+export interface FleetRefusal {
+  code: string;
+  surface: string;
+  detail: string;
+  rule: string | null;
+  recorded_at: string;
+}
+
 /**
- * One run and its governance joins.
+ * One run, its governance joins, its model and what it was refused.
  *
  * `cost_components: null` means NOT RECORDED — pre-M31.6, or a path M31.6
  * does not cover. An empty array would mean "measured, and it cost nothing",
  * which is a different fact; the UI must not render either as $0.
+ *
+ * `model_id` is the model Claude Code reported answering, as the run's last
+ * assistant turn named it; `null` is not recorded (M56.9). `refusals` are the
+ * rows recorded with the run's id, in id order, at most 50 and with telemetry
+ * left out, and `refusals_total` counts them all, so a cut list says so.
+ * Refusals have carried their run since M54.9, so `[]` is measured: nothing
+ * was refused.
  */
 export interface FleetRunDetail {
   run: FleetRun;
   cost_components: FleetCostComponent[] | null;
   assembly: FleetAssemblyMetrics | null;
+  model_id: string | null;
+  refusals: FleetRefusal[];
+  refusals_total: number;
+}
+
+/**
+ * A run's transcript as its detail reads it (M56.9, `transcript::RunTranscript`):
+ * Claude Code's session file folded on read, and how many runs share that
+ * session. Stored nowhere.
+ */
+export interface RunTranscript {
+  runs_in_session: number;
+  /** The retention Claude Code is configured with; null when it never
+   * sweeps, or when there was no folder to look in. */
+  retention_days: number | null;
+  read: TranscriptRead;
 }
 
 /** What one actor's rows add up to (M33.2). */
@@ -2173,6 +2433,50 @@ export async function fleetRunDetail(runId: string): Promise<FleetRunDetail> {
   // recorded nothing must not look the same.
   if (detail === undefined) throw new Error(`no run with id ${runId}`);
   return detail;
+}
+
+/** Run id → its transcript. The demo's are synthetic (`demoTranscripts.ts`). */
+let runTranscripts: Record<string, RunTranscript> = demoRunTranscripts();
+
+/**
+ * One run's transcript (M56.9). Refuses when the fleet is unavailable and for
+ * an id the fleet does not know, as Rust does; a run with no session reads
+ * not recorded. An unseeded run reads back through the browser's session
+ * files, so it is cleared unless a mock turn wrote one.
+ */
+export async function fleetRunTranscript(runId: string): Promise<RunTranscript> {
+  if (!fleetAvailable) throw fleetUnavailable();
+  const run = fleetDetails[runId]?.run ?? fleetRuns.find((r) => r.run_id === runId);
+  if (run === undefined) throw new Error(`no run with id ${runId}`);
+  const sessionRuns = fleetRuns.filter(
+    (r) => r.cli_session_id !== null && r.cli_session_id === run.cli_session_id,
+  ).length;
+  if (run.cli_session_id === null) {
+    return {
+      runs_in_session: 1,
+      retention_days: null,
+      read: { state: 'unavailable', reason: 'not_recorded', retention_days: null },
+    };
+  }
+  return (
+    runTranscripts[runId] ?? {
+      runs_in_session: Math.max(sessionRuns, 1),
+      retention_days: 30,
+      read: readMockCliTranscript(run.cli_session_id),
+    }
+  );
+}
+
+/** Test-only seam: what each run's transcript reads back as. `null` puts the
+ * demo's back. */
+export function __seedRunTranscripts(transcripts: Record<string, RunTranscript> | null): void {
+  runTranscripts = transcripts ?? demoRunTranscripts();
+}
+
+if (typeof window !== 'undefined') {
+  (
+    window as unknown as { __cerebroSeedRunTranscripts: typeof __seedRunTranscripts }
+  ).__cerebroSeedRunTranscripts = __seedRunTranscripts;
 }
 
 /** The one fold both summary reads share, mirroring `fleet.rs`'s `summaries`.
@@ -2684,6 +2988,90 @@ export function refuseIfAgentPaused(vault: string, actor: string | null | undefi
   );
 }
 
+// --- Claude Code session files (M56.3) -------------------------------------
+//
+// Rust reads a conversation back from the session file Claude Code writes for
+// the vault and folds it into events (`read_cli_transcript`). The browser has
+// no CLI and no file, so this holds what a mock run would have written, by
+// session id: the replay events `agentIpc.runAgent` records as each mock run
+// ends, appended per turn like the CLI's own file. Mirrored to sessionStorage
+// so a reload in the same tab keeps it; a spec seeds a read directly through
+// `window.__cerebroSeedCliTranscript`.
+//
+// What is NOT mirrored is Rust's classifier: an unseeded id reads as cleared
+// with Claude Code's default retention, the one answer the browser can give
+// honestly, and a seeded unavailable read is returned as given.
+
+const CLI_TRANSCRIPTS_KEY = 'cerebro.mockCliTranscripts';
+
+/** Session id → what reading it back gives. */
+let cliTranscripts = loadCliTranscripts();
+
+function loadCliTranscripts(): Map<string, TranscriptRead> {
+  try {
+    const raw = window.sessionStorage.getItem(CLI_TRANSCRIPTS_KEY);
+    const parsed: unknown = raw === null ? [] : JSON.parse(raw);
+    return new Map(Array.isArray(parsed) ? (parsed as [string, TranscriptRead][]) : []);
+  } catch {
+    return new Map();
+  }
+}
+
+function saveCliTranscripts(): void {
+  try {
+    window.sessionStorage.setItem(CLI_TRANSCRIPTS_KEY, JSON.stringify([...cliTranscripts]));
+  } catch {
+    // Storage unavailable: the store stays in memory for this page.
+  }
+}
+
+function resetCliTranscripts(): void {
+  cliTranscripts = new Map();
+  saveCliTranscripts();
+}
+
+/** Append a mock run's replay events to its session, as the CLI appends a
+ * resumed turn to the same file. */
+export function recordMockCliTranscript(sessionId: string, events: AgentStreamEvent[]): void {
+  const before = cliTranscripts.get(sessionId);
+  const kept = before?.state === 'read' ? before.events : [];
+  const all = [...kept, ...events];
+  cliTranscripts.set(sessionId, {
+    state: 'read',
+    events: all,
+    lines: all.length,
+    unclassified: [],
+  });
+  saveCliTranscripts();
+}
+
+/** What reading `sessionId` back gives in the browser. */
+export function readMockCliTranscript(sessionId: string | null): TranscriptRead {
+  if (sessionId === null) {
+    return { state: 'unavailable', reason: 'not_recorded', retention_days: 30 };
+  }
+  return (
+    cliTranscripts.get(sessionId) ?? {
+      state: 'unavailable',
+      reason: 'cleared',
+      retention_days: 30,
+    }
+  );
+}
+
+/** Test-only seam: what a session reads back as. `null` forgets it, so it
+ * reads cleared again. */
+export function __seedCliTranscript(sessionId: string, read: TranscriptRead | null): void {
+  if (read === null) cliTranscripts.delete(sessionId);
+  else cliTranscripts.set(sessionId, read);
+  saveCliTranscripts();
+}
+if (typeof window !== 'undefined') {
+  (
+    window as unknown as { __cerebroSeedCliTranscript: typeof __seedCliTranscript }
+  ).__cerebroSeedCliTranscript = __seedCliTranscript;
+}
+
 // --- Diagnostics (M53.24) --------------------------------------------------
 
 /**
@@ -2702,4 +3090,56 @@ export interface FrontendLogEntry {
 export async function logFrontend(_entry: FrontendLogEntry): Promise<void> {
   // No-op: the browser has no app data to log into, and its console already
   // shows the error.
+}
+
+// --- Quit (M55.10) -----------------------------------------------------------
+
+/** What the shell sends when a quit begins: how long the webview has. */
+export interface QuitRequest {
+  deadlineMs: number;
+}
+
+const quitHandlers = new Set<(request: QuitRequest) => void>();
+/** What the webview answered, in order: `finished` or `cancelled`. */
+const quitLog: string[] = [];
+
+export async function listenQuitRequested(
+  handler: (request: QuitRequest) => void,
+): Promise<() => void> {
+  // A fresh wrapper, so a handler registered twice is two listeners, as
+  // Tauri's listen makes it.
+  const own = (request: QuitRequest) => handler(request);
+  quitHandlers.add(own);
+  return () => {
+    quitHandlers.delete(own);
+  };
+}
+
+export async function finishQuit(): Promise<void> {
+  quitLog.push('finished');
+}
+
+export async function cancelQuit(): Promise<void> {
+  quitLog.push('cancelled');
+}
+
+/** Test-only seam, mirroring `window.__cerebroMockFs`: ask to quit, as ⌘Q,
+ * the close button and ⌘W do in the app. */
+export function __mockQuit(deadlineMs = 5_000): void {
+  for (const handler of [...quitHandlers]) handler({ deadlineMs });
+}
+
+/** Test isolation: forget every quit listener and answer. */
+export function __resetMockQuit(): void {
+  quitHandlers.clear();
+  quitLog.length = 0;
+}
+
+if (typeof window !== 'undefined') {
+  const seams = window as unknown as {
+    __cerebroMockQuit: typeof __mockQuit;
+    __cerebroMockQuitLog: string[];
+  };
+  seams.__cerebroMockQuit = __mockQuit;
+  seams.__cerebroMockQuitLog = quitLog;
 }

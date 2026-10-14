@@ -11,8 +11,11 @@
 //!
 //! So `tauri.conf.json` declares the window `create: false`, and
 //! `build_main_window` builds it here, from that same config, in `setup`,
-//! with both of `links`'s routers attached. No other file builds a window:
-//! `both_guards_are_attached` fails the build if one does.
+//! with both of `links`'s routers attached and the close guard (M55.10):
+//! the close button and ⌘W arrive as `CloseRequested`, which is prevented
+//! and handed to `quit::request`, so every pending edit saves before the
+//! window goes. No other file builds a window: `both_guards_are_attached`
+//! fails the build if one does.
 //!
 //! That entry also turns WebKit's background throttling off (M53.13). Two of
 //! the app's clocks matter most while nobody is looking: `useJobRunner`'s 60 s
@@ -23,15 +26,23 @@
 //! later only; `minimumSystemVersion` is still 10.15, so an older Mac keeps
 //! WebKit's default. `the_main_window_keeps_running_hidden` says how to
 //! measure it.
+//!
+//! `open` is the one other way out (M55.9): Open with reveals or opens a
+//! vault note and hands a page to an agent app, each through `/usr/bin/open`
+//! as one argument, and writes the clipboard through `/usr/bin/pbcopy`.
+//!
+//! `quit` owns ⌘Q, the app menu and the close guard's prepare (M55.10).
 
 pub mod links;
+pub mod open;
+pub mod quit;
 
 /// The one window's label, and the only one `capabilities/default.json`
 /// grants.
 pub const MAIN_WINDOW: &str = "main";
 
 /// Build the main window from its `tauri.conf.json` entry, with the link
-/// guard attached. Called once, from `setup`.
+/// guard and the close guard attached. Called once, from `setup`.
 ///
 /// The devUrl is the app's own origin only under `tauri dev`: tauri's own
 /// app URL reads the same switch (`get_app_url`, tauri-2.11.5
@@ -52,7 +63,7 @@ pub fn build_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Err
     };
     let nav_root = dev_root.clone();
     let win_root = dev_root;
-    tauri::WebviewWindowBuilder::from_config(app.handle(), config)?
+    let window = tauri::WebviewWindowBuilder::from_config(app.handle(), config)?
         .on_navigation(move |url| {
             links::route_navigation(url, nav_root.as_ref(), &links::open_in_browser)
         })
@@ -60,6 +71,15 @@ pub fn build_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Err
             links::route_new_window(&url, win_root.as_ref(), &links::open_in_browser)
         })
         .build()?;
+    // M55.10: the close button and ⌘W save first. The window closes when
+    // the app exits, after the webview's prepare or at its deadline.
+    let handle = app.handle().clone();
+    window.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            quit::request(&handle);
+        }
+    });
     Ok(())
 }
 
@@ -194,5 +214,28 @@ mod tests {
             scanned > 50,
             "the scan is walking the real tree ({scanned} files)"
         );
+    }
+
+    #[test]
+    fn the_close_button_runs_the_quit_prepare() {
+        let body = include_str!("mod.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .expect("the non-test half");
+        let build = body
+            .split("pub fn build_main_window")
+            .nth(1)
+            .expect("build_main_window is in the non-test half");
+        for hook in [
+            ".on_window_event(",
+            "WindowEvent::CloseRequested",
+            "api.prevent_close()",
+            "quit::request(",
+        ] {
+            assert!(
+                build.contains(hook),
+                "build_main_window lost {hook:?}: the close button would drop unsaved edits"
+            );
+        }
     }
 }

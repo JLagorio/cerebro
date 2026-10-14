@@ -6,6 +6,7 @@ import {
   onExternalWrite,
   registerFlush,
 } from './openPages';
+import { coalescedRefresh } from '@/lib/trailingRefresh';
 
 afterEach(() => {
   __resetOpenPages();
@@ -141,25 +142,37 @@ describe('announceExternalWrites', () => {
     expect(page.pending).not.toHaveBeenCalled();
   });
 
-  it('keeps one catch-up running and one queued, however many writes arrive', async () => {
-    const runs: ReturnType<typeof deferred>[] = [];
-    const catchUp = () => {
-      const run = deferred();
-      runs.push(run);
-      return run.promise;
-    };
+  it('a burst of announcements catches up in one pass and one trailing pass', async () => {
+    const passes: ReturnType<typeof deferred>[] = [];
+    // The store's rescan, as both callers pass it: it coalesces itself.
+    const catchUp = coalescedRefresh(
+      async () => {
+        const pass = deferred();
+        passes.push(pass);
+        await pass.promise;
+        return 'done';
+      },
+      () => undefined,
+    );
     const first = announceExternalWrites(['notes/a.md'], catchUp);
-    // Two more writes while the first catch-up runs: one queued run covers
+    await vi.waitFor(() => expect(passes).toHaveLength(1));
+    // Two more writes while the first pass runs: the trailing pass covers
     // both, since it starts after either landed.
     const second = announceExternalWrites(['notes/a.md'], catchUp);
     const third = announceExternalWrites(['notes/b.md'], catchUp);
-    expect(runs).toHaveLength(1);
-    runs[0].resolve();
-    await first;
-    await vi.waitFor(() => expect(runs).toHaveLength(2));
+    passes[0].resolve();
+    await vi.waitFor(() => expect(passes).toHaveLength(2));
     expect(await hasSettled(second)).toBe(false);
-    runs[1].resolve();
-    await Promise.all([second, third]);
-    expect(runs).toHaveLength(2);
+    passes[1].resolve();
+    await Promise.all([first, second, third]);
+    expect(passes).toHaveLength(2);
+  });
+
+  it('each announcement calls catchUp itself, synchronously', () => {
+    const catchUp = vi.fn(() => new Promise<void>(() => undefined));
+    void announceExternalWrites(['notes/a.md'], catchUp);
+    void announceExternalWrites(['notes/b.md'], catchUp);
+    void announceExternalWrites([], catchUp);
+    expect(catchUp).toHaveBeenCalledTimes(3);
   });
 });

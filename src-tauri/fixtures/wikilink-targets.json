@@ -1,0 +1,90 @@
+{
+  "format": 1,
+  "about": "What a wikilink target names (M55.8). A name resolves by filename stem first, then by the folder of a project.md, then by exact title, all case-insensitive and trimmed, each pass taking the first entry in order; an empty name resolves nothing. A target is read whole first. Only when that names nothing and the target holds a #, the text before its FIRST # is resolved as the page, and the text after it, trimmed, is the section (none when empty). So nothing that resolved before section links changes, and a title that holds a # stays a title link. The fragment is never cut from the file or from outgoingLinks. Replayed by replays_the_shared_target_cases in src-tauri/src/vault/link.rs, which checks path only, and by src/engine/wikilink.test.ts, which checks path and section. `why` is for the reader.",
+  "entries": [
+    { "path": "projects/atlas/project.md", "title": "Atlas rollout" },
+    { "path": "docs/notes.md", "title": "Atlas" },
+    { "path": "docs/c-sharp.md", "title": "C# notes" },
+    { "path": "strategy/plan.md", "title": "Q3 plan" },
+    { "path": "records/risks/rq-84b-kestrel.md", "title": "RQ-84B Kestrel" }
+  ],
+  "cases": [
+    {
+      "target": "atlas",
+      "path": "projects/atlas/project.md",
+      "section": null,
+      "why": "A project is reached by its folder, and the folder outranks a page titled Atlas."
+    },
+    {
+      "target": "notes#Risks",
+      "path": "docs/notes.md",
+      "section": "Risks",
+      "why": "The page before the #, the heading after it."
+    },
+    {
+      "target": " notes # Risks ",
+      "path": "docs/notes.md",
+      "section": "Risks",
+      "why": "Both halves are trimmed."
+    },
+    {
+      "target": "atlas#Timeline",
+      "path": "projects/atlas/project.md",
+      "section": "Timeline",
+      "why": "The page half runs the folder pass like any name."
+    },
+    {
+      "target": "Q3 plan#Goals",
+      "path": "strategy/plan.md",
+      "section": "Goals",
+      "why": "The page half runs the title pass like any name."
+    },
+    {
+      "target": "C# notes",
+      "path": "docs/c-sharp.md",
+      "section": null,
+      "why": "The whole target goes first, so a title that holds a # stays a title link."
+    },
+    {
+      "target": "c-sharp#Setup",
+      "path": "docs/c-sharp.md",
+      "section": "Setup"
+    },
+    {
+      "target": "notes#",
+      "path": "docs/notes.md",
+      "section": null,
+      "why": "An empty section is none: the link reaches the page."
+    },
+    {
+      "target": "notes#A#B",
+      "path": "docs/notes.md",
+      "section": "A#B",
+      "why": "Only the first # splits."
+    },
+    {
+      "target": "#Risks",
+      "path": null,
+      "section": null,
+      "why": "No page half: it names a section of the page the link sits in, which only that page can answer."
+    },
+    {
+      "target": "nothing#Risks",
+      "path": null,
+      "section": null,
+      "why": "A page half that names nothing dangles."
+    },
+    {
+      "target": "RQ-84B-Kestrel#Mitigation",
+      "path": "records/risks/rq-84b-kestrel.md",
+      "section": "Mitigation",
+      "why": "Case never decides the stem."
+    },
+    {
+      "target": "notes#^b1",
+      "path": "docs/notes.md",
+      "section": "^b1",
+      "why": "Resolves to the page; the editor lands only on headings."
+    }
+  ]
+}

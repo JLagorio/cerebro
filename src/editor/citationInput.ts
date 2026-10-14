@@ -178,12 +178,23 @@ const PASTE_FORMATS = [
   'Files',
 ] as const;
 
-type PasteContext = Parameters<
+export type PasteContext = Parameters<
   NonNullable<BlockNoteEditorOptions<any, any, any>['pasteHandler']>
 >[0];
 
 /**
- * The editor's paste handler (M52.4): pasted markdown keeps its footnotes.
+ * The text of a paste BlockNote would read as markdown — its first format is
+ * `text/markdown` or `text/plain` — or null for any other paste.
+ */
+export function pastedMarkdown(clipboard: DataTransfer | null): string | null {
+  const format = PASTE_FORMATS.find((type) => clipboard?.types.includes(type));
+  if (clipboard === null || (format !== 'text/markdown' && format !== 'text/plain')) return null;
+  return clipboard.getData(format);
+}
+
+/**
+ * The citation half of the editor's paste (M52.4), behind
+ * `pageLinkPasteHandler` (M55.14): pasted markdown keeps its footnotes.
  *
  * BlockNote reads pasted markdown — and plain text, which it reads as markdown
  * — with the GFM parser, which rewrites `[^id]` into a numbered link and its
@@ -203,13 +214,8 @@ export function citationPasteHandler({
 }: PasteContext): boolean | undefined {
   const { $from, $to } = editor.prosemirrorState.selection;
   if ($from.parent.type.spec.code || $to.parent.type.spec.code) return defaultPasteHandler();
-  const clipboard = event.clipboardData;
-  const format = PASTE_FORMATS.find((type) => clipboard?.types.includes(type));
-  if (clipboard === null || (format !== 'text/markdown' && format !== 'text/plain')) {
-    return defaultPasteHandler();
-  }
-  const data = clipboard.getData(format);
-  if (!/\[\^[^\]\s]+\]/.test(data)) return defaultPasteHandler();
+  const data = pastedMarkdown(event.clipboardData);
+  if (data === null || !/\[\^[^\]\s]+\]/.test(data)) return defaultPasteHandler();
   editor.pasteMarkdown(protectFootnotes(data));
   return true;
 }

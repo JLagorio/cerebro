@@ -11,6 +11,8 @@ import type { Entry, Schema } from '@/engine/types';
 import { useOpenPath } from '@/app/useOpenPath';
 import { typeStyle } from '@/engine/typeCatalog';
 import { ConceptDetailsTab } from '@/knowledge/ConceptDetailsTab';
+import { CommentsTab } from '@/detail/CommentsTab';
+import type { PageCommentsController } from '@/detail/usePageComments';
 import { FileNote } from '@/library/chrome';
 import { PageKnowledge } from '@/knowledge/PageKnowledge';
 import {
@@ -29,6 +31,8 @@ const TABS: { id: DocPanelTab; label: string }[] = [
   // M8.3 — the PRD case. A tab rather than an inline suggestion: opening it
   // is the ask, so the assistant never speaks first while you are writing.
   { id: 'knowledge', label: 'Knowledge' },
+  // M70.2b — the page's threads: on its text, and about the whole page.
+  { id: 'comments', label: 'Comments' },
 ];
 
 /** A concept's panel (M50.1): its provenance first. The review itself is the
@@ -37,6 +41,9 @@ const CONCEPT_TABS: { id: ConceptPanelTab; label: string }[] = [
   { id: 'details', label: 'Details' },
   { id: 'outline', label: 'Outline' },
   { id: 'links', label: 'Links' },
+  // A concept takes comments like any page (M70.2b, Q5): the sidecar sits
+  // outside the bundle, and a thread can neither write nor verify it.
+  { id: 'comments', label: 'Comments' },
 ];
 
 function LinkRow({ link }: { link: DocLink }) {
@@ -124,9 +131,10 @@ function AgentInfo({ entry }: { entry: Entry }) {
 
 /**
  * Right-hand doc side panel (M2.x docs polish — Plane's pane pattern): one
- * panel, three tabs. Outline replaces the old floating TOC; Info hosts the
- * properties editor (on an agent page, a read-only note — M55.12); Links
- * shows resolved connections and backlinks.
+ * panel, its tabs in TABS (CONCEPT_TABS on a concept). Outline replaces the
+ * old floating TOC; Info hosts the properties editor (on an agent page, a
+ * read-only note — M55.12); Links shows resolved connections and backlinks;
+ * Comments holds the page's threads (M70.2b).
  */
 export function DocSidePanel({
   entry,
@@ -135,6 +143,7 @@ export function DocSidePanel({
   scrollRef,
   concept = null,
   overlay = false,
+  comments = null,
 }: {
   entry: Entry;
   schema: Schema;
@@ -148,6 +157,8 @@ export function DocSidePanel({
    * asked for it anyway. The page decides; the stored open flag is not asked.
    */
   overlay?: boolean;
+  /** The page's comments (M70.2b), which DocPage drives. */
+  comments?: PageCommentsController | null;
 }) {
   const docTab = useUiStore((s) => s.docPanelTab);
   const setDocTab = useUiStore((s) => s.setDocPanelTab);
@@ -182,7 +193,7 @@ export function DocSidePanel({
           : { flex: `0 1 ${DOC_PANEL_WIDTH}px`, minWidth: DOC_PANEL_MIN_WIDTH }
       }
     >
-      {/* Wraps rather than clips: at the panel's floor four tabs are wider
+      {/* Wraps rather than clips: at the panel's floor its tabs are wider
           than the panel. */}
       <div className="flex flex-none flex-wrap items-center gap-1 border-b border-n-100 px-2 py-1.5">
         {tabs.map((t) => (
@@ -199,6 +210,19 @@ export function DocSidePanel({
             ].join(' ')}
           >
             {t.label}
+            {/* A quiet count of open threads, only once it is known and
+                above zero (CV-05: loading and unavailable are not 0). It
+                stays in the panel and never reaches the nav. */}
+            {t.id === 'comments' &&
+              comments?.slot?.kind === 'ready' &&
+              (comments.sections?.openCount ?? 0) > 0 && (
+                <span
+                  data-testid="doc-panel-comment-count"
+                  className="ml-1 font-mono text-2xs text-[var(--text-meta)]"
+                >
+                  {comments.sections?.openCount}
+                </span>
+              )}
           </button>
         ))}
       </div>
@@ -217,6 +241,7 @@ export function DocSidePanel({
             <DocProperties entry={entry} schema={schema} />
           ))}
         {tab === 'links' && <LinksTab entry={entry} />}
+        {tab === 'comments' && comments !== null && <CommentsTab controller={comments} />}
         {/* The record peek's Knowledge, component for component (M52.3).
             What this note gave Knowledge comes before what Knowledge can give
             the note: every doc is a candidate source, not just the ones that

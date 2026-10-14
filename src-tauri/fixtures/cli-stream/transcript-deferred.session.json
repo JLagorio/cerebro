@@ -1,0 +1,168 @@
+[
+  {
+    "type": "queue-operation",
+    "operation": "enqueue",
+    "synthetic": "hand-shaped from Claude Code 2.1.250's shapes (M57.1), not recorded; the defer-gate record commit replaces it",
+    "timestamp": "2026-10-14T12:00:01.000Z",
+    "sessionId": "00000000-0000-4000-8000-000000000057",
+    "content": "Add 'call the vendor about the delay' to my inbox."
+  },
+  {
+    "type": "queue-operation",
+    "operation": "dequeue",
+    "timestamp": "2026-10-14T12:00:01.002Z",
+    "sessionId": "00000000-0000-4000-8000-000000000057"
+  },
+  {
+    "parentUuid": null,
+    "isSidechain": false,
+    "promptId": "00000000-0000-4000-8000-000000005720",
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": "Add 'call the vendor about the delay' to my inbox."
+    },
+    "permissionMode": "acceptEdits",
+    "promptSource": "sdk",
+    "uuid": "00000000-0000-4000-8000-000000005721",
+    "timestamp": "2026-10-14T12:00:01.005Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000057",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000005721",
+    "isSidechain": false,
+    "type": "attachment",
+    "attachment": {
+      "type": "deferred_tools_delta",
+      "addedNames": [
+        "WebFetch"
+      ],
+      "addedLines": [
+        "WebFetch"
+      ],
+      "removedNames": []
+    },
+    "uuid": "00000000-0000-4000-8000-000000005722",
+    "timestamp": "2026-10-14T12:00:01.008Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000057",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000005722",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000005701",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Adding it to your inbox."
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 6100,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 1,
+        "service_tier": "standard"
+      }
+    },
+    "requestId": "req_000000000000000000005701",
+    "uuid": "00000000-0000-4000-8000-000000005723",
+    "timestamp": "2026-10-14T12:00:02.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000057",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000005723",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000005701",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000005701",
+          "name": "mcp__cerebro__append_to_note",
+          "input": {
+            "path": "notes/inbox.md",
+            "content": "- Call the vendor about the delay"
+          }
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 6100,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 1,
+        "service_tier": "standard"
+      }
+    },
+    "requestId": "req_000000000000000000005701",
+    "uuid": "00000000-0000-4000-8000-000000005724",
+    "timestamp": "2026-10-14T12:00:02.100Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000057",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000005724",
+    "isSidechain": false,
+    "type": "attachment",
+    "attachment": {
+      "type": "hook_deferred_tool",
+      "toolUseID": "toolu_000000000000000000005701",
+      "toolName": "mcp__cerebro__append_to_note",
+      "toolInput": {
+        "path": "notes/inbox.md",
+        "content": "- Call the vendor about the delay"
+      },
+      "hookName": "PreToolUse:mcp__cerebro__append_to_note",
+      "hookEvent": "PreToolUse",
+      "permissionMode": "acceptEdits"
+    },
+    "uuid": "00000000-0000-4000-8000-000000005725",
+    "timestamp": "2026-10-14T12:00:02.200Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000057",
+    "version": "2.1.250"
+  },
+  {
+    "type": "last-prompt",
+    "lastPrompt": "Add 'call the vendor about the delay' to my inbox.",
+    "leafUuid": "00000000-0000-4000-8000-000000005725",
+    "sessionId": "00000000-0000-4000-8000-000000000057"
+  }
+]

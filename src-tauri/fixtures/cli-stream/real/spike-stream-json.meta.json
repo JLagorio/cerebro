@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "cli_version": "2.1.250",
+  "source": "spike",
+  "recorded": "derived",
+  "derived_from": [
+    "spike/stream-json.json",
+    "the 2.1.250 bundle (control protocol schemas)",
+    "the 2.1.250 bundle (stream_event, assistant and result schemas)",
+    "real/spike-not-signed-in (the 2.1.250 init and session-file framing)"
+  ],
+  "transport": "stream-json-input",
+  "scenario": "stream-json step 0",
+  "proves": "The long-lived stream-json child speaks the control protocol and writes one result per message.",
+  "ends": "result",
+  "session": "00000000-0000-4000-8000-000000000001.jsonl",
+  "sanitizer": 1
+}

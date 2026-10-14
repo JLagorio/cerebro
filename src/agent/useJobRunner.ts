@@ -78,6 +78,12 @@ const TICK_MS = 60_000;
 /** One empty list, so "no events" keeps one identity across renders. */
 const NO_EVENTS: readonly VaultEvent[] = [];
 
+/** What a job's log says when a hook outside Cerebro held one of its calls
+ * (M57.1): nobody watches a job, so nobody answers it. */
+export function pausedByHook(tool: string): string {
+  return `${tool} was paused by a hook outside Cerebro, and nobody was watching this run to answer it, so it stopped there.`;
+}
+
 export function useJobRunner(): void {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const entries = useVaultStore((s) => s.entries);
@@ -430,6 +436,10 @@ export function useJobRunner(): void {
         /** Whether this start-up won its durable claim, so an abandoned one
          * knows it has a claim to give back. */
         let claimed = false;
+        /** Set once the record is read and the run is being asked for, so a
+         * throw after it is the start's refusal (a model or effort Rust would
+         * not take, M56.5), not a read that failed. */
+        let starting = false;
         /** End a start-up the vault moved out from under: the run never
          * happens, so the claim it won goes back, durable and local alike, as
          * a deferral's does — left in place, the old vault would read the job
@@ -581,6 +591,7 @@ export function useJobRunner(): void {
               return;
             }
           }
+          starting = true;
           const start = await runAgent(vaultPath, {
             message,
             actor: agent?.actor ?? null,
@@ -613,7 +624,12 @@ export function useJobRunner(): void {
             // A fresh session every time: a background turn that accumulated
             // context would carry one note's framing into the next one's.
             sessionId: null,
-            model: null,
+            // M56.5: the record's own model and effort, or Claude Code's
+            // default. Rust refuses a value it would not take, and that
+            // refusal is logged like any failed start, every fire until the
+            // record is fixed (Q12).
+            model: agent?.model ?? null,
+            effort: agent?.effort ?? null,
             // A ceiling, never the Settings toggle itself: see shellGrant.
             shell: shellGrant,
             // M17.13/M17.8: the record's own declarations, enforced in Rust.
@@ -740,9 +756,13 @@ export function useJobRunner(): void {
               if (path !== null && !wrote.current.includes(path)) wrote.current.push(path);
             }
             if (event.kind === 'Error') failure.current = event.message;
+            // M57.1: nobody watches a job, so a call a hook outside Cerebro
+            // held is never answered; the run stopped there, and Rust books
+            // it failed and requeues its items.
+            if (event.kind === 'ToolDeferred') failure.current = pausedByHook(event.tool_name);
             if (event.kind === 'Done' || event.kind === 'Error') finish();
           }, runId);
-        } catch {
+        } catch (err) {
           // Silent by construction — no toast: a background runner that could
           // raise one would be a notification, which is the one thing this
           // whole surface is not allowed to be. But silent is not INVISIBLE
@@ -760,7 +780,12 @@ export function useJobRunner(): void {
               scope: agent?.scope ?? null,
               files: [],
               status: 'failed',
-              error: `could not read ${job.path} — this run cannot say what it found`,
+              // A refused start says why in Rust's words, each fire, until
+              // the record is fixed (M56.5, Q12).
+              error:
+                starting && err instanceof Error && err.message !== ''
+                  ? `did not start: ${err.message}`
+                  : `could not read ${job.path} — this run cannot say what it found`,
             });
           }
           if (!recorded) hold();

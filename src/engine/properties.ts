@@ -12,6 +12,7 @@
  * as ghosts rather than being rejected (locked M1 decision).
  */
 
+import { isPageChromeKey } from './pageChrome';
 import { childrenOf, rollupSpec, type RelationIndex } from './relations';
 import { resolveTarget } from './wikilink';
 import type {
@@ -27,17 +28,18 @@ import type {
 // --- System properties (M4) -------------------------------------------------
 
 /**
- * App-managed frontmatter keys are `_`-prefixed (Tolaria's convention:
- * `_organized`, `_pinned`, `_icon`). They are real YAML — visible to any
- * editor and to agents — but the property surfaces hide them and the field
- * pickers refuse to create them, so the workflow state the app maintains
+ * App-managed frontmatter keys: the `_`-prefixed workflow keys (Tolaria's
+ * convention: `_organized`, `_pinned`), and the page chrome keys `icon` and
+ * `cover` (M55.11), which the page draws above its title rather than as rows.
+ * They are real YAML — visible to any editor and to agents — but the property
+ * surfaces, the columns and adoption skip them, so what the app maintains
  * never reads as user data the user is expected to curate.
  *
  * Hidden, not stripped: writes preserve unknown keys, so a `_`-key set by
  * another tool survives a round-trip through cerebro untouched.
  */
 export function isSystemProperty(name: string): boolean {
-  return name.startsWith('_');
+  return name.startsWith('_') || isPageChromeKey(name);
 }
 
 /** Drop app-managed keys from a list of frontmatter names for display. */

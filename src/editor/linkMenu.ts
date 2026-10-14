@@ -6,6 +6,7 @@
  * No React and no BlockNote, so each rule is a table in linkMenu.test.tsx;
  * MarkdownEditor wires them into the menus.
  */
+import { parseLinkTarget } from '@/engine/wikilink';
 
 /** The slice of a ProseMirror EditorState that `charBeforeTrigger` reads. */
 export interface TriggerState {
@@ -54,11 +55,21 @@ export function charBeforeTrigger(
   }
 }
 
+/**
+ * A section query (M55.8): the page before the first `#` and the heading
+ * after it, both trimmed. An empty page is the page being edited, and the
+ * heading is null until one is typed.
+ */
+export interface SectionQuery {
+  page: string;
+  heading: string | null;
+}
+
 /** What the `[` menu's query asks for. */
 export type LinkQuery =
   | { kind: 'cite'; text: string }
   | { kind: 'closed' }
-  | { kind: 'page'; text: string; double: boolean };
+  | { kind: 'page'; text: string; double: boolean; section: SectionQuery | null };
 
 /**
  * Read the `[` menu's query, given the character before its trigger.
@@ -67,14 +78,18 @@ export type LinkQuery =
  * BlockNote puts the second bracket of `[[` before the query today, and this
  * keeps reading it right if a bump ever lands that bracket in the query
  * instead. A `]` closes the link being typed. Anything else names a page, and
- * `double` says it follows `[[`.
+ * `double` says it follows `[[`. A `#` splits it at the first one into a
+ * `section`, the page and the heading a section link names (M55.8).
  */
 export function readLinkQuery(query: string, before: string | null): LinkQuery {
   if (query.startsWith('^')) return { kind: 'cite', text: query.slice(1) };
   const stripped = query.startsWith('[');
   const text = stripped ? query.slice(1) : query;
   if (text.includes(']')) return { kind: 'closed' };
-  return { kind: 'page', text, double: stripped || before === '[' };
+  const double = stripped || before === '[';
+  if (!text.includes('#')) return { kind: 'page', text, double, section: null };
+  const { page, section } = parseLinkTarget(text);
+  return { kind: 'page', text, double, section: { page, heading: section } };
 }
 
 /**

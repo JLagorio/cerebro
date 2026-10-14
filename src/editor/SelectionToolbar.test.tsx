@@ -1,7 +1,12 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import type { ContextType, ReactNode } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { en } from '@blocknote/core/locales';
-import { getFormattingToolbarItems } from '@blocknote/react';
+import { ComponentsContext, getFormattingToolbarItems } from '@blocknote/react';
+import { PageCommentsContext } from './PageCommentsContext';
 import {
+  AiToolbarButtons,
   blockMenuItems,
   formattingToolbarItems,
   PRESETS,
@@ -80,5 +85,68 @@ describe('blockMenuItems', () => {
     for (const key of ['blockColorsItem', 'tableRowHeaderItem', 'tableColumnHeaderItem']) {
       expect(UNCARRIED_ACTIONS[key], key).toBeTruthy();
     }
+  });
+});
+
+/**
+ * M70.2b — Comment sits on the same bar, after the AI group, and only where a
+ * page provides PageCommentsContext. BlockNote's Mantine button is swapped for
+ * a plain one: what is pinned here is the gate and the call, not Mantine.
+ */
+describe('the Comment button', () => {
+  afterEach(cleanup);
+
+  const components = {
+    FormattingToolbar: {
+      Button: ({
+        children,
+        label,
+        onClick,
+        ...rest
+      }: {
+        children?: ReactNode;
+        label?: string;
+        onClick?: () => void;
+        'data-testid'?: string;
+      }) => (
+        <button
+          type="button"
+          aria-label={label}
+          data-testid={rest['data-testid']}
+          onClick={onClick}
+        >
+          {children}
+        </button>
+      ),
+    },
+  } as unknown as ContextType<typeof ComponentsContext>;
+
+  const bar = (start?: () => void) => (
+    <ComponentsContext.Provider value={components}>
+      {start === undefined ? (
+        <AiToolbarButtons onAsk={() => undefined} />
+      ) : (
+        <PageCommentsContext.Provider value={{ start }}>
+          <AiToolbarButtons onAsk={() => undefined} />
+        </PageCommentsContext.Provider>
+      )}
+    </ComponentsContext.Provider>
+  );
+
+  it('is absent without PageCommentsContext, as on the record peek', () => {
+    render(bar());
+    expect(screen.getByTestId('selection-ask-ai')).toBeTruthy();
+    expect(screen.queryByTestId('selection-comment')).toBeNull();
+  });
+
+  it('shows inside the context, keeps the selection on mousedown, and calls start', () => {
+    const start = vi.fn();
+    render(bar(start));
+    const button = screen.getByTestId('selection-comment');
+    expect(button.getAttribute('aria-label')).toBe('Comment');
+    // A default mousedown would move the selection off the text first.
+    expect(fireEvent.mouseDown(button)).toBe(false);
+    fireEvent.click(button);
+    expect(start).toHaveBeenCalledTimes(1);
   });
 });

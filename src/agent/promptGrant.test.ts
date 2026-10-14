@@ -13,6 +13,7 @@ import {
   fetchRefsPrompt,
   freshProposalPrompt,
   organizePrompt,
+  panelAgentPrompt,
   refreshSourcePrompt,
   reviewConceptPrompt,
   reviseConceptPrompt,
@@ -58,9 +59,14 @@ const TRIGGERS = [
 const MEMORY = { recent: 'NOTES', preferences: 'CORRECTION' };
 const AGENT = 'records/agents/scout.md';
 
-/** Every agent prompt for `grant`: an unattended run, woken or not, and an
- * addressed turn, under each write and read scope. They read only the
- * grant's tools. */
+/** The agent Settings binds the panel to (M56.6), under one scope pair. */
+function panelAgent(scope: string[] | null, readScope: string[] | null) {
+  return { path: AGENT, title: 'Scout', actor: 'process:scout', memory: MEMORY, scope, readScope };
+}
+
+/** Every agent prompt for `grant`: an unattended run, woken or not, an
+ * addressed turn and the panel's bound agent, under each write and read
+ * scope. They read only the grant's tools. */
 function agentPrompts(grant: PromptGrant): { label: string; text: string }[] {
   const out: { label: string; text: string }[] = [];
   for (const scope of SCOPES) {
@@ -92,6 +98,10 @@ function agentPrompts(grant: PromptGrant): { label: string; text: string }[] {
           scope,
           readScope,
         ),
+      });
+      out.push({
+        label: `panelAgentPrompt, ${where}`,
+        text: panelAgentPrompt(grant, panelAgent(scope, readScope), 'Keep a running brief.'),
       });
     }
   }
@@ -204,7 +214,7 @@ describe('no prompt names a tool its run lacks', () => {
         }
       }
     }
-    expect(composed).toBe(2 ** NAMED.length * (27 + 32));
+    expect(composed).toBe(2 ** NAMED.length * (36 + 32));
     expect(misses.slice(0, 5)).toEqual([]);
   });
 
@@ -302,6 +312,8 @@ describe('the surface prompts', () => {
           readScope,
         );
         expect(turn.includes('Read, Glob and Grep')).toBe(readScope !== null);
+        const panel = panelAgentPrompt(full, panelAgent(scope, readScope), 'Keep a brief.');
+        expect(panel.includes('Read, Glob and Grep')).toBe(readScope !== null);
       }
     }
   });

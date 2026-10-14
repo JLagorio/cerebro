@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "about": "What a tool call writes and where it is aimed, read off shared/policy/tools.v1.json (M54.1). A name is read in its short or its mcp__cerebro__ spelling. `writes_disk` is whether a successful call changes something on disk: the row's door, the generated door for an op the policy table offers agents, or the CLI row, and false for a name the manifest does not know (propose_revert_proposal is no agent-facing op, so it is one). `write_target` is the path the write scope checks, '' being the vault root when a folder target is missing; `read_target` is the path the read scope checks, the bundle's folder for a bundle target, and a read_write writer (edit_note, M55.5) has both. `written_path` is what a run log reports for the call: the target argument of a tool that writes, else null, for the frontend's replay (M54.2). Replayed by replays_the_shared_tool_cases in src-tauri/src/mcp.rs.",
+  "about": "What a tool call writes and where it is aimed, read off shared/policy/tools.v1.json (M54.1). A name is read in its short or its mcp__cerebro__ spelling. `writes_disk` is whether a successful call changes something on disk: the row's door, the generated door for an op the policy table offers agents, or the CLI row, and false for a name the manifest does not know (propose_revert_proposal is no agent-facing op, so it is one). `write_target` is the path the write scope checks, '' being the vault root when a folder target is missing; `read_target` is the path the read scope checks, the bundle's folder for a bundle target, and a read_write writer (edit_note, M55.5) has both. `written_path` is what a run log reports for the call: the target argument of a tool that writes, else null, for the frontend's replay (M54.2). `renderer` is how a transcript draws the call and `fold` the phrases a run of its calls folds under, null for a tool that never folds (M56.8): a step with no fold for a name the manifest does not know. Replayed by replays_the_shared_tool_cases in src-tauri/src/mcp.rs.",
   "cases": [
     {
       "tool": "append_to_note",
@@ -8,7 +8,9 @@
       "writes_disk": true,
       "write_target": "notes/a.md",
       "read_target": null,
-      "written_path": "notes/a.md"
+      "written_path": "notes/a.md",
+      "renderer": "change",
+      "fold": null
     },
     {
       "tool": "mcp__cerebro__append_to_note",
@@ -16,7 +18,9 @@
       "writes_disk": true,
       "write_target": "notes/a.md",
       "read_target": null,
-      "written_path": "notes/a.md"
+      "written_path": "notes/a.md",
+      "renderer": "change",
+      "fold": null
     },
     {
       "tool": "edit_note",
@@ -24,7 +28,9 @@
       "writes_disk": true,
       "write_target": "notes/a.md",
       "read_target": "notes/a.md",
-      "written_path": "notes/a.md"
+      "written_path": "notes/a.md",
+      "renderer": "change",
+      "fold": null
     },
     {
       "tool": "create_note",
@@ -32,7 +38,9 @@
       "writes_disk": true,
       "write_target": "projects/atlas",
       "read_target": null,
-      "written_path": "projects/atlas"
+      "written_path": "projects/atlas",
+      "renderer": "change",
+      "fold": null
     },
     {
       "tool": "create_note",
@@ -40,7 +48,9 @@
       "writes_disk": true,
       "write_target": "",
       "read_target": null,
-      "written_path": null
+      "written_path": null,
+      "renderer": "change",
+      "fold": null
     },
     {
       "tool": "update_frontmatter",
@@ -48,7 +58,9 @@
       "writes_disk": true,
       "write_target": "records/risks/r-1.md",
       "read_target": null,
-      "written_path": "records/risks/r-1.md"
+      "written_path": "records/risks/r-1.md",
+      "renderer": "change",
+      "fold": null
     },
     {
       "tool": "get_note",
@@ -56,7 +68,9 @@
       "writes_disk": false,
       "write_target": null,
       "read_target": "records/risks/r-1.md",
-      "written_path": null
+      "written_path": null,
+      "renderer": "step",
+      "fold": { "one": "read a note", "many": "read {n} notes" }
     },
     {
       "tool": "knowledge_about",
@@ -64,7 +78,9 @@
       "writes_disk": false,
       "write_target": null,
       "read_target": "knowledge",
-      "written_path": null
+      "written_path": null,
+      "renderer": "step",
+      "fold": { "one": "read what Knowledge holds", "many": "read Knowledge {n} times" }
     },
     {
       "tool": "search_notes",
@@ -72,7 +88,9 @@
       "writes_disk": false,
       "write_target": null,
       "read_target": null,
-      "written_path": null
+      "written_path": null,
+      "renderer": "step",
+      "fold": { "one": "searched notes", "many": "searched notes {n} times" }
     },
     {
       "tool": "write_concept",
@@ -86,7 +104,9 @@
       "writes_disk": true,
       "write_target": null,
       "read_target": null,
-      "written_path": "knowledge/metrics/churn.md"
+      "written_path": "knowledge/metrics/churn.md",
+      "renderer": "concept",
+      "fold": null
     },
     {
       "tool": "cache_source",
@@ -94,7 +114,9 @@
       "writes_disk": true,
       "write_target": null,
       "read_target": null,
-      "written_path": "PHX-421"
+      "written_path": "PHX-421",
+      "renderer": "change",
+      "fold": null
     },
     {
       "tool": "propose_organize",
@@ -102,7 +124,9 @@
       "writes_disk": false,
       "write_target": null,
       "read_target": null,
-      "written_path": null
+      "written_path": null,
+      "renderer": "step",
+      "fold": null
     },
     {
       "tool": "open_note",
@@ -110,7 +134,9 @@
       "writes_disk": false,
       "write_target": null,
       "read_target": null,
-      "written_path": null
+      "written_path": null,
+      "renderer": "step",
+      "fold": null
     },
     {
       "tool": "propose_create_belief",
@@ -118,7 +144,9 @@
       "writes_disk": true,
       "write_target": null,
       "read_target": null,
-      "written_path": null
+      "written_path": null,
+      "renderer": "step",
+      "fold": null
     },
     {
       "tool": "propose_revert_proposal",
@@ -126,7 +154,9 @@
       "writes_disk": false,
       "write_target": null,
       "read_target": null,
-      "written_path": null
+      "written_path": null,
+      "renderer": "step",
+      "fold": null
     },
     {
       "tool": "commit_proposals",
@@ -134,7 +164,9 @@
       "writes_disk": true,
       "write_target": null,
       "read_target": null,
-      "written_path": null
+      "written_path": null,
+      "renderer": "commit",
+      "fold": null
     },
     {
       "tool": "MultiEdit",
@@ -142,7 +174,9 @@
       "writes_disk": true,
       "write_target": null,
       "read_target": null,
-      "written_path": null
+      "written_path": null,
+      "renderer": "change",
+      "fold": null
     },
     {
       "tool": "Bash",
@@ -150,7 +184,9 @@
       "writes_disk": false,
       "write_target": null,
       "read_target": null,
-      "written_path": null
+      "written_path": null,
+      "renderer": "step",
+      "fold": null
     },
     {
       "tool": "delete_everything",
@@ -158,7 +194,39 @@
       "writes_disk": false,
       "write_target": null,
       "read_target": null,
-      "written_path": null
+      "written_path": null,
+      "renderer": "step",
+      "fold": null
+    },
+    {
+      "tool": "mcp__gmail__search",
+      "args": { "query": "churn" },
+      "writes_disk": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null,
+      "renderer": "step",
+      "fold": null
+    },
+    {
+      "tool": "hand_to",
+      "args": { "agent": "release-scout", "message": "Check the release notes." },
+      "writes_disk": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null,
+      "renderer": "handoff",
+      "fold": null
+    },
+    {
+      "tool": "Read",
+      "args": { "file_path": "/VAULT/notes/a.md" },
+      "writes_disk": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null,
+      "renderer": "step",
+      "fold": { "one": "read a file", "many": "read {n} files" }
     }
   ]
 }

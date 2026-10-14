@@ -1,0 +1,2294 @@
+{
+  "format": 1,
+  "about": "Page comments (M70.2): a page's threads live in <vault>/.comments/<page path>.json, never in the page. Rust (vault/comments.rs) and TS (engine/comments.ts, the mock) replay every section: the limits; the path mapping (a sidecar maps back to a page only for a .md with no hidden name); parse (text to file, or the reason it can't be read); ops (a file before, or null for none, an op and its context, to the file after, 'unchanged', or the refusal's exact words); and bytes (a file to the exact text written: key order, omitted keys, two-space indent, raw non-ASCII and a final newline). Characters are counted as code points.",
+  "limits": {
+    "dir": ".comments",
+    "format": 1,
+    "body": 10000,
+    "quote": 1000,
+    "context": 40,
+    "file_bytes": 1048576,
+    "owner": "human:owner"
+  },
+  "paths": [
+    {
+      "page": "notes/plan.md",
+      "sidecar": ".comments/notes/plan.md.json"
+    },
+    {
+      "page": "plan.md",
+      "sidecar": ".comments/plan.md.json"
+    },
+    {
+      "page": "knowledge/systems/status-model.md",
+      "sidecar": ".comments/knowledge/systems/status-model.md.json"
+    },
+    {
+      "page": "caf\u00e9/r\u00e9sum\u00e9.md",
+      "sidecar": ".comments/caf\u00e9/r\u00e9sum\u00e9.md.json"
+    },
+    {
+      "folder": "notes",
+      "sidecar_folder": ".comments/notes"
+    },
+    {
+      "folder": "records/decisions",
+      "sidecar_folder": ".comments/records/decisions"
+    },
+    {
+      "sidecar": ".comments/diagrams/flow.mmd.json",
+      "page": null
+    },
+    {
+      "sidecar": ".comments/.obsidian/a.md.json",
+      "page": null
+    },
+    {
+      "sidecar": ".comments/notes/.a.md.json",
+      "page": null
+    },
+    {
+      "sidecar": ".comments/\u200c.claude/a.md.json",
+      "page": null
+    },
+    {
+      "sidecar": ".comments/notes/plan.md",
+      "page": null
+    },
+    {
+      "sidecar": ".comments/notes/plan.md.json.tmp",
+      "page": null
+    },
+    {
+      "sidecar": "notes/plan.md.json",
+      "page": null
+    },
+    {
+      "sidecar": ".comments/../plan.md.json",
+      "page": null
+    },
+    {
+      "sidecar": ".comments//plan.md.json",
+      "page": null
+    },
+    {
+      "sidecar": ".comments/notes",
+      "page": null
+    }
+  ],
+  "parse": [
+    {
+      "name": "an empty file",
+      "text": "{\"format\":1,\"threads\":[]}",
+      "file": {
+        "format": 1,
+        "threads": []
+      }
+    },
+    {
+      "name": "every field, in any key order",
+      "text": "{\"format\": 1, \"threads\": [{\"anchor\": {\"quote\": \"after the freeze\", \"occurrence\": 1, \"before\": \"We ship on Thursdays, \", \"after\": \".\"}, \"resolved\": {\"at\": \"2026-10-13T08:30:00Z\", \"by\": \"claude-code\"}, \"comments\": [{\"id\": \"0000000000000001\", \"author\": \"human:owner\", \"created\": \"2026-10-13T08:00:00Z\", \"body\": \"@release-scout check this\"}, {\"id\": \"0000000000000003\", \"author\": \"process:release-scout\", \"created\": \"2026-10-13T08:30:00Z\", \"body\": \"It checks out.\", \"run_id\": \"run-7\", \"state\": \"answered\", \"answers\": \"0000000000000001\"}, {\"id\": \"0000000000000004\", \"author\": \"agent:m26-ingest\", \"created\": \"2026-10-13T08:30:00Z\", \"body\": \"\", \"deleted\": {\"at\": \"2026-10-13T08:30:00Z\", \"by\": \"human:owner\"}}]}, {\"deleted\": {\"at\": \"2026-10-13T08:30:00Z\", \"by\": \"human:owner\"}, \"comments\": [{\"id\": \"0000000000000002\", \"author\": \"human:owner\", \"created\": \"2026-10-13T08:00:00Z\", \"body\": \"\", \"deleted\": {\"at\": \"2026-10-13T08:30:00Z\", \"by\": \"human:owner\"}}]}]}",
+      "file": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "resolved": {
+              "at": "2026-10-13T08:30:00Z",
+              "by": "claude-code"
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "@release-scout check this"
+              },
+              {
+                "id": "0000000000000003",
+                "author": "process:release-scout",
+                "created": "2026-10-13T08:30:00Z",
+                "body": "It checks out.",
+                "run_id": "run-7",
+                "state": "answered",
+                "answers": "0000000000000001"
+              },
+              {
+                "id": "0000000000000004",
+                "author": "agent:m26-ingest",
+                "created": "2026-10-13T08:30:00Z",
+                "body": "",
+                "deleted": {
+                  "at": "2026-10-13T08:30:00Z",
+                  "by": "human:owner"
+                }
+              }
+            ]
+          },
+          {
+            "deleted": {
+              "at": "2026-10-13T08:30:00Z",
+              "by": "human:owner"
+            },
+            "comments": [
+              {
+                "id": "0000000000000002",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "",
+                "deleted": {
+                  "at": "2026-10-13T08:30:00Z",
+                  "by": "human:owner"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "an occurrence written as 2.0 reads as 2",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 2.0,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "file": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 2,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "conflict markers",
+      "text": "<<<<<<< HEAD\n{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\"\n        }\n      ]\n    }\n  ]\n}\n=======\n{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\"\n        },\n        {\n          \"id\": \"0000000000000003\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:30:00Z\",\n          \"body\": \"I think so.\"\n        }\n      ]\n    },\n    {\n      \"comments\": [\n        {\n          \"id\": \"0000000000000002\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"The whole page needs a summary.\"\n        }\n      ]\n    }\n  ]\n}\n>>>>>>> theirs\n",
+      "reason": "it has unresolved merge conflict markers"
+    },
+    {
+      "name": "a diff3 base marker alone",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\"\n        }\n      ]\n    }\n  ]\n}\n||||||| base\n",
+      "reason": "it has unresolved merge conflict markers"
+    },
+    {
+      "name": "not JSON",
+      "text": "{format: 1}",
+      "reason": "it is not valid JSON"
+    },
+    {
+      "name": "an empty file is not JSON",
+      "text": "",
+      "reason": "it is not valid JSON"
+    },
+    {
+      "name": "two documents",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\"\n        }\n      ]\n    }\n  ]\n}\n{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it is not valid JSON"
+    },
+    {
+      "name": "format 2",
+      "text": "{\"format\":2,\"threads\":[]}",
+      "reason": "it was written by a newer Cerebro"
+    },
+    {
+      "name": "format 2 in any shape",
+      "text": "{\"format\":2,\"threads\":\"later\"}",
+      "reason": "it was written by a newer Cerebro"
+    },
+    {
+      "name": "format 0",
+      "text": "{\"format\":0,\"threads\":[]}",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "format as a string",
+      "text": "{\"format\":\"1\",\"threads\":[]}",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "no format",
+      "text": "{\"threads\":[]}",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "no threads",
+      "text": "{\"format\":1}",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "an array",
+      "text": "[]",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "an unknown key on the file",
+      "text": "{\"format\":1,\"threads\":[],\"x\":1}",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "an unknown key on a comment",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\",\n          \"likes\": 3\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "an unknown key on a thread",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\"\n        }\n      ],\n      \"id\": \"0000000000000001\"\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "a missing body",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "a null where a key is optional",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\",\n          \"deleted\": null\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "an upper-case id",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"000000000000000A\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "a short id",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "a time with milliseconds",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00.000Z\",\n          \"body\": \"Is this right?\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "a time with an offset",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00+00:00\",\n          \"body\": \"Is this right?\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "a day that does not exist",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-02-30T08:00:00Z\",\n          \"body\": \"Is this right?\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "a leap day that does",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2028-02-29T08:00:00Z\",\n          \"body\": \"Is this right?\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "file": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2028-02-29T08:00:00Z",
+                "body": "Is this right?"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "a leap second",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-12-31T23:59:60Z\",\n          \"body\": \"Is this right?\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "a stamp's time is checked",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"resolved\": {\n        \"at\": \"yesterday\",\n        \"by\": \"human:owner\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "a stamp with no author",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"resolved\": {\n        \"at\": \"2026-10-13T08:30:00Z\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "duplicate ids across threads",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\"\n        },\n        {\n          \"id\": \"0000000000000003\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:30:00Z\",\n          \"body\": \"I think so.\"\n        }\n      ]\n    },\n    {\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"The whole page needs a summary.\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "a thread with no comments",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": []\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "occurrence 0",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 0,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "occurrence 1.5",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1.5,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "an unknown state",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\",\n          \"state\": \"maybe\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "answers names an id",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\",\n          \"answers\": \"the first one\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "an empty run id",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\",\n          \"run_id\": \"\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "a second human",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:guest\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "an author with no kind",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"release-scout\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "an agent with no id",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"agent:\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "a process with a blank name",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"process: \",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "a process name holding a line break",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"process:a\\nb\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    },
+    {
+      "name": "a process name holding a space",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"process:release scout\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Is this right?\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "file": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "process:release scout",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "a body of the wrong kind",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": 3\n        }\n      ]\n    }\n  ]\n}\n",
+      "reason": "it does not match the comments format"
+    }
+  ],
+  "ops": [
+    {
+      "name": "a first comment on a passage starts the file",
+      "before": null,
+      "op": {
+        "op": "start",
+        "anchor": {
+          "quote": "after the freeze",
+          "occurrence": 1,
+          "before": "We ship on Thursdays, ",
+          "after": "."
+        },
+        "body": "Is this right?"
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "a1b2c3d4e5f60718",
+                "author": "human:owner",
+                "created": "2026-10-14T09:00:00Z",
+                "body": "Is this right?"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "a comment with no anchor is about the whole page, and goes last",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "start",
+        "body": "The whole page needs a summary."
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              }
+            ]
+          },
+          {
+            "comments": [
+              {
+                "id": "a1b2c3d4e5f60718",
+                "author": "human:owner",
+                "created": "2026-10-14T09:00:00Z",
+                "body": "The whole page needs a summary."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "a body is trimmed",
+      "before": null,
+      "op": {
+        "op": "start",
+        "body": "  Looks good.\n\n"
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "format": 1,
+        "threads": [
+          {
+            "comments": [
+              {
+                "id": "a1b2c3d4e5f60718",
+                "author": "human:owner",
+                "created": "2026-10-14T09:00:00Z",
+                "body": "Looks good."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "trimming takes Rust's whitespace: U+0085 goes, U+FEFF stays",
+      "before": null,
+      "op": {
+        "op": "start",
+        "body": "\u0085hi\ufeff"
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "format": 1,
+        "threads": [
+          {
+            "comments": [
+              {
+                "id": "a1b2c3d4e5f60718",
+                "author": "human:owner",
+                "created": "2026-10-14T09:00:00Z",
+                "body": "hi\ufeff"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "an empty body is refused",
+      "before": null,
+      "op": {
+        "op": "start",
+        "body": " \n\t"
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "error": "A comment needs some text."
+      }
+    },
+    {
+      "name": "a body past the limit is refused, counted in code points",
+      "before": null,
+      "op": {
+        "op": "start",
+        "body": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "error": "A comment holds at most 10000 characters; this one has 10001."
+      }
+    },
+    {
+      "name": "an empty quote is refused",
+      "before": null,
+      "op": {
+        "op": "start",
+        "anchor": {
+          "quote": "  ",
+          "occurrence": 1,
+          "before": "We ship on Thursdays, ",
+          "after": "."
+        },
+        "body": "Hm."
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "error": "A comment's quote can't be empty."
+      }
+    },
+    {
+      "name": "a quote past the limit is refused",
+      "before": null,
+      "op": {
+        "op": "start",
+        "anchor": {
+          "quote": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "occurrence": 1,
+          "before": "We ship on Thursdays, ",
+          "after": "."
+        },
+        "body": "Hm."
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "error": "A comment's quote holds at most 1000 characters; this one has 1001."
+      }
+    },
+    {
+      "name": "an occurrence counts from 1",
+      "before": null,
+      "op": {
+        "op": "start",
+        "anchor": {
+          "quote": "after the freeze",
+          "occurrence": 0,
+          "before": "We ship on Thursdays, ",
+          "after": "."
+        },
+        "body": "Hm."
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "error": "A comment's occurrence counts from 1."
+      }
+    },
+    {
+      "name": "context past the limit on either side is refused",
+      "before": null,
+      "op": {
+        "op": "start",
+        "anchor": {
+          "quote": "after the freeze",
+          "occurrence": 1,
+          "before": "We ship on Thursdays, ",
+          "after": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "body": "Hm."
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "error": "A comment's context holds at most 40 characters on each side."
+      }
+    },
+    {
+      "name": "context at the limit in code points is taken, though it is twice that in UTF-16",
+      "before": null,
+      "op": {
+        "op": "start",
+        "anchor": {
+          "quote": "after the freeze",
+          "occurrence": 1,
+          "before": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00",
+          "after": "."
+        },
+        "body": "Hm."
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "a1b2c3d4e5f60718",
+                "author": "human:owner",
+                "created": "2026-10-14T09:00:00Z",
+                "body": "Hm."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "the body is checked before the anchor",
+      "before": null,
+      "op": {
+        "op": "start",
+        "anchor": {
+          "quote": "",
+          "occurrence": 1,
+          "before": "We ship on Thursdays, ",
+          "after": "."
+        },
+        "body": ""
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "error": "A comment needs some text."
+      }
+    },
+    {
+      "name": "an agent's comment carries its author and run",
+      "before": null,
+      "op": {
+        "op": "start",
+        "body": "Flagged for review."
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "process:release-scout",
+        "page": "notes/plan.md",
+        "run_id": "run-7"
+      },
+      "after": {
+        "format": 1,
+        "threads": [
+          {
+            "comments": [
+              {
+                "id": "a1b2c3d4e5f60718",
+                "author": "process:release-scout",
+                "created": "2026-10-14T09:00:00Z",
+                "body": "Flagged for review.",
+                "run_id": "run-7"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "a reply lands at the end of its thread",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              },
+              {
+                "id": "0000000000000003",
+                "author": "human:owner",
+                "created": "2026-10-13T08:30:00Z",
+                "body": "I think so."
+              }
+            ]
+          },
+          {
+            "comments": [
+              {
+                "id": "0000000000000002",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "The whole page needs a summary."
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "reply",
+        "thread": "0000000000000001",
+        "body": "Agreed."
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              },
+              {
+                "id": "0000000000000003",
+                "author": "human:owner",
+                "created": "2026-10-13T08:30:00Z",
+                "body": "I think so."
+              },
+              {
+                "id": "a1b2c3d4e5f60718",
+                "author": "human:owner",
+                "created": "2026-10-14T09:00:00Z",
+                "body": "Agreed."
+              }
+            ]
+          },
+          {
+            "comments": [
+              {
+                "id": "0000000000000002",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "The whole page needs a summary."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "a reply reopens a resolved thread",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "resolved": {
+              "at": "2026-10-13T08:30:00Z",
+              "by": "human:owner"
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "reply",
+        "thread": "0000000000000001",
+        "body": "Not quite."
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              },
+              {
+                "id": "a1b2c3d4e5f60718",
+                "author": "human:owner",
+                "created": "2026-10-14T09:00:00Z",
+                "body": "Not quite."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "a reply to an unknown thread is refused",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              },
+              {
+                "id": "0000000000000003",
+                "author": "human:owner",
+                "created": "2026-10-13T08:30:00Z",
+                "body": "I think so."
+              }
+            ]
+          },
+          {
+            "comments": [
+              {
+                "id": "0000000000000002",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "The whole page needs a summary."
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "reply",
+        "thread": "ffffffffffffffff",
+        "body": "Hm."
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "error": "No comment thread ffffffffffffffff on notes/plan.md."
+      }
+    },
+    {
+      "name": "a reply names the concept page it was refused on",
+      "before": null,
+      "op": {
+        "op": "reply",
+        "thread": "0000000000000001",
+        "body": "Hm."
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "knowledge/systems/status-model.md"
+      },
+      "after": {
+        "error": "No comment thread 0000000000000001 on knowledge/systems/status-model.md."
+      }
+    },
+    {
+      "name": "a reply to a deleted thread is refused",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "deleted": {
+              "at": "2026-10-13T08:30:00Z",
+              "by": "human:owner"
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "",
+                "deleted": {
+                  "at": "2026-10-13T08:30:00Z",
+                  "by": "human:owner"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "reply",
+        "thread": "0000000000000001",
+        "body": "Hm."
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "error": "That comment thread was deleted."
+      }
+    },
+    {
+      "name": "an empty reply is refused",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              },
+              {
+                "id": "0000000000000003",
+                "author": "human:owner",
+                "created": "2026-10-13T08:30:00Z",
+                "body": "I think so."
+              }
+            ]
+          },
+          {
+            "comments": [
+              {
+                "id": "0000000000000002",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "The whole page needs a summary."
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "reply",
+        "thread": "0000000000000001",
+        "body": ""
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "error": "A comment needs some text."
+      }
+    },
+    {
+      "name": "a reply keeps every field later parts write",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "@release-scout check this"
+              },
+              {
+                "id": "0000000000000003",
+                "author": "process:release-scout",
+                "created": "2026-10-13T08:30:00Z",
+                "body": "It checks out.",
+                "run_id": "run-7",
+                "state": "answered",
+                "answers": "0000000000000001"
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "reply",
+        "thread": "0000000000000001",
+        "body": "Thanks."
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "@release-scout check this"
+              },
+              {
+                "id": "0000000000000003",
+                "author": "process:release-scout",
+                "created": "2026-10-13T08:30:00Z",
+                "body": "It checks out.",
+                "run_id": "run-7",
+                "state": "answered",
+                "answers": "0000000000000001"
+              },
+              {
+                "id": "a1b2c3d4e5f60718",
+                "author": "human:owner",
+                "created": "2026-10-14T09:00:00Z",
+                "body": "Thanks."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "resolving stamps the thread",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "set_resolved",
+        "thread": "0000000000000001",
+        "resolved": true
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "resolved": {
+              "at": "2026-10-14T09:00:00Z",
+              "by": "human:owner"
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "resolving twice changes nothing",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "resolved": {
+              "at": "2026-10-13T08:30:00Z",
+              "by": "human:owner"
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "set_resolved",
+        "thread": "0000000000000001",
+        "resolved": true
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": "unchanged"
+    },
+    {
+      "name": "resolving twice with a closing note changes nothing",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "resolved": {
+              "at": "2026-10-13T08:30:00Z",
+              "by": "human:owner"
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "set_resolved",
+        "thread": "0000000000000001",
+        "resolved": true,
+        "closing": "Done."
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": "unchanged"
+    },
+    {
+      "name": "reopening an open thread changes nothing",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "set_resolved",
+        "thread": "0000000000000001",
+        "resolved": false
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": "unchanged"
+    },
+    {
+      "name": "reopening drops the stamp",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "resolved": {
+              "at": "2026-10-13T08:30:00Z",
+              "by": "human:owner"
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "set_resolved",
+        "thread": "0000000000000001",
+        "resolved": false
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "a closing note is posted, trimmed, in the same change",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "set_resolved",
+        "thread": "0000000000000001",
+        "resolved": true,
+        "closing": " Fixed in the second paragraph. "
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "resolved": {
+              "at": "2026-10-14T09:00:00Z",
+              "by": "human:owner"
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              },
+              {
+                "id": "a1b2c3d4e5f60718",
+                "author": "human:owner",
+                "created": "2026-10-14T09:00:00Z",
+                "body": "Fixed in the second paragraph."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "an empty closing note is refused",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "set_resolved",
+        "thread": "0000000000000001",
+        "resolved": true,
+        "closing": "  "
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "error": "A comment needs some text."
+      }
+    },
+    {
+      "name": "a deleted thread can't be resolved",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "deleted": {
+              "at": "2026-10-13T08:30:00Z",
+              "by": "human:owner"
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "",
+                "deleted": {
+                  "at": "2026-10-13T08:30:00Z",
+                  "by": "human:owner"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "set_resolved",
+        "thread": "0000000000000001",
+        "resolved": true
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "error": "That comment thread was deleted."
+      }
+    },
+    {
+      "name": "resolving an unknown thread is refused",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "set_resolved",
+        "thread": "0000000000000002",
+        "resolved": true
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "error": "No comment thread 0000000000000002 on notes/plan.md."
+      }
+    },
+    {
+      "name": "deleting a comment empties and stamps it, and the thread stays",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              },
+              {
+                "id": "0000000000000003",
+                "author": "human:owner",
+                "created": "2026-10-13T08:30:00Z",
+                "body": "I think so."
+              }
+            ]
+          },
+          {
+            "comments": [
+              {
+                "id": "0000000000000002",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "The whole page needs a summary."
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "delete_comment",
+        "thread": "0000000000000001",
+        "comment": "0000000000000003"
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              },
+              {
+                "id": "0000000000000003",
+                "author": "human:owner",
+                "created": "2026-10-13T08:30:00Z",
+                "body": "",
+                "deleted": {
+                  "at": "2026-10-14T09:00:00Z",
+                  "by": "human:owner"
+                }
+              }
+            ]
+          },
+          {
+            "comments": [
+              {
+                "id": "0000000000000002",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "The whole page needs a summary."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "deleting the last live comment stamps the thread too",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              },
+              {
+                "id": "0000000000000003",
+                "author": "human:owner",
+                "created": "2026-10-13T08:30:00Z",
+                "body": "",
+                "deleted": {
+                  "at": "2026-10-14T09:00:00Z",
+                  "by": "human:owner"
+                }
+              }
+            ]
+          },
+          {
+            "comments": [
+              {
+                "id": "0000000000000002",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "The whole page needs a summary."
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "delete_comment",
+        "thread": "0000000000000001",
+        "comment": "0000000000000001"
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "deleted": {
+              "at": "2026-10-14T09:00:00Z",
+              "by": "human:owner"
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "",
+                "deleted": {
+                  "at": "2026-10-14T09:00:00Z",
+                  "by": "human:owner"
+                }
+              },
+              {
+                "id": "0000000000000003",
+                "author": "human:owner",
+                "created": "2026-10-13T08:30:00Z",
+                "body": "",
+                "deleted": {
+                  "at": "2026-10-14T09:00:00Z",
+                  "by": "human:owner"
+                }
+              }
+            ]
+          },
+          {
+            "comments": [
+              {
+                "id": "0000000000000002",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "The whole page needs a summary."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "deleting a comment twice changes nothing",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              },
+              {
+                "id": "0000000000000003",
+                "author": "human:owner",
+                "created": "2026-10-13T08:30:00Z",
+                "body": "",
+                "deleted": {
+                  "at": "2026-10-14T09:00:00Z",
+                  "by": "human:owner"
+                }
+              }
+            ]
+          },
+          {
+            "comments": [
+              {
+                "id": "0000000000000002",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "The whole page needs a summary."
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "delete_comment",
+        "thread": "0000000000000001",
+        "comment": "0000000000000003"
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": "unchanged"
+    },
+    {
+      "name": "deleting an unknown comment is refused",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              },
+              {
+                "id": "0000000000000003",
+                "author": "human:owner",
+                "created": "2026-10-13T08:30:00Z",
+                "body": "I think so."
+              }
+            ]
+          },
+          {
+            "comments": [
+              {
+                "id": "0000000000000002",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "The whole page needs a summary."
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "delete_comment",
+        "thread": "0000000000000001",
+        "comment": "0000000000000004"
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "error": "No comment 0000000000000004 in that thread."
+      }
+    },
+    {
+      "name": "deleting a comment in an unknown thread is refused",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              },
+              {
+                "id": "0000000000000003",
+                "author": "human:owner",
+                "created": "2026-10-13T08:30:00Z",
+                "body": "I think so."
+              }
+            ]
+          },
+          {
+            "comments": [
+              {
+                "id": "0000000000000002",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "The whole page needs a summary."
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "delete_comment",
+        "thread": "0000000000000004",
+        "comment": "0000000000000004"
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "error": "No comment thread 0000000000000004 on notes/plan.md."
+      }
+    },
+    {
+      "name": "deleting a thread stamps it and every live comment, and keeps earlier stamps",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              },
+              {
+                "id": "0000000000000003",
+                "author": "human:owner",
+                "created": "2026-10-13T08:30:00Z",
+                "body": "",
+                "deleted": {
+                  "at": "2026-10-14T09:00:00Z",
+                  "by": "human:owner"
+                }
+              }
+            ]
+          },
+          {
+            "comments": [
+              {
+                "id": "0000000000000002",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "The whole page needs a summary."
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "delete_thread",
+        "thread": "0000000000000001"
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "deleted": {
+              "at": "2026-10-14T09:00:00Z",
+              "by": "human:owner"
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "",
+                "deleted": {
+                  "at": "2026-10-14T09:00:00Z",
+                  "by": "human:owner"
+                }
+              },
+              {
+                "id": "0000000000000003",
+                "author": "human:owner",
+                "created": "2026-10-13T08:30:00Z",
+                "body": "",
+                "deleted": {
+                  "at": "2026-10-14T09:00:00Z",
+                  "by": "human:owner"
+                }
+              }
+            ]
+          },
+          {
+            "comments": [
+              {
+                "id": "0000000000000002",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "The whole page needs a summary."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "deleting a thread twice changes nothing",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "deleted": {
+              "at": "2026-10-13T08:30:00Z",
+              "by": "human:owner"
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "",
+                "deleted": {
+                  "at": "2026-10-13T08:30:00Z",
+                  "by": "human:owner"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "delete_thread",
+        "thread": "0000000000000001"
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": "unchanged"
+    },
+    {
+      "name": "deleting an unknown thread is refused",
+      "before": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "Is this right?"
+              }
+            ]
+          }
+        ]
+      },
+      "op": {
+        "op": "delete_thread",
+        "thread": "0000000000000002"
+      },
+      "ctx": {
+        "ids": ["a1b2c3d4e5f60718"],
+        "now": "2026-10-14T09:00:00Z",
+        "by": "human:owner",
+        "page": "notes/plan.md"
+      },
+      "after": {
+        "error": "No comment thread 0000000000000002 on notes/plan.md."
+      }
+    }
+  ],
+  "bytes": [
+    {
+      "name": "an empty file",
+      "file": {
+        "format": 1,
+        "threads": []
+      },
+      "text": "{\n  \"format\": 1,\n  \"threads\": []\n}\n"
+    },
+    {
+      "name": "key order, omission, escapes and raw non-ASCII",
+      "file": {
+        "threads": [
+          {
+            "comments": [
+              {
+                "body": "Line one\n\t\u201cquoted\u201d \\ \"plain\" \u0001 caf\u00e9 \ud83d\ude00",
+                "created": "2026-10-13T08:00:00Z",
+                "author": "human:owner",
+                "id": "0000000000000001"
+              }
+            ],
+            "resolved": {
+              "by": "human:owner",
+              "at": "2026-10-13T08:30:00Z"
+            },
+            "anchor": {
+              "after": " \u2014 end",
+              "before": "",
+              "occurrence": 2,
+              "quote": "caf\u00e9"
+            }
+          }
+        ],
+        "format": 1
+      },
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"caf\u00e9\",\n        \"occurrence\": 2,\n        \"before\": \"\",\n        \"after\": \" \u2014 end\"\n      },\n      \"resolved\": {\n        \"at\": \"2026-10-13T08:30:00Z\",\n        \"by\": \"human:owner\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"Line one\\n\\t\u201cquoted\u201d \\\\ \\\"plain\\\" \\u0001 caf\u00e9 \ud83d\ude00\"\n        }\n      ]\n    }\n  ]\n}\n"
+    },
+    {
+      "name": "every field",
+      "file": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "after the freeze",
+              "occurrence": 1,
+              "before": "We ship on Thursdays, ",
+              "after": "."
+            },
+            "resolved": {
+              "at": "2026-10-13T08:30:00Z",
+              "by": "claude-code"
+            },
+            "comments": [
+              {
+                "id": "0000000000000001",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "@release-scout check this"
+              },
+              {
+                "id": "0000000000000003",
+                "author": "process:release-scout",
+                "created": "2026-10-13T08:30:00Z",
+                "body": "It checks out.",
+                "run_id": "run-7",
+                "state": "answered",
+                "answers": "0000000000000001"
+              },
+              {
+                "id": "0000000000000004",
+                "author": "agent:m26-ingest",
+                "created": "2026-10-13T08:30:00Z",
+                "body": "",
+                "deleted": {
+                  "at": "2026-10-13T08:30:00Z",
+                  "by": "human:owner"
+                }
+              }
+            ]
+          },
+          {
+            "deleted": {
+              "at": "2026-10-13T08:30:00Z",
+              "by": "human:owner"
+            },
+            "comments": [
+              {
+                "id": "0000000000000002",
+                "author": "human:owner",
+                "created": "2026-10-13T08:00:00Z",
+                "body": "",
+                "deleted": {
+                  "at": "2026-10-13T08:30:00Z",
+                  "by": "human:owner"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"resolved\": {\n        \"at\": \"2026-10-13T08:30:00Z\",\n        \"by\": \"claude-code\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"@release-scout check this\"\n        },\n        {\n          \"id\": \"0000000000000003\",\n          \"author\": \"process:release-scout\",\n          \"created\": \"2026-10-13T08:30:00Z\",\n          \"body\": \"It checks out.\",\n          \"run_id\": \"run-7\",\n          \"state\": \"answered\",\n          \"answers\": \"0000000000000001\"\n        },\n        {\n          \"id\": \"0000000000000004\",\n          \"author\": \"agent:m26-ingest\",\n          \"created\": \"2026-10-13T08:30:00Z\",\n          \"body\": \"\",\n          \"deleted\": {\n            \"at\": \"2026-10-13T08:30:00Z\",\n            \"by\": \"human:owner\"\n          }\n        }\n      ]\n    },\n    {\n      \"deleted\": {\n        \"at\": \"2026-10-13T08:30:00Z\",\n        \"by\": \"human:owner\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000002\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": \"\",\n          \"deleted\": {\n            \"at\": \"2026-10-13T08:30:00Z\",\n            \"by\": \"human:owner\"\n          }\n        }\n      ]\n    }\n  ]\n}\n"
+    }
+  ]
+}

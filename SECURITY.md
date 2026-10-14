@@ -39,7 +39,10 @@ deliberately does not do — with your machine is most of its security story.
   Cerebro's own internal runs (ingest, maintenance, synthesis) are denied all
   of those, plus the web tools and Task. Cerebro's MCP tools enforce the rest
   themselves: a run's write scope, its read scope, the knowledge guard and
-  the note-corpus doors. A write that names `expect_hash` is also a read, and
+  the note-corpus doors. One write crosses a run's scope on purpose (D7): a
+  run may rewrite the `recent` key, and nothing else, on its own Agent record,
+  at most 30 lines and 4096 bytes. Every other key, and every other Agent
+  record, stays refused. A write that names `expect_hash` is also a read, and
   is held to the read scope. The one tool that rewrites note text in place,
   `edit_note`, needs read access to the note as well as write access, because
   its refusals quote the note back. A vault's `allowed-tools:` can only narrow
@@ -101,6 +104,54 @@ deliberately does not do — with your machine is most of its security story.
   self-certification), `recheck_concept` (which moves `stale_after` and
   nothing else, and refuses a concept a person verified) and `verify_concept`
   (scoped to the `verified` key).
+- **A page's comments live beside it, in `.comments/`** (M70.2). Each page's
+  threads are `.comments/<page path>.json`; no comment ever writes the page
+  itself. Git carries that folder like any other, so a pushed vault shares
+  its comments. The scan, search and the agent's note tools never read or
+  write it, and a sidecar linked out of the vault is refused like any escape.
+- **Claude Code's session files are read back, never copied** (M56.3).
+  Claude Code writes each conversation's transcript under its own config
+  folder, keyed by the vault's path, outside the vault. Cerebro reads a
+  vault's session file back, read-only, to rebuild a thread whose cached copy
+  is gone, folds it as it reads, and stores no new copy of it. A session id
+  is accepted only as a lowercase UUID, before any run starts or any path is
+  built, so a stored id can neither become a Claude Code flag nor reach a
+  file outside that vault's projects folder.
+- **A run's detail folds its session file only when asked** (M56.9). Claude
+  Code keeps session transcripts under its own `projects` folder, outside the
+  vault, and Settings names and purges them. A run's detail reads that file,
+  read-only, when you open its Transcript; Cerebro stores no copy, and after
+  Claude Code's cleanup (30 days by default) the run says so. The fleet reads run history
+  through a connection SQLite opens read-only.
+- **A model and an effort reach argv only after Rust checks them** (M56.5).
+  An Agent record's `model:` and `effort:`, and a conversation's pick, become
+  `--model` and `--effort` only after `src-tauri/src/agent/run_options.rs`
+  has checked them against `shared/policy/run-options.v1.json`: an effort
+  must be one of its five levels, and a model name starts with a letter or
+  digit and holds only letters, digits and `._-:@/[]`, at most 128 of them,
+  so no value can be read as a flag or carry a space or a control character.
+  The check runs before any token, lease or run row exists, again before a
+  handed-to run starts, and again before the child is admitted. Each value
+  is its own argv element, never passed through a shell.
+- **A vault cannot choose who the panel answers as** (M56.6). Settings binds
+  a vault's assistant panel to an Agent record by its handle, and the binding
+  is the app's own `config.json`, keyed by vault path, never a file in the
+  vault. A handle outside the slug grammar is refused before anything is
+  written. A bound turn runs under that record's grant, like a turn that
+  names it with `@`: its actor, write and read scope, tools and connectors,
+  under the Settings shell ceiling, and a paused agent's turn is refused. A
+  binding no record answers to sends as the plain assistant, and the panel
+  says so.
+- **Open with opens two kinds of target, and nothing else.** A markdown note
+  inside the vault, judged by the note writers' own door (no dot-paths,
+  non-notes, `views/`, `attachments/` or symlinks out), which Finder reveals or
+  the default app opens; or a link built from one of the four agent-link bases
+  in `shared/policy/agent-links.v1.json`, with the prompt percent-encoded and
+  the whole link at most 8192 bytes. Each goes to `/usr/bin/open` as one
+  argument, never through a shell, and the clipboard is written through
+  `/usr/bin/pbcopy`. A prompt carries the page's vault-relative path, never
+  its absolute one, so a link to claude.ai does not carry your home folder's
+  name (M55.9).
 
 ## Mounted repositories (M30/M32)
 

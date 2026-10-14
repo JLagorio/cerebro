@@ -77,7 +77,18 @@ const LOST = {
 };
 
 type Run = typeof RUN;
-type Detail = { run: Run; cost_components: unknown[] | null; assembly: unknown | null };
+type Detail = {
+  run: Run;
+  cost_components: unknown[] | null;
+  assembly: unknown | null;
+  model_id: string | null;
+  refusals: unknown[];
+  refusals_total: number;
+};
+
+/** A detail's M56.9 fields for a run with no model recorded and nothing
+ * refused. */
+const MEASURED = { model_id: null, refusals: [], refusals_total: 0 };
 
 async function openFleet(page: Page, runs: Run[] | null, details: Record<string, Detail> = {}) {
   await seedBeforeBoot(page, '__cerebroSeedFleet', runs, details);
@@ -142,7 +153,7 @@ test('fleet: a run opens, and an unrecorded cost says so rather than showing a z
   // the door to the needs section.
   const undecided = { ...RUN, proposals_submitted: 3 };
   const section = await openFleet(page, [undecided], {
-    'run-2': { run: undecided, cost_components: null, assembly: null },
+    'run-2': { run: undecided, cost_components: null, assembly: null, ...MEASURED },
   });
   await section.getByTestId('fleet-row').click();
 
@@ -159,7 +170,7 @@ test('fleet: a run that left nothing undecided offers no door to the review sect
   // RUN submitted two and decided both. A door to an empty queue would be
   // worse than no door.
   const section = await openFleet(page, [RUN], {
-    'run-2': { run: RUN, cost_components: null, assembly: null },
+    'run-2': { run: RUN, cost_components: null, assembly: null, ...MEASURED },
   });
   await section.getByTestId('fleet-row').click();
   await expect(section.getByTestId('run-detail')).toBeVisible();
@@ -193,6 +204,7 @@ test('fleet: recorded components render, and an estimate is marked as one', asyn
         },
       ],
       assembly: null,
+      ...MEASURED,
     },
   });
   await section.getByTestId('fleet-row').click();
@@ -276,7 +288,7 @@ test('fleet: work that no agent record owns is named, not given a face', async (
 test('fleet: clicking an agent opens it, with only its runs', async ({ page }) => {
   const scoutRun = { ...RUN, run_id: 'run-scout', actor: 'process:release-scout' };
   const section = await openFleet(page, [scoutRun, LOST], {
-    'run-scout': { run: scoutRun, cost_components: null, assembly: null },
+    'run-scout': { run: scoutRun, cost_components: null, assembly: null, ...MEASURED },
   });
   await expect(section.getByTestId('fleet-row')).toHaveCount(2);
 
@@ -417,4 +429,66 @@ test("fleet: release-scout's scheduled run says why, on the fleet and on its Run
   const run = page.getByTestId('agent-runs').getByTestId('agent-run');
   await expect(run).toHaveAttribute('data-run', 'run-scout-1');
   await expect(run.getByTestId('run-why')).toHaveText(said);
+});
+
+// --- A run's detail explains itself (M56.9) ---------------------------------
+
+test("fleet: release-scout's run explains itself", async ({ page }) => {
+  // The demo seed: release-scout's 08:30 fire ran at 09:15, read the five
+  // release risks, and was refused twice.
+  await boot(page);
+  await openAgents(page);
+  await page.locator('[data-testid="fleet-row"][data-run="run-scout-1"]').click();
+  const detail = page.getByTestId('run-detail');
+  await expect(detail).toHaveAttribute('data-run', 'run-scout-1');
+  await expect(detail.getByTestId('run-detail-why')).toContainText('ran 45m late');
+  await expect(detail.getByTestId('run-detail-model')).toHaveText('claude-opus-5');
+
+  const refused = detail.getByTestId('run-detail-refusal');
+  await expect(refused).toHaveCount(2);
+  await expect(refused.nth(0)).toContainText('write outside scope');
+  await expect(refused.nth(1)).toContainText('capability unavailable');
+
+  // Collapsed until asked for, then the five reads are one row.
+  await expect(detail.getByTestId('run-transcript-body')).toHaveCount(0);
+  await detail.getByTestId('run-transcript-toggle').click();
+  const body = detail.getByTestId('run-transcript-body');
+  const group = body.getByTestId('action-group');
+  await expect(group).toHaveCount(1);
+  await expect(group).toContainText('read 5 notes');
+  await expect(detail.getByTestId('run-transcript-retention')).toContainText('30 days');
+});
+
+test('fleet: an expired transcript says cleared by Claude Code', async ({ page }) => {
+  await seedBeforeBoot(page, '__cerebroSeedRunTranscripts', {
+    'run-scout-1': {
+      runs_in_session: 1,
+      retention_days: 30,
+      read: { state: 'unavailable', reason: 'expired', retention_days: 30 },
+    },
+  });
+  await boot(page);
+  await openAgents(page);
+  await page.locator('[data-testid="fleet-row"][data-run="run-scout-1"]').click();
+  const detail = page.getByTestId('run-detail');
+  await detail.getByTestId('run-transcript-toggle').click();
+  await expect(detail.getByTestId('run-transcript-state')).toHaveText(
+    'Cleared by Claude Code, which deletes session files 30 days after their last turn.',
+  );
+  await expect(detail.getByTestId('run-transcript-body')).toHaveCount(0);
+});
+
+test('fleet: a run with no session says transcript not recorded', async ({ page }) => {
+  await boot(page);
+  await openAgents(page);
+  await page.locator('[data-testid="fleet-row"][data-run="run-legacy-1"]').click();
+  const detail = page.getByTestId('run-detail');
+  await expect(detail.getByTestId('run-transcript-state')).toHaveText(
+    'Transcript not recorded for this run.',
+  );
+  await expect(detail.getByTestId('run-transcript-toggle')).toHaveCount(0);
+  await expect(detail.getByTestId('run-detail-model')).toHaveText('not recorded');
+  await expect(detail.getByTestId('run-detail-refused')).toContainText(
+    'No refusal recorded for this run.',
+  );
 });

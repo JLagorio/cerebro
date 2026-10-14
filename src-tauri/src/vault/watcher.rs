@@ -20,6 +20,10 @@ use notify::{recommended_watcher, EventKind, RecursiveMode, Watcher};
 use tauri::Emitter;
 
 pub const VAULT_CHANGED_EVENT: &str = "vault-changed";
+/// A page's comment sidecar changed outside Cerebro (M70.2). The payload
+/// names the pages, or is `null` when the OS dropped events and every loaded
+/// page should reload.
+pub const COMMENTS_CHANGED_EVENT: &str = "comments-changed";
 pub const DEBOUNCE: Duration = Duration::from_millis(350);
 pub const OWN_WRITE_WINDOW: Duration = Duration::from_secs(4);
 
@@ -178,7 +182,8 @@ enum WatchSignal {
 pub struct WatcherState(pub Mutex<Option<notify::RecommendedWatcher>>);
 
 /// Start (or replace) the vault watcher: recursive notify watcher feeding a
-/// debounce thread that emits `vault-changed` (unit payload) to the frontend.
+/// debounce thread that emits `vault-changed` (unit payload) and
+/// `comments-changed` (`{pages}`) to the frontend.
 pub fn start(app: tauri::AppHandle, state: &WatcherState, vault: PathBuf) -> Result<(), String> {
     if !vault.is_dir() {
         return Err(format!("not a directory: {}", vault.display()));
@@ -219,23 +224,55 @@ fn relevant_change(vault: &Path, path: &Path) -> bool {
     is_relevant_path(rel)
 }
 
-/// Collect change events; after 350 ms of quiet, emit one `vault-changed`.
-/// Exits when the watcher (and thus the channel sender) is dropped.
+/// The page whose comment sidecar `path` is, when that sidecar changed
+/// outside Cerebro (M70.2). Cerebro's own sidecar writes are suppressed like
+/// any own write; a sidecar is never a `vault-changed`, since
+/// `is_relevant_path` skips every dot-folder.
+pub fn comment_change(vault: &Path, path: &Path) -> Option<String> {
+    if is_suppressed(path) {
+        return None;
+    }
+    let normalized = normalize(path);
+    let rel = normalized.strip_prefix(vault).unwrap_or(&normalized);
+    let rel = rel.to_string_lossy().replace('\\', "/");
+    super::comments::page_of_sidecar(&rel)
+}
+
+/// `comments-changed`'s payload: the pages, or `None` (null) for all.
+#[derive(Clone, serde::Serialize)]
+struct CommentsChanged {
+    pages: Option<Vec<String>>,
+}
+
+/// Collect change events; after 350 ms of quiet, emit one `vault-changed`
+/// for page changes and one `comments-changed` for sidecar changes, each only
+/// when it has something to say. Exits when the watcher (and thus the
+/// channel sender) is dropped.
 fn debounce_loop(app: tauri::AppHandle, vault: PathBuf, rx: mpsc::Receiver<WatchSignal>) {
     let mut pending = false;
     let mut last_event: Option<Instant> = None;
     let mut knowledge_pending: std::collections::BTreeSet<String> =
         std::collections::BTreeSet::new();
+    let mut comment_pages: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    // The OS dropped events: every loaded page's comments reload.
+    let mut comments_lost = false;
     loop {
         match rx.recv_timeout(POLL) {
             Ok(WatchSignal::Force) => {
                 pending = true;
+                comments_lost = true;
                 last_event = Some(Instant::now());
             }
             Ok(WatchSignal::Paths(paths)) => {
                 if paths.iter().any(|p| relevant_change(&vault, p)) {
                     pending = true;
                     last_event = Some(Instant::now());
+                }
+                for path in &paths {
+                    if let Some(page) = comment_change(&vault, path) {
+                        comment_pages.insert(page);
+                        last_event = Some(Instant::now());
+                    }
                 }
                 for path in &paths {
                     if let Ok(rel) = path.strip_prefix(&vault) {
@@ -249,9 +286,25 @@ fn debounce_loop(app: tauri::AppHandle, vault: PathBuf, rx: mpsc::Receiver<Watch
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return,
         }
-        if should_flush(pending, last_event, Instant::now(), DEBOUNCE) {
-            pending = false;
+        let comments_pending = comments_lost || !comment_pages.is_empty();
+        if should_flush(
+            pending || comments_pending,
+            last_event,
+            Instant::now(),
+            DEBOUNCE,
+        ) {
             last_event = None;
+            if comments_pending {
+                let pages = std::mem::take(&mut comment_pages);
+                let payload = CommentsChanged {
+                    pages: (!std::mem::take(&mut comments_lost))
+                        .then(|| pages.into_iter().collect()),
+                };
+                let _ = app.emit(COMMENTS_CHANGED_EVENT, payload);
+            }
+            if !std::mem::take(&mut pending) {
+                continue;
+            }
             // M23.7: live out-of-band capture for knowledge projections.
             // Hash-based — a file equal to its projection no-ops; mtime is
             // never consulted. A refusal is logged and escalated to a
@@ -422,6 +475,58 @@ mod tests {
         let plain = notify::Event::new(EventKind::Create(CreateKind::File))
             .add_path(PathBuf::from("/some/vault/items/a.md"));
         assert!(!is_forced_rescan(&plain));
+    }
+
+    #[test]
+    fn a_sidecar_change_names_its_page() {
+        let vault = crate::vault::testutil::temp_vault("watcher-sidecar");
+        let root = normalize(&vault);
+        let file = root.join(".comments/notes/plan.md.json");
+        crate::vault::testutil::write(&vault, ".comments/notes/plan.md.json", "{}\n");
+        assert_eq!(
+            comment_change(&root, &file).as_deref(),
+            Some("notes/plan.md")
+        );
+        // Cerebro's own write raises nothing.
+        note_own_write_hashed(&file, crate::ledger::sha256_hex(b"{}\n"));
+        assert_eq!(comment_change(&root, &file), None);
+        // A deletion is a change too.
+        std::fs::remove_file(&file).unwrap();
+        assert_eq!(
+            comment_change(&root, &file).as_deref(),
+            Some("notes/plan.md")
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_sidecar_is_not_a_vault_change() {
+        assert!(!is_relevant_path(Path::new(".comments/notes/plan.md.json")));
+        assert!(!is_relevant_path(Path::new(".comments/notes/plan.md")));
+        assert!(is_relevant_path(Path::new("notes/plan.md")));
+    }
+
+    #[test]
+    fn only_markdown_page_sidecars_count() {
+        let root = Path::new("/vault");
+        for (rel, page) in [
+            (".comments/notes/plan.md.json", Some("notes/plan.md")),
+            (".comments/diagrams/flow.mmd.json", None),
+            (".comments/.obsidian/a.md.json", None),
+            (".comments/notes", None),
+            (
+                ".comments/notes/.plan.md.json.cerebro-tmp-00000000deadbeef",
+                None,
+            ),
+            ("notes/plan.md.json", None),
+            ("notes/plan.md", None),
+        ] {
+            assert_eq!(
+                comment_change(root, &root.join(rel)).as_deref(),
+                page,
+                "{rel}"
+            );
+        }
     }
 
     #[test]

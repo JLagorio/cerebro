@@ -46,6 +46,8 @@ live, then pin it with a spec.
 - `window.__cerebroMockFs` is the fake disk, a `Map` from vault-relative path
   to file text. Probing it writes nothing real, and a reload resets it.
 - `[data-testid="detail-title"]` is an input: read `.value`, not its text.
+- To review a section's five states, open `/state-lab.html?section=<id>&state=<state>`
+  (CV-44) instead of staging data by hand; Fail next and Remount show a failed read.
 
 ## Lock it in
 

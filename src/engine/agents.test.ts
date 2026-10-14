@@ -128,6 +128,16 @@ describe('agent scope', () => {
     ]);
     expect(agentRef(agent({ 'disallowed-tools': [] })).disallowedTools).toEqual([]);
   });
+
+  it('reads `model:` and `effort:` trimmed, and blank or non-string as unset (M56.5)', () => {
+    const ref = agentRef(agent({ model: ' sonnet ', effort: 'high' }));
+    expect([ref.model, ref.effort]).toEqual(['sonnet', 'high']);
+    const unset = agentRef(agent({ model: '  ', effort: 3 }));
+    expect([unset.model, unset.effort]).toEqual([null, null]);
+    expect(agentRef(agent({})).model).toBeNull();
+    // Validity is the agent page's and Rust's, not the parser's.
+    expect(agentRef(agent({ effort: 'turbo' })).effort).toBe('turbo');
+  });
 });
 
 describe('an agent’s identity survives a rename', () => {
@@ -198,6 +208,69 @@ describe('memory tiers', () => {
 
   it('is empty rather than absent on a first run', () => {
     expect(withProps({}).memory).toEqual({ recent: '', preferences: '' });
+  });
+
+  // M56.13 — a hand-written [[link]] sends the field to relationships,
+  // bracket-stripped (CV-09), and the tier used to read as empty.
+  describe('a tier that holds a [[link]]', () => {
+    const withLinks = (
+      properties: Record<string, unknown>,
+      relationships: Record<string, string[]>,
+    ) =>
+      agentRef(
+        makeEntry({
+          path: 'records/agents/scout.md',
+          title: 'Scout',
+          type: 'Agent',
+          properties: properties as never,
+          relationships,
+        }),
+      ).memory;
+
+    it('reads back with its links, in the order written', () => {
+      // `preferences: "Ask [[maya-chen]] before touching [[atlas]]"` and a
+      // `recent:` list naming two notes, as the scanner hands them over.
+      const memory = withLinks(
+        {},
+        { preferences: ['maya-chen', 'atlas'], recent: ['risk-register', 'q3-plan'] },
+      );
+      expect(memory).toEqual({
+        recent: '[[risk-register]]\n[[q3-plan]]',
+        preferences: '[[maya-chen]]\n[[atlas]]',
+      });
+    });
+
+    it('leaves plain text as it was, and prefers it over another key’s links', () => {
+      const memory = withLinks(
+        { recent: '  saw three risks  ', preferences: 'be terser' },
+        { project: ['atlas'] },
+      );
+      expect(memory).toEqual({ recent: 'saw three risks', preferences: 'be terser' });
+    });
+
+    it('reads a linked pre-M17.14 memory:, and a linked recent: over a plain one', () => {
+      expect(withLinks({}, { memory: ['old-note'] }).recent).toBe('[[old-note]]');
+      expect(withLinks({ memory: 'old notes' }, {}).recent).toBe('old notes');
+      expect(withLinks({ memory: 'old notes' }, { recent: ['new-note'] }).recent).toBe(
+        '[[new-note]]',
+      );
+    });
+
+    it('is empty for a relation that names nothing', () => {
+      expect(withLinks({}, { preferences: [' ', ''] }).preferences).toBe('');
+    });
+
+    it('rebuilds on read and never writes the entry', () => {
+      const entry = makeEntry({
+        path: 'records/agents/scout.md',
+        title: 'Scout',
+        type: 'Agent',
+        relationships: { preferences: ['atlas'] },
+      });
+      const before = structuredClone(entry);
+      expect(agentRef(entry).memory.preferences).toBe('[[atlas]]');
+      expect(entry).toEqual(before);
+    });
   });
 });
 

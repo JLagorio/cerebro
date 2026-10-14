@@ -116,6 +116,16 @@ describe('addFieldToType', () => {
     expect(toasts[0]).toMatch(/reserved/);
   });
 
+  it('refuses page chrome as a field name: cover the way icon is (M55.11)', async () => {
+    expect(await addFieldToType('Recipe', 'icon', 'text')).toBe(false);
+    expect(await addFieldToType('Recipe', 'cover', 'files')).toBe(false);
+    expect(patches).toEqual([]);
+    expect(toasts).toEqual([
+      '"icon" is a reserved key and can\'t be a property',
+      '"cover" is a reserved key and can\'t be a property',
+    ]);
+  });
+
   it('refuses to clobber a type doc with YAML errors', async () => {
     useVaultStore.setState({
       entries: [{ ...typeDoc, parseError: 'bad yaml', properties: {} }],

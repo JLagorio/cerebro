@@ -27,9 +27,9 @@ import { ConfirmDeleteProperty, PropertyEditor } from '@/views/PropertyEditor';
  *
  * Notion's order, verbatim: Rename · Edit property › · Comment · ─ · Property
  * visibility › · Duplicate property · Delete property · ─ · Customize layout.
- * One is deliberately absent. **Comment** has no subsystem anywhere in this
- * app — no type, no store, no IPC, no Rust command — so a menu row for it
- * would be a button that cannot work. **Customize layout** landed in M45.2:
+ * One is deliberately absent. **Comment** stays out because page comments
+ * (M70) anchor to a page's body text, and a property has none to quote.
+ * **Customize layout** landed in M45.2:
  * the verbatim-order last item, opening the TYPE's layout editor through the
  * one uiStore signal rather than editing this property.
  *

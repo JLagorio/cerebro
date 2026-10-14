@@ -7,7 +7,8 @@
  * own built-ins are one list. No tool is listed here. What lives in this
  * module is the strict load the Rust loader performs, refusal for refusal and
  * in the same words, and `toolFacts`: what a call writes, how a transcript
- * draws it, its icon and the argument it is aimed by.
+ * draws it and folds a run of it (M56.8), its icon and the argument it is
+ * aimed by.
  *
  * Load is STRICT, as serde's `deny_unknown_fields` is on the Rust side: an
  * unknown field fails, a missing one fails unless the Rust field is an
@@ -47,6 +48,12 @@ const SEARCH_HINT_LIMIT = 80;
 const DESCRIPTION_MIN = 21;
 const DESCRIPTION_MAX = 2048;
 
+/** A fold phrase is a row label, not a sentence (M56.8). */
+const FOLD_LIMIT = 40;
+
+/** Where a fold phrase's count goes. */
+const FOLD_COUNT = '{n}';
+
 /** Served on every run, or beside the generated tools when the proposal
  * surface is on. */
 export type Surface = 'base' | 'proposals';
@@ -58,14 +65,35 @@ export type Kind = 'read_only' | 'additive' | 'destructive';
 export type Axis = 'write' | 'read' | 'read_write' | 'none';
 /** What a tool's target argument names; the bundle takes no argument. */
 export type TargetKind = 'note' | 'folder' | 'concept' | 'source_id' | 'bundle';
-/** How a transcript shows a call: a step in the run, or a change card. */
-export type Renderer = 'step' | 'change';
+/** How a transcript shows a call (M56.8): a step in the run, a change card,
+ * or one of the rows a cerebro tool owns: a concept to review, a handoff to
+ * another agent, a commit of proposals. */
+export type Renderer = 'step' | 'change' | 'concept' | 'handoff' | 'commit';
 
 const SURFACES: readonly Surface[] = ['base', 'proposals'];
 const KINDS: readonly Kind[] = ['read_only', 'additive', 'destructive'];
 const AXES: readonly Axis[] = ['write', 'read', 'read_write', 'none'];
 const TARGET_KINDS: readonly TargetKind[] = ['note', 'folder', 'concept', 'source_id', 'bundle'];
-const RENDERERS: readonly Renderer[] = ['step', 'change'];
+const RENDERERS: readonly Renderer[] = ['step', 'change', 'concept', 'handoff', 'commit'];
+
+/** The door a cerebro tool's own row must go through, for the renderers that
+ * draw what that door does. */
+const RENDERER_DOORS: Partial<Record<Renderer, string>> = {
+  concept: 'concept',
+  handoff: 'run',
+  commit: 'ledger',
+};
+
+/**
+ * How consecutive calls to one read fold into a single transcript row
+ * (M56.8): `one` names a single call and `many` a count of them, `{n}`
+ * standing for the count. Owner-read copy, lowercase: the row capitalizes the
+ * label it joins them into.
+ */
+export interface FoldPhrases {
+  one: string;
+  many: string;
+}
 
 /** The text a `{{name}}` in a description or schema stands for. */
 export interface Token {
@@ -119,6 +147,8 @@ export interface ToolRow {
   /** Why no folder axis binds the tool; set exactly when `axis` is none. */
   exempt: string | null;
   renderer: Renderer;
+  /** Set only on a read: what a run of its calls folds under. */
+  fold: FoldPhrases | null;
   /** A lucide icon name. */
   icon: string;
   always_load: boolean;
@@ -154,6 +184,8 @@ export interface CliTool {
   /** Granted, with the cerebro tools, to a run that holds shell. */
   with_shell: boolean;
   renderer: Renderer;
+  /** Set only on a reader: what a run of its calls folds under. */
+  fold: FoldPhrases | null;
   icon: string;
 }
 
@@ -281,6 +313,8 @@ function mapOf(what: string, fields: Record<string, Field>): Check {
 
 const TARGET = struct({ arg: { option: text }, kind: oneOf(TARGET_KINDS) });
 
+const FOLD = struct({ one: text, many: text });
+
 const GENERATED = struct({
   prefix: text,
   title_prefix: text,
@@ -325,6 +359,7 @@ const MANIFEST_SHAPE = struct({
     target: { option: TARGET },
     exempt: { option: text },
     renderer: oneOf(RENDERERS),
+    fold: { option: FOLD },
     icon: text,
     always_load: flag,
     search_hint: text,
@@ -340,6 +375,7 @@ const MANIFEST_SHAPE = struct({
     denied_when_read_scoped: flag,
     with_shell: flag,
     renderer: oneOf(RENDERERS),
+    fold: { option: FOLD },
     icon: text,
   }),
 });
@@ -368,6 +404,50 @@ function chars(value: string): number {
 /** Is `value` within `limit` characters, and not blank? */
 function fits(value: string, limit: number): boolean {
   return value.trim() !== '' && chars(value) <= limit;
+}
+
+/** A row's fold phrases (M56.8), for a row that may fold: it reads, and it
+ * renders as a step. `writer` says why a row may not, in the row's terms. */
+function checkFold(
+  subject: string,
+  fold: FoldPhrases | null,
+  writer: string | null,
+  renderer: Renderer,
+): void {
+  if (fold === null) return;
+  if (writer !== null) {
+    throw refusal(
+      subject,
+      'fold',
+      `is set on ${writer}; only a read folds, so a write keeps its path in view`,
+    );
+  }
+  if (renderer !== 'step') {
+    throw refusal(subject, 'fold', `is set on a ${renderer} row; only a step folds`);
+  }
+  if (!fits(fold.one, FOLD_LIMIT) || fold.one.includes(FOLD_COUNT)) {
+    throw refusal(
+      subject,
+      'fold.one',
+      `must be 1 to ${FOLD_LIMIT} characters, without ${FOLD_COUNT}`,
+    );
+  }
+  if (!fits(fold.many, FOLD_LIMIT) || fold.many.split(FOLD_COUNT).length - 1 !== 1) {
+    throw refusal(
+      subject,
+      'fold.many',
+      `must be 1 to ${FOLD_LIMIT} characters, with exactly one ${FOLD_COUNT}`,
+    );
+  }
+  for (const [field, phrase] of [
+    ['fold.one', fold.one],
+    ['fold.many', fold.many],
+  ] as const) {
+    // Rust's `char::is_uppercase` is the Uppercase property.
+    if (/^\p{Uppercase}/u.test(phrase)) {
+      throw refusal(subject, field, 'must start lowercase; the row capitalizes the label it joins');
+    }
+  }
 }
 
 /** `[a-z][a-z_]*` */
@@ -490,15 +570,17 @@ function checkFacts(manifest: ToolsManifest, subject: string, facts: Facts): voi
   } else if (facts.exempt !== null) {
     throw refusal(subject, 'exempt', `is set, but the ${facts.axis} axis binds the tool`);
   }
-  if (facts.renderer === 'change') {
-    if (!door.writes) {
-      throw refusal(
-        subject,
-        'renderer',
-        `change needs a door that writes, and ${door.id} does not`,
-      );
-    }
-    if (target === null) throw refusal(subject, 'renderer', 'change needs a target');
+  if (facts.renderer === 'change' && !door.writes) {
+    throw refusal(subject, 'renderer', `change needs a door that writes, and ${door.id} does not`);
+  }
+  // A change card shows the path it changed, and a concept row opens the
+  // concept to review: both need the argument that names it.
+  if ((facts.renderer === 'change' || facts.renderer === 'concept') && target === null) {
+    throw refusal(subject, 'renderer', `${facts.renderer} needs a target`);
+  }
+  const needed = RENDERER_DOORS[facts.renderer];
+  if (needed !== undefined && door.id !== needed) {
+    throw refusal(subject, 'renderer', `${facts.renderer} needs door ${needed}, not ${door.id}`);
   }
   if (!KEBAB.test(facts.icon)) {
     throw refusal(subject, 'icon', `must be a kebab-case name, not ${JSON.stringify(facts.icon)}`);
@@ -535,6 +617,12 @@ function checkRow(manifest: ToolsManifest, row: ToolRow): void {
       `carries the generated prefix ${manifest.generated.prefix}, and prefix_exceptions does not list it`,
     );
   }
+  checkFold(
+    subject,
+    row.fold,
+    row.kind === 'read_only' ? null : `a tool whose kind is ${row.kind}`,
+    row.renderer,
+  );
   checkFacts(manifest, subject, {
     toolset: row.toolset,
     kind: row.kind,
@@ -547,6 +635,9 @@ function checkRow(manifest: ToolsManifest, row: ToolRow): void {
     icon: row.icon,
     searchHint: row.search_hint,
   });
+  if (row.renderer === 'commit' && row.surface !== 'proposals') {
+    throw refusal(subject, 'renderer', 'commit needs the proposals surface');
+  }
   const length = chars(row.description);
   if (length < DESCRIPTION_MIN || length > DESCRIPTION_MAX) {
     throw refusal(
@@ -597,6 +688,14 @@ function checkGenerated(manifest: ToolsManifest): void {
 function checkCli(tool: CliTool): void {
   const subject = `cli tool ${tool.name}`;
   if (!PASCAL.test(tool.name)) throw refusal(subject, 'name', 'must match [A-Z][A-Za-z]*');
+  checkFold(subject, tool.fold, tool.writes ? 'a tool that writes' : null, tool.renderer);
+  if (RENDERER_DOORS[tool.renderer] !== undefined) {
+    throw refusal(
+      subject,
+      'renderer',
+      `${tool.renderer} draws a cerebro tool's own door, never a CLI tool`,
+    );
+  }
   if (tool.with_shell && !tool.denied_without_shell && !tool.denied_when_read_scoped) {
     throw refusal(
       subject,
@@ -707,6 +806,9 @@ export interface ToolFacts {
   /** Does a successful call change something on disk? */
   writes: boolean;
   renderer: Renderer;
+  /** What a run of its calls folds under (M56.8); null for a tool that never
+   * folds: a writer, a generated tool. */
+  fold: FoldPhrases | null;
   /** A lucide icon name. */
   icon: string;
   /** The argument the call is aimed by; generated and CLI tools have none. */
@@ -728,6 +830,7 @@ export function toolFacts(name: string): ToolFacts | null {
       origin: 'row',
       writes: DOOR_WRITES.get(row.door) === true,
       renderer: row.renderer,
+      fold: row.fold,
       icon: row.icon,
       target: row.target,
     };
@@ -738,6 +841,7 @@ export function toolFacts(name: string): ToolFacts | null {
       origin: 'generated',
       writes: DOOR_WRITES.get(generated.door) === true,
       renderer: generated.renderer,
+      fold: null,
       icon: generated.icon,
       target: null,
     };
@@ -748,6 +852,7 @@ export function toolFacts(name: string): ToolFacts | null {
       origin: 'cli',
       writes: cli.writes,
       renderer: cli.renderer,
+      fold: cli.fold,
       icon: cli.icon,
       target: null,
     };

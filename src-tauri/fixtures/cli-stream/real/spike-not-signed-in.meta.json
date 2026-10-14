@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "cli_version": "2.1.250",
+  "source": "spike",
+  "recorded": "live",
+  "transport": "per-turn",
+  "scenario": "not-signed-in step 0",
+  "proves": "A fresh config with no sign-in still starts, then ends in one synthetic authentication_failed reply and a success result marked is_error.",
+  "ends": "result",
+  "session": "00000000-0000-4000-8000-000000000001.jsonl",
+  "sanitizer": 1
+}

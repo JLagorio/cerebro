@@ -762,6 +762,33 @@ describe('useJobRunner composes each job for its grant', () => {
     });
   });
 
+  it('passes an agent run its record’s model and effort (M56.5)', async () => {
+    useVaultStore.setState({
+      entries: [scheduled('Agent', { model: ' sonnet ', effort: 'high' })],
+    });
+    const { options } = await runOne();
+    expect(options).toMatchObject({ model: 'sonnet', effort: 'high' });
+  });
+
+  it('runs a record that names neither at Claude Code’s default (M56.5)', async () => {
+    useVaultStore.setState({ entries: [scheduled('Agent', {})] });
+    const { options } = await runOne();
+    expect(options).toMatchObject({ model: null, effort: null });
+  });
+
+  it('logs a start Rust refused in its words, not as a failed read (M56.5, Q12)', async () => {
+    useRunLogStore.getState().clear();
+    const refusal = 'effort "turbo" is not one Claude Code accepts. Nothing was started.';
+    vi.mocked(agentIpc.runAgent).mockRejectedValueOnce(new Error(refusal));
+    useVaultStore.setState({ entries: [scheduled('Agent', { effort: 'turbo' })] });
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
+    const [entry] = useRunLogStore.getState().entries;
+    expect(entry.status).toBe('failed');
+    expect(entry.error).toBe(`did not start: ${refusal}`);
+  });
+
   it('gives a scheduled skill no connector to reach and nothing to deny', async () => {
     // A skill's record names no connectors, and an unattended run that names
     // none reaches none (M54.9): Rust reads the null this sends as that.

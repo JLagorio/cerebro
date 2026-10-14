@@ -55,16 +55,16 @@ function stemOf(entry: Entry): string {
 }
 
 /**
- * Filename-stem match first, then project folder, then exact title; all
- * case-insensitive (Tolaria rule).
+ * One name against the vault: filename-stem match first, then project
+ * folder, then exact title; all case-insensitive (Tolaria rule).
  *
  * The folder pass exists because a project IS its folder: every project's file
  * is named `project.md`, so a stem match can never name one and `[[atlas]]`
  * would dangle against `projects/atlas/project.md`. It sits above the title
  * pass because a folder name is an identifier and a title is prose.
  */
-export function resolveTarget(target: string, entries: Entry[]): Entry | null {
-  const needle = target.trim().toLowerCase();
+function resolveName(name: string, entries: Entry[]): Entry | null {
+  const needle = name.trim().toLowerCase();
   if (needle === '') return null;
   for (const entry of entries) {
     if (stemOf(entry) === needle) return entry;
@@ -78,6 +78,64 @@ export function resolveTarget(target: string, entries: Entry[]): Entry | null {
     if (entry.title.toLowerCase() === needle) return entry;
   }
   return null;
+}
+
+/** A link target read as a page and a section (M55.8). */
+export interface LinkTarget {
+  /** The text before the first `#`, trimmed; the whole target when it has none. */
+  page: string;
+  /** The text after the first `#`, trimmed; null when there is none or it is empty. */
+  section: string | null;
+}
+
+/**
+ * Split a target at its FIRST `#`: `notes#Risks` is the page `notes` and the
+ * section `Risks`, and `notes#A#B` keeps `A#B` as the section. Both halves are
+ * trimmed, and an empty section is none. `#Risks` names a section of the page
+ * the link sits in, so its page is empty.
+ */
+export function parseLinkTarget(target: string): LinkTarget {
+  const cut = target.indexOf('#');
+  if (cut === -1) return { page: target.trim(), section: null };
+  const section = target.slice(cut + 1).trim();
+  return { page: target.slice(0, cut).trim(), section: section === '' ? null : section };
+}
+
+/** What a link reaches: the page, and the section inside it it points at. */
+export interface ResolvedLink {
+  entry: Entry;
+  section: string | null;
+}
+
+/**
+ * Resolve a wikilink target (M55.8): the whole target first, and only when
+ * that names nothing and the target holds a `#`, the page before its first
+ * `#`, keeping the rest as the section.
+ *
+ * The whole target goes first so that nothing that resolved before section
+ * links changes: a page titled `C# notes` is still reached by `[[C# notes]]`,
+ * as a title link with no section. The fragment is never cut from the file
+ * or from `outgoingLinks`; this is the only place it is read.
+ *
+ * Twinned by `TargetIndex::resolve` in src-tauri/src/vault/link.rs; both
+ * replay src-tauri/fixtures/wikilink-targets.json.
+ */
+export function resolveLink(target: string, entries: Entry[]): ResolvedLink | null {
+  const whole = resolveName(target, entries);
+  if (whole !== null) return { entry: whole, section: null };
+  if (!target.includes('#')) return null;
+  const { page, section } = parseLinkTarget(target);
+  const entry = resolveName(page, entries);
+  return entry === null ? null : { entry, section };
+}
+
+/**
+ * The page a wikilink target names: `resolveLink`'s entry. A section link
+ * (`[[page#Heading]]`) resolves to its page, so backlinks, relations, the
+ * knowledge bundle and the agent's context all read one.
+ */
+export function resolveTarget(target: string, entries: Entry[]): Entry | null {
+  return resolveLink(target, entries)?.entry ?? null;
 }
 
 /**

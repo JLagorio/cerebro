@@ -1,9 +1,17 @@
 import { useEffect, useState } from 'react';
 import { actorLabel } from '@/engine/authors';
 import { instantText } from '@/engine/whenText';
-import { runKnowledgeWrites, type FleetRunDetail, type RunWrite } from '@/lib/ipc';
+import {
+  runKnowledgeWrites,
+  type FleetRefusal,
+  type FleetRun,
+  type FleetRunDetail,
+  type RunWrite,
+} from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import { RunTranscript } from './RunTranscript';
+import { RunWhy } from './RunWhy';
 
 /**
  * One run, opened (M33.5).
@@ -22,7 +30,16 @@ import { useVaultStore } from '@/stores/vaultStore';
  * component with no `observed_cost_micros` never renders as free either.
  * The proposal counters follow the same rule (M49.9): `null` is a run nothing
  * ever booked, and it reads "not recorded" — never "0 applied", and never a
- * "still waiting" count computed from zeros nobody measured.
+ * "still waiting" count computed from zeros nobody measured. So do the why
+ * (M56.7: "why not recorded") and the model (M56.9): `model_id: null` reads
+ * "not recorded", never a guess at the default. A run with no Claude Code
+ * session says its transcript was not recorded, and one whose session file
+ * could not be read says that, never an empty thread (`RunTranscript`).
+ *
+ * **Refused is measured.** Refusals have been recorded with their run since
+ * M54.9, so an empty list reads "No refusal recorded for this run." A code
+ * is worded by turning its underscores into spaces, never from a table of
+ * codes kept here (CV-04); a list the cap cut says how many more there are.
  */
 
 /** Micros to a readable amount. Only ever called with a recorded value —
@@ -105,6 +122,96 @@ function Stamp({ iso }: { iso: string }) {
   );
 }
 
+/**
+ * Why the run started (M56.7), with the page it was about when there is one
+ * (D18: the subject opens its page) and, for a schedule's fire, when it was
+ * due beside when it started.
+ */
+function Why({ run }: { run: FleetRun }) {
+  const navigate = useNavStore((s) => s.navigate);
+  const entries = useVaultStore((s) => s.entries);
+  const cause = run.cause;
+  const subject = cause?.subject ?? null;
+  const page = subject === null ? undefined : entries.find((e) => e.path === subject);
+  return (
+    <div data-testid="run-detail-why" className="flex flex-col gap-0.5 text-2xs text-n-600">
+      <div className="flex min-w-0 items-baseline gap-1.5">
+        <span className="flex-none text-n-500">Why</span>
+        <RunWhy cause={cause} startedAt={run.started_at} />
+      </div>
+      {subject !== null && (
+        <div className="flex min-w-0 items-baseline gap-1.5">
+          <span className="flex-none text-n-500">About</span>
+          {page === undefined ? (
+            <span data-testid="run-detail-subject" className="min-w-0 truncate">
+              {subject}
+            </span>
+          ) : (
+            <button
+              type="button"
+              data-testid="run-detail-subject"
+              data-path={page.path}
+              onClick={() => navigate({ kind: 'doc', path: page.path })}
+              className="min-w-0 truncate border-0 bg-transparent p-0 text-left text-2xs text-cortex-600 hover:underline"
+            >
+              {page.title}
+            </button>
+          )}
+        </div>
+      )}
+      {cause?.due_at != null && (
+        <span data-testid="run-detail-due" className="text-n-500">
+          <span title={cause.due_at}>due {instantText(cause.due_at)}</span> ·{' '}
+          <span title={run.started_at}>started {instantText(run.started_at)}</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** One refusal, worded by its own fields: the surface, the code with its
+ * underscores as spaces, and what Rust said. */
+function Refusal({ refusal }: { refusal: FleetRefusal }) {
+  return (
+    <li
+      data-testid="run-detail-refusal"
+      data-code={refusal.code}
+      data-surface={refusal.surface}
+      title={refusal.recorded_at}
+      className="text-2xs text-n-600"
+    >
+      <span className="[font-family:var(--font-mono)] text-n-500">{refusal.surface}</span>
+      {' · '}
+      <span className="text-n-700">{refusal.code.replace(/_/g, ' ')}</span>
+      {' — '}
+      {refusal.detail}
+    </li>
+  );
+}
+
+function Refused({ refusals, total }: { refusals: FleetRefusal[]; total: number }) {
+  const more = total - refusals.length;
+  return (
+    <section className="flex flex-col gap-1" data-testid="run-detail-refused">
+      <h5 className="text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">Refused</h5>
+      {refusals.length === 0 ? (
+        <p className="text-2xs text-n-500">No refusal recorded for this run.</p>
+      ) : (
+        <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+          {refusals.map((refusal, i) => (
+            <Refusal key={`${refusal.recorded_at}-${i}`} refusal={refusal} />
+          ))}
+        </ul>
+      )}
+      {more > 0 && (
+        <p data-testid="run-detail-refused-more" className="text-2xs text-n-500">
+          and {more} more not shown
+        </p>
+      )}
+    </section>
+  );
+}
+
 function Absent({ what }: { what: string }) {
   return (
     <p className="text-2xs text-n-500" data-testid="detail-absent">
@@ -122,7 +229,7 @@ export function RunDetailPanel({
 }) {
   const navigate = useNavStore((s) => s.navigate);
   const entries = useVaultStore((s) => s.entries);
-  const { run, cost_components: components, assembly } = detail;
+  const { run, cost_components: components, assembly, model_id: model } = detail;
   // Who ran it, in the app's nouns (M52.3); an agent's name opens its page.
   const who = actorLabel(run.actor, entries);
   const agent = who.actor;
@@ -166,6 +273,8 @@ export function RunDetailPanel({
         </button>
       </div>
 
+      <Why run={run} />
+
       <dl className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-2xs text-n-600">
         <div>
           <dt className="inline text-n-500">Started </dt>
@@ -197,7 +306,32 @@ export function RunDetailPanel({
               : 'not recorded'}
           </dd>
         </div>
+        <div>
+          <dt className="inline text-n-500">Model </dt>
+          {model === null ? (
+            <dd className="inline" data-testid="run-detail-model">
+              not recorded
+            </dd>
+          ) : (
+            <dd
+              className="inline [font-family:var(--font-mono)]"
+              data-testid="run-detail-model"
+              title="as Claude Code reported it"
+            >
+              {model}
+            </dd>
+          )}
+        </div>
       </dl>
+
+      <RunTranscript
+        key={run.run_id}
+        runId={run.run_id}
+        sessionId={run.cli_session_id}
+        running={run.outcome === 'running'}
+      />
+
+      <Refused refusals={detail.refusals} total={detail.refusals_total} />
 
       <KnowledgeChanged runId={run.run_id} />
 

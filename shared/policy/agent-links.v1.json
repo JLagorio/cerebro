@@ -1,0 +1,26 @@
+{
+  "format": 1,
+  "rule": "Open with hands a page to an agent app through a link built here and nowhere else: one of these bases, then '?', the target's param, '=', and the prompt percent-encoded as encodeURIComponent encodes it. A link longer than max_url_bytes is never opened; the prompt is copied instead.",
+  "max_url_bytes": 8192,
+  "targets": [
+    { "id": "claude-code-web", "label": "Claude Code on the web", "base": "https://claude.ai/code", "param": "q" },
+    { "id": "codex", "label": "Codex", "base": "codex://new", "param": "prompt" },
+    { "id": "cursor", "label": "Cursor", "base": "cursor://anysphere.cursor-deeplink/prompt", "param": "text" },
+    { "id": "zed", "label": "Zed", "base": "zed://agent", "param": "prompt" }
+  ],
+  "cases": [
+    { "target": "claude-code-web", "prompt": "Summarize this page", "url": "https://claude.ai/code?q=Summarize%20this%20page" },
+    { "target": "codex", "prompt": "Summarize this page", "url": "codex://new?prompt=Summarize%20this%20page" },
+    { "target": "cursor", "prompt": "Summarize this page", "url": "cursor://anysphere.cursor-deeplink/prompt?text=Summarize%20this%20page" },
+    { "target": "zed", "prompt": "Summarize this page", "url": "zed://agent?prompt=Summarize%20this%20page" },
+
+    { "target": "codex", "prompt": "a&b=c#d+e%f?g/h", "url": "codex://new?prompt=a%26b%3Dc%23d%2Be%25f%3Fg%2Fh" },
+    { "target": "zed", "prompt": "line one\nline two", "url": "zed://agent?prompt=line%20one%0Aline%20two" },
+    { "target": "cursor", "prompt": "café — 🚀", "url": "cursor://anysphere.cursor-deeplink/prompt?text=caf%C3%A9%20%E2%80%94%20%F0%9F%9A%80" },
+    { "target": "claude-code-web", "prompt": "-_.!~*'()", "url": "https://claude.ai/code?q=-_.!~*'()" },
+    { "target": "claude-code-web", "prompt": "", "url": "https://claude.ai/code?q=" },
+
+    { "target": "claude-code-web", "repeat": "a", "times": 8167, "bytes": 8192 },
+    { "target": "claude-code-web", "repeat": "a", "times": 8168, "too_long": true }
+  ]
+}

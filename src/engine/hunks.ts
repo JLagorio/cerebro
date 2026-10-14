@@ -39,33 +39,62 @@ function tokenize(text: string): string[] {
 }
 
 /**
- * Longest common subsequence over tokens, as a table of back-pointers.
+ * Longest common subsequence of `a` and `b` under `same`, as a table whose
+ * cell [i][j] is the LCS length of `a.slice(i)` and `b.slice(j)`.
  *
- * O(n·m), which is fine at the scale this runs on: the input is a selection a
- * person made, not a file. A selection large enough for this to matter is one
- * that should have gone to the panel instead, which is what M17.16's
- * escalation rule is for.
+ * O(n·m) in time and space. Two inputs run through it: the words of a
+ * selection a person asked to rewrite (M17.16), and the blocks of one level of
+ * an open page against an outside write (M55.6, `engine/blockMerge.ts`). A
+ * page level is hundreds of blocks at most, so the table stays small.
  */
-function lcs(a: string[], b: string[]): number[][] {
+export function lcsTable<T>(
+  a: readonly T[],
+  b: readonly T[],
+  same: (x: T, y: T) => boolean,
+): number[][] {
   const table: number[][] = Array.from({ length: a.length + 1 }, () =>
     new Array<number>(b.length + 1).fill(0),
   );
   for (let i = a.length - 1; i >= 0; i--) {
     for (let j = b.length - 1; j >= 0; j--) {
-      table[i][j] =
-        a[i].trim() === b[j].trim()
-          ? table[i + 1][j + 1] + 1
-          : Math.max(table[i + 1][j], table[i][j + 1]);
+      table[i][j] = same(a[i], b[j])
+        ? table[i + 1][j + 1] + 1
+        : Math.max(table[i + 1][j], table[i][j + 1]);
     }
   }
   return table;
 }
 
+/** The index pairs `[i, j]` an LCS of `a` and `b` under `same` matches, in
+ * ascending order of both. */
+export function lcsPairs<T>(
+  a: readonly T[],
+  b: readonly T[],
+  same: (x: T, y: T) => boolean,
+): [number, number][] {
+  const table = lcsTable(a, b, same);
+  const pairs: [number, number][] = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    if (same(a[i], b[j])) {
+      pairs.push([i, j]);
+      i++;
+      j++;
+    } else if (table[i + 1][j] >= table[i][j + 1]) i++;
+    else j++;
+  }
+  return pairs;
+}
+
+/** Tokens are equal when they differ only in their whitespace. */
+const sameToken = (x: string, y: string): boolean => x.trim() === y.trim();
+
 /** Diff two versions of a passage into shared runs and decidable hunks. */
 export function rewriteHunks(before: string, after: string): Rewrite {
   const a = tokenize(before);
   const b = tokenize(after);
-  const table = lcs(a, b);
+  const table = lcsTable(a, b, sameToken);
   const parts: (string | Hunk)[] = [];
   const hunks: Hunk[] = [];
   let i = 0;

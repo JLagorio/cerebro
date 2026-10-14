@@ -46,9 +46,9 @@ export function ProposalCard({ proposal }: { proposal: OrganizeProposal }) {
    * The capture is open in the editor beside this card (InboxPage), and the H1
    * is in the body that editor saves. So the open pages' pending saves land
    * first, and the writes are announced once they have landed, the way the
-   * agent's are (`openPages.ts`). Announced after, never wrapped: a catch-up
-   * can be dropped for one already queued (`coalesced`), so it is only ever
-   * the store's rescan, never the write itself.
+   * agent's are (`openPages.ts`). Announced after, never wrapped: the
+   * catch-up joins the store's queued rescan, so it is only ever that rescan,
+   * never the write itself.
    */
   const write = async (): Promise<boolean> => {
     // A save still on its debounce would otherwise land after the H1 below
@@ -67,12 +67,11 @@ export function ProposalCard({ proposal }: { proposal: OrganizeProposal }) {
     if (renamed && !(await setTitle(proposal.path, title))) return false;
     if (patched || renamed) {
       // A rename changed the body, so the page showing the capture hears it
-      // by path, reloading if clean and asking if not: its modifiedAt cannot
-      // carry a write in the same second as its own last save. Frontmatter
-      // alone names no page, as the agent's update_frontmatter names none (a
-      // page's save keeps it from disk), but still catches the vault up: a
-      // save the flush landed started a scan before the write, and that scan
-      // would land over the entry patchFrontmatter just wrote.
+      // by path and takes the new H1 in place (M55.6). Frontmatter alone
+      // names no page, as the agent's update_frontmatter names none (a page's
+      // save keeps it from disk), but still catches the vault up: an
+      // optimistic `type` patch lands in properties and leaves `entry.type`
+      // stale until a scan reads it.
       void announceExternalWrites(renamed ? [proposal.path] : [], rescan);
     }
     return true;

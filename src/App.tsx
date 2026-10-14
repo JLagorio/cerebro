@@ -23,6 +23,8 @@ import {
 import { Sidebar } from '@/app/Sidebar';
 import { StatusBar } from '@/app/StatusBar';
 import { QuickOpen } from '@/app/QuickOpen';
+import { useQuitHost, useQuitting } from '@/app/quit';
+import { QuitScreen } from '@/app/QuitScreen';
 import { ToastHost } from '@/app/ToastHost';
 import { DetailPanel } from '@/detail/DetailPanel';
 import { LayoutEditorDialog } from '@/detail/LayoutEditorDialog';
@@ -207,6 +209,10 @@ function App() {
   // for a second before the shell arrives is the flash the theme work exists
   // to remove. index.html covers the first paint; this owns every one after.
   useTheme();
+  // M55.10: ⌘Q, the close button and ⌘W save first. Above every early
+  // return too, so the vault chooser answers a quit as well.
+  useQuitHost();
+  const quitting = useQuitting();
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const openVault = useVaultStore((s) => s.openVault);
   const [booted, setBooted] = useState(false);
@@ -378,6 +384,10 @@ function App() {
       cancelled = true;
     };
   }, [openVault]);
+
+  // Leaving for the quit screen unmounts the shell, so every open page runs
+  // its own leave path, exactly as navigating away does.
+  if (quitting) return <QuitScreen />;
 
   if (!vaultPath) {
     return booted ? <VaultChooser /> : null;

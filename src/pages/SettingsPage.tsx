@@ -1,12 +1,16 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useLedgerReview, useQuarantine } from '@/stores/ledgerStore';
 import { Button } from '@/components/ui/Button';
+import { ClaudeCodeRow } from '@/pages/ClaudeCodeRow';
 import { CliWorkspaceRow } from '@/pages/CliWorkspaceRow';
 import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Switch } from '@/components/ui/Switch';
 import { ConnectorSettings } from '@/app/ConnectorSettings';
-import { jobQueue } from '@/engine/jobs';
+import { listAgents } from '@/engine/agents';
+import { isPaused, jobQueue } from '@/engine/jobs';
+import type { Entry } from '@/engine/types';
 import { GitSettings } from '@/git/GitSettings';
 import { listConcepts } from '@/engine/okf';
 import { pickVault } from '@/lib/ipc';
@@ -43,6 +47,77 @@ function SettingRow({
         <div className="mt-0.5 text-xs leading-[16px] text-n-500">{hint}</div>
       </div>
       <Switch ariaLabel={label} checked={checked} onChange={onChange} disabled={disabled} />
+    </div>
+  );
+}
+
+/** The Select's value for "no agent": the plain assistant answers. */
+const NO_AGENT = '';
+
+/**
+ * Who answers in this vault's assistant panel (M56.6). The binding is the
+ * app's config, by vault path (app_config.rs), so the vault cannot choose
+ * it; the choices are this vault's Agent records, by title.
+ */
+function PanelAgentRow({ vaultPath, entries }: { vaultPath: string; entries: Entry[] }) {
+  const bound = useUiStore((s) => s.panelAgents[vaultPath] ?? null);
+  const loadPanelAgent = useUiStore((s) => s.loadPanelAgent);
+  const setPanelAgent = useUiStore((s) => s.setPanelAgent);
+  useEffect(() => {
+    void loadPanelAgent(vaultPath);
+  }, [loadPanelAgent, vaultPath]);
+  const agents = useMemo(() => {
+    const byPath = new Map(entries.map((e) => [e.path, e]));
+    return listAgents(entries).map((agent) => {
+      const entry = byPath.get(agent.path);
+      return { agent, paused: entry !== undefined && isPaused(entry) };
+    });
+  }, [entries]);
+  const dangling = bound !== null && !agents.some(({ agent }) => agent.handle === bound);
+  const options = [
+    { value: NO_AGENT, label: 'Claude Code (no agent)' },
+    ...agents.map(({ agent, paused }) => ({
+      value: agent.handle,
+      label: paused ? `${agent.title} (paused)` : agent.title,
+    })),
+    ...(dangling && bound !== null ? [{ value: bound, label: `@${bound} (not found)` }] : []),
+  ];
+  return (
+    <div className="py-2">
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium text-n-800">Panel assistant</div>
+          <div className="mt-0.5 text-xs leading-[16px] text-n-500">
+            Who answers in the assistant panel. An agent answers with its own instructions,
+            preferences and limits, and its writes are attributed to it. A turn that names someone
+            with @ still goes to them.
+          </div>
+        </div>
+        <Select
+          ariaLabel="Panel assistant"
+          testId="panel-agent-select"
+          size="sm"
+          options={options}
+          value={bound ?? NO_AGENT}
+          onChange={(e) =>
+            void setPanelAgent(vaultPath, e.target.value === NO_AGENT ? null : e.target.value)
+          }
+          className="w-[180px] flex-none"
+        />
+      </div>
+      {dangling && (
+        <div
+          data-testid="panel-agent-dangling"
+          className="mt-1 flex items-center gap-2 text-xs leading-[16px] text-warn-600"
+        >
+          <span className="min-w-0 flex-1">
+            @{bound} — no agent answers to this name, so the assistant answers
+          </span>
+          <Button variant="secondary" size="sm" onClick={() => void setPanelAgent(vaultPath, null)}>
+            Clear
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -189,6 +264,8 @@ export function SettingsPage() {
             and writes there directly, and it reaches everything else through cerebro's own tools.
             Shell access is the one thing a folder boundary cannot express.
           </p>
+          <ClaudeCodeRow />
+          {vaultPath !== null && <PanelAgentRow vaultPath={vaultPath} entries={entries} />}
           <SettingRow
             label="Shell access"
             hint="Let the assistant run commands and edit files directly inside the vault folder. Off — cerebro's tools only."

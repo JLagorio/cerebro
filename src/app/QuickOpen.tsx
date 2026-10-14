@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useOpenPath } from '@/app/useOpenPath';
 import { Dialog } from '@/components/ui/Dialog';
-import { Icon } from '@/components/ui/Icon';
+import { PageIconGlyph } from '@/components/PageIcon';
 import { Input } from '@/components/ui/Input';
 import { libraryIcon, libraryKind, libraryLabel } from '@/engine/library';
+import { pageIconOf, type PageIcon } from '@/engine/pageChrome';
 import { listTypes, typeStyle } from '@/engine/typeCatalog';
 import { askAssistantLabel } from '@/lib/prompts';
 import { quickOpenScore } from '@/lib/quickOpenScore';
@@ -24,6 +25,9 @@ interface Target {
   label: string;
   icon: string;
   color: string | null;
+  /** A page's own icon (M55.11), drawn in place of `icon` when set; `icon`
+   *  and `color` are then only its fallback. */
+  pageIcon?: PageIcon | null;
   /**
    * The record's own identifier, rendered as a mono chip. Only records have
    * one — it used to double as "a count" and "a folder name", which put three
@@ -81,6 +85,7 @@ export function QuickOpen() {
         label: e.title,
         icon: diagram ? 'waypoints' : kind === null ? style.icon : libraryIcon(kind),
         color: kind === null ? style.color : 'var(--synapse-500)',
+        pageIcon: diagram ? null : pageIconOf(e),
         hint: key,
         meta: '',
         kindLabel: diagram ? 'Diagram' : kind === null ? (e.type ?? 'Note') : libraryLabel(kind),
@@ -315,7 +320,11 @@ export function QuickOpen() {
               className="inline-flex flex-none"
               style={{ color: r.target.color ?? 'var(--n-500)' }}
             >
-              <Icon name={r.target.icon} size={14} />
+              <PageIconGlyph
+                icon={r.target.pageIcon ?? null}
+                fallback={{ name: r.target.icon }}
+                size={14}
+              />
             </span>
             <span className="min-w-0 flex-1 truncate text-sm text-n-900">{r.target.label}</span>
             {/* The record's key: a mono chip, because it is an identifier you

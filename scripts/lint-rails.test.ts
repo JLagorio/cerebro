@@ -121,6 +121,44 @@ describe('only render.ts and *.mermaid.test.ts load mermaid', () => {
   });
 });
 
+describe("only the M70.1 spike loads '@blocknote/core/comments'", () => {
+  it('fails a production file that imports it, and names the fix', async () => {
+    const messages = await railMessages(
+      'src/editor/Probe.tsx',
+      "import { CommentsExtension } from '@blocknote/core/comments';\nexport const c = CommentsExtension;\n",
+    );
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toContain('CommentHighlights');
+  });
+
+  it('fails a dynamic import and a re-export too', async () => {
+    expect(
+      await railMessages(
+        'src/editor/Probe.tsx',
+        "export const c = () => import('@blocknote/core/comments');",
+      ),
+    ).toHaveLength(1);
+    expect(
+      await railMessages('src/editor/probe.ts', "export * from '@blocknote/core/comments';"),
+    ).toHaveLength(1);
+  });
+
+  it('passes the spike test, and leaves the rest of @blocknote/core alone', async () => {
+    expect(
+      await railMessages(
+        'src/editor/commentSpike.test.ts',
+        "import { CommentsExtension } from '@blocknote/core/comments';\nexport const c = CommentsExtension;\n",
+      ),
+    ).toEqual([]);
+    expect(
+      await railMessages(
+        'src/editor/Probe.tsx',
+        "import { createExtension } from '@blocknote/core';\nimport '@blocknote/core/extensions';\nexport const c = createExtension;\n",
+      ),
+    ).toEqual([]);
+  });
+});
+
 describe('only mockIpc reads mockParse', () => {
   it('fails any other importer, and names the fix', async () => {
     const messages = await railMessages('src/pages/Probe.tsx', "import '@/lib/mockParse';");
@@ -140,11 +178,12 @@ describe('only mockIpc reads mockParse', () => {
  * in engine/ a Tauri import breaks the allowlist too, and draws both.
  */
 describe('each file class keeps every rail but its own exemption', () => {
-  type Rail = 'tauri' | 'mermaid' | 'mockParse' | 'engine';
+  type Rail = 'tauri' | 'mermaid' | 'mockParse' | 'comments' | 'engine';
   const MARK: Record<Rail, string> = {
     tauri: 'Tauri loads only in the IPC adapters',
     mermaid: 'load mermaid',
     mockParse: 'reads mockParse',
+    comments: "loads '@blocknote/core/comments'",
     engine: 'engine/ is the pure core',
   };
   const PROBES: Record<Rail, string[]> = {
@@ -159,6 +198,10 @@ describe('each file class keeps every rail but its own exemption', () => {
     mockParse: [
       "import { parseNote } from '@/lib/mockParse';\nexport const p = parseNote;",
       "export const p = () => import('./mockParse');",
+    ],
+    comments: [
+      "import { CommentMark } from '@blocknote/core/comments';\nexport const m = CommentMark;",
+      "export const c = () => import('@blocknote/core/comments');",
     ],
     engine: ["import { useUiStore } from '@/stores/uiStore';\nexport const u = useUiStore;"],
   };
@@ -175,6 +218,8 @@ describe('each file class keeps every rail but its own exemption', () => {
     ['src/lib/scanGolden.test.ts', ['mockParse', 'engine']],
     ['src/engine/probe.ts', []],
     ['src/engine/probe.test.ts', ['engine']],
+    ['src/editor/commentSpike.test.ts', ['comments', 'engine']],
+    ['src/editor/Probe.test.tsx', ['engine']],
   ];
   const cases = CLASSES.flatMap(([path, allowed]) =>
     (Object.keys(PROBES) as Rail[]).flatMap((rail) =>

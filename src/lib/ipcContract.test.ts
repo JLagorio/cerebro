@@ -63,7 +63,13 @@ const UNCALLED: Readonly<Record<string, string>> = {
 };
 
 /** What Rust emits, and exactly what the adapters listen to. */
-const EVENTS: readonly string[] = ['cerebro://agent', 'cerebro://ui-action', 'vault-changed'];
+const EVENTS: readonly string[] = [
+  'cerebro://agent',
+  'cerebro://quit-requested',
+  'cerebro://ui-action',
+  'comments-changed',
+  'vault-changed',
+];
 
 // --- Spelling ---------------------------------------------------------------
 
@@ -1233,6 +1239,20 @@ describe('the real tree', () => {
     expect(rust.commands.get('unmount_root')?.params.map((param) => param.key)).toEqual(['rootId']);
   });
 
+  it('follows a command registered two modules down (M55.9)', () => {
+    const { rust } = real();
+    for (const [name, keys] of [
+      ['reveal_in_finder', ['vault', 'path']],
+      ['open_in_default_app', ['vault', 'path']],
+      ['open_agent_link', ['target', 'prompt']],
+      ['write_clipboard', ['text']],
+    ] as const) {
+      const command = rust.commands.get(name);
+      expect(command?.file, name).toBe('shell/open.rs');
+      expect(command?.params.map((param) => param.key)).toEqual(keys);
+    }
+  });
+
   it('flags exactly the commands with no production caller, each with a reason', () => {
     const { rust, side } = real();
     const reached = pathed(side);
@@ -1241,7 +1261,7 @@ describe('the real tree', () => {
     for (const reason of Object.values(UNCALLED)) expect(reason.length).toBeGreaterThanOrEqual(20);
   });
 
-  it('Rust emits exactly the three EVENTS, and the adapters listen to exactly those', () => {
+  it('Rust emits exactly the EVENTS, and the adapters listen to exactly those', () => {
     const { rust, side } = real();
     expect([...rust.events].sort()).toEqual([...EVENTS].sort());
     expect([...new Set(side.heard.map((heard) => heard.event))].sort()).toEqual([...EVENTS].sort());

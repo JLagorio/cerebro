@@ -328,6 +328,19 @@ describe('the table answers the questions an interpreter asks', () => {
     expect(destiny(POLICY, 'stale_target_version')).toBe('ledger');
   });
 
+  it('declares no_longer_waiting an operational transport code, in no op row', () => {
+    // M57.1. A person's late click on a card whose request already ended
+    // fails at the answer command's door: it bounds no run and is recorded
+    // nowhere. The twin of `no_longer_waiting_is_an_operational_transport_code`
+    // in table.rs.
+    expect(destiny(POLICY, 'no_longer_waiting')).toBe('operational');
+    expect(POLICY.transport_rejections).toContain('no_longer_waiting');
+    for (const [name, rule] of Object.entries(POLICY.ops)) {
+      expect(rule.possible_rejections, `${name}`).not.toContain('no_longer_waiting');
+    }
+    expect(retryVerdict(POLICY, 'no_longer_waiting', 0)).toBe('not_retryable');
+  });
+
   it('binds the preventive ancestry walk to the ops that change a belief basis', () => {
     // The walk is Rust-only — it reads reducer state the mock has no
     // counterpart for — but WHERE it runs is policy, and both loaders hold

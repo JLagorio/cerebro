@@ -34,9 +34,10 @@ export type DiagramSelection = Extract<Selection, { kind: 'diagram' }>;
  * The file itself — read-once, debounce-save, flush-on-unmount, and the raw
  * `.mmd` byte contract that keeps mermaid's `---` config header intact — is
  * `useDiagramFile` since M29.46, shared verbatim with the whiteboard view.
- * The no-live-reload choice travels with it (DocPage's M17.4 reconcile
- * problem, consciously deferred): the watcher's rescan still updates the
- * entry (title, tree), only the open buffer stays put.
+ * The no-live-reload choice travels with it: markdown pages merge an outside
+ * write in place (M55.6), but a `.mmd` file is still read once per mount. The
+ * watcher's rescan still updates the entry (title, tree); only the open
+ * buffer stays put.
  *
  * App.tsx mounts this KEYED on the path, and that is still load-bearing: the
  * hook's pending-debounce flush runs as an unmount cleanup, and only a true

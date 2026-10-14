@@ -19,7 +19,13 @@ import * as mockBackend from '@/lib/mockIpc';
 import { resetMockFs } from '@/lib/mockIpc';
 import { sha256Hex } from '@/lib/sha256';
 import { useUiStore } from '@/stores/uiStore';
-import { getSchema, useEntry, useVaultStore } from '@/stores/vaultStore';
+import {
+  __resetRescans,
+  getSchema,
+  useEntry,
+  useVaultStore,
+  WRITE_WAIT_MS,
+} from '@/stores/vaultStore';
 
 function findEntry(path: string) {
   return useVaultStore.getState().entries.find((e) => e.path === path);
@@ -37,9 +43,27 @@ function mockFsDisk(): Map<string, string> {
   return (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
 }
 
+/** Every scan the store lands, through the trigger diff the way the runner
+ * feeds it — the events it read, as [kind, path]. */
+function observeStoreScans(): { events: Array<[string, string]>; stop: () => void } {
+  const events: Array<[string, string]> = [];
+  let baseline: ScanBaseline | null = null;
+  const stop = useVaultStore.subscribe((s, prev) => {
+    if (s.entriesVault === null) return;
+    if (s.entries === prev.entries && s.entriesVault === prev.entriesVault) return;
+    const scan = observeScan(baseline, s.entriesVault, s.entries);
+    baseline = scan.baseline;
+    events.push(...scan.events.map((e): [string, string] => [e.kind, e.path]));
+  });
+  return { events, stop };
+}
+
 beforeEach(() => {
   resetMockFs();
   vi.clearAllMocks();
+  // The rescan coalescer and the write fence are module state: a test that
+  // parked a scan or a write must not hold the next one behind it (M58.2).
+  __resetRescans();
   useVaultStore.setState({
     vaultPath: null,
     entries: [],
@@ -299,21 +323,6 @@ describe('vaultStore', () => {
     }
   });
 
-  /** Every scan the store lands, through the trigger diff the way the runner
-   * feeds it — the events it read, as [kind, path]. */
-  function observeStoreScans(): { events: Array<[string, string]>; stop: () => void } {
-    const events: Array<[string, string]> = [];
-    let baseline: ScanBaseline | null = null;
-    const stop = useVaultStore.subscribe((s, prev) => {
-      if (s.entriesVault === null) return;
-      if (s.entries === prev.entries && s.entriesVault === prev.entriesVault) return;
-      const scan = observeScan(baseline, s.entriesVault, s.entries);
-      baseline = scan.baseline;
-      events.push(...scan.events.map((e): [string, string] => [e.kind, e.path]));
-    });
-    return { events, stop };
-  }
-
   // AUTOMATION-2b. rescan() scans `vaultPath`, which an open moves at once,
   // so a rescan inside the open's window lands the new vault's entries first.
   // The open's own scan, taken before it, then landed over them: the store
@@ -351,14 +360,14 @@ describe('vaultStore', () => {
     }
   });
 
-  it('an older rescan never lands over a newer one', async () => {
+  it('a rescan asked for while another runs waits for it, then reads the disk again', async () => {
     const PATH = 'projects/guided-onboarding-ga/items/fld-1.md';
     vi.mocked(ipc.scanVault).mockImplementation(mockBackend.scanVault);
     const scans = observeStoreScans();
     await useVaultStore.getState().openVault('/demo-vault');
-    // Two rescans in flight — a job's finish() and a watcher event, say. The
-    // first has read the disk and is parked when the disk changes and the
-    // second runs.
+    vi.mocked(ipc.scanVault).mockClear();
+    // A job's finish() and a watcher event, say. The first rescan has read
+    // the disk and is parked when the disk changes and the second is asked.
     let parked = false;
     let releaseScan: () => void = () => undefined;
     vi.mocked(ipc.scanVault).mockImplementationOnce(async (vault) => {
@@ -368,14 +377,16 @@ describe('vaultStore', () => {
       return before;
     });
     try {
-      const older = useVaultStore.getState().rescan();
+      const first = useVaultStore.getState().rescan();
       await vi.waitFor(() => expect(parked).toBe(true));
       await ipc.updateFrontmatter('/demo-vault', PATH, { probe: 'x' });
-      await useVaultStore.getState().rescan();
-      expect(findEntry(PATH)?.properties.probe).toBe('x');
+      const second = useVaultStore.getState().rescan();
+      // It joins the running one rather than racing it.
+      expect(second).toBe(first);
       releaseScan();
-      await older;
+      await second;
       expect(findEntry(PATH)?.properties.probe).toBe('x');
+      expect(vi.mocked(ipc.scanVault)).toHaveBeenCalledTimes(2);
       // One real edit, read once — never a second, backwards one.
       expect(scans.events).toEqual([['changed', PATH]]);
     } finally {
@@ -596,7 +607,8 @@ describe('vaultStore content hash (M55.2)', () => {
     enterTauri();
     try {
       vi.mocked(ipc.updateFrontmatter).mockImplementationOnce(async () => {
-        // A scan lands while the write is in flight: it read the disk itself.
+        // A scan lands while the write is in flight, as one that waited out
+        // WRITE_WAIT_MS does (M58.2): it read the disk itself.
         useVaultStore.setState({
           entries: useVaultStore
             .getState()
@@ -656,6 +668,318 @@ describe('vaultStore content hash (M55.2)', () => {
       expect(scans.events).toEqual([{ kind: 'changed', path: PATH, fields: ['status'] }]);
     } finally {
       scans.stop();
+    }
+  });
+});
+
+/**
+ * M58.2: one rescan at a time plus one trailing, and a write fence, so a scan
+ * read before an inline edit never lands over it — in Tauri too, where no
+ * reconcile scan follows the edit to put it back.
+ */
+describe('vaultStore rescans (M58.2)', () => {
+  const PATH = 'projects/guided-onboarding-ga/items/fld-1.md';
+  const REFRESH_FAILED = "Couldn't refresh vault";
+
+  /** Route the IPC the store calls to the mock backend, so it works with
+   *  inTauri() true. Returns the cleanup. */
+  function routeToMockBackend(): () => void {
+    vi.mocked(ipc.scanVault).mockImplementation(mockBackend.scanVault);
+    vi.mocked(ipc.listViews).mockImplementation(mockBackend.listViews);
+    vi.mocked(ipc.listCollections).mockImplementation(mockBackend.listCollections);
+    vi.mocked(ipc.listFolders).mockImplementation(mockBackend.listFolders);
+    vi.mocked(ipc.startWatcher).mockImplementation(mockBackend.startWatcher);
+    vi.mocked(ipc.updateFrontmatter).mockImplementation(mockBackend.updateFrontmatter);
+    vi.mocked(ipc.setNoteTitle).mockImplementation(mockBackend.setNoteTitle);
+    listenMock.mockResolvedValue(() => undefined);
+    return () => {
+      for (const fn of [
+        ipc.scanVault,
+        ipc.listViews,
+        ipc.listCollections,
+        ipc.listFolders,
+        ipc.startWatcher,
+        ipc.updateFrontmatter,
+        ipc.setNoteTitle,
+      ]) {
+        vi.mocked(fn).mockReset();
+      }
+      listenMock.mockReset();
+    };
+  }
+
+  /** The next scanVault reads the disk now, then parks until released. */
+  function parkNextScan(): { parked: () => boolean; release: () => void } {
+    let parked = false;
+    let release: () => void = () => undefined;
+    vi.mocked(ipc.scanVault).mockImplementationOnce(async (vault) => {
+      const before = await mockBackend.scanVault(vault);
+      parked = true;
+      await new Promise<void>((resolve) => (release = resolve));
+      return before;
+    });
+    return { parked: () => parked, release: () => release() };
+  }
+
+  /** The next updateFrontmatter waits to be released, then writes. */
+  function parkNextPatch(): { started: () => boolean; release: () => void } {
+    let started = false;
+    let release: () => void = () => undefined;
+    vi.mocked(ipc.updateFrontmatter).mockImplementationOnce(async (vault, path, patch) => {
+      started = true;
+      await new Promise<void>((resolve) => (release = resolve));
+      return mockBackend.updateFrontmatter(vault, path, patch);
+    });
+    return { started: () => started, release: () => release() };
+  }
+
+  /** Every value PATH's `field` takes in the store from now on. */
+  function watchField(read: (s: ReturnType<typeof useVaultStore.getState>) => unknown): {
+    seen: unknown[];
+    stop: () => void;
+  } {
+    const seen: unknown[] = [];
+    const stop = useVaultStore.subscribe((s, prev) => {
+      if (s.entries !== prev.entries) seen.push(read(s));
+    });
+    return { seen, stop };
+  }
+
+  const toasts = () => useUiStore.getState().toasts.map((t) => t.message);
+
+  it('five rescans asked for while one runs make exactly two scans, and all resolve after the second lands', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    vi.mocked(ipc.scanVault).mockClear();
+    const park = parkNextScan();
+    const first = useVaultStore.getState().rescan();
+    await vi.waitFor(() => expect(park.parked()).toBe(true));
+    await ipc.updateFrontmatter('/demo-vault', PATH, { probe: 'x' });
+    const resolvedWith: unknown[] = [];
+    const five = Array.from({ length: 5 }, () =>
+      useVaultStore
+        .getState()
+        .rescan()
+        .then(() => resolvedWith.push(findEntry(PATH)?.properties.probe)),
+    );
+    park.release();
+    await Promise.all([first, ...five]);
+    expect(vi.mocked(ipc.scanVault)).toHaveBeenCalledTimes(2);
+    // Each one saw the second scan, which read the disk after it was asked.
+    expect(resolvedWith).toEqual(['x', 'x', 'x', 'x', 'x']);
+  });
+
+  it('a patch racing a parked scan that read before it never leaves the store (Tauri)', async () => {
+    const scans = observeStoreScans();
+    await useVaultStore.getState().openVault('/demo-vault');
+    const cleanup = routeToMockBackend();
+    enterTauri();
+    try {
+      vi.mocked(ipc.scanVault).mockClear();
+      const park = parkNextScan();
+      const scan = useVaultStore.getState().rescan();
+      await vi.waitFor(() => expect(park.parked()).toBe(true));
+
+      expect(await useVaultStore.getState().patchFrontmatter(PATH, { status: 'done' })).toBe(true);
+      const status = watchField(() => findEntry(PATH)?.properties.status);
+      park.release();
+      await scan;
+      status.stop();
+
+      // The parked scan was discarded and read again; the trailing one landed.
+      expect(vi.mocked(ipc.scanVault)).toHaveBeenCalledTimes(2);
+      expect(status.seen.length).toBeGreaterThan(0);
+      expect(status.seen.every((v) => v === 'done')).toBe(true);
+      expect(findEntry(PATH)?.properties.status).toBe('done');
+      expect(findEntry(PATH)?.hash).toBe(sha256Hex(mockFsDisk().get(PATH) ?? ''));
+      // One edit, one event: never a reverse one.
+      expect(scans.events).toEqual([['changed', PATH]]);
+    } finally {
+      exitTauri();
+      scans.stop();
+      cleanup();
+    }
+  });
+
+  it('setTitle racing a parked scan keeps the new title throughout (Tauri)', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    const cleanup = routeToMockBackend();
+    enterTauri();
+    try {
+      const park = parkNextScan();
+      const scan = useVaultStore.getState().rescan();
+      await vi.waitFor(() => expect(park.parked()).toBe(true));
+
+      const title = watchField(() => findEntry(PATH)?.title);
+      const renamed = useVaultStore.getState().setTitle(PATH, 'Renamed mid-scan');
+      await vi.waitFor(() => expect(vi.mocked(ipc.setNoteTitle)).toHaveBeenCalled());
+      park.release();
+      expect(await renamed).toBe(true);
+      await scan;
+      title.stop();
+
+      expect(title.seen.every((v) => v === 'Renamed mid-scan')).toBe(true);
+      expect(findEntry(PATH)?.title).toBe('Renamed mid-scan');
+    } finally {
+      exitTauri();
+      cleanup();
+    }
+  });
+
+  it('a rescan asked for while a write is pending waits for it, then lands the edit', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    const write = parkNextPatch();
+    const patched = useVaultStore.getState().patchFrontmatter(PATH, { status: 'done' });
+    await vi.waitFor(() => expect(write.started()).toBe(true));
+    vi.mocked(ipc.scanVault).mockClear();
+
+    const scan = useVaultStore.getState().rescan();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(vi.mocked(ipc.scanVault)).not.toHaveBeenCalled();
+
+    write.release();
+    expect(await patched).toBe(true);
+    await scan;
+    expect(vi.mocked(ipc.scanVault)).toHaveBeenCalled();
+    expect(findEntry(PATH)?.properties.status).toBe('done');
+  });
+
+  it('a write that never settles holds a rescan WRITE_WAIT_MS at most, and its late settle scans again', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    const cleanup = routeToMockBackend();
+    enterTauri();
+    try {
+      const write = parkNextPatch();
+      const patched = useVaultStore.getState().patchFrontmatter(PATH, { status: 'done' });
+      await vi.waitFor(() => expect(write.started()).toBe(true));
+      vi.mocked(ipc.scanVault).mockClear();
+
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const scan = useVaultStore.getState().rescan();
+      await vi.advanceTimersByTimeAsync(WRITE_WAIT_MS - 1);
+      expect(vi.mocked(ipc.scanVault)).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await scan;
+      vi.useRealTimers();
+      // The store shows disk truth: the write has not landed.
+      expect(vi.mocked(ipc.scanVault)).toHaveBeenCalledTimes(1);
+      expect(findEntry(PATH)?.properties.status).toBe('progress');
+
+      write.release();
+      expect(await patched).toBe(true);
+      // The scan that landed past it is owed one more, which reads the edit.
+      await vi.waitFor(() => expect(findEntry(PATH)?.properties.status).toBe('done'));
+      expect(vi.mocked(ipc.scanVault)).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+      exitTauri();
+      cleanup();
+    }
+  });
+
+  it('a browser patch arms no WRITE_WAIT_MS timer: its fence ends before its own rescan', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    const timers = vi.spyOn(globalThis, 'setTimeout');
+    try {
+      expect(await useVaultStore.getState().patchFrontmatter(PATH, { status: 'done' })).toBe(true);
+      expect(timers.mock.calls.some(([, ms]) => ms === WRITE_WAIT_MS)).toBe(false);
+      expect(findEntry(PATH)?.properties.status).toBe('done');
+    } finally {
+      timers.mockRestore();
+    }
+  });
+
+  it('two failed passes in one cycle toast once, and keep the last good snapshot', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    const good = useVaultStore.getState().entries;
+    useUiStore.setState({ toasts: [] });
+    let release: () => void = () => undefined;
+    let parked = false;
+    vi.mocked(ipc.scanVault)
+      .mockImplementationOnce(async () => {
+        parked = true;
+        await new Promise<void>((resolve) => (release = resolve));
+        throw new Error('scan failed');
+      })
+      .mockRejectedValueOnce(new Error('scan failed again'));
+    const first = useVaultStore.getState().rescan();
+    await vi.waitFor(() => expect(parked).toBe(true));
+    const trailing = useVaultStore.getState().rescan();
+    release();
+    await expect(first).resolves.toBeUndefined();
+    await expect(trailing).resolves.toBeUndefined();
+    expect(vi.mocked(ipc.scanVault)).toHaveBeenCalledTimes(3);
+    expect(toasts()).toEqual([REFRESH_FAILED]);
+    expect(useVaultStore.getState().entries).toBe(good);
+  });
+
+  it('a failed pass followed by a good trailing pass toasts nothing', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    const before = useVaultStore.getState().entries;
+    useUiStore.setState({ toasts: [] });
+    let release: () => void = () => undefined;
+    let parked = false;
+    vi.mocked(ipc.scanVault).mockImplementationOnce(async () => {
+      parked = true;
+      await new Promise<void>((resolve) => (release = resolve));
+      throw new Error('scan failed');
+    });
+    const first = useVaultStore.getState().rescan();
+    await vi.waitFor(() => expect(parked).toBe(true));
+    void useVaultStore.getState().rescan();
+    release();
+    await first;
+    expect(toasts()).toEqual([]);
+    expect(useVaultStore.getState().entries).not.toBe(before);
+  });
+
+  it('rescans while the window is hidden', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    const before = useVaultStore.getState().entries;
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+    try {
+      await useVaultStore.getState().rescan();
+      expect(useVaultStore.getState().entries).not.toBe(before);
+      expect(useVaultStore.getState().status).toBe('ready');
+    } finally {
+      // Back to jsdom's own getters on the prototype.
+      delete (document as unknown as Record<string, unknown>).visibilityState;
+      delete (document as unknown as Record<string, unknown>).hidden;
+    }
+  });
+
+  it('a reopen racing an inline edit lands no stale snapshot, and hands off to a trailing scan', async () => {
+    const scans = observeStoreScans();
+    await useVaultStore.getState().openVault('/demo-vault');
+    const cleanup = routeToMockBackend();
+    enterTauri();
+    try {
+      const write = parkNextPatch();
+      const patched = useVaultStore.getState().patchFrontmatter(PATH, { status: 'done' });
+      await vi.waitFor(() => expect(write.started()).toBe(true));
+      const status = watchField(() => findEntry(PATH)?.properties.status);
+
+      // RecordingBanner's Reopen vault, while the edit is still writing.
+      const reopened = useVaultStore.getState().openVault('/demo-vault');
+      await vi.waitFor(() => expect(vi.mocked(ipc.startWatcher)).toHaveBeenCalled());
+      await new Promise((r) => setTimeout(r, 0));
+      // Its read predates the write, so it lands nothing yet.
+      expect(useVaultStore.getState().status).toBe('scanning');
+      expect(findEntry(PATH)?.properties.status).toBe('done');
+
+      write.release();
+      expect(await patched).toBe(true);
+      await reopened;
+      status.stop();
+
+      expect(useVaultStore.getState().status).toBe('ready');
+      expect(findEntry(PATH)?.properties.status).toBe('done');
+      expect(status.seen.every((v) => v === 'done')).toBe(true);
+      expect(scans.events).toEqual([['changed', PATH]]);
+    } finally {
+      exitTauri();
+      scans.stop();
+      cleanup();
     }
   });
 });

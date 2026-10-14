@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
-import { runAgent, stopAllAgents } from '@/agent/agentIpc';
+import { onAgentEvent, readCliTranscript, runAgent, stopAllAgents } from '@/agent/agentIpc';
+import COMMENT_CASES from '../../src-tauri/fixtures/comment-cases.json';
 import NOTE_TARGETS from '../../src-tauri/fixtures/note-targets.json';
 import QUOTE_CASES from '../../src-tauri/fixtures/quote-cases.json';
+import APP_CONFIG_RS from '../../src-tauri/src/app_config.rs?raw';
 import CAUSE_RS from '../../src-tauri/src/runtime/cause.rs?raw';
+import { serializeComments, sidecarPathOf, type CommentOp } from '@/engine/comments';
 import { demoFleetRuns } from './demoOperational';
 import * as mock from './mockIpc';
 import { sha256Hex } from './sha256';
@@ -60,6 +63,18 @@ describe('mockIpc', () => {
     ) as string;
     expect(raw.indexOf('type:')).toBeLessThan(raw.indexOf('key:')); // key order preserved
     expect(raw).toContain('assignee:'); // unknown-to-the-patch key preserved
+  });
+
+  // M55.11 — parity with write.rs serialize_mapping: a patch that empties the
+  // mapping leaves only the body, never `---\n{}\n---\n`.
+  it('updateFrontmatter that removes the last key leaves only the body, as Rust does', async () => {
+    const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+    const path = 'inbox/checklist.md';
+    fs.set(path, '# Checklist\n');
+    await mock.updateFrontmatter('/demo-vault', path, { icon: '\u{1F680}' });
+    expect(fs.get(path)).toBe('---\nicon: \u{1F680}\n---\n# Checklist\n');
+    await mock.updateFrontmatter('/demo-vault', path, { icon: null });
+    expect(fs.get(path)).toBe('# Checklist\n');
   });
 
   it('createNote dedupes slugs with -2, -3 and returns the vault-relative path', async () => {
@@ -1433,7 +1448,14 @@ describe('the deferral gates (M28.1)', () => {
   it('an unknown run id is REFUSED, exactly as Rust refuses it', async () => {
     // Not null. A typo and a run that recorded nothing must not look the same.
     mock.__seedFleet([fleetRun()], {
-      r1: { run: fleetRun(), cost_components: null, assembly: null },
+      r1: {
+        run: fleetRun(),
+        cost_components: null,
+        assembly: null,
+        model_id: null,
+        refusals: [],
+        refusals_total: 0,
+      },
     });
     await expect(mock.fleetRunDetail('nope')).rejects.toThrow(/no run with id/);
     const detail = await mock.fleetRunDetail('r1');
@@ -1751,5 +1773,348 @@ describe('connector status (M54.11)', () => {
     expect(
       (window as unknown as { __cerebroSeedConnectorStatus: unknown }).__cerebroSeedConnectorStatus,
     ).toBe(mock.__seedConnectorStatus);
+  });
+});
+
+describe("a run's detail and transcript (M56.9)", () => {
+  it('details carry the model and what the run was refused', async () => {
+    const scout = await mock.fleetRunDetail('run-scout-1');
+    expect(scout.model_id).toBe('claude-opus-5');
+    expect(scout.refusals.map((r) => [r.surface, r.code])).toEqual([
+      ['create_note', 'write_outside_scope'],
+      ['agent.permission', 'capability_unavailable'],
+    ]);
+    expect(scout.refusals_total).toBe(2);
+    const legacy = await mock.fleetRunDetail('run-legacy-1');
+    expect(legacy.model_id).toBeNull();
+    expect(legacy.refusals).toEqual([]);
+    expect(legacy.refusals_total).toBe(0);
+  });
+
+  it("fleetRunTranscript returns run-scout-1's demo transcript", async () => {
+    const transcript = await mock.fleetRunTranscript('run-scout-1');
+    expect(transcript.runs_in_session).toBe(1);
+    expect(transcript.read.state).toBe('read');
+    if (transcript.read.state !== 'read') return;
+    expect(transcript.read.events[0]).toEqual({
+      kind: 'Init',
+      session_id: '00000000-0000-4000-8000-000000000001',
+    });
+  });
+
+  it('a run with no session reads not recorded; an unknown id is refused', async () => {
+    const legacy = await mock.fleetRunTranscript('run-legacy-1');
+    expect(legacy.read).toMatchObject({ state: 'unavailable', reason: 'not_recorded' });
+    await expect(mock.fleetRunTranscript('nope')).rejects.toThrow(/no run with id/);
+  });
+
+  it('throws when the fleet is unavailable', async () => {
+    mock.__seedFleet(null);
+    await expect(mock.fleetRunTranscript('run-scout-1')).rejects.toThrow(/runtime database/);
+  });
+
+  it('the seam replaces transcripts, and null puts the demo back', async () => {
+    const expired = {
+      runs_in_session: 1,
+      retention_days: 30,
+      read: { state: 'unavailable' as const, reason: 'expired', retention_days: 30 },
+    };
+    mock.__seedRunTranscripts({ 'run-scout-1': expired });
+    expect(await mock.fleetRunTranscript('run-scout-1')).toEqual(expired);
+    expect(
+      (window as unknown as { __cerebroSeedRunTranscripts: unknown }).__cerebroSeedRunTranscripts,
+    ).toBe(mock.__seedRunTranscripts);
+    mock.__seedRunTranscripts(null);
+    expect((await mock.fleetRunTranscript('run-scout-1')).read.state).toBe('read');
+  });
+});
+
+describe('Claude Code session files, in the browser (M56.3)', () => {
+  const SESSION = '00000000-0000-4000-8000-0000000000cd';
+
+  it('reads a seeded transcript back, an unseeded one as cleared, and forgets on null', async () => {
+    const read = {
+      state: 'read' as const,
+      events: [{ kind: 'UserPrompt' as const, text: 'hi' }],
+      lines: 1,
+      unclassified: [],
+    };
+    mock.__seedCliTranscript(SESSION, read);
+    expect(await readCliTranscript('/demo-vault', SESSION, null)).toEqual(read);
+    mock.__seedCliTranscript(SESSION, null);
+    expect(await readCliTranscript('/demo-vault', SESSION, null)).toEqual({
+      state: 'unavailable',
+      reason: 'cleared',
+      retention_days: 30,
+    });
+    expect(await readCliTranscript('/demo-vault', null, null)).toMatchObject({
+      reason: 'not_recorded',
+    });
+    expect(
+      (window as unknown as { __cerebroSeedCliTranscript: unknown }).__cerebroSeedCliTranscript,
+    ).toBe(mock.__seedCliTranscript);
+  });
+
+  it('records a mock run’s replay events under its session id, a turn at a time', async () => {
+    const turn = async (sessionId: string | null) => {
+      let done: () => void = () => {};
+      const finished = new Promise<void>((resolve) => (done = resolve));
+      const start = await runAgent('/demo-vault', {
+        message: 'What is at risk right now?',
+        sessionId,
+        shell: false,
+        connectors: false,
+        attended: true,
+      });
+      if ('deferred' in start) throw new Error('an attended run is never deferred');
+      const stop = onAgentEvent((event) => {
+        if (event.kind === 'Done') done();
+      }, start.run);
+      await finished;
+      stop();
+      return start.sessionId ?? null;
+    };
+    const minted = await turn(null);
+    expect(minted).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(await turn(minted)).toBe(minted);
+    const read = await readCliTranscript('/demo-vault', minted, null);
+    if (read.state !== 'read') throw new Error(`expected a read, got ${read.reason}`);
+    const kinds = read.events.map((e) => e.kind);
+    expect(kinds.filter((k) => k === 'UserPrompt')).toHaveLength(2);
+    // M56.5: the mock reports the model it answers as before its first tool.
+    expect(kinds.slice(0, 3)).toEqual(['UserPrompt', 'ModelChanged', 'ToolStart']);
+    expect(kinds.filter((k) => k === 'TurnEnded')).toHaveLength(2);
+    expect(read.events[0]).toEqual({ kind: 'UserPrompt', text: 'What is at risk right now?' });
+  });
+});
+
+describe('page comments in the browser (M70.2)', () => {
+  const DEC = 'records/decisions/dec-conflict-resolution-is-manual.md';
+  const fs = () => (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+
+  type Row = {
+    name: string;
+    before: unknown;
+    op: CommentOp;
+    ctx: { page: string };
+    after: unknown;
+  };
+
+  /** The human command a fixture op is. */
+  function run(page: string, op: CommentOp): Promise<unknown> {
+    switch (op.op) {
+      case 'start':
+        return mock.startCommentThread('/demo-vault', page, op.anchor ?? null, op.body);
+      case 'reply':
+        return mock.replyToCommentThread('/demo-vault', page, op.thread, op.body);
+      case 'set_resolved':
+        return mock.setCommentThreadResolved('/demo-vault', page, op.thread, op.resolved);
+      case 'delete_comment':
+        return mock.deleteComment('/demo-vault', page, op.thread, op.comment);
+      case 'delete_thread':
+        return mock.deleteCommentThread('/demo-vault', page, op.thread);
+    }
+  }
+
+  it("every refusal uses the fixture's words, and writes nothing", async () => {
+    const rows = (COMMENT_CASES.ops as unknown as Row[]).filter(
+      (row) =>
+        typeof row.after === 'object' &&
+        row.after !== null &&
+        'error' in row.after &&
+        // A person's resolve never sends a closing note.
+        !(row.op.op === 'set_resolved' && 'closing' in row.op),
+    );
+    expect(rows.length).toBeGreaterThan(10);
+    for (const row of rows) {
+      mock.resetMockFs();
+      const page = row.ctx.page;
+      if (!fs().has(page)) fs().set(page, '# Plan\n');
+      const sidecar = row.before === null ? undefined : JSON.stringify(row.before);
+      if (sidecar !== undefined) fs().set(sidecarPathOf(page), sidecar);
+      await expect(run(page, row.op), row.name).rejects.toThrow(
+        (row.after as { error: string }).error,
+      );
+      expect(fs().get(sidecarPathOf(page)), row.name).toBe(sidecar);
+    }
+  });
+
+  it("refuses a page that is no note, or no note that exists, in Rust's words", async () => {
+    await expect(
+      mock.startCommentThread('/demo-vault', 'records/nope.md', null, 'x'),
+    ).rejects.toThrow('no note at records/nope.md');
+    await expect(mock.listComments('/demo-vault', '.cerebro/a.md')).rejects.toThrow(
+      'not a note: .cerebro/a.md — dot-folders and dotfiles hold no notes',
+    );
+    await expect(mock.startCommentThread('/demo-vault', 'a.mmd', null, 'x')).rejects.toThrow(
+      'only .md files are notes',
+    );
+    expect([...fs().keys()].some((p) => p.startsWith('.comments/'))).toBe(false);
+  });
+
+  it("no op touches the page's bytes, and a re-read returns the same threads", async () => {
+    const before = fs().get(DEC);
+    const scanned = (await mock.scanVault('/demo-vault')).find((e) => e.path === DEC);
+    expect(await mock.listComments('/demo-vault', DEC)).toEqual({ format: 1, threads: [] });
+    const anchor = { quote: 'conflict', occurrence: 1, before: '', after: '' };
+    let file = await mock.startCommentThread('/demo-vault', DEC, anchor, 'Still true?');
+    const thread = file.threads[0].comments[0].id;
+    file = await mock.replyToCommentThread('/demo-vault', DEC, thread, 'Yes.');
+    const second = file.threads[0].comments[1].id;
+    for (const step of [
+      () => mock.setCommentThreadResolved('/demo-vault', DEC, thread, true),
+      () => mock.setCommentThreadResolved('/demo-vault', DEC, thread, false),
+      () => mock.deleteComment('/demo-vault', DEC, thread, second),
+      () => mock.startCommentThread('/demo-vault', DEC, null, 'The whole page.'),
+      () => mock.deleteCommentThread('/demo-vault', DEC, thread),
+    ]) {
+      file = await step();
+      expect(fs().get(DEC)).toBe(before);
+      expect(await mock.listComments('/demo-vault', DEC)).toEqual(file);
+    }
+    expect((await mock.scanVault('/demo-vault')).find((e) => e.path === DEC)).toEqual(scanned);
+    expect(fs().get(sidecarPathOf(DEC))).toBe(serializeComments(file));
+    expect(file.threads[0].comments.every((c) => c.author === 'human:owner')).toBe(true);
+  });
+
+  it('a concept page takes comments, and its bytes stay', async () => {
+    const concept = 'knowledge/systems/status-model.md';
+    const before = fs().get(concept);
+    await mock.startCommentThread('/demo-vault', concept, null, 'Still true?');
+    expect(fs().get(concept)).toBe(before);
+    expect(fs().has('.comments/knowledge/systems/status-model.md.json')).toBe(true);
+  });
+
+  it('an unreadable sidecar reads as its reason and is never overwritten', async () => {
+    const conflicted = '<<<<<<< HEAD\n{}\n=======\n{}\n>>>>>>> theirs\n';
+    fs().set(sidecarPathOf(DEC), conflicted);
+    await expect(mock.listComments('/demo-vault', DEC)).rejects.toThrow(
+      `Comments for ${DEC} can't be read: it has unresolved merge conflict markers.`,
+    );
+    await expect(mock.startCommentThread('/demo-vault', DEC, null, 'x')).rejects.toThrow(
+      `Comments for ${DEC} can't be read (it has unresolved merge conflict markers), so nothing was written.`,
+    );
+    expect(fs().get(sidecarPathOf(DEC))).toBe(conflicted);
+  });
+
+  it('a rename carries a page and a folder, and replaces an orphan at the target', async () => {
+    await mock.startCommentThread('/demo-vault', DEC, null, 'x');
+    const sidecar = fs().get(sidecarPathOf(DEC));
+    fs().set('.comments/records/moved.md.json', 'an orphan');
+    await mock.renameNote('/demo-vault', DEC, 'records/moved.md');
+    expect(fs().has(sidecarPathOf(DEC))).toBe(false);
+    expect(fs().get('.comments/records/moved.md.json')).toBe(sidecar);
+    await mock.renameNote('/demo-vault', 'records', 'archive');
+    expect(fs().get('.comments/archive/moved.md.json')).toBe(sidecar);
+    expect([...fs().keys()].some((p) => p.startsWith('.comments/records/'))).toBe(false);
+    // A refused rename moves nothing.
+    await expect(
+      mock.renameNote('/demo-vault', 'archive/moved.md', 'archive/moved.md'),
+    ).rejects.toThrow('target already exists');
+    expect(fs().get('.comments/archive/moved.md.json')).toBe(sidecar);
+  });
+
+  it('a delete removes the sidecar of a page and of every page in a folder', async () => {
+    await mock.startCommentThread('/demo-vault', DEC, null, 'x');
+    await mock.deleteNote('/demo-vault', DEC);
+    expect(fs().has(sidecarPathOf(DEC))).toBe(false);
+    const other = 'records/decisions/dec-offline-window-72h.md';
+    await mock.startCommentThread('/demo-vault', other, null, 'x');
+    await mock.deleteNote('/demo-vault', 'records/decisions');
+    expect([...fs().keys()].some((p) => p.startsWith('.comments/'))).toBe(false);
+  });
+
+  it('scanVault and listFolders never list .comments/', async () => {
+    await mock.startCommentThread('/demo-vault', DEC, null, 'x');
+    fs().set('.comments/records/decisions/looks-like-a-page.md', '# Not a page\n');
+    const entries = await mock.scanVault('/demo-vault');
+    expect(entries.some((e) => e.path.startsWith('.comments'))).toBe(false);
+    const folders = await mock.listFolders('/demo-vault');
+    expect(folders.some((f) => f.startsWith('.comments'))).toBe(false);
+  });
+});
+
+describe('quit in the browser (M55.10)', () => {
+  beforeEach(() => mock.__resetMockQuit());
+
+  const seams = () =>
+    window as unknown as {
+      __cerebroMockQuit: (deadlineMs?: number) => void;
+      __cerebroMockQuitLog: string[];
+    };
+
+  it('__cerebroMockQuit calls each registered handler with its deadline', async () => {
+    const heard: number[] = [];
+    const other: number[] = [];
+    await mock.listenQuitRequested((request) => heard.push(request.deadlineMs));
+    await mock.listenQuitRequested((request) => other.push(request.deadlineMs));
+    seams().__cerebroMockQuit(1234);
+    seams().__cerebroMockQuit();
+    expect(heard).toEqual([1234, 5000]);
+    expect(other).toEqual([1234, 5000]);
+  });
+
+  it('a handler that was unlistened hears nothing', async () => {
+    const heard: number[] = [];
+    const unlisten = await mock.listenQuitRequested((request) => heard.push(request.deadlineMs));
+    unlisten();
+    seams().__cerebroMockQuit(100);
+    expect(heard).toEqual([]);
+  });
+
+  it('logs each finish and cancel, in order', async () => {
+    await mock.cancelQuit();
+    await mock.finishQuit();
+    expect(seams().__cerebroMockQuitLog).toEqual(['cancelled', 'finished']);
+  });
+});
+
+// M56.6 — the panel's binding is app config in Rust (app_config.rs) and an
+// in-memory map here. The refusal is Rust's, word for word.
+describe('the panel agent binding', () => {
+  it('is kept per vault, and null or a blank unbinds it', async () => {
+    expect(await mock.getPanelAgent('/demo-vault')).toBeNull();
+    await mock.setPanelAgent('/demo-vault', 'release-scout');
+    await mock.setPanelAgent('/other', ' digest2 ');
+    expect(await mock.getPanelAgent('/demo-vault')).toBe('release-scout');
+    expect(await mock.getPanelAgent('/other')).toBe('digest2');
+    await mock.setPanelAgent('/demo-vault', null);
+    expect(await mock.getPanelAgent('/demo-vault')).toBeNull();
+    await mock.setPanelAgent('/other', '   ');
+    expect(await mock.getPanelAgent('/other')).toBeNull();
+    await mock.setPanelAgent('/demo-vault', 'scout');
+    mock.resetMockFs();
+    expect(await mock.getPanelAgent('/demo-vault')).toBeNull();
+  });
+
+  it('refuses what Rust refuses, in the same words, and keeps what it had', async () => {
+    // The sentence Rust formats, read from its source rather than retyped.
+    const rust = APP_CONFIG_RS.match(
+      /format!\("\\"\{shown\}\{cut\}\\"( is not an agent handle)"\)/,
+    );
+    expect(rust).not.toBeNull();
+    const words = rust?.[1] ?? '';
+    await mock.setPanelAgent('/demo-vault', 'scout');
+    const long = 'a'.repeat(65);
+    for (const bad of [
+      'Scout',
+      'release scout',
+      'release--scout',
+      '-scout',
+      'scout-',
+      'scout_2',
+      '@scout',
+      'scöut',
+      '../scout',
+      long,
+    ]) {
+      const shown = bad.length > 64 ? `${'a'.repeat(64)}…` : bad;
+      await expect(mock.setPanelAgent('/demo-vault', bad), bad).rejects.toThrow(
+        `"${shown}"${words}`,
+      );
+      expect(await mock.getPanelAgent('/demo-vault')).toBe('scout');
+    }
+    await mock.setPanelAgent('/demo-vault', 'a'.repeat(64));
+    expect(await mock.getPanelAgent('/demo-vault')).toBe('a'.repeat(64));
   });
 });

@@ -7,7 +7,16 @@
 //! machine except through the CLI the user already installed and signed into.
 
 mod connector_signals;
+pub mod failure;
+pub mod fold;
+pub mod interaction;
+pub(crate) mod kinds;
 pub mod meter;
+#[cfg(test)]
+mod recordings;
+pub mod run_options;
+mod tee;
+pub mod transcript;
 pub mod usage;
 
 use std::collections::HashMap;
@@ -19,6 +28,9 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
 use crate::spawn::StderrTail;
+
+pub(crate) use fold::content_blocks;
+use transcript::CliSession;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -33,13 +45,30 @@ pub struct AgentStatus {
     pub path: Option<String>,
 }
 
-/// Normalized stream events. The CLI's wire format is richer and version-
-/// dependent; the panel only ever sees this shape.
-#[derive(Debug, Serialize, Clone)]
+/// Normalized events. The CLI's wire format is richer and version-dependent;
+/// the panel only ever sees this shape, from the stream and the session file
+/// alike (M56.3, `fold`).
+#[derive(Debug, Serialize, Clone, PartialEq)]
 #[serde(tag = "kind")]
 pub enum AgentEvent {
     Init {
         session_id: String,
+    },
+    /// A prompt the person sent: read from the session file, where a
+    /// restored thread's user bubbles come from.
+    UserPrompt {
+        text: String,
+    },
+    /// The model answering this turn, as Claude Code reported it: named once
+    /// per turn and again when it changes, and never `<synthetic>`.
+    ModelChanged {
+        model: String,
+    },
+    /// One text block of an assistant message, whole. The live stream sends
+    /// the same words as deltas first; the reducer keeps one copy.
+    Text {
+        message_id: String,
+        text: String,
     },
     TextDelta {
         text: String,
@@ -47,18 +76,31 @@ pub enum AgentEvent {
     ThinkingDelta {
         text: String,
     },
+    /// A tool call, its input a preview: each long string cut (`fold`).
     ToolStart {
         tool_name: String,
         tool_id: String,
         input: Option<String>,
     },
-    // M9.5: the result travels with the completion. Action cards expand to
-    // show what a tool actually returned, and without a payload here there
-    // is nothing to expand to.
+    // M9.5: a preview of the result travels with the completion, so an
+    // action card has something to expand to; when the preview cut it, the
+    // whole rides a ToolPayload (M56.8).
     ToolDone {
         tool_id: String,
         output: Option<String>,
         is_error: bool,
+    },
+    /// The whole of a tool call's input or output, sent only when its
+    /// preview cut it (M56.8), right after the ToolStart or ToolDone it
+    /// belongs to. `text` stops at `fold::PAYLOAD_LIMIT_BYTES` on a character
+    /// boundary, `bytes` is the whole size, and `truncated` says whether the
+    /// limit cut it.
+    ToolPayload {
+        tool_id: String,
+        part: PayloadPart,
+        text: String,
+        bytes: u64,
+        truncated: bool,
     },
     Result {
         text: String,
@@ -66,8 +108,55 @@ pub enum AgentEvent {
     },
     Error {
         message: String,
+        /// A typed cause, when the CLI named one: the API error on a
+        /// `<synthetic>` reply, or the result's subtype.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        code: Option<String>,
+        /// What the failure was and how to fix it, when Claude Code's typed
+        /// fields said (M56.4, `failure`). Skipped when None, so an Error
+        /// without one crosses exactly as it did before.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        notice: Option<failure::FailureNotice>,
+    },
+    /// A pull request the session opened, from a `pr-link` record.
+    PrLink {
+        number: u64,
+        url: String,
+        repository: String,
+    },
+    /// The turn ended, once, with its stop reason when one was recorded.
+    TurnEnded {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        stop_reason: Option<String>,
+    },
+    /// The turn never ended: `stopped` by the person, or `cut_off` (a killed
+    /// run, or a file that stops mid-turn).
+    TurnInterrupted {
+        reason: String,
+    },
+    /// The turn is suspended on a call a PreToolUse hook deferred (M57.1):
+    /// Cerebro's gate, waiting for the person, or a hook outside Cerebro.
+    /// From the stream's result and the session file's marker alike; no
+    /// TurnEnded follows.
+    ToolDeferred {
+        tool_id: String,
+        tool_name: String,
+    },
+    /// A call waits for the person (M57.1): Cerebro's own gate deferred it
+    /// and this run's stream confirmed the deferral. Sent just before its
+    /// ToolDeferred, never from a session file.
+    Interaction {
+        interaction: interaction::InteractionCard,
     },
     Done,
+}
+
+/// Which half of a tool call a `ToolPayload` carries.
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PayloadPart {
+    Input,
+    Output,
 }
 
 /// What actually crosses the event channel: every event tagged with the run
@@ -83,13 +172,25 @@ struct TaggedEvent {
 }
 
 /// One run's request. Its `Debug` is written by hand, below, so the bearer
-/// never reaches a log; deriving it again would undo that.
-#[derive(Deserialize)]
+/// never reaches a log; deriving it again would undo that. `Clone` so a seat
+/// keeps the request an answer resumes (M57.1), with its bearer, endpoint and
+/// message cleared (`interaction::Seat::new`).
+#[derive(Deserialize, Clone)]
 pub struct AgentRequest {
     pub message: String,
     pub system_prompt: Option<String>,
     pub session_id: Option<String>,
+    /// The model to ask Claude Code for (M56.5): an alias or a full name,
+    /// from the conversation's pick or the Agent record's `model:`. Absent
+    /// or blank is unset, which passes no flag and leaves Claude Code's
+    /// default. `run_options::validate_request` refuses anything that is not
+    /// a model name before the run starts.
     pub model: Option<String>,
+    /// The effort to ask Claude Code for (M56.5), one of
+    /// `run-options.v1.json`'s levels. Absent or blank is unset, the same
+    /// way. Anything else is refused before the run starts, because the CLI
+    /// would only warn and run at its default.
+    pub effort: Option<String>,
     /// The Settings ceiling (M8.1): adds shell + the CLI's own file tools,
     /// except on a read-scoped run, where build_args withdraws it (M53.5): a
     /// shell reads past any folder list. Absent reads as false — a missing
@@ -215,6 +316,7 @@ impl std::fmt::Debug for AgentRequest {
         f.debug_struct("AgentRequest")
             .field("session_id", &self.session_id)
             .field("model", &self.model)
+            .field("effort", &self.effort)
             .field("shell", &self.shell)
             .field("connectors", &self.connectors)
             .field("connector_names", &self.connector_names)
@@ -234,11 +336,17 @@ impl std::fmt::Debug for AgentRequest {
     }
 }
 
-/// Where the CLI keeps ITS OWN state for a vault (M17.14).
+/// Where the CLI keeps ITS OWN state for a vault (M17.14, M56.11).
 ///
-/// Cerebro spawns Claude Code with cwd = the vault, and the CLI files its
-/// session transcripts — and its auto-memory — under a slug derived from that
-/// cwd, in the user's home directory. So a vault's contents accumulate
+/// Cerebro spawns Claude Code with cwd = the vault, and the CLI files what it
+/// keeps about each session under a key derived from that cwd, in its config
+/// home (`~/.claude` unless `CLAUDE_CONFIG_DIR` moves it; the one locator is
+/// `transcript::cli_project_dir`). CLI 2.1.250 keeps, per session, the
+/// transcript (`<id>.jsonl`) and other top-level `<id>.*` files, and a `<id>/`
+/// folder holding its subagents' transcripts, the output of the tools it ran,
+/// its workflows, remote agents and MCP tasks; beside them sits the auto-memory
+/// (`memory/`), and in the config home, copies of the files its own Edit and
+/// Write changed (`file-history/<id>/`). So a vault's contents accumulate
 /// verbatim OUTSIDE the vault: outside its git, outside its backups, and
 /// outside every guard in knowledge.rs.
 ///
@@ -253,115 +361,314 @@ impl std::fmt::Debug for AgentRequest {
 /// What is left is honesty: name the directory, count what is in it, and give
 /// the user a button. A leak you can see and empty is a different thing from
 /// one nobody mentions.
-fn slugify_path(path: &Path) -> String {
-    path.to_string_lossy()
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect()
-}
-
 #[derive(Debug, Serialize, Clone, PartialEq)]
 pub struct CliWorkspace {
     /// Absolute path, shown to the user verbatim. There is no version of this
     /// feature where the app knows and the user does not.
     pub path: String,
     pub exists: bool,
-    /// Session transcripts — what `--resume` needs, and what holds the
-    /// verbatim note content the run read.
+    /// Distinct sessions: each id with a top-level file or a session folder,
+    /// orphaned folders (no transcript) included. Their transcripts are what
+    /// `--resume` needs, and what holds the verbatim note content the run read.
     pub sessions: usize,
+    /// Every regular file those sessions keep: top-level `<id>.*` files, every
+    /// file under `<id>/` at any depth, and `file-history/<id>/` in the config
+    /// home.
+    pub session_files: usize,
+    /// The bytes of those session files.
     pub bytes: u64,
-    /// Auto-memory files. The directory is created on the first run and is
-    /// usually empty; a non-zero count here means the CLI has written durable
-    /// conclusions about this vault outside it.
+    /// Auto-memory files, at any depth under `memory/`. The directory is
+    /// created on the first run and is usually empty; a non-zero count here
+    /// means the CLI has written durable conclusions about this vault outside
+    /// it.
     pub memory_files: usize,
+    /// Folders or files the count could not read. Above zero, every count is a
+    /// floor (CV-05), never the whole.
+    pub unreadable: usize,
+    /// True when `CLAUDE_CODE_PROJECT_DIR_NAME` chose the folder, so every
+    /// project's sessions may share it. Counted, never cleared.
+    pub shared: bool,
 }
 
-fn home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+/// What a walk found: regular files, their bytes, and what it could not read.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct Tally {
+    files: usize,
+    bytes: u64,
+    unreadable: usize,
 }
 
-pub fn cli_workspace(vault: &Path) -> CliWorkspace {
-    let Some(dir) = home().map(|h| h.join(".claude/projects").join(slugify_path(vault))) else {
-        return CliWorkspace {
-            path: String::new(),
-            exists: false,
-            sessions: 0,
-            bytes: 0,
-            memory_files: 0,
+/// Count every regular file under `dir`, at any depth, with an explicit stack.
+/// A symlink is never followed, and every read_dir or metadata error adds one
+/// to `unreadable`.
+fn tally(dir: &Path, into: &mut Tally) {
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(_) => {
+                into.unreadable += 1;
+                continue;
+            }
         };
-    };
-    let mut sessions = 0usize;
-    let mut bytes = 0u64;
-    if let Ok(entries) = std::fs::read_dir(&dir) {
-        for entry in entries.flatten() {
-            let meta = match entry.metadata() {
-                Ok(m) => m,
-                Err(_) => continue,
+        for entry in entries {
+            let Ok(entry) = entry else {
+                into.unreadable += 1;
+                continue;
             };
-            if meta.is_file() && entry.path().extension().is_some_and(|e| e == "jsonl") {
-                sessions += 1;
-                bytes += meta.len();
+            let Ok(kind) = entry.file_type() else {
+                into.unreadable += 1;
+                continue;
+            };
+            if kind.is_symlink() {
+                continue;
+            }
+            if kind.is_dir() {
+                stack.push(entry.path());
+            } else if kind.is_file() {
+                match entry.metadata() {
+                    Ok(meta) => {
+                        into.files += 1;
+                        into.bytes += meta.len();
+                    }
+                    Err(_) => into.unreadable += 1,
+                }
             }
         }
     }
-    let memory_files = std::fs::read_dir(dir.join("memory"))
-        .map(|d| d.flatten().filter(|e| e.path().is_file()).count())
-        .unwrap_or(0);
-    CliWorkspace {
-        path: dir.to_string_lossy().to_string(),
-        exists: dir.is_dir(),
-        sessions,
-        bytes,
-        memory_files,
+}
+
+/// One top-level entry of a project folder, as the workspace sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum WorkspaceEntry {
+    /// `<id>.jsonl`, or `<session-id>.<anything>`.
+    SessionFile(String),
+    /// `<session-id>/`, tallied whole.
+    SessionDir(String),
+    /// `memory/`, tallied to any depth.
+    Memory,
+}
+
+/// What a top-level entry is. Symlinks and anything unknown are None, so they
+/// are neither counted nor cleared.
+fn classify(name: &str, kind: std::fs::FileType) -> Option<WorkspaceEntry> {
+    if kind.is_symlink() {
+        return None;
+    }
+    if kind.is_file() {
+        if let Some(stem) = name.strip_suffix(".jsonl").filter(|s| !s.is_empty()) {
+            return Some(WorkspaceEntry::SessionFile(stem.to_string()));
+        }
+        let (id, rest) = (name.get(..36)?, name.get(36..)?);
+        return (rest.starts_with('.') && transcript::parse_session_id(id).is_some())
+            .then(|| WorkspaceEntry::SessionFile(id.to_string()));
+    }
+    if kind.is_dir() {
+        if name == "memory" {
+            return Some(WorkspaceEntry::Memory);
+        }
+        return transcript::parse_session_id(name).map(WorkspaceEntry::SessionDir);
+    }
+    None
+}
+
+/// The project folder's classified top-level entries, plus whether it could
+/// be read at all (None when it is absent).
+fn entries_of(dir: &Path) -> Option<Result<Vec<(PathBuf, WorkspaceEntry)>, String>> {
+    let read = match std::fs::read_dir(dir) {
+        Ok(read) => read,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) => return Some(Err(e.to_string())),
+    };
+    let mut out = Vec::new();
+    for entry in read {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(e) => return Some(Err(e.to_string())),
+        };
+        let kind = match entry.file_type() {
+            Ok(kind) => kind,
+            Err(e) => return Some(Err(e.to_string())),
+        };
+        let name = entry.file_name();
+        if let Some(found) = name.to_str().and_then(|name| classify(name, kind)) {
+            out.push((entry.path(), found));
+        }
+    }
+    Some(Ok(out))
+}
+
+/// The distinct session ids `entries` name, in order, that are safe to join
+/// onto a path.
+fn session_ids(entries: &[(PathBuf, WorkspaceEntry)]) -> Vec<String> {
+    let mut ids: Vec<String> = entries
+        .iter()
+        .filter_map(|(_, entry)| match entry {
+            WorkspaceEntry::SessionFile(id) | WorkspaceEntry::SessionDir(id) => Some(id.clone()),
+            WorkspaceEntry::Memory => None,
+        })
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+/// `<file_history>/<id>/`, when it is a real folder (never a symlink).
+fn history_dir(file_history: &Path, id: &str) -> Option<PathBuf> {
+    let id = transcript::parse_session_id(id)?;
+    let dir = file_history.join(id);
+    std::fs::symlink_metadata(&dir)
+        .ok()
+        .filter(|meta| meta.is_dir())
+        .map(|_| dir)
+}
+
+pub fn cli_workspace(vault: &Path) -> CliWorkspace {
+    match transcript::cli_project_dir(vault) {
+        Some(located) => {
+            let file_history = located.config_home().join("file-history");
+            workspace_at(&located, &file_history)
+        }
+        None => CliWorkspace {
+            path: String::new(),
+            exists: false,
+            sessions: 0,
+            session_files: 0,
+            bytes: 0,
+            memory_files: 0,
+            unreadable: 0,
+            shared: false,
+        },
     }
 }
 
-/// Delete the CLI's stored state for this vault. Returns what was removed.
+/// Count what the CLI keeps for one project folder, and each of its sessions'
+/// `file-history/<id>/`. The folder itself is read even when it is a symlink;
+/// nothing under it is followed.
+fn workspace_at(located: &transcript::CliProjectDir, file_history: &Path) -> CliWorkspace {
+    let dir = &located.dir;
+    let mut sessions = Tally::default();
+    let mut memory = Tally::default();
+    let mut ids = Vec::new();
+    match entries_of(dir) {
+        None => {}
+        Some(Err(_)) => sessions.unreadable += 1,
+        Some(Ok(entries)) => {
+            for (path, entry) in &entries {
+                match entry {
+                    WorkspaceEntry::SessionFile(_) => match std::fs::symlink_metadata(path) {
+                        Ok(meta) => {
+                            sessions.files += 1;
+                            sessions.bytes += meta.len();
+                        }
+                        Err(_) => sessions.unreadable += 1,
+                    },
+                    WorkspaceEntry::SessionDir(_) => tally(path, &mut sessions),
+                    WorkspaceEntry::Memory => tally(path, &mut memory),
+                }
+            }
+            ids = session_ids(&entries);
+        }
+    }
+    for id in &ids {
+        if let Some(history) = history_dir(file_history, id) {
+            tally(&history, &mut sessions);
+        }
+    }
+    CliWorkspace {
+        path: dir.to_string_lossy().to_string(),
+        exists: dir.is_dir(),
+        sessions: ids.len(),
+        session_files: sessions.files,
+        bytes: sessions.bytes,
+        memory_files: memory.files,
+        unreadable: sessions.unreadable + memory.unreadable,
+        shared: located.shared,
+    }
+}
+
+/// Delete the CLI's stored state for this vault. Returns how many files went.
 ///
-/// Refuses to touch anything that is not exactly `<home>/.claude/projects/<slug>`
-/// — a purge is the one operation here that destroys data, so the path it
-/// deletes is re-derived rather than accepted from the caller, and checked
-/// against the directory it must live in.
+/// The folder is re-derived by the one locator rather than accepted from the
+/// caller, and `purge_at` checks it before anything is removed.
 pub fn purge_cli_workspace(vault: &Path) -> Result<usize, String> {
-    let home = home().ok_or("no home directory")?;
-    let projects = home.join(".claude/projects");
-    let slug = slugify_path(vault);
-    if slug.is_empty() || slug.contains("..") {
+    if vault.as_os_str().is_empty() {
         return Err("refusing to purge: unusable vault path".into());
     }
-    let dir = projects.join(&slug);
-    if !dir.starts_with(&projects) {
+    let located = transcript::cli_project_dir(vault).ok_or("no home directory")?;
+    let file_history = located.config_home().join("file-history");
+    purge_at(&located, &file_history)
+}
+
+/// Clear one project folder: its sessions' `file-history/<id>/` first, then
+/// every top-level session file, every session folder and `memory/`.
+///
+/// Refuses anything that is not exactly `<config home>/projects/<key>` — a
+/// purge is the one operation here that destroys data — and refuses a shared
+/// folder (`CLAUDE_CODE_PROJECT_DIR_NAME`), whose sessions may be any
+/// project's, and a project folder that is itself a symlink. Symlinks inside
+/// are never followed (`remove_dir_all` removes a link, never its target), and
+/// entries it does not know stay. It counts every regular file it removes and
+/// stops at the first error, so a failed clear leaves the rest to be counted.
+fn purge_at(located: &transcript::CliProjectDir, file_history: &Path) -> Result<usize, String> {
+    if located.shared {
+        return Err(
+            "refusing to purge a folder every project shares (CLAUDE_CODE_PROJECT_DIR_NAME)".into(),
+        );
+    }
+    let dir = &located.dir;
+    let key = dir
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if key.is_empty() || key.contains("..") || dir.parent() != Some(located.projects.as_path()) {
         return Err("refusing to purge outside the CLI's project directory".into());
     }
-    if !dir.is_dir() {
-        return Ok(0);
+    match std::fs::symlink_metadata(dir) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e.to_string()),
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return Err("refusing to purge a project folder that is a symlink".into());
+        }
+        Ok(meta) if !meta.is_dir() => return Ok(0),
+        Ok(_) => {}
     }
+    let entries = match entries_of(dir) {
+        None => return Ok(0),
+        Some(entries) => entries?,
+    };
     let mut removed = 0usize;
-    for entry in std::fs::read_dir(&dir)
-        .map_err(|e| e.to_string())?
-        .flatten()
-    {
-        let path = entry.path();
-        let is_session = path.extension().is_some_and(|e| e == "jsonl");
-        let is_memory = path.is_dir() && path.file_name().is_some_and(|n| n == "memory");
-        if is_session {
-            std::fs::remove_file(&path).map_err(|e| e.to_string())?;
-            removed += 1;
-        } else if is_memory {
-            let count = std::fs::read_dir(&path)
-                .map(|d| d.flatten().filter(|e| e.path().is_file()).count())
-                .unwrap_or(0);
-            std::fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
-            removed += count;
+    let history_is_real = std::fs::symlink_metadata(file_history)
+        .map(|meta| meta.is_dir())
+        .unwrap_or(false);
+    if history_is_real {
+        for id in session_ids(&entries) {
+            if let Some(history) = history_dir(file_history, &id) {
+                removed += remove_tree(&history)?;
+            }
+        }
+    }
+    for (path, entry) in &entries {
+        match entry {
+            WorkspaceEntry::SessionFile(_) => {
+                std::fs::remove_file(path).map_err(|e| e.to_string())?;
+                removed += 1;
+            }
+            WorkspaceEntry::SessionDir(_) | WorkspaceEntry::Memory => {
+                removed += remove_tree(path)?;
+            }
         }
     }
     Ok(removed)
+}
+
+/// Remove a real folder and everything in it, returning how many regular files
+/// it held. `remove_dir_all` never follows a symlink.
+fn remove_tree(dir: &Path) -> Result<usize, String> {
+    let mut found = Tally::default();
+    tally(dir, &mut found);
+    std::fs::remove_dir_all(dir).map_err(|e| e.to_string())?;
+    Ok(found.files)
 }
 
 /// How many CLI children may be alive at once (M17.3).
@@ -430,6 +737,9 @@ pub struct AgentState {
     books: Arc<AtomicUsize>,
     /// Raised by `shut_down`. Nothing is admitted after it.
     closing: Arc<AtomicBool>,
+    /// The ask seam's book (M57.1): seats and the calls waiting for the
+    /// person, shared with the loopback endpoint and the answer commands.
+    interactions: interaction::Interactions,
 }
 
 /// A reader's place in `AgentState::books`: taken when its run is admitted,
@@ -456,13 +766,18 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// A vault path as the slots record it: canonical where the filesystem can
-/// say, as given where it cannot.
-fn vault_key(vault: &Path) -> PathBuf {
+/// A vault path as the slots and the ask seam's book record it: canonical
+/// where the filesystem can say, as given where it cannot.
+pub(crate) fn vault_key(vault: &Path) -> PathBuf {
     std::fs::canonicalize(vault).unwrap_or_else(|_| vault.to_path_buf())
 }
 
 impl AgentState {
+    /// The ask seam's book (M57.1).
+    pub fn interactions(&self) -> &interaction::Interactions {
+        &self.interactions
+    }
+
     /// May a run start now? Refused once quitting, and at the cap.
     ///
     /// Refuse rather than displace (M17.3). The old behaviour was to kill
@@ -530,9 +845,12 @@ impl AgentState {
     /// what opening a vault does first (`start_watcher`). A run in the vault
     /// being opened is kept, so reopening the same vault, as a webview reload
     /// does, stops nothing, and a run started in the new vault while it was
-    /// opening survives. Returns the runs it stopped, in order.
+    /// opening survives. Returns the runs it stopped, in order. The other
+    /// vaults' waiting cards are cancelled too (M57.1), so their calls are
+    /// refused as not answered when those threads go on.
     pub fn stop_other_vaults(&self, vault: &Path) -> Vec<u64> {
         let keep = vault_key(vault);
+        self.interactions.cancel_other_vaults(&keep);
         let slots = lock(&self.slots);
         let mut stopped = Vec::new();
         for (run, slot) in slots.iter() {
@@ -1132,50 +1450,59 @@ fn scoped_readers() -> Vec<&'static str> {
     crate::policy::tools::cli_names(|tool| tool.denied_when_read_scoped)
 }
 
-/// A tool call's input, shortened for the event stream WITHOUT breaking it
-/// (M49.9, K25): each long string value is cut, never the JSON. It used to
-/// be the serialized input cut at 200 characters — a write_concept body is
-/// always longer, so the run log's `writtenPath` could never parse it and
-/// every knowledge run logged `files: []`, "wrote nothing" and "did not
-/// look" reading the same.
-fn tool_input_preview(input: &Value) -> String {
-    const MAX_STRING: usize = 160;
-    fn shorten(value: &Value) -> Value {
-        match value {
-            Value::String(s) if s.chars().count() > MAX_STRING => Value::String(format!(
-                "{}…",
-                s.chars().take(MAX_STRING).collect::<String>()
-            )),
-            Value::Array(items) => Value::Array(items.iter().map(shorten).collect()),
-            Value::Object(map) => {
-                Value::Object(map.iter().map(|(k, v)| (k.clone(), shorten(v))).collect())
-            }
-            other => other.clone(),
-        }
+/// Whether a run's request withdraws or keeps the shell: the Settings
+/// ceiling, less a read limit (M53.5). Bash reads past any folder list, so a
+/// read-scoped run that kept one would have no read limit at all. Fail
+/// closed.
+fn holds_shell(req: &AgentRequest) -> bool {
+    req.shell.unwrap_or(false) && req.read_scope.is_none()
+}
+
+/// What a run's `--allowedTools` grants before the gate takes its asks out
+/// (M57.1): cerebro's and the host's tools, narrowed by the record, then the
+/// connectors' grants (M54.9). An internal run takes no connector.
+fn granted_cli_tools(req: &AgentRequest, connectors: &RunConnectors) -> Vec<String> {
+    let mut tools = narrow(tool_policy(holds_shell(req)), req.allowed_tools.as_ref());
+    if !req.internal {
+        tools.extend(connectors.allow.iter().cloned());
     }
-    shorten(input).to_string()
+    tools
+}
+
+/// What a run that can ask hands its argv (M57.1): the settings file holding
+/// its PreToolUse hook (`interaction::hook_settings`), and the tools that may
+/// ask, which leave `--allowedTools` so nothing pre-approves them: a hook
+/// that fails or never runs then leaves the call refused.
+#[derive(Debug, Clone)]
+pub(crate) struct RunGate {
+    pub settings: PathBuf,
+    pub asks: Vec<String>,
 }
 
 /// The CLI's argv for one run. `connectors` is what `connector_reach` worked
 /// out for it (M54.9): its grants follow cerebro's and the host's in
 /// `--allowedTools`, its denials join the one `--disallowedTools`, and the
 /// connectors its record named that it does not get are named in its prompt
-/// (M54.11). An internal run is handed none and takes none.
+/// (M54.11). An internal run is handed none and takes none. `gate` is a
+/// seated run's ask seam (M57.1): its asks leave `--allowedTools` and its
+/// settings follow `--setting-sources`; with none, the argv is what it was
+/// before the seam. `session` closes the argv (M56.3): `--resume <id>` for a
+/// stored session, `--session-id <minted>` for every other run, so the run's
+/// id is known before the CLI says a word. Only a parsed UUID reaches it,
+/// never `req.session_id`.
 pub(crate) fn build_args(
     req: &AgentRequest,
     mcp_config: &Path,
+    gate: Option<&RunGate>,
     strict_mcp: bool,
     connectors: &RunConnectors,
+    session: &CliSession,
 ) -> Vec<String> {
-    // M53.5 — a read limit withdraws the shell, whatever the record declares
-    // and the Settings ceiling allows: Bash reads past any folder list, so a
-    // read-scoped run that kept one would have no read limit at all. Fail
-    // closed.
     let read_scoped = req.read_scope.is_some();
-    let shell = req.shell.unwrap_or(false) && !read_scoped;
-    let mut tools = narrow(tool_policy(shell), req.allowed_tools.as_ref());
-    if !req.internal {
-        tools.extend(connectors.allow.iter().cloned());
+    let shell = holds_shell(req);
+    let mut tools = granted_cli_tools(req, connectors);
+    if let Some(gate) = gate {
+        tools.retain(|tool| !gate.asks.contains(tool));
     }
     let mut args: Vec<String> = vec![
         "-p".into(),
@@ -1202,15 +1529,17 @@ pub(crate) fn build_args(
         args.push("--disallowedTools".into());
         args.push(internal_disallowed().join(","));
     } else {
-        // The CLI's own gate stays out of the way: cerebro's tools enforce
-        // their boundaries themselves, and shell access is decided above —
-        // which is exactly why a run without it must not keep the built-in
-        // writers `acceptEdits` would wave through (M49.4), and why a
-        // read-scoped run must not keep the built-in readers, which need no
-        // approval inside the cwd at all (M53.5). Both go in ONE flag, with
-        // the record's connector denials (M54.9): whether the CLI merges a
-        // repeated --disallowedTools or keeps only the last is not something
-        // a boundary should depend on.
+        // The CLI's own gate decides from argv, except for a tool that may
+        // ask (M57.1): that one leaves --allowedTools and meets Cerebro's
+        // gate through the run's hook. Cerebro's tools enforce their
+        // boundaries themselves, and shell access is decided above — which is
+        // exactly why a run without it must not keep the built-in writers
+        // `acceptEdits` would wave through (M49.4), and why a read-scoped run
+        // must not keep the built-in readers, which need no approval inside
+        // the cwd at all (M53.5). Both go in ONE flag, with the record's
+        // connector denials (M54.9): whether the CLI merges a repeated
+        // --disallowedTools or keeps only the last is not something a
+        // boundary should depend on.
         args.push("--permission-mode".into());
         args.push("acceptEdits".into());
         let mut denied: Vec<&str> = Vec::new();
@@ -1237,6 +1566,12 @@ pub(crate) fn build_args(
     // VAULT opens, not the one the person opened on their own machine.
     args.push("--setting-sources".into());
     args.push("user".into());
+    // M57.1: flag settings always load, whatever the sources say (derived
+    // from 2.1.250), so the run's own hook rides beside the person's.
+    if let Some(gate) = gate {
+        args.push("--settings".into());
+        args.push(gate.settings.to_string_lossy().to_string());
+    }
     // Strictness is decided by connector_reach (M13.3, M54.9): a vault with
     // an explicit connector list is pinned to it (strict, its mergeable
     // servers merged into our config); a vault without one keeps the legacy
@@ -1265,14 +1600,18 @@ pub(crate) fn build_args(
         args.push("--append-system-prompt".into());
         args.push(appended);
     }
+    // M56.5: each value is its own argv element, after `run_options` has
+    // checked it, and none of it passes through a shell. Unset passes no
+    // flag, so an unset run's argv is what it was before either existed.
     if let Some(model) = req.model.as_ref().filter(|m| !m.trim().is_empty()) {
         args.push("--model".into());
         args.push(model.clone());
     }
-    if let Some(session) = req.session_id.as_ref().filter(|s| !s.trim().is_empty()) {
-        args.push("--resume".into());
-        args.push(session.clone());
+    if let Some(effort) = req.effort.as_ref().filter(|e| !e.trim().is_empty()) {
+        args.push("--effort".into());
+        args.push(effort.clone());
     }
+    args.extend(session.args());
     args
 }
 
@@ -1350,6 +1689,9 @@ pub fn mcp_config_json(
     serde_json::json!({ "mcpServers": servers }).to_string()
 }
 
+/// What a run's settings file is called, before its run number (M57.1).
+const RUN_SETTINGS_PREFIX: &str = "run-settings-";
+
 /// The merged MCP config carries secrets — the vault's connector headers/env
 /// and this run's loopback token — so it must not take up residence in the
 /// app config dir (PR #5 security review). Owner-readable only, and swept:
@@ -1373,6 +1715,8 @@ fn write_run_config(path: &Path, contents: &str) -> Result<(), String> {
     std::fs::write(path, contents).map_err(|e| e.to_string())
 }
 
+/// Remove the run configs and run settings (M57.1) earlier runs, or crashes,
+/// left in `config_dir`.
 pub fn sweep_run_configs(config_dir: &Path) {
     let Ok(dir) = std::fs::read_dir(config_dir) else {
         return;
@@ -1380,7 +1724,8 @@ pub fn sweep_run_configs(config_dir: &Path) {
     for entry in dir.flatten() {
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if name.starts_with("mcp-config") && name.ends_with(".json") {
+        let ours = name.starts_with("mcp-config") || name.starts_with(RUN_SETTINGS_PREFIX);
+        if ours && name.ends_with(".json") {
             let _ = std::fs::remove_file(entry.path());
         }
     }
@@ -1413,23 +1758,63 @@ pub fn stream(
     config_dir: &Path,
     meter: Option<meter::Meter>,
     done: Option<std::sync::mpsc::SyncSender<meter::RunEnd>>,
-) -> Result<u64, String> {
+) -> Result<Spawned, String> {
     let bearer = req.mcp_token.clone();
+    // M56.3: the session first, before admission and before any file is
+    // written. A stored id that is not a UUID never reaches argv or a path.
+    let session = match CliSession::for_request(req.session_id.as_deref()) {
+        Ok(session) => session,
+        Err(refusal) => {
+            revoke_bearer(&app, bearer.as_deref(), Duration::ZERO);
+            return Err(refusal);
+        }
+    };
+    let session_id = session.id().to_string();
     let expects_cerebro = holds_a_cerebro_tool(&req);
+    // M57.1: a run a person watches takes a seat before it spawns, keyed by
+    // the durable id its bearer carries, so its hook can ask. A resumed
+    // session reads its file's open deferral first, for the settle.
+    let seat = meter
+        .as_ref()
+        .filter(|meter| takes_a_seat(&req, meter))
+        .map(|meter| meter.run_id.clone());
+    if let Some(run_id) = &seat {
+        let pending = match &session {
+            CliSession::Resume(id) => transcript::pending_deferral(vault, id),
+            CliSession::New(_) => None,
+        };
+        state.interactions.open_seat(
+            interaction::Seat::new(run_id, &session_id, &vault_key(vault), &req),
+            pending,
+        );
+    }
     let Started {
         run,
         config_path: run_config,
+        settings_path: run_settings,
         supervised,
         stdout,
         books,
         cancelled,
         connectors,
-    } = match spawn_run(state, vault, &req, config_dir, meter.as_ref()) {
+        mut recording,
+    } = match spawn_run(
+        state,
+        vault,
+        &req,
+        &session,
+        config_dir,
+        meter.as_ref(),
+        seat.as_deref(),
+    ) {
         Ok(started) => started,
         Err(refusal) => {
             // No process ever held this bearer, or the one that did was ended
             // before its run began: nothing can still be sending with it.
             revoke_bearer(&app, bearer.as_deref(), Duration::ZERO);
+            if let Some(run_id) = &seat {
+                state.interactions.close_seat(run_id);
+            }
             return Err(refusal);
         }
     };
@@ -1451,10 +1836,28 @@ pub fn stream(
     let gate = InitGate::new(run, expects_cerebro);
     // M54.11: what the stream says about each connector the run reaches.
     let mut observer = connector_signals::Observer::new(&connectors);
+    // M56.2: a recorded run's stdout is copied byte for byte as it is read.
+    let stdout = match recording.as_mut() {
+        Some(recording) => recording.tee(stdout),
+        None => tee::Tee::plain(stdout),
+    };
+    let interactions = state.interactions.clone();
+    let card_session = session_id.clone();
     std::thread::spawn(move || {
         let _books = books;
-        let mut emit = |event: AgentEvent| {
+        let mut send = |event: AgentEvent| {
             let _ = app.emit(AGENT_EVENT, TaggedEvent { run, event });
+        };
+        // M57.1: a deferral this run's gate registered is announced as a card
+        // just before it.
+        let mut emit = |event: AgentEvent| {
+            announce(
+                &interactions,
+                seat.is_some(),
+                &card_session,
+                event,
+                &mut send,
+            );
         };
         // M54.5: a run whose tools failed to load is ended at its init, and
         // not booked cancelled, since nobody asked for that stop.
@@ -1475,17 +1878,38 @@ pub fn stream(
         live.store(false, Ordering::Relaxed);
         // The child has exited; its config's job is done. Secrets end their
         // residency with the run — the sweep at the next spawn is only the
-        // backstop for a crash between here and there.
+        // backstop for a crash between here and there. Its settings go with
+        // it, and its seat (M57.1): unconfirmed registrations die, a waiting
+        // card stays.
         let _ = std::fs::remove_file(&run_config);
+        if let Some(settings) = &run_settings {
+            let _ = std::fs::remove_file(settings);
+        }
+        if let Some(run_id) = &seat {
+            interactions.close_seat(run_id);
+        }
         let was_aborted = aborted.load(Ordering::SeqCst);
         let was_cancelled = cancelled.load(Ordering::SeqCst);
+        if let Some(recording) = recording {
+            recording.finish(
+                status,
+                &tail,
+                was_cancelled,
+                was_aborted,
+                tally.saw_terminal(),
+            );
+        }
         if let Some(message) = stderr_failure(
             status,
             &tail,
             was_aborted || was_cancelled || tally.refused_at_init(),
             tally.saw_terminal(),
         ) {
-            emit(AgentEvent::Error { message });
+            emit(AgentEvent::Error {
+                message,
+                code: None,
+                notice: None,
+            });
         }
         // Close the books BEFORE the slot is freed and before `Done`: a
         // listener that reacts to `Done` by asking for the next dispatch must
@@ -1518,7 +1942,16 @@ pub fn stream(
         emit(AgentEvent::Done);
     });
 
-    Ok(run)
+    Ok(Spawned { run, session_id })
+}
+
+/// A run under way, as `stream` answers it (M56.3): the tag every event of
+/// the run carries, and the Claude Code session it runs in, known before the
+/// first event because Cerebro minted it or is resuming it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Spawned {
+    pub run: u64,
+    pub session_id: String,
 }
 
 /// Retire a run's bearer `grace` from now (M53.11). Reached through the app's
@@ -1531,11 +1964,68 @@ fn revoke_bearer(app: &AppHandle, bearer: Option<&str>, grace: Duration) {
     }
 }
 
+/// Does this run take a seat, so it can ask (M57.1)? A person must be
+/// watching it: an attended, metered root run that is not one of Cerebro's
+/// internal constructs. A handed-to run, a schedule and an internal run never
+/// ask; nobody is there to answer.
+fn takes_a_seat(req: &AgentRequest, meter: &meter::Meter) -> bool {
+    req.attended == Some(true)
+        && !req.internal
+        && meter.mode == meter::Mode::Attended
+        && meter.parent_run_id.is_none()
+}
+
+/// Pass one event of a run on, a confirmed wait first (M57.1): a deferral
+/// the run's own gate registered becomes a card, announced just before its
+/// `ToolDeferred`. A deferral no gate registered (a hook outside Cerebro)
+/// shows no card.
+fn announce(
+    interactions: &interaction::Interactions,
+    seated: bool,
+    session: &str,
+    event: AgentEvent,
+    send: &mut dyn FnMut(AgentEvent),
+) {
+    if let (true, AgentEvent::ToolDeferred { tool_id, .. }) = (seated, &event) {
+        if let Some(card) = interactions.confirm(session, tool_id) {
+            send(AgentEvent::Interaction { interaction: card });
+        }
+    }
+    send(event);
+}
+
+/// A seated run's gate (M57.1), written beside its config: None when it asks
+/// nothing, which is every run in a release build until M57.2 that settles
+/// nothing, so its argv stays as it was and no file is written. The CLI's
+/// version is asked only when the run would ask.
+fn run_gate(
+    interactions: &interaction::Interactions,
+    run_id: &str,
+    granted: &[String],
+    path: &Path,
+) -> Result<Option<RunGate>, String> {
+    if !interactions.wants_gate(run_id, granted) {
+        return Ok(None);
+    }
+    let version = interaction::cached_cli_version();
+    let plan = interactions.ask_plan(run_id, granted, version.as_deref());
+    if plan.is_empty() {
+        return Ok(None);
+    }
+    write_run_config(path, &interaction::hook_settings(&plan.matcher())?)?;
+    Ok(Some(RunGate {
+        settings: path.to_path_buf(),
+        asks: plan.asks,
+    }))
+}
+
 /// A run under way: its child spawned and its slot taken. What the reader
 /// thread takes over from `spawn_run`.
 struct Started {
     run: u64,
     config_path: PathBuf,
+    /// The run's settings file, when it can ask (M57.1).
+    settings_path: Option<PathBuf>,
     supervised: crate::spawn::Supervised,
     stdout: std::process::ChildStdout,
     books: Books,
@@ -1543,20 +2033,29 @@ struct Started {
     /// The connectors the run reaches, which its stream is read against
     /// (M54.11).
     connectors: RunConnectors,
+    /// The run's recording, in a debug build started with a record folder
+    /// (M56.2, `tee`). Always None in a release build.
+    recording: Option<tee::Recording>,
 }
 
-/// Everything that can fail before a run is under way (M53.11): finding the
-/// CLI, admission, the run's config, the spawn and the slot. Out of `stream`
-/// so they share one exit, where the bearer of a run that never began is
-/// revoked. Each failure takes back what it had made: the config, the
-/// meter's row, a child spawned into a quit.
+/// Everything that can fail before a run is under way (M53.11): the run's
+/// model and effort, finding the CLI, admission, the run's config, the spawn
+/// and the slot. Out of `stream` so they share one exit, where the bearer of
+/// a run that never began is revoked. Each failure takes back what it had
+/// made: the config, the meter's row, a child spawned into a quit.
 fn spawn_run(
     state: &AgentState,
     vault: &Path,
     req: &AgentRequest,
+    session: &CliSession,
     config_dir: &Path,
     meter: Option<&meter::Meter>,
+    seat: Option<&str>,
 ) -> Result<Started, String> {
+    // M56.5: checked again here, before admission, so a spawn path that
+    // skipped `run_agent`'s check still never passes the CLI a value it would
+    // ignore. A refusal takes no slot and writes nothing.
+    run_options::validate_request(req)?;
     let binary = find_binary().ok_or(
         "Claude Code was not found on this machine. Install it from https://claude.com/claude-code, then reopen cerebro.",
     )?;
@@ -1581,6 +2080,28 @@ fn spawn_run(
     let config_path = config_dir.join(format!("mcp-config-{run}.json"));
     let (extra_servers, strict_mcp, reach) = connector_reach(vault, req);
     write_run_config(&config_path, &mcp_config_json(url, token, &extra_servers))?;
+    // M57.1: a seated run that asks gets its hook in a settings file beside
+    // the config, owner-only, swept and removed the same way.
+    let settings_path = config_dir.join(format!("{RUN_SETTINGS_PREFIX}{run}.json"));
+    let gate = match seat {
+        Some(run_id) => run_gate(
+            &state.interactions,
+            run_id,
+            &granted_cli_tools(req, &reach),
+            &settings_path,
+        ),
+        None => Ok(None),
+    }
+    .inspect_err(|_| {
+        let _ = std::fs::remove_file(&config_path);
+        let _ = std::fs::remove_file(&settings_path);
+    })?;
+    let settings_path = gate.as_ref().map(|gate| gate.settings.clone());
+    let forget_settings = || {
+        if let Some(path) = &settings_path {
+            let _ = std::fs::remove_file(path);
+        }
+    };
 
     // M49.9: an attended run's row opens BEFORE the child exists, so every
     // write it books lands on a row — the first moment its token can be
@@ -1589,17 +2110,38 @@ fn spawn_run(
     if let Some(meter) = meter {
         meter::begin(meter);
     }
+    let args = build_args(
+        req,
+        &config_path,
+        gate.as_ref(),
+        strict_mcp,
+        &reach,
+        session,
+    );
+    // M56.2: a debug build with a record folder records the run, and its
+    // child gets the folder's own Claude Code config, so the owner's settings
+    // and sessions stay out of the recording and it stays out of theirs.
+    let recording = tee::recording(run, &args);
     let mut command = crate::spawn::command(binary);
     command
-        .args(build_args(req, &config_path, strict_mcp, &reach))
+        .args(&args)
         // The vault is the working directory, so shell-capable modes and the
         // CLI's own file tools stay pointed at the user's notes.
         .current_dir(vault);
+    if let Some(recording) = &recording {
+        // Recordings use the owner's own login only, never a key: the
+        // sanitizer refuses any init whose API-key source is not `none`.
+        command.env("CLAUDE_CONFIG_DIR", recording.config_dir());
+        for credential in tee::CREDENTIALS {
+            command.env_remove(credential);
+        }
+    }
     with_login_path(&mut command);
     // M53.10: the CLI leads its own process group, so a stop reaches the
     // shells and tools it started, and its stderr drains while it runs.
     let (supervised, stdout) = crate::spawn::supervise(&mut command).map_err(|e| {
         let _ = std::fs::remove_file(&config_path);
+        forget_settings();
         if let Some(meter) = meter {
             meter::discard(meter);
         }
@@ -1620,26 +2162,39 @@ fn spawn_run(
         supervised.handle().terminate(Duration::ZERO);
         let _ = supervised.finish(TAIL_WAIT);
         let _ = std::fs::remove_file(&config_path);
+        forget_settings();
         if let Some(meter) = meter {
             meter::discard(meter);
         }
         return Err(refusal);
     }
+    // M56.3: the child is running in this session, so its row names it now;
+    // a kill -9 before the stream's init still leaves the run findable. The
+    // stream's own id is written again at finish, and that write wins.
+    if let Some(meter) = meter {
+        meter::record_spawned_session(meter, session.id());
+    }
     Ok(Started {
         run,
         config_path,
+        settings_path,
         supervised,
         stdout,
         books,
         cancelled,
         connectors: reach,
+        recording,
     })
 }
 
 /// Read a run's stdout to its end (M53.10): every line is metered, read for
-/// what it says about the run's connectors (M54.11) and passed through the
-/// init gate (M54.5), and each normalized event the gate lets out goes to
-/// `emit`. Out of the reader thread so a test can drive it with a fake CLI.
+/// what it says about the run's connectors (M54.11), folded (M56.3, `fold`,
+/// the same fold a session file goes through) and passed through the init
+/// gate (M54.5), and each event the gate lets out goes to `emit`; an error
+/// the fold could type carries its notice (M56.4). When the stream ends, the
+/// fold ends a turn still open, as cut off when it never finished, and tells
+/// the tally whether the run died for want of quota. Out of the reader thread
+/// so a test can drive it with a fake CLI.
 ///
 /// When the gate refuses the run, the tally records it and `end_run` is
 /// called, once. The read goes on, emitting nothing, until the child has gone.
@@ -1656,9 +2211,9 @@ pub(crate) fn read_stream(
     end_run: &mut dyn FnMut(),
 ) -> meter::Tally {
     let mut reader = BufReader::new(stdout);
-    let mut session_id: Option<String> = None;
+    let mut fold = fold::TranscriptFold::default();
     // M25.2: what this run cost, accumulated as the stream is read. It never
-    // reaches `translate` or the event channel — the panel has no business
+    // reaches the fold or the event channel — the panel has no business
     // knowing about tokens, and a number the renderer can see is a number
     // that ends up somewhere portable.
     let mut tally = meter::Tally::default();
@@ -1675,15 +2230,20 @@ pub(crate) fn read_stream(
         if line.trim().is_empty() {
             continue;
         }
-        // A line we cannot parse is skipped rather than surfaced: the CLI
-        // interleaves diagnostics with the stream and its wire format
-        // changes between versions.
+        // A line we cannot parse is skipped: the CLI interleaves diagnostics
+        // with the stream. A parsed line of a kind this build does not
+        // classify is not silent: the tally collects its kind, and the meter
+        // reports it once per run (M56.2, `kinds`).
         let Ok(value) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
         tally.observe(&value);
         observer.observe(&value, chrono::Utc::now());
-        let admitted = gate.admit(&value, &mut session_id);
+        let (class, events) = fold.entry(&value);
+        if let fold::LineClass::Unclassified(kind) = class {
+            note_unclassified(&kind);
+        }
+        let admitted = gate.admit(&value, events);
         for event in admitted.events {
             emit(event);
         }
@@ -1692,7 +2252,24 @@ pub(crate) fn read_stream(
             end_run();
         }
     }
+    for event in gate.pass(fold.finish()) {
+        emit(event);
+    }
+    // M56.4: quota is read from the typed fields the fold classified, never
+    // from the result's words.
+    tally.record_quota(fold.is_quota());
     tally
+}
+
+/// Log a kind the fold could not classify, once per process (M56.3): the
+/// meter's `agent.stream` row says it once per run, and this says it in the
+/// diagnostic log without a line per occurrence.
+fn note_unclassified(kind: &str) {
+    static SEEN: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    let first = lock(SEEN.get_or_init(Default::default)).insert(kind.to_string());
+    if first {
+        log::warn!("Claude Code sent a line of kind {kind}, which this build does not classify");
+    }
 }
 
 /// What a finished run's stderr has to say, if anything (M53.10).
@@ -1744,157 +2321,6 @@ fn exit_words(status: Option<ExitStatus>) -> String {
         }
     }
     status.to_string()
-}
-
-/// Map one CLI stream-json object onto zero or more normalized events.
-/// A tool result's text, however the CLI shaped it.
-///
-/// `content` is a bare string in some versions and an array of typed blocks
-/// in others; both appear in the same stream depending on the tool. Reading
-/// only one shape silently drops half the outputs.
-fn tool_result_text(block: &Value) -> Option<String> {
-    const LIMIT: usize = 2000;
-    let content = block.get("content")?;
-    let text = match content {
-        Value::String(s) => s.clone(),
-        Value::Array(items) => items
-            .iter()
-            .filter_map(|i| {
-                i.get("text")
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-                    .or_else(|| i.as_str().map(str::to_string))
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-        other => other.to_string(),
-    };
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(if trimmed.chars().count() > LIMIT {
-        let head: String = trimmed.chars().take(LIMIT).collect();
-        format!("{head}…")
-    } else {
-        trimmed.to_string()
-    })
-}
-
-pub fn translate(value: &Value, session_id: &mut Option<String>) -> Vec<AgentEvent> {
-    let kind = value.get("type").and_then(Value::as_str).unwrap_or("");
-    match kind {
-        "system" => {
-            if value.get("subtype").and_then(Value::as_str) == Some("init") {
-                if let Some(id) = value.get("session_id").and_then(Value::as_str) {
-                    *session_id = Some(id.to_string());
-                    return vec![AgentEvent::Init {
-                        session_id: id.to_string(),
-                    }];
-                }
-            }
-            vec![]
-        }
-        "stream_event" => {
-            let event = value.get("event").unwrap_or(&Value::Null);
-            if event.get("type").and_then(Value::as_str) != Some("content_block_delta") {
-                return vec![];
-            }
-            let delta = event.get("delta").unwrap_or(&Value::Null);
-            match delta.get("type").and_then(Value::as_str) {
-                Some("text_delta") => delta
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .map(|t| {
-                        vec![AgentEvent::TextDelta {
-                            text: t.to_string(),
-                        }]
-                    })
-                    .unwrap_or_default(),
-                Some("thinking_delta") => delta
-                    .get("thinking")
-                    .and_then(Value::as_str)
-                    .map(|t| {
-                        vec![AgentEvent::ThinkingDelta {
-                            text: t.to_string(),
-                        }]
-                    })
-                    .unwrap_or_default(),
-                _ => vec![],
-            }
-        }
-        "assistant" => content_blocks(value)
-            .iter()
-            .filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_use"))
-            .map(|b| AgentEvent::ToolStart {
-                tool_name: b
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .unwrap_or("tool")
-                    .to_string(),
-                tool_id: b
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string(),
-                input: b.get("input").map(tool_input_preview),
-            })
-            .collect(),
-        "user" => content_blocks(value)
-            .iter()
-            .filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_result"))
-            .map(|b| AgentEvent::ToolDone {
-                tool_id: b
-                    .get("tool_use_id")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string(),
-                // Truncated here rather than in the panel: a Read of a large
-                // note would otherwise cross the IPC boundary in full on
-                // every turn, to be thrown away by the renderer.
-                output: tool_result_text(b),
-                is_error: b.get("is_error").and_then(Value::as_bool).unwrap_or(false),
-            })
-            .collect(),
-        "result" => {
-            if let Some(id) = value.get("session_id").and_then(Value::as_str) {
-                *session_id = Some(id.to_string());
-            }
-            let is_error = value
-                .get("is_error")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            let text = value
-                .get("result")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-            if is_error {
-                vec![AgentEvent::Error {
-                    message: if text.is_empty() {
-                        "the agent reported an error".into()
-                    } else {
-                        text
-                    },
-                }]
-            } else {
-                vec![AgentEvent::Result {
-                    text,
-                    session_id: session_id.clone(),
-                }]
-            }
-        }
-        _ => vec![],
-    }
-}
-
-fn content_blocks(value: &Value) -> Vec<Value> {
-    value
-        .get("message")
-        .and_then(|m| m.get("content"))
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------
@@ -1992,13 +2418,6 @@ fn cerebro_readiness(init: &Value) -> Readiness {
     }
 }
 
-/// What the person reads when a run is stopped at init (M54.5).
-fn init_refusal(word: &str) -> String {
-    format!(
-        "Cerebro's tools did not load for this run (Claude Code reported them as {word}), so the run was stopped before it could answer without them. Try again; if it repeats, restart Cerebro."
-    )
-}
-
 /// What one stream line lets out of the gate.
 pub(crate) struct Admitted {
     pub(crate) events: Vec<AgentEvent>,
@@ -2032,15 +2451,15 @@ impl InitGate {
         }
     }
 
-    /// Pass one parsed stream line, translated, unless the run is refused.
-    pub(crate) fn admit(&mut self, value: &Value, session_id: &mut Option<String>) -> Admitted {
+    /// Pass one parsed stream line's folded `events`, unless the run is
+    /// refused.
+    pub(crate) fn admit(&mut self, value: &Value, mut events: Vec<AgentEvent>) -> Admitted {
         if self.refused {
             return Admitted {
                 events: Vec::new(),
                 refuse: false,
             };
         }
-        let mut events = translate(value, session_id);
         if self.seen_init || !is_init(value) {
             return Admitted {
                 events,
@@ -2063,8 +2482,13 @@ impl InitGate {
                 log::warn!("agent run {run}: cerebro was {word} at init, so its tools may be missing from the first turn");
             }
             Readiness::Refused(word) => {
+                // M56.4: the refusal is the first failure in precedence, so
+                // its notice is the run's.
+                let version = value.get("claude_code_version").and_then(Value::as_str);
                 events.push(AgentEvent::Error {
-                    message: init_refusal(&word),
+                    message: failure::init_refusal(&word),
+                    code: None,
+                    notice: Some(failure::tools_unavailable(&word, version)),
                 });
                 self.refused = true;
                 return Admitted {
@@ -2076,6 +2500,18 @@ impl InitGate {
         Admitted {
             events,
             refuse: false,
+        }
+    }
+}
+
+impl InitGate {
+    /// Events with no line of their own (the fold's end), let out unless the
+    /// run is refused.
+    pub(crate) fn pass(&self, events: Vec<AgentEvent>) -> Vec<AgentEvent> {
+        if self.refused {
+            Vec::new()
+        } else {
+            events
         }
     }
 }
@@ -2100,6 +2536,28 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// The session every argv test runs in: a new one, minted as stream()
+    /// would. Its two elements close every argv (M56.3).
+    const TEST_SESSION: &str = "00000000-0000-4000-8000-0000000000aa";
+
+    /// build_args for a new session, so the argv tests read as they did
+    /// before every run named its session, and add only that.
+    fn build_args(
+        req: &AgentRequest,
+        mcp_config: &Path,
+        strict_mcp: bool,
+        connectors: &RunConnectors,
+    ) -> Vec<String> {
+        super::build_args(
+            req,
+            mcp_config,
+            None,
+            strict_mcp,
+            connectors,
+            &CliSession::New(TEST_SESSION.into()),
+        )
+    }
+
     fn args_for(shell: bool) -> Vec<String> {
         build_args(
             &AgentRequest {
@@ -2121,6 +2579,7 @@ mod tests {
                 disallowed_tools: None,
                 lane: None,
                 cause: None,
+                effort: None,
                 internal: false,
             },
             Path::new("/tmp/mcp.json"),
@@ -2164,6 +2623,7 @@ mod tests {
             disallowed_tools: None,
             lane: None,
             cause: None,
+            effort: None,
             internal: false,
         }
     }
@@ -2343,6 +2803,9 @@ mod tests {
                 "--setting-sources",
                 "user",
                 "--strict-mcp-config",
+                // M56.3: every run names its session.
+                "--session-id",
+                TEST_SESSION,
             ];
             assert_eq!(args, expected, "shell={shell:?}");
         }
@@ -2918,6 +3381,7 @@ mod tests {
                 disallowed_tools: None,
                 lane: None,
                 cause: None,
+                effort: None,
                 internal: false,
             },
             Path::new("/tmp/mcp.json"),
@@ -2954,6 +3418,7 @@ mod tests {
                 disallowed_tools: None,
                 lane: None,
                 cause: None,
+                effort: None,
                 internal: false,
             },
             Path::new("/tmp/mcp.json"),
@@ -2967,31 +3432,238 @@ mod tests {
             .collect()
     }
 
+    /// A located project folder under a temp config home, never the real
+    /// `~/.claude`.
+    fn temp_project(label: &str) -> (PathBuf, transcript::CliProjectDir, PathBuf) {
+        let root = crate::vault::testutil::temp_vault(label);
+        let projects = root.join("config/projects");
+        let located = transcript::CliProjectDir {
+            dir: projects.join("-vault"),
+            projects,
+            shared: false,
+        };
+        std::fs::create_dir_all(&located.dir).unwrap();
+        let history = root.join("config/file-history");
+        (root, located, history)
+    }
+
+    fn put(path: &Path, text: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+
+    const S1: &str = "00000000-0000-4000-8000-000000000001";
+    const S2: &str = "00000000-0000-4000-8000-000000000002";
+    const OTHER: &str = "00000000-0000-4000-8000-000000000009";
+
+    /// The tree CLI 2.1.250 leaves: s1 with its transcript, a tip file and a
+    /// session folder; s2 an orphan folder with no transcript; memory to two
+    /// depths; a stray file nobody knows; file history for s1 and for another
+    /// project's session. Returns the session files' total bytes.
+    fn every_session_folder(dir: &Path, history: &Path) -> u64 {
+        let files: [(PathBuf, &str); 8] = [
+            (dir.join(format!("{S1}.jsonl")), "{}\n"),
+            (dir.join(format!("{S1}.ccr-tip.json")), "{\"t\":1}"),
+            (dir.join(S1).join("subagents/agent-a1.jsonl"), "{}\n{}\n"),
+            (dir.join(S1).join("subagents/agent-a1.meta.json"), "{}"),
+            (dir.join(S1).join("tool-results/t1.txt"), "output"),
+            (dir.join(S1).join("workflows/scripts/w.js"), "run()"),
+            (dir.join(S2).join("tool-results/t2.txt"), "orphan"),
+            (history.join(S1).join("abc@v1"), "note body"),
+        ];
+        let mut bytes = 0;
+        for (path, text) in &files {
+            put(path, text);
+            bytes += text.len() as u64;
+        }
+        put(&dir.join("memory/MEMORY.md"), "m");
+        put(&dir.join("memory/proposals/p.md"), "p");
+        put(&dir.join("notes.txt"), "mine");
+        put(&history.join(OTHER).join("abc@v1"), "someone else's");
+        bytes
+    }
+
     #[test]
-    fn the_cli_workspace_slug_matches_what_the_cli_actually_writes() {
-        // Derived from the real directories on this machine: every character
-        // that is not alphanumeric or a hyphen becomes a hyphen, including the
-        // leading slash and the dot in a hidden directory.
+    fn the_cli_workspace_counts_the_directory_the_cli_writes() {
+        // The key rule's vectors are transcript.rs's; this proves the count
+        // reads the folder that rule names, for a vault whose name the old
+        // per-character slug got wrong (an emoji is two UTF-16 units).
+        let root = crate::vault::testutil::temp_vault("cli-workspace-emoji");
+        let vault = root.join("\u{1f9e0} notes");
+        std::fs::create_dir_all(&vault).unwrap();
+        let env = transcript::CliEnv {
+            config_dir: Some(root.join("config").into_os_string()),
+            project_dir_name: None,
+            home: None,
+        };
+        let located = transcript::cli_project_dir_in(&env, &vault).unwrap();
+        let name = located
+            .dir
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        assert!(name.ends_with("----notes"), "{name}");
+        put(&located.dir.join(format!("{S1}.jsonl")), "{}\n");
+        put(&located.dir.join("memory/MEMORY.md"), "x");
+        let workspace = workspace_at(&located, &root.join("config/file-history"));
+        assert!(workspace.exists);
         assert_eq!(
-            slugify_path(Path::new("/Users/me/Development/cerebro")),
-            "-Users-me-Development-cerebro"
+            (
+                workspace.sessions,
+                workspace.session_files,
+                workspace.bytes,
+                workspace.memory_files
+            ),
+            (1, 1, 3, 1)
         );
+        assert_eq!(workspace.path, located.dir.to_string_lossy());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn the_count_covers_every_session_folder() {
+        let (root, located, history) = temp_project("cli-workspace-count");
+        let bytes = every_session_folder(&located.dir, &history);
+        let workspace = workspace_at(&located, &history);
+        assert_eq!(workspace.sessions, 2, "s1 and the orphan s2");
         assert_eq!(
-            slugify_path(Path::new("/Users/me/Documents/Cerebro Demo Vault")),
-            "-Users-me-Documents-Cerebro-Demo-Vault"
+            workspace.session_files, 8,
+            "seven in the folder, one history"
         );
+        assert_eq!(workspace.bytes, bytes);
+        assert_eq!(workspace.memory_files, 2, "memory is counted to any depth");
+        assert_eq!(workspace.unreadable, 0);
+        assert!(!workspace.shared);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_purge_clears_every_session_folder_and_leaves_what_it_does_not_know() {
+        let (root, located, history) = temp_project("cli-workspace-purge");
+        every_session_folder(&located.dir, &history);
+        assert_eq!(purge_at(&located, &history), Ok(10));
+        let mut left: Vec<String> = std::fs::read_dir(&located.dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        left.sort();
+        assert_eq!(left, vec!["notes.txt"]);
+        assert!(!history.join(S1).exists());
+        assert!(history.join(OTHER).join("abc@v1").exists());
+        let after = workspace_at(&located, &history);
         assert_eq!(
-            slugify_path(Path::new("/Users/me/dev/cerebro/.claude/worktrees/m14")),
-            "-Users-me-dev-cerebro--claude-worktrees-m14"
+            (after.sessions, after.session_files, after.memory_files),
+            (0, 0, 0)
         );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_project_dir_name_override_is_shared_and_never_cleared() {
+        // The env rules are transcript.rs's; this proves a shared folder is
+        // counted and that the purge refuses it with nothing deleted.
+        let root = crate::vault::testutil::temp_vault("cli-workspace-shared");
+        let env = transcript::CliEnv {
+            config_dir: Some(root.join("config").into_os_string()),
+            project_dir_name: Some("team".into()),
+            home: None,
+        };
+        let located = transcript::cli_project_dir_in(&env, &root.join("vault")).unwrap();
+        assert!(located.shared);
+        assert_eq!(located.dir, root.join("config/projects/team"));
+        let history = root.join("config/file-history");
+        every_session_folder(&located.dir, &history);
+        let workspace = workspace_at(&located, &history);
+        assert!(workspace.shared);
+        assert_eq!(workspace.sessions, 2);
+        assert!(purge_at(&located, &history).is_err());
+        assert!(located.dir.join(format!("{S1}.jsonl")).exists());
+        assert!(history.join(S1).exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_purge_refuses_a_folder_that_is_not_a_direct_child_of_projects() {
+        let (root, mut located, history) = temp_project("cli-workspace-escape");
+        put(&located.dir.join(format!("{S1}.jsonl")), "{}\n");
+        let nested = located.dir.clone();
+        located.dir = located.projects.join("a").join("b");
+        assert!(purge_at(&located, &history).is_err());
+        located.dir = located.projects.join("..");
+        assert!(purge_at(&located, &history).is_err());
+        assert!(nested.join(format!("{S1}.jsonl")).exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_workspace_never_follows_a_symlink() {
+        use std::os::unix::fs::symlink;
+        let (root, located, history) = temp_project("cli-workspace-symlink");
+        let outside = root.join("outside");
+        put(&outside.join("secret.txt"), "keep me");
+        put(&located.dir.join(format!("{S1}.jsonl")), "{}\n");
+        symlink(&outside, located.dir.join(S2)).unwrap();
+        symlink(&outside, located.dir.join("memory")).unwrap();
+        let workspace = workspace_at(&located, &history);
+        assert_eq!(
+            (
+                workspace.sessions,
+                workspace.session_files,
+                workspace.memory_files
+            ),
+            (1, 1, 0)
+        );
+        assert_eq!(purge_at(&located, &history), Ok(1));
+        assert!(outside.join("secret.txt").exists());
+        assert!(std::fs::symlink_metadata(located.dir.join(S2)).is_ok());
+
+        // A symlinked project folder is counted, and the purge refuses it.
+        let real = root.join("real-project");
+        put(&real.join(format!("{S1}.jsonl")), "{}\n");
+        let linked = transcript::CliProjectDir {
+            dir: located.projects.join("-linked"),
+            projects: located.projects.clone(),
+            shared: false,
+        };
+        symlink(&real, &linked.dir).unwrap();
+        assert_eq!(workspace_at(&linked, &history).session_files, 1);
+        assert!(purge_at(&linked, &history).is_err());
+        assert!(real.join(format!("{S1}.jsonl")).exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_folder_makes_the_count_a_floor() {
+        use std::os::unix::fs::PermissionsExt;
+        let (root, located, history) = temp_project("cli-workspace-floor");
+        let locked = located.dir.join(S1);
+        put(&locked.join("tool-results/t1.txt"), "x");
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // Root reads through a 000 folder; assert only when the lock took.
+        let took = std::fs::read_dir(&locked).is_err();
+        let workspace = workspace_at(&located, &history);
+        let _ = std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755));
+        if took {
+            assert!(workspace.unreadable >= 1);
+        }
+        assert_eq!(workspace.sessions, 1);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
     fn a_purge_reports_zero_rather_than_failing_when_there_is_nothing_there() {
         // A vault the CLI has never run against. Not an error: "nothing to
         // clear" is the answer, and an error would read as "clearing failed".
-        let dir = std::env::temp_dir().join("cerebro-never-run-vault-xyzzy");
-        assert_eq!(purge_cli_workspace(&dir), Ok(0));
+        // A temp config home, so the real `~/.claude` is never read.
+        let (root, located, history) = temp_project("cli-workspace-never-run");
+        std::fs::remove_dir_all(&located.dir).unwrap();
+        assert_eq!(purge_at(&located, &history), Ok(0));
+        assert!(!workspace_at(&located, &history).exists);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -3195,6 +3867,7 @@ mod tests {
                 disallowed_tools: None,
                 lane: None,
                 cause: None,
+                effort: None,
                 internal: false,
             },
             Path::new("/tmp/mcp.json"),
@@ -3213,43 +3886,154 @@ mod tests {
     }
 
     #[test]
-    fn resume_and_model_are_only_passed_when_set() {
+    fn a_new_run_names_its_session() {
         let bare = args_for(false);
         assert!(!bare.contains(&"--resume".to_string()));
         assert!(!bare.contains(&"--model".to_string()));
-
-        let full = build_args(
-            &AgentRequest {
-                message: "hi".into(),
-                system_prompt: Some("  ".into()),
-                session_id: Some("abc".into()),
-                model: Some("claude-opus-5".into()),
-                shell: None,
-                connectors: None,
-                connector_names: None,
-                attended: None,
-                mcp_url: None,
-                mcp_token: None,
-                actor: None,
-                approved_stdio: None,
-                scope: None,
-                read_scope: None,
-                allowed_tools: None,
-                disallowed_tools: None,
-                lane: None,
-                cause: None,
-                internal: false,
-            },
+        assert_eq!(
+            &bare[bare.len() - 2..],
+            ["--session-id".to_string(), TEST_SESSION.to_string()],
+            "the session closes the argv"
+        );
+        // stream() mints one for a request that names none.
+        let minted = CliSession::for_request(None).unwrap();
+        let args = super::build_args(
+            &panel_style_request(),
             Path::new("/tmp/mcp.json"),
+            None,
             true,
             &RunConnectors::default(),
+            &minted,
         );
-        assert!(full.windows(2).any(|w| w[0] == "--resume" && w[1] == "abc"));
+        let at = args.iter().position(|a| a == "--session-id").unwrap();
+        assert_eq!(
+            transcript::parse_session_id(&args[at + 1]).as_deref(),
+            Some(minted.id())
+        );
+    }
+
+    #[test]
+    fn a_resumed_run_never_mints() {
+        let stored = "00000000-0000-4000-8000-000000000001";
+        let mut req = panel_style_request();
+        req.system_prompt = Some("  ".into());
+        req.session_id = Some(stored.into());
+        req.model = Some("claude-opus-5".into());
+        let session = CliSession::for_request(req.session_id.as_deref()).unwrap();
+        let full = super::build_args(
+            &req,
+            Path::new("/tmp/mcp.json"),
+            None,
+            true,
+            &RunConnectors::default(),
+            &session,
+        );
+        assert!(full
+            .windows(2)
+            .any(|w| w[0] == "--resume" && w[1] == stored));
+        assert!(!full.contains(&"--session-id".to_string()));
         assert!(full
             .windows(2)
             .any(|w| w[0] == "--model" && w[1] == "claude-opus-5"));
         // A whitespace-only system prompt is not a system prompt.
         assert!(!full.contains(&"--append-system-prompt".to_string()));
+    }
+
+    #[test]
+    fn a_malformed_resume_id_is_refused_before_any_spawn() {
+        // stream() asks for_request first, before admission, the run's config
+        // and the meter's row: a refusal here is the whole run.
+        for stored in [
+            "--dangerously-skip-permissions",
+            "abc",
+            "../../escape",
+            "00000000-0000-4000-8000-00000000000Z",
+        ] {
+            let refused = CliSession::for_request(Some(stored)).unwrap_err();
+            assert!(refused.contains("not a session id"), "{stored}: {refused}");
+        }
+    }
+
+    #[test]
+    fn a_model_and_effort_reach_argv_as_separate_values() {
+        let mut req = panel_style_request();
+        req.model = Some("claude-opus-5-5[1m]".into());
+        req.effort = Some("xhigh".into());
+        let args = build_args(
+            &req,
+            Path::new("/tmp/mcp.json"),
+            true,
+            &RunConnectors::default(),
+        );
+        let model = args.iter().position(|a| a == "--model").unwrap();
+        assert_eq!(args[model + 1], "claude-opus-5-5[1m]");
+        // Effort right after the model, each value its own element.
+        assert_eq!(args[model + 2], "--effort");
+        assert_eq!(args[model + 3], "xhigh");
+        assert!(!args
+            .iter()
+            .any(|a| a.contains("--effort ") || a.contains("--model ")));
+        // The session still closes the argv.
+        assert_eq!(args[args.len() - 2], "--session-id");
+    }
+
+    #[test]
+    fn an_unset_model_and_effort_pass_no_flag() {
+        let unset = args_for(false);
+        assert!(!unset.contains(&"--model".to_string()));
+        assert!(!unset.contains(&"--effort".to_string()));
+        // Blank is unset too: the argv is the same, byte for byte.
+        let mut blank = panel_style_request();
+        blank.shell = Some(false);
+        blank.model = Some("  ".into());
+        blank.effort = Some(String::new());
+        let args = build_args(
+            &blank,
+            Path::new("/tmp/mcp.json"),
+            true,
+            &RunConnectors::default(),
+        );
+        assert_eq!(args, unset);
+        // And a set pair adds exactly its four elements and moves nothing.
+        let mut set = blank;
+        set.model = Some("sonnet".into());
+        set.effort = Some("low".into());
+        let mut with = build_args(
+            &set,
+            Path::new("/tmp/mcp.json"),
+            true,
+            &RunConnectors::default(),
+        );
+        let at = with.iter().position(|a| a == "--model").unwrap();
+        let added: Vec<String> = with.drain(at..at + 4).collect();
+        assert_eq!(added, ["--model", "sonnet", "--effort", "low"]);
+        assert_eq!(with, unset);
+    }
+
+    #[test]
+    fn stream_refuses_an_unknown_effort_before_admitting() {
+        // spawn_run is where stream() admits; the check comes first, so a
+        // refused run takes no slot and writes no config.
+        let state = AgentState::default();
+        let dir = std::env::temp_dir().join("cerebro-run-options-never-written");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut req = panel_style_request();
+        req.effort = Some("turbo".into());
+        let session = CliSession::for_request(None).unwrap();
+        let refused = spawn_run(&state, Path::new("/tmp"), &req, &session, &dir, None, None)
+            .err()
+            .expect("an effort Claude Code ignores is refused");
+        assert!(refused.starts_with("effort \"turbo\""), "{refused}");
+        assert!(refused.ends_with("Nothing was started."), "{refused}");
+        assert_eq!(state.live(), 0);
+        assert!(!dir.exists(), "nothing was written for the run");
+        req.effort = None;
+        req.model = Some("--dangerously-skip-permissions".into());
+        let refused = spawn_run(&state, Path::new("/tmp"), &req, &session, &dir, None, None)
+            .err()
+            .expect("a flag is not a model");
+        assert!(refused.starts_with("model "), "{refused}");
+        assert_eq!(state.live(), 0);
     }
 
     #[test]
@@ -3679,11 +4463,15 @@ mod tests {
                         ..RunConnectors::default()
                     }
                 );
+                // The paragraph lands before the session, which closes argv.
                 let mut named = shipped.clone();
-                named.extend([
-                    "--append-system-prompt".to_string(),
-                    missing_connectors_paragraph(&reach.missing).unwrap(),
-                ]);
+                named.splice(
+                    named.len() - 2..named.len() - 2,
+                    [
+                        "--append-system-prompt".to_string(),
+                        missing_connectors_paragraph(&reach.missing).unwrap(),
+                    ],
+                );
                 assert_eq!(
                     build_args(&req, Path::new("/tmp/x.json"), strict, &reach),
                     named,
@@ -4020,157 +4808,12 @@ mod tests {
         assert!(!names_tool("mcp__cerebro__Bash", "Bash"));
     }
 
-    #[test]
-    fn translates_the_cli_stream_into_normalized_events() {
-        let mut session = None;
-
-        let init = translate(
-            &json!({ "type": "system", "subtype": "init", "session_id": "s-1" }),
-            &mut session,
-        );
-        assert!(
-            matches!(init.as_slice(), [AgentEvent::Init { session_id }] if session_id == "s-1")
-        );
-        assert_eq!(session.as_deref(), Some("s-1"));
-
-        let delta = translate(
-            &json!({
-                "type": "stream_event",
-                "event": { "type": "content_block_delta", "delta": { "type": "text_delta", "text": "he" } }
-            }),
-            &mut session,
-        );
-        assert!(matches!(delta.as_slice(), [AgentEvent::TextDelta { text }] if text == "he"));
-
-        let tool = translate(
-            &json!({
-                "type": "assistant",
-                "message": { "content": [{ "type": "tool_use", "id": "t1", "name": "search_notes", "input": { "query": "x" } }] }
-            }),
-            &mut session,
-        );
-        assert!(
-            matches!(tool.as_slice(), [AgentEvent::ToolStart { tool_name, tool_id, .. }]
-                if tool_name == "search_notes" && tool_id == "t1")
-        );
-
-        let done = translate(
-            &json!({ "type": "user", "message": { "content": [{ "type": "tool_result", "tool_use_id": "t1" }] } }),
-            &mut session,
-        );
-        assert!(
-            matches!(done.as_slice(), [AgentEvent::ToolDone { tool_id, .. }] if tool_id == "t1")
-        );
-
-        let result = translate(
-            &json!({ "type": "result", "subtype": "success", "result": "done", "session_id": "s-1" }),
-            &mut session,
-        );
-        assert!(matches!(result.as_slice(), [AgentEvent::Result { text, .. }] if text == "done"));
-    }
-
-    // M9.5: the CLI shapes tool_result content two different ways in the same
-    // stream. Reading only one silently drops half the outputs.
-    #[test]
-    fn tool_results_carry_their_output_in_either_shape() {
-        let mut sid = None;
-        let string_form = translate(
-            &json!({ "type": "user", "message": { "content": [
-                { "type": "tool_result", "tool_use_id": "t1", "content": "  four notes  " }
-            ] } }),
-            &mut sid,
-        );
-        assert!(matches!(
-            string_form.as_slice(),
-            [AgentEvent::ToolDone { output: Some(text), is_error: false, .. }] if text == "four notes"
-        ));
-
-        let block_form = translate(
-            &json!({ "type": "user", "message": { "content": [
-                { "type": "tool_result", "tool_use_id": "t2", "content": [
-                    { "type": "text", "text": "line one" },
-                    { "type": "text", "text": "line two" }
-                ] }
-            ] } }),
-            &mut sid,
-        );
-        assert!(matches!(
-            block_form.as_slice(),
-            [AgentEvent::ToolDone { output: Some(text), .. }] if text == "line one\nline two"
-        ));
-    }
-
-    #[test]
-    fn a_failed_tool_reports_as_such() {
-        let mut sid = None;
-        let events = translate(
-            &json!({ "type": "user", "message": { "content": [
-                { "type": "tool_result", "tool_use_id": "t1", "content": "nope", "is_error": true }
-            ] } }),
-            &mut sid,
-        );
-        assert!(matches!(
-            events.as_slice(),
-            [AgentEvent::ToolDone { is_error: true, .. }]
-        ));
-    }
-
-    #[test]
-    fn an_empty_tool_result_carries_no_output() {
-        let mut sid = None;
-        let events = translate(
-            &json!({ "type": "user", "message": { "content": [
-                { "type": "tool_result", "tool_use_id": "t1", "content": "   " }
-            ] } }),
-            &mut sid,
-        );
-        assert!(matches!(
-            events.as_slice(),
-            [AgentEvent::ToolDone { output: None, .. }]
-        ));
-    }
-
-    #[test]
-    fn a_failed_result_surfaces_as_an_error_not_a_reply() {
-        let mut session = None;
-        let events = translate(
-            &json!({ "type": "result", "is_error": true, "result": "rate limited" }),
-            &mut session,
-        );
-        assert!(
-            matches!(events.as_slice(), [AgentEvent::Error { message }] if message == "rate limited")
-        );
-    }
-
-    #[test]
-    fn unknown_and_malformed_lines_are_ignored_rather_than_shown() {
-        let mut session = None;
-        // The CLI's wire format changes between versions; an unknown shape
-        // must not become a visible error in the conversation.
-        assert!(translate(&json!({ "type": "telemetry" }), &mut session).is_empty());
-        assert!(translate(&json!({}), &mut session).is_empty());
-        assert!(translate(&json!({ "type": "stream_event" }), &mut session).is_empty());
-    }
-
-    // M49.9 (K25): the preview keeps the path a long write_concept names —
-    // the run log reads it from here.
-    #[test]
-    fn a_long_tool_input_keeps_its_path_and_stays_json() {
-        let input = serde_json::json!({
-            "path": "knowledge/metrics/churn.md",
-            "body": "x".repeat(5_000),
-        });
-        let preview = tool_input_preview(&input);
-        let parsed: serde_json::Value = serde_json::from_str(&preview).unwrap();
-        assert_eq!(parsed["path"], "knowledge/metrics/churn.md");
-        assert!(preview.len() < 400, "{}", preview.len());
-    }
-
     // --- M54.5: tools ready early, and no run answers without them --------
     //
     // No stream fixture here is a recording. Each is hand-shaped to CLI
-    // 2.1.250's init schema, like the rest of cli-stream/, with synthetic ids,
-    // so these tests pin how we read a stream, never what the CLI writes.
+    // 2.1.250's init schema, like the rest of cli-stream/'s top level, with
+    // synthetic ids, so these tests pin how we read a stream, never what the
+    // CLI writes. The recordings are cli-stream/real/ (M56.2).
 
     const INIT_CONNECTED: &str = include_str!("../../fixtures/cli-stream/init-connected.json");
     const INIT_PENDING: &str = include_str!("../../fixtures/cli-stream/init-pending.json");
@@ -4213,11 +4856,11 @@ mod tests {
     /// Every line through one gate: what it let out, and how often it refused.
     fn gated(expects_cerebro: bool, lines: &[Value]) -> (Vec<AgentEvent>, usize) {
         let mut gate = InitGate::new(7, expects_cerebro);
-        let mut session = None;
+        let mut fold = fold::TranscriptFold::default();
         let mut events = Vec::new();
         let mut refusals = 0;
         for line in lines {
-            let admitted = gate.admit(line, &mut session);
+            let admitted = gate.admit(line, fold.entry(line).1);
             events.extend(admitted.events);
             refusals += usize::from(admitted.refuse);
         }
@@ -4359,8 +5002,18 @@ mod tests {
         let (events, refusals) = gated(true, &answer_after(parsed(INIT_FAILED)));
         assert_eq!(refusals, 1, "refused exactly once");
         match events.as_slice() {
-            [AgentEvent::Init { session_id }, AgentEvent::Error { message }] => {
+            [AgentEvent::Init { session_id }, AgentEvent::Error {
+                message,
+                code: None,
+                notice: Some(notice),
+            }] => {
                 assert_eq!(session_id, "00000000-0000-4000-8000-000000000007");
+                // M56.4: the refusal carries the tools notice, worded as the
+                // error is.
+                assert_eq!(notice.kind, failure::FailureKind::ToolsUnavailable);
+                assert_eq!(notice.title, "Cerebro's tools didn't load");
+                assert_eq!(&notice.body, message);
+                assert_eq!(notice.action, None);
                 assert_eq!(
                     message,
                     "Cerebro's tools did not load for this run (Claude Code reported them as \
@@ -4374,7 +5027,7 @@ mod tests {
         let (events, refusals) = gated(true, &answer_after(cerebro_reads("needs-auth")));
         assert_eq!(refusals, 1);
         assert!(
-            matches!(events.as_slice(), [AgentEvent::Init { .. }, AgentEvent::Error { message }]
+            matches!(events.as_slice(), [AgentEvent::Init { .. }, AgentEvent::Error { message, .. }]
                 if message.contains("reported them as needs-auth")),
             "{events:?}"
         );
@@ -4400,24 +5053,26 @@ mod tests {
     #[test]
     fn a_pending_cerebro_init_lets_the_run_answer() {
         let mut gate = InitGate::new(7, true);
-        let mut session = None;
+        let mut fold = fold::TranscriptFold::default();
+        let mut folded = |line: &Value| fold.entry(line).1;
         let lines = answer_after(parsed(INIT_PENDING));
-        let init = gate.admit(&lines[0], &mut session);
+        let init = gate.admit(&lines[0], folded(&lines[0]));
         assert!(!init.refuse);
         assert!(
             matches!(init.events.as_slice(), [AgentEvent::Init { .. }]),
             "{:?}",
             init.events
         );
-        let delta = gate.admit(&lines[1], &mut session);
+        let delta = gate.admit(&lines[1], folded(&lines[1]));
         assert!(
             matches!(delta.events.as_slice(), [AgentEvent::TextDelta { text }] if text == "From memory, ")
         );
-        let result = gate.admit(&lines[4], &mut session);
-        assert!(matches!(
-            result.events.as_slice(),
-            [AgentEvent::Result { .. }]
-        ));
+        let result = gate.admit(&lines[4], folded(&lines[4]));
+        assert!(
+            matches!(result.events.as_slice(), [AgentEvent::Result { .. }, ..]),
+            "{:?}",
+            result.events
+        );
 
         // An unknown word never ends a run either.
         let (events, refusals) = gated(true, &answer_after(cerebro_reads("needs-approval")));
@@ -4426,8 +5081,11 @@ mod tests {
 
         // Only the run's first init is judged.
         let mut gate = InitGate::new(7, true);
-        assert!(!gate.admit(&parsed(INIT_CONNECTED), &mut session).refuse);
-        let later = gate.admit(&parsed(INIT_FAILED), &mut session);
+        let mut fold = fold::TranscriptFold::default();
+        let connected = parsed(INIT_CONNECTED);
+        assert!(!gate.admit(&connected, fold.entry(&connected).1).refuse);
+        let failed = parsed(INIT_FAILED);
+        let later = gate.admit(&failed, fold.entry(&failed).1);
         assert!(!later.refuse);
         assert!(matches!(later.events.as_slice(), [AgentEvent::Init { .. }]));
     }
@@ -4440,11 +5098,8 @@ mod tests {
         // making that turn.
         let lines: Vec<Value> = serde_json::from_str(FIRST_TURN).unwrap();
         assert_eq!(lines[0]["claude_code_version"], "2.1.250");
-        let mut session = None;
-        let events: Vec<AgentEvent> = lines
-            .iter()
-            .flat_map(|line| translate(line, &mut session))
-            .collect();
+        let mut fold = fold::TranscriptFold::default();
+        let events: Vec<AgentEvent> = lines.iter().flat_map(|line| fold.entry(line).1).collect();
         let starts: Vec<&str> = events
             .iter()
             .filter_map(|event| match event {
@@ -4524,6 +5179,130 @@ mod tests {
     }
 
     #[test]
+    fn read_stream_attaches_the_notice_to_the_error_event() {
+        let wrapper: Value = serde_json::from_str(include_str!(
+            "../../fixtures/cli-stream/usage-limit-stream.json"
+        ))
+        .unwrap();
+        let stream: String = wrapper["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|line| format!("{line}\n"))
+            .collect();
+        let mut events = Vec::new();
+        let tally = read_stream(
+            stream.as_bytes(),
+            InitGate::new(3, true),
+            &mut no_connectors(),
+            &mut |event| events.push(event),
+            &mut || {},
+        );
+        let errors: Vec<&AgentEvent> = events
+            .iter()
+            .filter(|event| matches!(event, AgentEvent::Error { .. }))
+            .collect();
+        match errors.as_slice() {
+            [AgentEvent::Error {
+                code: Some(code),
+                notice: Some(notice),
+                ..
+            }] => {
+                assert_eq!(code, "rate_limit");
+                assert_eq!(notice.kind, failure::FailureKind::UsageLimit);
+                assert_eq!(notice.resets_at.as_deref(), Some("2026-01-01T00:00:00Z"));
+                assert_eq!(notice.cli_version.as_deref(), Some("2.1.250"));
+            }
+            other => panic!("expected one error with its notice, got {other:?}"),
+        }
+        assert_eq!(
+            tally.ended(false, false).0,
+            crate::runtime::dispatch::RunOutcome::QuotaFailed,
+            "the fold's verdict reaches the meter"
+        );
+    }
+
+    #[test]
+    fn an_error_without_a_notice_serializes_as_before() {
+        let bare = AgentEvent::Error {
+            message: "Claude Code exited with code 1".into(),
+            code: None,
+            notice: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&bare).unwrap(),
+            r#"{"kind":"Error","message":"Claude Code exited with code 1"}"#
+        );
+        let typed = AgentEvent::Error {
+            message: "Not logged in".into(),
+            code: Some("authentication_failed".into()),
+            notice: Some(failure::notice(
+                failure::FailureKind::NotSignedIn,
+                None,
+                None,
+                Some("2.1.250"),
+            )),
+        };
+        let wire = serde_json::to_value(&typed).unwrap();
+        assert_eq!(wire["notice"]["kind"], "not_signed_in");
+        assert_eq!(wire["notice"]["action"], "open_settings");
+        assert_eq!(wire["notice"]["resets_at"], Value::Null);
+        assert_eq!(wire["notice"]["cli_version"], "2.1.250");
+    }
+
+    #[test]
+    fn read_stream_ends_a_cut_off_run_interrupted() {
+        // A run stopped mid-tool: no result ever comes, and the reader's own
+        // end says so rather than leaving the turn open.
+        let stream: String = answer_after(parsed(INIT_CONNECTED))[..3]
+            .iter()
+            .map(|line| format!("{line}\n"))
+            .collect();
+        let mut events = Vec::new();
+        read_stream(
+            stream.as_bytes(),
+            InitGate::new(3, true),
+            &mut no_connectors(),
+            &mut |event| events.push(event),
+            &mut || {},
+        );
+        assert!(
+            matches!(events.last(), Some(AgentEvent::TurnInterrupted { reason }) if reason == "cut_off"),
+            "{events:?}"
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| matches!(
+                    e,
+                    AgentEvent::TurnInterrupted { .. } | AgentEvent::TurnEnded { .. }
+                ))
+                .count(),
+            1
+        );
+        // A whole answer ends once, at its result.
+        let whole: String = answer_after(parsed(INIT_CONNECTED))
+            .iter()
+            .map(|line| format!("{line}\n"))
+            .collect();
+        let mut events = Vec::new();
+        read_stream(
+            whole.as_bytes(),
+            InitGate::new(3, true),
+            &mut no_connectors(),
+            &mut |event| events.push(event),
+            &mut || {},
+        );
+        assert!(
+            matches!(
+                events.as_slice(),
+                [.., AgentEvent::Result { .. }, AgentEvent::TurnEnded { .. }]
+            ),
+            "{events:?}"
+        );
+    }
+
+    #[test]
     fn only_a_run_that_holds_a_cerebro_tool_is_gated() {
         let holds = |shell: Option<bool>, allowed: Option<Vec<&str>>| {
             let mut req = panel_style_request();
@@ -4544,6 +5323,340 @@ mod tests {
         assert!(
             !holds(Some(true), Some(vec!["Bash", "Read"])),
             "the CLI's own tools are not cerebro's"
+        );
+    }
+
+    // --- The ask seam (M57.1) -------------------------------------------------
+
+    const ASKED: &str = "mcp__cerebro__append_to_note";
+
+    fn meter_for(mode: meter::Mode, parent: Option<&str>) -> meter::Meter {
+        meter::Meter {
+            data_dir: PathBuf::from("/nowhere"),
+            run_id: "run-seat".into(),
+            mode,
+            vault_id: None,
+            store_uuid: None,
+            started_at: chrono::Utc::now(),
+            elapsed_limit_seconds: None,
+            actor: None,
+            parent_run_id: parent.map(str::to_string),
+            cause: None,
+        }
+    }
+
+    fn attended_request() -> AgentRequest {
+        AgentRequest {
+            attended: Some(true),
+            ..panel_style_request()
+        }
+    }
+
+    /// A book that asks for ASKED, with `run-seat` seated in it.
+    fn seated(req: &AgentRequest) -> interaction::Interactions {
+        let book = interaction::Interactions::with_asks(vec![ASKED.into()]);
+        book.open_seat(
+            interaction::Seat::new("run-seat", TEST_SESSION, Path::new("/v"), req),
+            None,
+        );
+        book
+    }
+
+    #[test]
+    fn a_tool_the_gate_may_defer_is_never_pre_approved() {
+        let gate = RunGate {
+            settings: PathBuf::from("/tmp/run-settings-1.json"),
+            asks: vec![ASKED.into()],
+        };
+        let shapes = [
+            attended_request(),
+            AgentRequest {
+                shell: Some(true),
+                ..attended_request()
+            },
+            AgentRequest {
+                read_scope: Some(vec!["notes".into()]),
+                ..attended_request()
+            },
+            AgentRequest {
+                scope: Some(vec!["notes".into()]),
+                allowed_tools: Some(vec!["append_to_note".into(), "get_note".into()]),
+                ..attended_request()
+            },
+            AgentRequest {
+                connectors: Some(true),
+                ..attended_request()
+            },
+        ];
+        for req in shapes {
+            let granted = granted_cli_tools(&req, &RunConnectors::default());
+            assert!(granted.iter().any(|t| t == ASKED), "{req:?} holds it");
+            let args = super::build_args(
+                &req,
+                Path::new("/tmp/mcp.json"),
+                Some(&gate),
+                true,
+                &RunConnectors::default(),
+                &CliSession::New(TEST_SESSION.into()),
+            );
+            let allowed = allowed_tools(&args);
+            assert!(
+                !allowed.split(',').any(|t| t == ASKED),
+                "{req:?}: an asked tool is never pre-approved: {allowed}"
+            );
+            assert!(!allowed.is_empty(), "the rest stays granted");
+            let sources = args.iter().position(|a| a == "--setting-sources").unwrap();
+            assert_eq!(args[sources + 1], "user");
+            assert_eq!(args[sources + 2], "--settings");
+            assert_eq!(args[sources + 3], "/tmp/run-settings-1.json");
+        }
+    }
+
+    #[test]
+    fn a_run_that_asks_nothing_keeps_its_argv() {
+        let dir = std::env::temp_dir().join("cerebro-agent-test-no-gate");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let req = attended_request();
+        // A release build's book: no asks, so no gate and no file.
+        let book = interaction::Interactions::with_asks(Vec::new());
+        book.open_seat(
+            interaction::Seat::new("run-seat", TEST_SESSION, Path::new("/v"), &req),
+            None,
+        );
+        let granted = granted_cli_tools(&req, &RunConnectors::default());
+        let path = dir.join("run-settings-0.json");
+        assert!(run_gate(&book, "run-seat", &granted, &path)
+            .unwrap()
+            .is_none());
+        assert!(!path.exists(), "no settings file");
+        let plain = build_args(
+            &req,
+            Path::new("/tmp/mcp.json"),
+            true,
+            &RunConnectors::default(),
+        );
+        let gated = super::build_args(
+            &req,
+            Path::new("/tmp/mcp.json"),
+            None,
+            true,
+            &RunConnectors::default(),
+            &CliSession::New(TEST_SESSION.into()),
+        );
+        assert_eq!(plain, gated);
+        assert!(!plain.iter().any(|a| a == "--settings"));
+        // And an unseated run, whatever the book asks for, gets none.
+        let asking = seated(&req);
+        assert!(run_gate(&asking, "other-run", &granted, &path)
+            .unwrap()
+            .is_none());
+        assert!(!path.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unattended_internal_and_handoff_runs_get_no_seat() {
+        let attended = attended_request();
+        assert!(takes_a_seat(
+            &attended,
+            &meter_for(meter::Mode::Attended, None)
+        ));
+        let unattended = AgentRequest {
+            attended: Some(false),
+            ..panel_style_request()
+        };
+        let absent = panel_style_request();
+        let internal = AgentRequest {
+            internal: true,
+            ..attended_request()
+        };
+        for req in [&unattended, &absent, &internal] {
+            assert!(!takes_a_seat(req, &meter_for(meter::Mode::Attended, None)));
+        }
+        // A handed-to run is attended but started by a tool call.
+        assert!(!takes_a_seat(
+            &attended,
+            &meter_for(meter::Mode::Attended, Some("caller"))
+        ));
+        for mode in [meter::Mode::Ambient, meter::Mode::Supervised] {
+            assert!(!takes_a_seat(&attended, &meter_for(mode, None)));
+        }
+    }
+
+    #[test]
+    fn the_settings_file_is_owner_only_and_leaves_with_the_run() {
+        let dir = std::env::temp_dir().join("cerebro-agent-test-settings");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let req = attended_request();
+        let book = seated(&req);
+        let granted = granted_cli_tools(&req, &RunConnectors::default());
+        let path = dir.join(format!("{RUN_SETTINGS_PREFIX}3.json"));
+        // Asked with the CLI's real version; this machine may have none, and
+        // then the gate stays off, which `an_older_cli_gets_no_gate` covers.
+        let plan = book.ask_plan("run-seat", &granted, Some("2.1.250 (Claude Code)"));
+        assert_eq!(plan.asks, vec![ASKED.to_string()]);
+        write_run_config(&path, &interaction::hook_settings(&plan.matcher()).unwrap()).unwrap();
+        let written: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(written["hooks"]["PreToolUse"][0]["matcher"], ASKED);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "the settings file is the run's own");
+        }
+        // The run's end removes it beside its config, and its seat goes.
+        book.close_seat("run-seat");
+        assert!(book
+            .ask_plan("run-seat", &granted, Some("2.1.250"))
+            .is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_sweep_takes_stale_settings_files() {
+        let dir = std::env::temp_dir().join("cerebro-agent-test-sweep-settings");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("run-settings-4.json"), "{}").unwrap();
+        std::fs::write(dir.join("run-settings-4.txt"), "keep").unwrap();
+        std::fs::write(dir.join("settings.json"), "keep").unwrap();
+        sweep_run_configs(&dir);
+        assert!(!dir.join("run-settings-4.json").exists());
+        assert!(dir.join("run-settings-4.txt").exists());
+        assert!(dir.join("settings.json").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The synthetic deferred stream, as the bytes a CLI would write, with
+    /// its session id put where `seated` seats the run.
+    fn deferred_bytes() -> String {
+        let lines: Vec<Value> = serde_json::from_str(include_str!(
+            "../../fixtures/cli-stream/transcript-deferred.stream.json"
+        ))
+        .unwrap();
+        lines
+            .iter()
+            .map(|line| {
+                format!(
+                    "{}\n",
+                    line.to_string()
+                        .replace("00000000-0000-4000-8000-000000000057", TEST_SESSION)
+                )
+            })
+            .collect()
+    }
+
+    const DEFERRED_ID: &str = "toolu_000000000000000000005701";
+
+    fn read_announced(book: &interaction::Interactions, seatedness: bool) -> Vec<AgentEvent> {
+        let mut events = Vec::new();
+        read_stream(
+            deferred_bytes().as_bytes(),
+            InitGate::new(3, true),
+            &mut no_connectors(),
+            &mut |event| {
+                announce(book, seatedness, TEST_SESSION, event, &mut |e| {
+                    events.push(e)
+                })
+            },
+            &mut || {},
+        );
+        // The reader's own last word, after its books.
+        events.push(AgentEvent::Done);
+        events
+    }
+
+    #[test]
+    fn the_reader_announces_a_confirmed_wait_before_done() {
+        let req = attended_request();
+        let book = seated(&req);
+        // The hook asked during the run, before the result came back.
+        let call = interaction::GateCall {
+            session_id: TEST_SESSION.into(),
+            tool_use_id: DEFERRED_ID.into(),
+            tool_name: ASKED.into(),
+            tool_input: serde_json::json!({ "path": "notes/inbox.md" }),
+            agent_id: String::new(),
+        };
+        assert_eq!(book.gate("run-seat", &call), interaction::GateAnswer::Defer);
+        let events = read_announced(&book, true);
+        let tail: Vec<&AgentEvent> = events.iter().rev().take(3).rev().collect();
+        let [AgentEvent::Interaction { interaction }, AgentEvent::ToolDeferred { tool_id, .. }, AgentEvent::Done] =
+            tail.as_slice()
+        else {
+            panic!("a card, its deferral, then Done: {events:?}");
+        };
+        assert_eq!(interaction.tool_id, DEFERRED_ID);
+        assert_eq!(tool_id, DEFERRED_ID);
+        assert!(!events.iter().any(|e| matches!(
+            e,
+            AgentEvent::Result { .. }
+                | AgentEvent::TurnEnded { .. }
+                | AgentEvent::TurnInterrupted { .. }
+        )));
+        book.close_seat("run-seat");
+        assert_eq!(
+            book.pending(Path::new("/v")).len(),
+            1,
+            "the card outlives its run"
+        );
+    }
+
+    #[test]
+    fn a_foreign_deferral_shows_no_card() {
+        let req = attended_request();
+        // Nothing registered it: a hook outside Cerebro deferred the call.
+        let book = seated(&req);
+        let events = read_announced(&book, true);
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::Interaction { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::ToolDeferred { .. })));
+        // An unseated run never looks the call up at all.
+        let call = interaction::GateCall {
+            session_id: TEST_SESSION.into(),
+            tool_use_id: DEFERRED_ID.into(),
+            tool_name: ASKED.into(),
+            tool_input: Value::Null,
+            agent_id: String::new(),
+        };
+        book.gate("run-seat", &call);
+        let events = read_announced(&book, false);
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::Interaction { .. })));
+        assert!(book.pending(Path::new("/v")).is_empty());
+    }
+
+    #[test]
+    fn the_wire_names_both_new_events() {
+        let card = interaction::InteractionCard {
+            id: "a".repeat(32),
+            kind: interaction::Kind::Permission,
+            tool_name: ASKED.into(),
+            tool_id: "t1".into(),
+            session_id: TEST_SESSION.into(),
+            summary: "Append to a note · notes/inbox.md".into(),
+            input: "{}".into(),
+            asked_at: "2026-10-14T12:00:00.000Z".into(),
+        };
+        let wire = serde_json::to_value(AgentEvent::Interaction { interaction: card }).unwrap();
+        assert_eq!(wire["kind"], "Interaction");
+        assert_eq!(wire["interaction"]["kind"], "permission");
+        assert_eq!(wire["interaction"]["tool_id"], "t1");
+        let wire = serde_json::to_value(AgentEvent::ToolDeferred {
+            tool_id: "t1".into(),
+            tool_name: ASKED.into(),
+        })
+        .unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({ "kind": "ToolDeferred", "tool_id": "t1", "tool_name": ASKED })
         );
     }
 }

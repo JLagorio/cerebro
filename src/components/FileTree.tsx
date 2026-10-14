@@ -6,6 +6,8 @@ import { Dropdown } from '@/components/ui/Dropdown';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
+import { addSubPage, nestPage } from '@/app/pageActions';
+import { canHaveSubPages, isFolderNote } from '@/engine/docPages';
 import type { Entry } from '@/engine/types';
 import { createFolder, deleteNote, readNote, renameNote, setNoteTitle } from '@/lib/ipc';
 import { askedAbout, TEMPLATE_FILL_LABEL } from '@/lib/prompts';
@@ -21,6 +23,7 @@ import {
   todayIso,
 } from '@/lib/templates';
 import { isDocEntry, typeStyle } from '@/engine/typeCatalog';
+import { EntryIcon } from '@/components/PageIcon';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
@@ -32,8 +35,8 @@ interface TreeNode {
   /** Human-readable row text: note titles for files, title-cased slugs for
    * folders (M2.x feedback: show "App Notes", never "app-notes"). */
   label: string;
-  /** 'doc' = folder-note multi-page doc: the folder renders as a document
-   * whose extra pages nest beneath it (M2.x docs polish). */
+  /** 'doc' = folder note: the folder renders as the page it holds, with its
+   * sub-pages nested beneath it (M2.x docs polish, M55.13). */
   kind: 'folder' | 'file' | 'doc';
   /** For 'doc' nodes: path of the folder note (the doc's default page). */
   mainPath?: string;
@@ -169,7 +172,9 @@ function buildTree(
 type TreeDialog =
   | { mode: 'new-page'; dir: string }
   | { mode: 'new-folder'; dir: string }
-  | { mode: 'rename'; node: TreeNode };
+  | { mode: 'rename'; node: TreeNode }
+  /** M55.13: a page inside `parent` (a page's path), through addSubPage. */
+  | { mode: 'sub-page'; parent: Entry };
 
 export interface FileTreeProps {
   /** Directory whose contents are shown ('' = whole vault). */
@@ -219,7 +224,8 @@ export function FileTree({
   const askAgent = useUiStore((s) => s.askAgent);
 
   const templates = useMemo(() => listTemplates(entries), [entries]);
-  // M3: typed files carry their type's icon/color in the tree.
+  // A page's own icon comes first (M55.11); without one, a typed file
+  // carries its type's icon and color (M3).
   const schema = useSchema();
   const entryByPath = useMemo(() => new Map(entries.map((e) => [e.path, e])), [entries]);
 
@@ -254,7 +260,9 @@ export function FileTree({
   // Task 14: right-click menu — node targets a row, node:null targets root.
   const [menu, setMenu] = useState<{ x: number; y: number; node: TreeNode | null } | null>(null);
   // Drag & drop (M2.x): drag any row; drop INTO folders/docs (moves the item
-  // and everything inside it) or BETWEEN siblings (manual reorder).
+  // and everything inside it) or BETWEEN siblings (manual reorder). A page
+  // row that can take sub-pages takes a drop into its middle too, which nests
+  // the dragged page under it (M55.13).
   const [dragPath, setDragPath] = useState<string | null>(null);
   const [dropHint, setDropHint] = useState<{
     path: string;
@@ -354,16 +362,19 @@ export function FileTree({
     e.dataTransfer.dropEffect = 'move';
     const rect = e.currentTarget.getBoundingClientRect();
     const y = (e.clientY - rect.top) / Math.max(rect.height, 1);
-    const mode: 'into' | 'before' | 'after' =
-      node.kind === 'file'
-        ? y < 0.5
-          ? 'before'
-          : 'after'
-        : y < 0.25
-          ? 'before'
-          : y > 0.75
-            ? 'after'
-            : 'into';
+    // Three zones on a folder, a doc, and a page that can have sub-pages;
+    // two on any other file.
+    const entry = node.kind === 'file' ? entryByPath.get(node.path) : undefined;
+    const nests = node.kind !== 'file' || (entry !== undefined && canHaveSubPages(entry));
+    const mode: 'into' | 'before' | 'after' = !nests
+      ? y < 0.5
+        ? 'before'
+        : 'after'
+      : y < 0.25
+        ? 'before'
+        : y > 0.75
+          ? 'after'
+          : 'into';
     setDropHint((prev) =>
       prev?.path === node.path && prev.mode === mode ? prev : { path: node.path, mode },
     );
@@ -377,8 +388,27 @@ export function FileTree({
     setDragPath(null);
     setDropHint(null);
     if (src === null || hint === null || hint.path !== node.path) return;
-    if (hint.mode === 'into') void moveInto(src, node.path);
+    if (hint.mode === 'into' && node.kind === 'file') void nestInto(src, node.path);
+    else if (hint.mode === 'into') void moveInto(src, node.path);
     else void placeBeside(src, node, hint.mode);
+  };
+
+  /** Nest `src` under the page `target` (M55.13); nestPage toasts a refusal. */
+  const nestInto = async (src: string, target: string) => {
+    const moves = await nestPage(src, target);
+    if (moves === null) return;
+    const folder = parentDir(moves[moves.length - 1].to);
+    if (useUiStore.getState().expandedFolders[folder] !== true) toggleFolder(folder);
+    // Follow the open page through each move: the target, when it grew, or
+    // the page that was dropped.
+    let open: string | null = null;
+    for (const step of moves) {
+      const from: string | null = open ?? activePath;
+      if (from === null) break;
+      if (from === step.from) open = step.to;
+      else if (from.startsWith(`${step.from}/`)) open = `${step.to}${from.slice(step.from.length)}`;
+    }
+    if (open !== null) onOpen(open);
   };
 
   const openDialog = (d: TreeDialog) => {
@@ -411,6 +441,15 @@ export function FileTree({
     if (dialog === null || vaultPath === null || trimmed === '' || submitting) return;
     setSubmitting(true);
     try {
+      if (dialog.mode === 'sub-page') {
+        // addSubPage never throws: a refusal or failure is its own toast.
+        const path = await addSubPage(dialog.parent.path, trimmed);
+        if (path === null) return;
+        revealAncestors(path);
+        closeDialog();
+        onOpen(path);
+        return;
+      }
       if (dialog.mode === 'new-page') {
         // Typed capitalization becomes the H1; the filename is the slug.
         const slug = slugify(trimmed) || 'page';
@@ -506,7 +545,9 @@ export function FileTree({
           ? 'rename'
           : dialog.mode === 'new-page'
             ? 'create page'
-            : 'create folder';
+            : dialog.mode === 'sub-page'
+              ? 'add sub-page'
+              : 'create folder';
       toast(`Couldn't ${verb}`);
     } finally {
       setSubmitting(false);
@@ -527,9 +568,25 @@ export function FileTree({
     }
   };
 
+  /** The page a row stands for, when it can take sub-pages: a file row's own
+   * entry, or a doc row's folder note. */
+  const subPageHost = (node: TreeNode): Entry | null => {
+    const path = node.kind === 'doc' ? node.mainPath : node.kind === 'file' ? node.path : undefined;
+    const entry = path === undefined ? undefined : entryByPath.get(path);
+    return entry !== undefined && canHaveSubPages(entry) ? entry : null;
+  };
+
+  const openSubPage = (node: TreeNode) => {
+    const host = subPageHost(node);
+    if (host !== null) openDialog({ mode: 'sub-page', parent: host });
+  };
+
   const menuItems = (node: TreeNode | null): ContextMenuItem[] => {
     const dir = node === null ? root : node.kind === 'file' ? parentDir(node.path) : node.path;
     const items: ContextMenuItem[] = [
+      ...(node !== null && subPageHost(node) !== null
+        ? [{ icon: 'file-plus', label: 'Add sub-page', onSelect: () => openSubPage(node) }]
+        : []),
       {
         icon: 'file-plus',
         label: 'New page',
@@ -574,6 +631,14 @@ export function FileTree({
           label={`New page in ${node.label}`}
           size="sm"
           onClick={() => openDialog({ mode: 'new-page', dir: node.path })}
+        />
+      )}
+      {node.kind === 'file' && subPageHost(node) !== null && (
+        <IconButton
+          icon="plus"
+          label={`Add a sub-page to ${node.label}`}
+          size="sm"
+          onClick={() => openSubPage(node)}
         />
       )}
       <span
@@ -676,10 +741,14 @@ export function FileTree({
                   onClick={() => node.mainPath !== undefined && onOpen(node.mainPath)}
                   className="inline-flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent py-[5px] pr-1 text-left text-sm text-n-700"
                 >
-                  <Icon
-                    name="file-stack"
-                    size={14}
-                    color={active ? 'var(--cortex-500)' : 'var(--n-500)'}
+                  <EntryIcon
+                    entry={
+                      node.mainPath === undefined ? null : (entryByPath.get(node.mainPath) ?? null)
+                    }
+                    fallback={{
+                      name: 'file-stack',
+                      color: active ? 'var(--cortex-500)' : 'var(--n-500)',
+                    }}
                   />
                   <span className={labelClass}>{node.label}</span>
                 </button>
@@ -697,12 +766,15 @@ export function FileTree({
                 className="inline-flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-1 py-[5px] pl-[19px] text-left text-sm text-n-700"
               >
                 {(() => {
-                  const style = typeStyle(entryByPath.get(node.path)?.type ?? null, schema);
+                  const entry = entryByPath.get(node.path) ?? null;
+                  const style = typeStyle(entry?.type ?? null, schema);
                   return (
-                    <Icon
-                      name={style.icon}
-                      size={14}
-                      color={active ? 'var(--cortex-500)' : (style.color ?? 'var(--n-500)')}
+                    <EntryIcon
+                      entry={entry}
+                      fallback={{
+                        name: style.icon,
+                        color: active ? 'var(--cortex-500)' : (style.color ?? 'var(--n-500)'),
+                      }}
                     />
                   );
                 })()}
@@ -719,7 +791,7 @@ export function FileTree({
           )}
           {node.kind === 'doc' && isOpen && node.children.length === 0 && (
             <p className="m-0 py-1 text-xs text-n-400" style={{ paddingLeft: depth * 14 + 40 }}>
-              No extra pages
+              No sub-pages
             </p>
           )}
         </li>
@@ -776,17 +848,27 @@ export function FileTree({
               ? 'New page'
               : dialog.mode === 'new-folder'
                 ? 'New folder'
-                : `Rename ${dialog.node.kind === 'folder' ? 'folder' : 'page'}`
+                : dialog.mode === 'sub-page'
+                  ? 'Add sub-page'
+                  : `Rename ${dialog.node.kind === 'folder' ? 'folder' : 'page'}`
           }
           width={420}
           primaryAction={{
-            label: dialog.mode === 'rename' ? 'Rename' : 'Create',
+            label:
+              dialog.mode === 'rename' ? 'Rename' : dialog.mode === 'sub-page' ? 'Add' : 'Create',
             onClick: () => void submitDialog(),
             disabled: name.trim() === '' || submitting,
           }}
           secondaryAction={{ label: 'Cancel', onClick: closeDialog }}
         >
           <div className="flex flex-col gap-2">
+            {dialog.mode === 'sub-page' && (
+              <p className="m-0 text-sm text-n-500">
+                {isFolderNote(dialog.parent)
+                  ? `Adds a page inside "${dialog.parent.title}".`
+                  : `"${dialog.parent.title}" moves into a folder of its own. Its text does not change.`}
+              </p>
+            )}
             <Input
               autoFocus
               placeholder={dialog.mode === 'new-folder' ? 'Folder name' : 'Page name'}

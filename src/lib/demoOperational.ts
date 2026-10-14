@@ -62,6 +62,9 @@ export const AMBIENT_CONCURRENCY_MAX = 4;
  * - a CRITICAL card → the diff-review mark
  * - a MEDIUM card the high-stakes rule holds → why it waits, beyond its risk
  * - an applied-but-undoable change → the revert list
+ * - a scheduled run that was refused twice, with a model and a transcript
+ *   (`demoTranscripts.ts`), and runs whose model was never recorded → the
+ *   run detail's Model, Transcript and Refused rows (M56.9)
  *
  * **The dates are VAULT_TODAY's.** The corpus is read on 2026-07-28 (see
  * `e2e/boot.ts`), so these sit in the hours before it. A fixture stamped
@@ -343,15 +346,55 @@ export function demoFleetDetails(): Record<string, FleetRunDetail> {
         answer_latency_micros: 3_412_000,
         recorded_at: at('11:43'),
       },
+      model_id: 'claude-opus-5',
+      refusals: [],
+      refusals_total: 0,
     },
     // Ambient runs are outside M31.6's attended writer, so nothing recorded
     // their cost. "Not recorded" — never $0.
-    'run-scout-1': { run: find('run-scout-1'), cost_components: null, assembly: null },
-    'run-ingest-2': { run: find('run-ingest-2'), cost_components: null, assembly: null },
-    'run-ingest-1': { run: find('run-ingest-1'), cost_components: null, assembly: null },
-    'run-maint-1': { run: find('run-maint-1'), cost_components: null, assembly: null },
-    'run-chat-1': { run: find('run-chat-1'), cost_components: null, assembly: null },
-    'run-legacy-1': { run: find('run-legacy-1'), cost_components: null, assembly: null },
+    //
+    // release-scout's run was refused twice (M56.9): a write outside its
+    // scope, and a built-in its grant does not hold. Both are rows recorded
+    // with its run id, as Rust's scope check and permission sink write them.
+    'run-scout-1': {
+      ...unrecorded(find('run-scout-1'), 'claude-opus-5'),
+      refusals: [
+        {
+          code: 'write_outside_scope',
+          surface: 'create_note',
+          detail: 'This run is scoped to records/risks and cannot write to records/work.',
+          rule: null,
+          recorded_at: '2026-07-28T09:18:00.000Z',
+        },
+        {
+          code: 'capability_unavailable',
+          surface: 'agent.permission',
+          detail: 'the CLI denied 1 call(s) this run: Bash',
+          rule: null,
+          recorded_at: '2026-07-28T09:18:30.000Z',
+        },
+      ],
+      refusals_total: 2,
+    },
+    'run-ingest-2': unrecorded(find('run-ingest-2'), 'claude-opus-5'),
+    // The CLI died before its stream named a model: not recorded.
+    'run-ingest-1': unrecorded(find('run-ingest-1'), null),
+    'run-maint-1': unrecorded(find('run-maint-1'), 'claude-opus-5'),
+    'run-chat-1': unrecorded(find('run-chat-1'), 'claude-opus-5'),
+    // From before anything recorded a model: not recorded.
+    'run-legacy-1': unrecorded(find('run-legacy-1'), null),
+  };
+}
+
+/** A detail with no cost or assembly rows recorded and nothing refused. */
+function unrecorded(run: FleetRun, model: string | null): FleetRunDetail {
+  return {
+    run,
+    cost_components: null,
+    assembly: null,
+    model_id: model,
+    refusals: [],
+    refusals_total: 0,
   };
 }
 

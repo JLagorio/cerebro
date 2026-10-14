@@ -11,9 +11,8 @@
  * - **External writes.** The agent's MCP writes go through the app's own
  *   `write_file`, which registers each write as the app's, so the watcher
  *   drops the echo. The tools announce what they changed instead, and a page
- *   with that file open hears it here by path. Rust stamps `modifiedAt` to
- *   the second, so a stamp cannot tell a page about a write in the same
- *   second as the last one; a per-path announcement can.
+ *   with that file open hears it here by path, holds its saves until the
+ *   vault has caught up, and then merges the write in place (M55.6).
  */
 
 type Flush = () => Promise<void>;
@@ -77,44 +76,21 @@ export function onExternalWrite(path: string, handlers: ExternalWriteHandlers): 
   };
 }
 
-/** The catch-up running now, and the one queued behind it. */
-let running: Promise<void> | null = null;
-let queued: Promise<void> | null = null;
-
 /** `catchUp()`, never rejecting. */
 const quietly = (catchUp: () => Promise<void>): Promise<void> =>
   attempt(catchUp).catch(() => undefined);
 
 /**
- * One catch-up running and at most one queued, however many writes arrive.
- *
- * A write announced while a catch-up runs may have landed after that scan
- * read its file, so it needs one that starts later; every write announced in
- * the meantime is covered by the same later one.
- */
-function coalesced(catchUp: () => Promise<void>): Promise<void> {
-  if (running === null) {
-    const run: Promise<void> = quietly(catchUp).finally(() => {
-      if (running === run) running = null;
-    });
-    running = run;
-    return run;
-  }
-  if (queued === null) {
-    const next: Promise<void> = running.then(() => {
-      queued = null;
-      return coalesced(catchUp);
-    });
-    queued = next;
-  }
-  return queued;
-}
-
-/**
  * Tell the pages showing `paths` that someone else wrote them, then bring the
  * vault up to date with `catchUp`. An empty `paths` is a write somewhere the
  * announcement could not name: it still catches up, and the pages fall back
- * on their stamps. Never rejects.
+ * on their entries' content hashes (M55.6). Never rejects.
+ *
+ * `catchUp` is called once per announcement, synchronously, and coalesces
+ * itself: both callers pass the store's rescan, which runs one scan at a time
+ * plus one trailing and resolves only after a scan that started after the
+ * call (M58.2). A write announced while a scan runs is covered by that
+ * trailing scan, so a burst costs two scans.
  */
 export async function announceExternalWrites(
   paths: readonly string[],
@@ -123,16 +99,14 @@ export async function announceExternalWrites(
   const told = [...new Set(paths)].flatMap((path) => [...(watchers.get(path) ?? [])]);
   for (const handlers of told) handlers.pending();
   try {
-    await coalesced(catchUp);
+    await quietly(catchUp);
   } finally {
     for (const handlers of told) handlers.settled();
   }
 }
 
-/** Test isolation: forget every page and any catch-up in flight. */
+/** Test isolation: forget every page and its flush. */
 export function __resetOpenPages(): void {
   flushes.clear();
   watchers.clear();
-  running = null;
-  queued = null;
 }

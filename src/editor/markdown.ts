@@ -1,5 +1,7 @@
 import type { BlockNoteEditor, PartialBlock } from '@blocknote/core';
 import { DATABASE_FENCE, parseDatabaseRef, serializeDatabaseRef } from '@/engine/databaseBlock';
+import { SUBPAGES_FENCE } from '@/engine/docPages';
+import { PAGE_CARD_FENCE, parsePageRef, serializePageRef } from '@/engine/pageCard';
 import {
   chipPropsToDateValue,
   DATE_TOKEN_SOURCE,
@@ -146,8 +148,7 @@ const isPlainTextNode = (item: unknown): item is TextNode =>
  * marker is still written outside the run; keeping it would take a second
  * copy of the marks in a prop, kept in step with them by hand. A decoration
  * drawing the number over text that stays text would leave the bytes alone
- * by construction, but it needs `prosemirror-view`, which is BlockNote's
- * dependency and not the app's. So inside emphasis the marker reads as
+ * by construction, and was not built. So inside emphasis the marker reads as
  * written, and typing one there (citationInput.ts) leaves it written too.
  * markdown.test.ts holds the first measurement ("would lose the emphasis if
  * the marker were a chip"), so a BlockNote that starts carrying the mark
@@ -264,8 +265,10 @@ export function enrichChips<T extends PartialBlock>(blocks: T[]): T[] {
   return blocks;
 }
 
-/** A chip's plain-text form, or null for anything that is not a chip. */
-function chipText(item: unknown): string | null {
+/** A chip's plain-text form, or null for anything that is not a chip. Reader
+ * text (readerText.ts, M70.1) spells a chip with it too, so a comment's quote
+ * reads a chip the way the file does. */
+export function chipText(item: unknown): string | null {
   if (typeof item !== 'object' || item === null) return null;
   const { type, props = {} } = item as { type?: string; props?: Record<string, string> };
   switch (type) {
@@ -342,10 +345,12 @@ export function unescapeChipMarkdown(markdown: string): string {
     .join('\n');
 }
 
-// --- Callout / mermaid / database round-trip (M2.x, M47.2) -----------------
+// --- Callout / mermaid / database / sub-pages / page card round-trip --------
 // On disk a callout is an Obsidian-style `> [!info] …` quote, a diagram is a
-// ```mermaid fence, and an embedded database is a ```cerebro-database fence
-// holding a pointer. promoteRichBlocks upgrades those plain forms into the
+// ```mermaid fence, an embedded database is a ```cerebro-database fence
+// holding a pointer (M47.2), a child-page list is an EMPTY ```cerebro-subpages
+// fence (M55.13), and a page card is a ```cerebro-page fence holding one
+// wikilink (M55.14). promoteRichBlocks upgrades those plain forms into the
 // custom blocks after parse; demoteRichBlocks reverses it before
 // serialization, on a deep copy so the live editor state is never mutated.
 
@@ -366,6 +371,24 @@ export function promoteRichBlocks<T extends PartialBlock>(blocks: T[]): T[] {
     const b = block as PartialBlock & { content?: unknown; children?: PartialBlock[] };
     if (b.type === 'codeBlock' && (b.props as { language?: string })?.language === 'mermaid') {
       return { type: 'mermaid', props: { code: blockText(b.content) } } as unknown as T;
+    }
+    // Only an EMPTY fence is the list: one holding text stays the code block
+    // it is, so promoting it can never replace a word anyone wrote.
+    if (
+      b.type === 'codeBlock' &&
+      (b.props as { language?: string })?.language === SUBPAGES_FENCE &&
+      blockText(b.content) === ''
+    ) {
+      return { type: 'subPages', props: {} } as unknown as T;
+    }
+    // An empty fence is the unset card and one link is a set one; anything
+    // else stays the code block it is, holding exactly what was typed.
+    if (
+      b.type === 'codeBlock' &&
+      (b.props as { language?: string })?.language === PAGE_CARD_FENCE
+    ) {
+      const ref = parsePageRef(blockText(b.content));
+      if (ref !== null) return { type: 'pageCard', props: ref } as unknown as T;
     }
     if (b.type === 'codeBlock' && (b.props as { language?: string })?.language === DATABASE_FENCE) {
       const text = blockText(b.content);
@@ -424,6 +447,28 @@ export function demoteRichBlocks<T extends PartialBlock>(blocks: T[]): T[] {
         type: 'codeBlock',
         props: { language: 'mermaid' },
         content: [{ type: 'text', text: code, styles: {} }],
+      } as unknown as T;
+    }
+    // Read off the type alone, never the rendering (DOM trap 10): the list is
+    // derived, so the fence holds nothing.
+    if (b.type === 'subPages') {
+      return {
+        type: 'codeBlock',
+        props: { language: SUBPAGES_FENCE },
+        content: [],
+      } as unknown as T;
+    }
+    // The pointer exactly as held: never re-resolved, never made a path, and
+    // read off the props alone, never the rendering (DOM trap 10).
+    if (b.type === 'pageCard') {
+      const text = serializePageRef({
+        target: typeof b.props?.target === 'string' ? b.props.target : '',
+        alias: typeof b.props?.alias === 'string' ? b.props.alias : '',
+      });
+      return {
+        type: 'codeBlock',
+        props: { language: PAGE_CARD_FENCE },
+        content: text === '' ? [] : [{ type: 'text', text, styles: {} }],
       } as unknown as T;
     }
     if (b.type === 'database') {
@@ -819,7 +864,7 @@ function liftMarkers(markdown: string): { text: string; lifted: LiftedLines } {
  * nothing; anything else (a `# heading`, a list) marks the entry, and the fold
  * keeps its line as the text it is.
  */
-async function readLiftedSummaries(editor: AnyEditor, lifted: LiftedLines): Promise<void> {
+function readLiftedSummaries(editor: AnyEditor, lifted: LiftedLines): void {
   for (const entry of lifted.lines.values()) {
     if (entry.kind !== 'toggle') continue;
     if (entry.summary.trim() === '') {
@@ -828,7 +873,7 @@ async function readLiftedSummaries(editor: AnyEditor, lifted: LiftedLines): Prom
     }
     const blocks = enrichChips(
       normalizeParsedBlocks(
-        (await editor.tryParseMarkdownToBlocks(protectFootnotes(entry.summary))) as PartialBlock[],
+        editor.tryParseMarkdownToBlocks(protectFootnotes(entry.summary)) as PartialBlock[],
       ),
     ) as { type?: string; content?: unknown; children?: unknown[] }[];
     const [only] = blocks;
@@ -875,18 +920,18 @@ function escapeBlockStart(line: string): string {
  * dropped. A line after the first that looks like a marker is escaped, as a
  * paragraph's would be.
  */
-async function writeToggleSummaries(
+function writeToggleSummaries(
   editor: AnyEditor,
   blocks: PartialBlock[],
   summaries: Map<object, string> = new Map(),
-): Promise<Map<object, string>> {
+): Map<object, string> {
   for (const block of blocks) {
     const b = block as { type?: string; content?: unknown; children?: PartialBlock[] };
     if (b.type === 'toggleListItem') {
       const content = Array.isArray(b.content) ? b.content : [];
       const paragraph = demoteChips([{ type: 'paragraph', content } as PartialBlock]);
       const markdown = restoreFootnotes(
-        unescapeChipMarkdown(await editor.blocksToMarkdownLossy(paragraph)),
+        unescapeChipMarkdown(editor.blocksToMarkdownLossy(paragraph)),
       ).replace(/\n$/, '');
       const [head, ...tail] = markdown.split('\n').map(escapeBlockStart);
       summaries.set(
@@ -894,7 +939,7 @@ async function writeToggleSummaries(
         tail.length === 0 ? head : `${head}\n${escapeMarkerLines(tail.join('\n'))}`,
       );
     }
-    if (Array.isArray(b.children)) await writeToggleSummaries(editor, b.children, summaries);
+    if (Array.isArray(b.children)) writeToggleSummaries(editor, b.children, summaries);
   }
   return summaries;
 }
@@ -1727,7 +1772,12 @@ function joinDefinitionRuns(markdown: string): string {
   return lines.join('\n');
 }
 
-export async function markdownToBlocks(editor: AnyEditor, markdown: string): Promise<AnyBlocks> {
+/**
+ * A note body as editor blocks, synchronously (M55.6). BlockNote 0.46 parses
+ * markdown synchronously, so an outside write can be planned and applied in
+ * one task, with no keystroke landing in between.
+ */
+export function markdownToBlocksNow(editor: AnyEditor, markdown: string): AnyBlocks {
   // Lift and loosen FIRST: the parser only gives each `:::` marker its own
   // paragraph when the markers are blank-line separated, and collapses a tight
   // run of them into one paragraph with soft breaks. The file on disk is the
@@ -1735,10 +1785,10 @@ export async function markdownToBlocks(editor: AnyEditor, markdown: string): Pro
   // except between two layouts in a row, where the blank is the author's
   // (see `tightenColumnMarkers`).
   const { text, lifted } = liftMarkers(markdown);
-  await readLiftedSummaries(editor, lifted);
+  readLiftedSummaries(editor, lifted);
   const source = protectFootnotes(loosenColumnMarkers(text));
   const parsed = restorePlaceholders(
-    normalizeParsedBlocks((await editor.tryParseMarkdownToBlocks(source)) as PartialBlock[]),
+    normalizeParsedBlocks(editor.tryParseMarkdownToBlocks(source) as PartialBlock[]),
     lifted,
     'code',
   );
@@ -1749,10 +1799,14 @@ export async function markdownToBlocks(editor: AnyEditor, markdown: string): Pro
   ) as AnyBlocks;
 }
 
-export async function blocksToMarkdown(
-  editor: AnyEditor,
-  blocks?: PartialBlock[],
-): Promise<string> {
+/** `markdownToBlocksNow`, as a promise, for the callers that await it. It
+ * runs at the call, as the async form always started to. */
+export async function markdownToBlocks(editor: AnyEditor, markdown: string): Promise<AnyBlocks> {
+  return markdownToBlocksNow(editor, markdown);
+}
+
+/** Blocks (the live document by default) as a note body, synchronously (M55.6). */
+export function blocksToMarkdownNow(editor: AnyEditor, blocks?: PartialBlock[]): string {
   const source = (blocks ?? editor.document) as PartialBlock[];
   // Deep copy: demotion must never touch live editor state. Every custom
   // block and chip is plain markdown before the serializer sees it, because
@@ -1762,7 +1816,7 @@ export async function blocksToMarkdown(
   const setAside: SetAside = {
     prefix: placeholderPrefix(),
     lines: new Map(),
-    summaries: await writeToggleSummaries(editor, copy),
+    summaries: writeToggleSummaries(editor, copy),
   };
   const demoted = demoteChips(
     demoteRichBlocks(demoteContainers(copy, BASE_MARKER_DEPTH, setAside)),
@@ -1771,12 +1825,22 @@ export async function blocksToMarkdown(
     tightenColumnMarkers(
       restoreSetAside(
         escapeMarkerLines(
-          restoreFootnotes(unescapeChipMarkdown(await editor.blocksToMarkdownLossy(demoted))),
+          restoreFootnotes(unescapeChipMarkdown(editor.blocksToMarkdownLossy(demoted))),
         ),
         setAside,
       ),
     ),
   );
+}
+
+/** `blocksToMarkdownNow`, as a promise, for the callers that await it. The
+ * document is read at the call, so an unmount flush still serializes the
+ * blocks it was handed. */
+export async function blocksToMarkdown(
+  editor: AnyEditor,
+  blocks?: PartialBlock[],
+): Promise<string> {
+  return blocksToMarkdownNow(editor, blocks);
 }
 
 /**

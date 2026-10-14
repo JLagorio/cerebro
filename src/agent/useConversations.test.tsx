@@ -1,8 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, renderHook } from '@testing-library/react';
+
+// The transcript read is Rust's (M56.3); each test says what it answers.
+vi.mock('./agentIpc', () => ({
+  readCliTranscript: vi.fn(async () => ({
+    state: 'unavailable',
+    reason: 'not_recorded',
+    retention_days: 30,
+  })),
+}));
+
+import * as agentIpc from './agentIpc';
 import { useConversations } from './useConversations';
 import type { AgentChat } from './useAgentChat';
-import type { ChatMessage, Conversation } from './types';
+import type { AgentStreamEvent, ChatMessage, Conversation, TranscriptRead } from './types';
 import type { Place } from '@/engine/place';
 import { makeEntry } from '@/test/factories';
 
@@ -32,10 +43,16 @@ const NO_MESSAGES: ChatMessage[] = [];
 const stubChat = (over: Partial<AgentChat> = {}): AgentChat => ({
   messages: NO_MESSAGES,
   streaming: false,
+  interaction: null,
+  waiting: false,
+  answer: vi.fn(),
   send: vi.fn(),
   stop: vi.fn(),
   reset: vi.fn(),
   sessionId: null,
+  model: null,
+  prLinks: [],
+  turnEndedAt: null,
   restore: vi.fn(),
   ...over,
 });
@@ -201,5 +218,202 @@ describe('useConversations — where a thread happened', () => {
     act(() => result.current.anchorNow());
     expect(result.current.hereLabel).toBe('The spec');
     expect(result.current.active?.placeLabel).toBe('The spec');
+  });
+});
+
+/**
+ * Threads that come back from Claude Code's own file (M56.3). The cache is
+ * restored at once; the file is read, and either rebuilds a thread with no
+ * cache, heals one that has a cache, or blocks one Claude Code no longer has.
+ */
+describe('useConversations — threads rebuild from the session file', () => {
+  const SESSION = '00000000-0000-4000-8000-000000000001';
+  const read = vi.mocked(agentIpc.readCliTranscript);
+  const events: AgentStreamEvent[] = [
+    { kind: 'UserPrompt', text: 'Read a.md' },
+    { kind: 'ModelChanged', model: 'claude-haiku-4-5-20251001' },
+    { kind: 'ToolStart', tool_name: 'Read', tool_id: 't-1', input: '{"file_path":"a.md"}' },
+    { kind: 'ToolDone', tool_id: 't-1', output: 'alpha', is_error: false },
+    { kind: 'Text', message_id: 'msg_1', text: 'done' },
+    { kind: 'TurnEnded', stop_reason: 'end_turn' },
+    {
+      kind: 'PrLink',
+      number: 7,
+      url: 'https://github.com/example/notes/pull/7',
+      repository: 'example/notes',
+    },
+  ];
+  const answer = (value: TranscriptRead) => read.mockResolvedValueOnce(value);
+  const seed = (...threads: Conversation[]) =>
+    window.localStorage.setItem('cerebro.conversations', JSON.stringify(threads));
+  const settle = () => act(async () => await Promise.resolve());
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    read.mockClear();
+  });
+
+  it('stamps the vault and persists the session id mid-turn', () => {
+    let chat = stubChat();
+    const { result, rerender } = renderHook(() =>
+      useConversations(chat, undefined, undefined, '/demo-vault'),
+    );
+    act(() => result.current.anchorNow());
+    expect(stored()[0].vault).toBe('/demo-vault');
+    chat = stubChat({ streaming: true, sessionId: SESSION });
+    rerender();
+    expect(stored()[0].sessionId).toBe(SESSION);
+  });
+
+  it('rebuilds a thread with no cached messages from its transcript', async () => {
+    seed(conversation('c-1', { sessionId: SESSION, vault: '/demo-vault' }));
+    answer({ state: 'read', events, lines: 9, unclassified: [] });
+    const chat = stubChat();
+    const { result } = renderHook(() =>
+      useConversations(chat, undefined, undefined, '/demo-vault'),
+    );
+    expect(result.current.transcript.state).toBe('reading');
+    await settle();
+    expect(read).toHaveBeenCalledWith('/demo-vault', SESSION, '2026-01-01T00:00:00.000Z');
+    expect(result.current.transcript.state).toBe('rebuilt');
+    const [messages, session, facts] = vi.mocked(chat.restore).mock.calls.at(-1) ?? [];
+    expect(session).toBe(SESSION);
+    expect(messages?.map((m) => [m.role, m.text])).toEqual([
+      ['user', 'Read a.md'],
+      ['assistant', 'done'],
+    ]);
+    expect(messages?.[1].tools[0]).toMatchObject({ id: 't-1', done: true, output: 'alpha' });
+    expect(facts).toEqual({
+      model: 'claude-haiku-4-5-20251001',
+      prLinks: [
+        { number: 7, url: 'https://github.com/example/notes/pull/7', repository: 'example/notes' },
+      ],
+    });
+    expect(result.current.blocked).toBeNull();
+  });
+
+  it('reads an expired thread as cleared by Claude Code, and blocks it', async () => {
+    seed(conversation('c-1', { sessionId: SESSION, updatedAt: '2026-05-01T00:00:00.000Z' }));
+    answer({ state: 'unavailable', reason: 'expired', retention_days: 30 });
+    const { result } = renderHook(() =>
+      useConversations(stubChat(), undefined, undefined, '/demo-vault'),
+    );
+    await settle();
+    expect(read).toHaveBeenCalledWith('/demo-vault', SESSION, '2026-05-01T00:00:00.000Z');
+    expect(result.current.transcript).toEqual({
+      state: 'unavailable',
+      reason: 'expired',
+      retentionDays: 30,
+    });
+    expect(result.current.blocked).toBe('expired');
+  });
+
+  it('blocks a cleared thread, and leaves an unreadable one open', async () => {
+    seed(conversation('c-1', { sessionId: SESSION }), conversation('c-2', { sessionId: SESSION }));
+    answer({ state: 'unavailable', reason: 'cleared', retention_days: 30 });
+    const { result } = renderHook(() =>
+      useConversations(stubChat(), undefined, undefined, '/demo-vault'),
+    );
+    await settle();
+    expect(result.current.blocked).toBe('cleared');
+    answer({ state: 'unavailable', reason: 'unreadable', retention_days: 30, detail: 'denied' });
+    act(() => result.current.select('c-2'));
+    await settle();
+    expect(result.current.transcript).toMatchObject({ state: 'unavailable', reason: 'unreadable' });
+    expect(result.current.blocked).toBeNull();
+  });
+
+  it('blocks a thread from another vault as elsewhere', async () => {
+    seed(conversation('c-1', { sessionId: SESSION, vault: '/other-vault' }));
+    answer({ state: 'read', events, lines: 9, unclassified: [] });
+    const { result } = renderHook(() =>
+      useConversations(stubChat(), undefined, undefined, '/demo-vault'),
+    );
+    await settle();
+    expect(read).toHaveBeenCalledWith('/other-vault', SESSION, expect.any(String));
+    expect(result.current.blocked).toBe('elsewhere');
+  });
+
+  it('changes nothing when the read lands after a send', async () => {
+    seed(conversation('c-1', { sessionId: SESSION }));
+    let land: (value: TranscriptRead) => void = () => {};
+    read.mockImplementationOnce(() => new Promise((resolve) => (land = resolve)));
+    const chat = stubChat();
+    const { result } = renderHook(() =>
+      useConversations(chat, undefined, undefined, '/demo-vault'),
+    );
+    expect(vi.mocked(chat.restore)).toHaveBeenCalledTimes(1);
+    act(() => result.current.anchorNow());
+    await act(async () => {
+      land({ state: 'read', events, lines: 9, unclassified: [] });
+      await Promise.resolve();
+    });
+    expect(vi.mocked(chat.restore)).toHaveBeenCalledTimes(1);
+    expect(result.current.transcript.state).toBe('reading');
+  });
+
+  it('heals a cached thread’s unfinished tools by id, keeping its wording', async () => {
+    const cached: ChatMessage[] = [
+      { id: 'm-1', role: 'user', text: 'read a, as typed', tools: [] },
+      {
+        id: 'm-2',
+        role: 'assistant',
+        text: 'cut short',
+        tools: [{ id: 't-1', name: 'Read', input: null, output: null, done: false, failed: false }],
+      },
+    ];
+    seed(conversation('c-1', { sessionId: SESSION, messages: cached }));
+    answer({ state: 'read', events, lines: 9, unclassified: [] });
+    const chat = stubChat();
+    const { result } = renderHook(() =>
+      useConversations(chat, undefined, undefined, '/demo-vault'),
+    );
+    await settle();
+    expect(result.current.transcript.state).toBe('healed');
+    const [messages] = vi.mocked(chat.restore).mock.calls.at(-1) ?? [];
+    expect(messages?.map((m) => m.text)).toEqual(['read a, as typed', 'cut short']);
+    expect(messages?.[1].tools[0]).toMatchObject({ id: 't-1', done: true, output: 'alpha' });
+  });
+});
+
+describe('useConversations — a conversation’s model and effort (M56.5)', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('persists the pick per thread, and a thread switch restores it', () => {
+    window.localStorage.setItem(
+      'cerebro.conversations',
+      JSON.stringify([conversation('a'), conversation('b', { model: 'sonnet', effort: 'low' })]),
+    );
+    window.localStorage.setItem('cerebro.activeConversation', 'a');
+    const chat = stubChat();
+    const { result } = renderHook(() => useConversations(chat));
+    act(() => result.current.setRunOptions('a', { model: 'opus', effort: 'high' }));
+    expect(result.current.active?.model).toBe('opus');
+    expect(result.current.active?.effort).toBe('high');
+    expect(stored().find((c) => c.id === 'a')).toMatchObject({ model: 'opus', effort: 'high' });
+
+    act(() => result.current.select('b'));
+    expect([result.current.active?.model, result.current.active?.effort]).toEqual([
+      'sonnet',
+      'low',
+    ]);
+    act(() => result.current.select('a'));
+    expect(result.current.active?.model).toBe('opus');
+
+    // Back to Claude Code's default.
+    act(() => result.current.setRunOptions('a', { model: null, effort: null }));
+    expect(stored().find((c) => c.id === 'a')).toMatchObject({ model: null, effort: null });
+  });
+
+  it('drops a stored pick Rust would refuse on load', () => {
+    window.localStorage.setItem(
+      'cerebro.conversations',
+      JSON.stringify([conversation('a', { model: '--model', effort: 'turbo' })]),
+    );
+    const chat = stubChat();
+    const { result } = renderHook(() => useConversations(chat));
+    expect([result.current.active?.model, result.current.active?.effort]).toEqual([null, null]);
   });
 });

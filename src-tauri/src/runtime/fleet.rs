@@ -1,26 +1,30 @@
 //! The fleet read model (M33.2).
 //!
-//! SELECT-only over `runs` and the two governance tables M31.6 writes. This
-//! module computes nothing the rows do not already say: every aggregate it
-//! serves is recomputable from the rows it reads, nothing is cached, and
-//! nothing is written. If a number here needs a new fact recorded, that is a
-//! Meter or governance change with its own test — never a side-write from a
-//! read model.
+//! It reads `runs`, the two governance tables M31.6 writes, and the
+//! `operational_log` rows recorded against a run (M56.9), and it reads them
+//! through [`ReadOnly`]: a handle SQLite refuses writes on, so this module
+//! cannot change a row even by mistake. It computes nothing the rows do not
+//! already say: every aggregate it serves is recomputable from the rows it
+//! reads, and nothing is cached. If a number here needs a new fact recorded,
+//! that is a Meter or governance change with its own test — never a
+//! side-write from a read model.
 //!
 //! **A missing join is `None`, never a zero.** M31's measurement rule, and
-//! the reason `RunDetail`'s two joins are `Option` rather than empty
+//! the reason `RunDetail`'s two cost joins are `Option` rather than empty
 //! collections: a run from before M31.6 recorded no cost components, and a
 //! run that recorded ten of them costing nothing is a different fact. The UI
 //! renders the first as "not recorded" and would render the second as zeros.
-//! Collapsing them would make the honest answer unavailable.
+//! Collapsing them would make the honest answer unavailable. Refusals are the
+//! other way round: they have been recorded with their run since M54.9, so an
+//! empty list is measured-at-zero.
 //!
 //! **"Fleet", never "ledger".** Same rule `surface.rs` states: the word
 //! ledger belongs to the epistemic record in the vault. This is operational.
 
-use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use super::cause::{view_of_column, CauseView};
+use super::ReadOnly;
 
 /// The most rows one page will ever return, however large a limit is asked
 /// for. A UI that wants more asks for another page; a UI that asks for
@@ -117,7 +121,18 @@ pub struct AssemblyMetricsRow {
     pub recorded_at: String,
 }
 
-/// One run and everything the governance tables recorded about it.
+/// One refusal recorded against a run in `operational_log` (M56.9).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RefusalRow {
+    pub code: String,
+    pub surface: String,
+    pub detail: String,
+    pub rule: Option<String>,
+    pub recorded_at: String,
+}
+
+/// One run, everything the governance tables recorded about it, and what it
+/// was refused.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RunDetail {
     pub run: FleetRun,
@@ -126,7 +141,57 @@ pub struct RunDetail {
     /// it cost nothing".
     pub cost_components: Option<Vec<CostComponentRow>>,
     pub assembly: Option<AssemblyMetricsRow>,
+    /// The model Claude Code reported answering, as the run's last assistant
+    /// turn named it (`runs.model_id`). `None` is not recorded.
+    pub model_id: Option<String>,
+    /// What the run was refused, in id order, at most [`REFUSALS_SHOWN`].
+    /// Telemetry rows filed under the same code are left out (see
+    /// [`TELEMETRY_SURFACES`]). Empty is measured: nothing was refused.
+    pub refusals: Vec<RefusalRow>,
+    /// Every refusal row the run has, so a list the cap cut says so.
+    pub refusals_total: u64,
 }
+
+/// Where a run's Claude Code session file is, and how many runs share it
+/// (M56.9). What `fleet_run_transcript` needs to find and word a transcript.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TranscriptKey {
+    /// `None` is not recorded: a row from before M56.7, or a run whose
+    /// stream never named one.
+    pub session_id: Option<String>,
+    /// The vault the run ran in, joined through `vault_registry`. `None` for
+    /// a run with no vault, or one whose vault is no longer registered.
+    pub vault_path: Option<String>,
+    pub started_at: String,
+    /// The latest end (or start, for a run still going) across every run
+    /// that shares the session: what tells Claude Code's sweep from a clear.
+    pub last_activity_at: String,
+    /// How many runs share the session; 1 for a run with none.
+    pub runs_in_session: u64,
+}
+
+/// The most refusals one detail lists. The rest are counted.
+pub const REFUSALS_SHOWN: u32 = 50;
+
+/// The surfaces that file run-attributed `capability_unavailable` rows as
+/// telemetry rather than as refusals, each read from the const where it is
+/// written. The Refused list leaves these out and keeps everything else, so
+/// a refusal surface added later shows instead of hiding.
+pub const TELEMETRY_SURFACES: [&str; 4] = [
+    crate::agent::meter::USAGE_SURFACE,
+    crate::agent::meter::STREAM_SURFACE,
+    super::governance::TOOL_CALLS_SURFACE,
+    crate::assembly::ask::COSTS_SURFACE,
+];
+
+/// The refusals a run's detail lists. `?1` is the run; `?2`–`?5` are the
+/// telemetry surfaces. Read by `operational_log_by_run` (schema v21).
+pub(crate) const REFUSALS_SQL: &str = "SELECT code, surface, detail, rule, recorded_at \
+     FROM operational_log WHERE run_id = ?1 AND surface NOT IN (?2, ?3, ?4, ?5) \
+     ORDER BY id LIMIT 50";
+
+const REFUSALS_COUNT_SQL: &str = "SELECT count(*) FROM operational_log \
+     WHERE run_id = ?1 AND surface NOT IN (?2, ?3, ?4, ?5)";
 
 /// What one actor has done, summed from its rows.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -193,7 +258,7 @@ fn map_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<FleetRun> {
 /// The WHERE clause is built from the filters that are PRESENT, and every
 /// value travels as a bound parameter — the column names are the only thing
 /// this function interpolates, and they are literals in this file.
-pub fn runs(conn: &Connection, filter: &Filter) -> Result<Vec<FleetRun>, String> {
+pub fn runs(ro: &ReadOnly, filter: &Filter) -> Result<Vec<FleetRun>, String> {
     let mut clauses: Vec<String> = Vec::new();
     let mut bound: Vec<&dyn rusqlite::ToSql> = Vec::new();
     for (column, value) in [
@@ -221,7 +286,7 @@ pub fn runs(conn: &Connection, filter: &Filter) -> Result<Vec<FleetRun>, String>
         "SELECT {RUN_COLUMNS} FROM runs {where_clause} \
          ORDER BY started_at DESC, run_id DESC LIMIT {limit}"
     );
-    let mut statement = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut statement = ro.prepare(&sql).map_err(|e| e.to_string())?;
     let rows = statement
         .query_map(bound.as_slice(), map_run)
         .map_err(|e| e.to_string())?;
@@ -229,24 +294,28 @@ pub fn runs(conn: &Connection, filter: &Filter) -> Result<Vec<FleetRun>, String>
         .map_err(|e| e.to_string())
 }
 
-/// One run and its governance joins.
+fn unknown_run(run_id: &str) -> impl Fn(rusqlite::Error) -> String + '_ {
+    move |e| match e {
+        rusqlite::Error::QueryReturnedNoRows => format!("no run with id {run_id}"),
+        other => other.to_string(),
+    }
+}
+
+/// One run, its governance joins, its model and its refusals.
 ///
 /// An unknown id is an ERROR, not an empty detail: the caller asked about a
 /// specific run, and answering "here it is, with nothing in it" would make a
 /// typo indistinguishable from an unmetered run.
-pub fn run_detail(conn: &Connection, run_id: &str) -> Result<RunDetail, String> {
-    let run = conn
+pub fn run_detail(ro: &ReadOnly, run_id: &str) -> Result<RunDetail, String> {
+    let (run, model_id) = ro
         .query_row(
-            &format!("SELECT {RUN_COLUMNS} FROM runs WHERE run_id = ?1"),
+            &format!("SELECT {RUN_COLUMNS}, model_id FROM runs WHERE run_id = ?1"),
             [run_id],
-            map_run,
+            |row| Ok((map_run(row)?, row.get::<_, Option<String>>(18)?)),
         )
-        .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => format!("no run with id {run_id}"),
-            other => other.to_string(),
-        })?;
+        .map_err(unknown_run(run_id))?;
 
-    let mut statement = conn
+    let mut statement = ro
         .prepare(
             "SELECT component, unit, model_id, quantity, observed_cost_micros, estimated, \
              pricing_snapshot_id, recorded_at FROM run_cost_components WHERE run_id = ?1 \
@@ -270,7 +339,7 @@ pub fn run_detail(conn: &Connection, run_id: &str) -> Result<RunDetail, String> 
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
 
-    let assembly = conn
+    let assembly = ro
         .query_row(
             "SELECT manifest_id, intended_stakes, source_count, evidence_item_count, \
              context_bytes, retrieval_query_count, blocked_intent_count, \
@@ -296,12 +365,77 @@ pub fn run_detail(conn: &Connection, run_id: &str) -> Result<RunDetail, String> 
             other => Err(other.to_string()),
         })?;
 
+    let [usage, stream, tool_calls, costs] = TELEMETRY_SURFACES;
+    let bound = rusqlite::params![run_id, usage, stream, tool_calls, costs];
+    let mut statement = ro.prepare(REFUSALS_SQL).map_err(|e| e.to_string())?;
+    let refusals = statement
+        .query_map(bound, |row| {
+            Ok(RefusalRow {
+                code: row.get(0)?,
+                surface: row.get(1)?,
+                detail: row.get(2)?,
+                rule: row.get(3)?,
+                recorded_at: row.get(4)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    let refusals_total = ro
+        .query_row(REFUSALS_COUNT_SQL, bound, |row| row.get::<_, i64>(0))
+        .map_err(|e| e.to_string())? as u64;
+
     Ok(RunDetail {
         run,
         // Empty → None. See the module note: "measured at zero" and "never
         // measured" are different answers and this is where they part.
         cost_components: (!components.is_empty()).then_some(components),
         assembly,
+        model_id,
+        refusals,
+        refusals_total,
+    })
+}
+
+/// Where a run's transcript lives (M56.9): its session, its vault's path, and
+/// the runs that share the session. An unknown id is an error, as it is for
+/// [`run_detail`].
+pub fn transcript_key(ro: &ReadOnly, run_id: &str) -> Result<TranscriptKey, String> {
+    let (session_id, vault_path, started_at, own_activity) = ro
+        .query_row(
+            "SELECT r.cli_session_id, v.vault_path, r.started_at, \
+             coalesce(r.ended_at, r.started_at) FROM runs r \
+             LEFT JOIN vault_registry v ON v.vault_id = r.vault_id WHERE r.run_id = ?1",
+            [run_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .map_err(unknown_run(run_id))?;
+    let (runs_in_session, last_activity_at) = match &session_id {
+        None => (1, own_activity),
+        // Read by `runs_by_cli_session` (schema v21). The run itself is one
+        // of the rows, so the count is at least 1 and the max is set.
+        Some(session) => ro
+            .query_row(
+                "SELECT count(*), max(coalesce(ended_at, started_at)) FROM runs \
+                 WHERE cli_session_id = ?1",
+                [session],
+                |row| Ok((row.get::<_, i64>(0)? as u64, row.get::<_, String>(1)?)),
+            )
+            .map_err(|e| e.to_string())?,
+    };
+    Ok(TranscriptKey {
+        session_id,
+        vault_path,
+        started_at,
+        last_activity_at,
+        runs_in_session,
     })
 }
 
@@ -318,7 +452,7 @@ pub fn run_detail(conn: &Connection, run_id: &str) -> Result<RunDetail, String> 
 /// `started_at DESC, run_id DESC` — two runs that started in the same second
 /// must resolve the same way they do in `runs()`, and `max()` alone cannot
 /// break that tie.
-fn summaries(conn: &Connection, actor: Option<&str>) -> Result<Vec<ActorSummary>, String> {
+fn summaries(ro: &ReadOnly, actor: Option<&str>) -> Result<Vec<ActorSummary>, String> {
     // An unattributed run belongs to no actor, so it is not a row of this
     // read. It is still a row of `runs()`, which is where it stays visible.
     let where_clause = if actor.is_some() {
@@ -338,7 +472,7 @@ fn summaries(conn: &Connection, actor: Option<&str>) -> Result<Vec<ActorSummary>
           ORDER BY x.started_at DESC, x.run_id DESC LIMIT 1) \
          FROM runs r {where_clause} GROUP BY r.actor ORDER BY r.actor"
     );
-    let mut statement = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut statement = ro.prepare(&sql).map_err(|e| e.to_string())?;
     let bound: Vec<&dyn rusqlite::ToSql> = match actor.as_ref() {
         Some(actor) => vec![actor],
         None => Vec::new(),
@@ -369,8 +503,8 @@ fn summaries(conn: &Connection, actor: Option<&str>) -> Result<Vec<ActorSummary>
 /// refusing. The zeros are measured-at-zero (this actor has no rows); the
 /// `None`s are not-recorded (nothing ever stamped a last outcome). They are
 /// different claims and the caller renders them differently.
-pub fn actor_summary(conn: &Connection, actor: &str) -> Result<ActorSummary, String> {
-    Ok(summaries(conn, Some(actor))?
+pub fn actor_summary(ro: &ReadOnly, actor: &str) -> Result<ActorSummary, String> {
+    Ok(summaries(ro, Some(actor))?
         .pop()
         .unwrap_or_else(|| ActorSummary {
             actor: actor.to_string(),
@@ -397,14 +531,15 @@ pub fn actor_summary(conn: &Connection, actor: &str) -> Result<ActorSummary, Str
 ///
 /// An empty result is measured-at-zero — nothing attributed has ever run. A
 /// missing database is an error, and the caller renders it as unavailable.
-pub fn actor_summaries(conn: &Connection) -> Result<Vec<ActorSummary>, String> {
-    summaries(conn, None)
+pub fn actor_summaries(ro: &ReadOnly) -> Result<Vec<ActorSummary>, String> {
+    summaries(ro, None)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::vault::testutil;
+    use rusqlite::Connection;
 
     struct Seed<'a> {
         run_id: &'a str,
@@ -432,6 +567,11 @@ mod tests {
                 output: 10,
             }
         }
+    }
+
+    /// Every read goes through the handle production uses.
+    fn read(dir: &std::path::Path) -> ReadOnly {
+        ReadOnly::open(dir).unwrap()
     }
 
     fn fixture(label: &str) -> (std::path::PathBuf, Connection, String) {
@@ -484,7 +624,7 @@ mod tests {
             ],
         );
         let page = runs(
-            &conn,
+            &read(&dir),
             &Filter {
                 actor: Some("process:digest".into()),
                 ..Filter::default()
@@ -497,7 +637,7 @@ mod tests {
             "the actor filter narrows, and recency orders"
         );
 
-        let all = runs(&conn, &Filter::default()).unwrap();
+        let all = runs(&read(&dir), &Filter::default()).unwrap();
         assert_eq!(all.len(), 3, "no filter is every run");
         assert_eq!(
             all[1].actor, None,
@@ -534,7 +674,7 @@ mod tests {
         )
         .unwrap();
 
-        let all = runs(&conn, &Filter::default()).unwrap();
+        let all = runs(&read(&dir), &Filter::default()).unwrap();
         let hop = all.iter().find(|r| r.run_id == "hop").unwrap();
         assert_eq!(hop.parent_run_id.as_deref(), Some("root"));
         let root = all.iter().find(|r| r.run_id == "root").unwrap();
@@ -636,7 +776,7 @@ mod tests {
         finish("quiet");
         finish("late");
 
-        let all = runs(&conn, &Filter::default()).unwrap();
+        let all = runs(&read(&dir), &Filter::default()).unwrap();
         let legacy = all.iter().find(|r| r.run_id == "legacy").unwrap();
         assert_eq!(
             (legacy.proposals_submitted, legacy.applied, legacy.rejected),
@@ -662,7 +802,7 @@ mod tests {
             "a row written only at the end stood for no booking"
         );
         assert_eq!(
-            run_detail(&conn, "legacy").unwrap().run.applied,
+            run_detail(&read(&dir), "legacy").unwrap().run.applied,
             None,
             "the detail read says the same"
         );
@@ -696,7 +836,7 @@ mod tests {
             [cause.to_column()],
         )
         .unwrap();
-        let run = runs(&conn, &Filter::default()).unwrap().remove(0);
+        let run = runs(&read(&dir), &Filter::default()).unwrap().remove(0);
         assert_eq!(
             run.cause,
             Some(CauseView {
@@ -707,7 +847,7 @@ mod tests {
                 due_at: Some("2026-07-28T08:30:00.000Z".into()),
             })
         );
-        assert_eq!(run_detail(&conn, "r1").unwrap().run.cause, run.cause);
+        assert_eq!(run_detail(&read(&dir), "r1").unwrap().run.cause, run.cause);
         let wire = serde_json::to_value(&run).unwrap();
         assert_eq!(wire["cause"]["subject"], serde_json::Value::Null);
         drop(conn);
@@ -722,7 +862,7 @@ mod tests {
             &vault,
             &[Seed::new("legacy", None, "2026-07-28T04:20:00Z")],
         );
-        let run = runs(&conn, &Filter::default()).unwrap().remove(0);
+        let run = runs(&read(&dir), &Filter::default()).unwrap().remove(0);
         assert_eq!(run.cause, None, "why not recorded, never a guess");
         assert_eq!(run.cli_session_id, None);
         let wire = serde_json::to_value(&run).unwrap();
@@ -745,13 +885,231 @@ mod tests {
             "00000000-0000-4000-8000-000000000001",
         )
         .unwrap();
-        let run = run_detail(&conn, "r1").unwrap().run;
+        let run = run_detail(&read(&dir), "r1").unwrap().run;
         assert_eq!(
             run.cli_session_id.as_deref(),
             Some("00000000-0000-4000-8000-000000000001")
         );
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// One `operational_log` row, as the sinks write it.
+    fn log_row(conn: &Connection, run_id: Option<&str>, surface: &str, code: &str, detail: &str) {
+        conn.execute(
+            "INSERT INTO operational_log (recorded_at, surface, code, rule, detail, run_id) \
+             VALUES ('2026-10-14T09:00:00.000Z', ?1, ?2, NULL, ?3, ?4)",
+            rusqlite::params![surface, code, detail, run_id],
+        )
+        .unwrap();
+    }
+
+    // M56.9 — the refusals recorded with the run, in id order; the four
+    // telemetry surfaces, another run's row and a row with no run stay out.
+    #[test]
+    fn run_detail_lists_the_refusals_recorded_against_the_run() {
+        let (dir, conn, vault) = fixture("fleet-refusals");
+        seed_runs(
+            &conn,
+            &vault,
+            &[
+                Seed::new("r1", Some("process:release-scout"), "2026-10-14T09:00:00Z"),
+                Seed::new("r2", None, "2026-10-14T09:05:00Z"),
+            ],
+        );
+        log_row(
+            &conn,
+            Some("r1"),
+            "create_note",
+            "write_outside_scope",
+            "scoped to records/risks",
+        );
+        for surface in TELEMETRY_SURFACES {
+            log_row(
+                &conn,
+                Some("r1"),
+                surface,
+                "capability_unavailable",
+                "telemetry",
+            );
+        }
+        log_row(
+            &conn,
+            Some("r2"),
+            "create_note",
+            "write_outside_scope",
+            "another run",
+        );
+        log_row(
+            &conn,
+            None,
+            "knowledge.bundle",
+            "write_outside_scope",
+            "no run",
+        );
+        log_row(
+            &conn,
+            Some("r1"),
+            "agent.permission",
+            "capability_unavailable",
+            "Bash",
+        );
+
+        let detail = run_detail(&read(&dir), "r1").unwrap();
+        assert_eq!(
+            detail
+                .refusals
+                .iter()
+                .map(|r| (r.surface.as_str(), r.code.as_str(), r.detail.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    "create_note",
+                    "write_outside_scope",
+                    "scoped to records/risks"
+                ),
+                ("agent.permission", "capability_unavailable", "Bash"),
+            ],
+            "id order, telemetry and other rows left out"
+        );
+        assert_eq!(detail.refusals_total, 2);
+        assert_eq!(detail.refusals[0].rule, None);
+        assert_eq!(detail.refusals[0].recorded_at, "2026-10-14T09:00:00.000Z");
+
+        let quiet = run_detail(&read(&dir), "r2").unwrap();
+        assert_eq!(quiet.refusals.len(), 1, "r2 sees only its own");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn refusals_past_the_cap_are_counted_not_dropped() {
+        let (dir, conn, vault) = fixture("fleet-refusals-cap");
+        seed_runs(
+            &conn,
+            &vault,
+            &[Seed::new("r1", None, "2026-10-14T09:00:00Z")],
+        );
+        for n in 0..60 {
+            log_row(
+                &conn,
+                Some("r1"),
+                "create_note",
+                "write_outside_scope",
+                &format!("refusal {n}"),
+            );
+        }
+        let detail = run_detail(&read(&dir), "r1").unwrap();
+        assert_eq!(detail.refusals.len(), REFUSALS_SHOWN as usize);
+        assert!(REFUSALS_SQL.ends_with(&format!("LIMIT {REFUSALS_SHOWN}")));
+        assert_eq!(detail.refusals_total, 60, "the rest are counted");
+        assert_eq!(detail.refusals[0].detail, "refusal 0", "oldest first");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_detail_carries_the_model_the_stream_named_or_none() {
+        let (dir, conn, vault) = fixture("fleet-model");
+        seed_runs(
+            &conn,
+            &vault,
+            &[
+                Seed::new("named", None, "2026-10-14T09:00:00Z"),
+                Seed::new("silent", None, "2026-10-14T09:05:00Z"),
+            ],
+        );
+        conn.execute(
+            "UPDATE runs SET model_id = 'claude-opus-5' WHERE run_id = 'named'",
+            [],
+        )
+        .unwrap();
+        let ro = read(&dir);
+        assert_eq!(
+            run_detail(&ro, "named").unwrap().model_id.as_deref(),
+            Some("claude-opus-5")
+        );
+        let silent = run_detail(&ro, "silent").unwrap();
+        assert_eq!(silent.model_id, None, "not recorded, never a guess");
+        assert!(silent.refusals.is_empty());
+        assert_eq!(silent.refusals_total, 0);
+        let wire = serde_json::to_value(&silent).unwrap();
+        assert_eq!(wire["model_id"], serde_json::Value::Null);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn transcript_key_resolves_the_runs_vault_session_and_siblings() {
+        let (dir, conn, vault) = fixture("fleet-transcript-key");
+        let session = "00000000-0000-4000-8000-000000000001";
+        seed_runs(
+            &conn,
+            &vault,
+            &[
+                Seed::new("first", None, "2026-10-14T09:00:00Z"),
+                Seed::new("second", None, "2026-10-14T10:00:00Z"),
+                Seed::new("alone", None, "2026-10-14T11:00:00Z"),
+            ],
+        );
+        for run in ["first", "second"] {
+            crate::runtime::dispatch::record_cli_session(&conn, run, session).unwrap();
+        }
+        // An attended row with no vault, in a session of its own.
+        conn.execute(
+            "INSERT INTO runs (run_id, mode, lane, started_at, ended_at, outcome, usage_state, \
+             input_tokens, output_tokens, cache_read, cache_write, reserved_total_tokens, \
+             reserved_output_tokens, proposals_submitted, applied, rejected, cli_session_id) \
+             VALUES ('vaultless', 'attended', 'agent', '2026-10-14T12:00:00Z', \
+             '2026-10-14T12:01:00Z', 'succeeded', 'exact', 5, 1, 0, 0, 0, 0, 0, 0, 0, \
+             '00000000-0000-4000-8000-000000000002')",
+            [],
+        )
+        .unwrap();
+        let registered: String = conn
+            .query_row(
+                "SELECT vault_path FROM vault_registry WHERE vault_id = ?1",
+                [&vault],
+                |r| r.get(0),
+            )
+            .unwrap();
+
+        let ro = read(&dir);
+        let first = transcript_key(&ro, "first").unwrap();
+        assert_eq!(first.session_id.as_deref(), Some(session));
+        assert_eq!(first.vault_path.as_deref(), Some(registered.as_str()));
+        assert_eq!(first.started_at, "2026-10-14T09:00:00Z");
+        assert_eq!(first.runs_in_session, 2, "both runs share the session");
+        assert_eq!(
+            first.last_activity_at, "2026-10-14T10:00:00Z",
+            "the session's last activity is its latest run's"
+        );
+
+        let alone = transcript_key(&ro, "alone").unwrap();
+        assert_eq!(alone.session_id, None);
+        assert_eq!(alone.runs_in_session, 1);
+        assert_eq!(alone.last_activity_at, "2026-10-14T11:00:00Z");
+
+        let vaultless = transcript_key(&ro, "vaultless").unwrap();
+        assert_eq!(vaultless.vault_path, None, "no vault gives no path");
+        assert_eq!(vaultless.runs_in_session, 1);
+        assert_eq!(vaultless.last_activity_at, "2026-10-14T12:01:00Z");
+
+        let unknown = transcript_key(&ro, "nope").unwrap_err();
+        assert!(unknown.contains("no run with id nope"), "{unknown}");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The read model cannot write: no statement runner, no pragma setter and
+    /// no writable handle appear in its non-test source.
+    #[test]
+    fn fleet_reads_never_write() {
+        let source = include_str!("fleet.rs");
+        let body = &source[..source.find("#[cfg(test)]").unwrap()];
+        for word in ["execute", "execute_batch", "pragma_update", "Connection"] {
+            assert!(!body.contains(word), "fleet.rs names {word}");
+        }
     }
 
     #[test]
@@ -763,7 +1121,7 @@ mod tests {
             .collect();
         seed_runs(&conn, &vault, &rows);
         let asked = runs(
-            &conn,
+            &read(&dir),
             &Filter {
                 limit: Some(2),
                 ..Filter::default()
@@ -772,7 +1130,7 @@ mod tests {
         .unwrap();
         assert_eq!(asked.len(), 2, "a small limit is honoured");
         let absurd = runs(
-            &conn,
+            &read(&dir),
             &Filter {
                 limit: Some(10_000_000),
                 ..Filter::default()
@@ -792,7 +1150,7 @@ mod tests {
             &vault,
             &[Seed::new("r1", None, "2026-08-09T10:00:00Z")],
         );
-        let detail = run_detail(&conn, "r1").unwrap();
+        let detail = run_detail(&read(&dir), "r1").unwrap();
         assert!(
             detail.cost_components.is_none(),
             "no rows means not recorded — an empty vec would read as measured-at-zero"
@@ -806,7 +1164,7 @@ mod tests {
     #[test]
     fn an_unknown_run_id_is_refused_rather_than_answered_emptily() {
         let (dir, conn, _vault) = fixture("fleet-unknown");
-        let refused = run_detail(&conn, "nope");
+        let refused = run_detail(&read(&dir), "nope");
         assert!(
             refused.is_err(),
             "a typo and an unmetered run must not look the same"
@@ -831,7 +1189,7 @@ mod tests {
                 Seed::new("r3", Some("other"), "2026-08-09T12:00:00Z"),
             ],
         );
-        let summary = actor_summary(&conn, "process:digest").unwrap();
+        let summary = actor_summary(&read(&dir), "process:digest").unwrap();
         assert_eq!(summary.run_count, 2, "both runs happened");
         assert_eq!(summary.input_tokens, 100, "only the metered one is summed");
         assert_eq!(summary.output_tokens, 10);
@@ -854,7 +1212,7 @@ mod tests {
         // A freshly written Agent record. "No runs yet" is an answer its
         // dossier has to be able to show.
         let (dir, conn, _vault) = fixture("fleet-fresh");
-        let summary = actor_summary(&conn, "process:brand-new").unwrap();
+        let summary = actor_summary(&read(&dir), "process:brand-new").unwrap();
         assert_eq!(summary.run_count, 0);
         assert_eq!(summary.unknown_runs, 0);
         assert_eq!(summary.running_runs, 0);
@@ -887,7 +1245,7 @@ mod tests {
             ],
         );
 
-        let roster = actor_summaries(&conn)?;
+        let roster = actor_summaries(&read(&dir))?;
         assert_eq!(
             roster.iter().map(|s| s.actor.as_str()).collect::<Vec<_>>(),
             vec!["agent:m26-ingest", "process:scout"],
@@ -907,7 +1265,7 @@ mod tests {
         );
         assert_eq!(
             scout,
-            &actor_summary(&conn, "process:scout")?,
+            &actor_summary(&read(&dir), "process:scout")?,
             "the fold is the same fold — one aggregation, two entry points"
         );
         drop(conn);
@@ -936,7 +1294,7 @@ mod tests {
             ],
         );
 
-        let roster = actor_summaries(&conn)?;
+        let roster = actor_summaries(&read(&dir))?;
         let scout = roster.iter().find(|s| s.actor == "process:scout").unwrap();
         assert_eq!(scout.running_runs, 1, "one row is open right now");
         assert_eq!(
@@ -965,7 +1323,7 @@ mod tests {
             &vault,
             &[Seed::new("r1", None, "2026-08-09T10:00:00Z")],
         );
-        assert!(actor_summaries(&conn)?.is_empty());
+        assert!(actor_summaries(&read(&dir))?.is_empty());
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
         Ok(())

@@ -56,3 +56,22 @@ describe('backlinksFor', () => {
     expect(backlinksFor(orphan, VAULT)).toEqual([]);
   });
 });
+
+// M55.8: a section link reaches its page, so the page lists the note that
+// links into it, and the note's outgoing links name the page.
+describe('section links', () => {
+  const plan = entry('docs/plan.md', { outgoingLinks: ['kickoff#Decisions'] });
+  const vault = [kickoff, plan];
+
+  it('outgoingFor resolves a link into a section to its page', () => {
+    expect(outgoingFor(plan, vault).map((l) => [l.entry.path, l.via])).toEqual([
+      ['meetings/kickoff.md', 'body'],
+    ]);
+  });
+
+  it('backlinksFor lists a note that links into a section', () => {
+    expect(backlinksFor(kickoff, vault).map((l) => [l.entry.path, l.via])).toEqual([
+      ['docs/plan.md', 'body'],
+    ]);
+  });
+});

@@ -1,14 +1,17 @@
 import { isPlace, placeLabel, type Place } from '@/engine/place';
-import type { ChatMessage, Conversation } from '@/agent/types';
+import type { ChatMessage, Conversation, FailureNotice } from '@/agent/types';
+import { effortRefusal, isUnset, modelRefusal } from '@/engine/runOptions';
 
 /**
  * Named conversations (M9.5).
  *
- * Stored in localStorage rather than the vault, deliberately: a transcript
- * is a tool log, not a note. Writing it into the vault would put it in the
- * corpus the background distiller reads, so the assistant would end up
- * learning from its own output — the exact loop M8's "nothing speaks first"
- * model exists to avoid.
+ * The list, and a cached copy of each thread's messages, live in
+ * localStorage. The transcript itself is Claude Code's session file, which
+ * the panel folds back when the copy is gone (M56.3, `useConversations`).
+ * Neither goes in the vault, deliberately: a transcript is a tool log, not a
+ * note. Writing it into the vault would put it in the corpus the background
+ * distiller reads, so the assistant would end up learning from its own
+ * output — the exact loop M8's "nothing speaks first" model exists to avoid.
  */
 
 const KEY = 'cerebro.conversations';
@@ -139,6 +142,100 @@ function healPlace(conversation: Conversation): Conversation {
   return { ...conversation, place: null, placeLabel: undefined };
 }
 
+/** A Claude Code session id as Rust accepts one: a lowercase UUID. */
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * Drop a stored session id that is not one (M56.3). Older mock builds stored
+ * `mock-session`, and Rust refuses any id that is not a UUID before a run
+ * starts; a thread holding one would refuse every send. Read as never
+ * recorded, it starts a new session instead.
+ */
+function healSessionId(conversation: Conversation): Conversation {
+  const { sessionId } = conversation;
+  if (sessionId === null || (typeof sessionId === 'string' && SESSION_ID.test(sessionId))) {
+    return conversation;
+  }
+  return { ...conversation, sessionId: null };
+}
+
+/** A stored notice the card can render: its words are strings, and each
+ * optional field is a string or null (M56.4). */
+function isNotice(raw: unknown): raw is FailureNotice {
+  if (typeof raw !== 'object' || raw === null) return false;
+  const n = raw as Record<string, unknown>;
+  const optional = (v: unknown) => v === undefined || v === null || typeof v === 'string';
+  return (
+    typeof n.kind === 'string' &&
+    typeof n.title === 'string' &&
+    typeof n.body === 'string' &&
+    optional(n.action) &&
+    optional(n.resets_at) &&
+    optional(n.window) &&
+    optional(n.cli_version)
+  );
+}
+
+/**
+ * Drop a stored failure notice that is not one (M56.4). localStorage holds
+ * whatever a build wrote; a notice whose words are missing would draw an
+ * empty card, while dropping it leaves the raw error, which says something.
+ */
+function healNotices(conversation: Conversation): Conversation {
+  let changed = false;
+  const messages = conversation.messages.map((m) => {
+    if (m.notice === undefined || isNotice(m.notice)) return m;
+    changed = true;
+    const { notice: _dropped, ...rest } = m;
+    return rest;
+  });
+  return changed ? { ...conversation, messages } : conversation;
+}
+
+/**
+ * Drop a stored model or effort Rust would refuse (M56.5). localStorage holds
+ * whatever a build wrote; a pick that refuses every send would leave the
+ * thread unusable, while dropping it falls back to Claude Code's default.
+ */
+function healRunOptions(conversation: Conversation): Conversation {
+  const keep = (value: unknown, refusal: (v: string) => string | null) =>
+    typeof value === 'string' && !isUnset(value) && refusal(value) === null ? value : null;
+  const model = keep(conversation.model, modelRefusal);
+  const effort = keep(conversation.effort, effortRefusal);
+  if ((conversation.model ?? null) === model && (conversation.effort ?? null) === effort) {
+    return conversation;
+  }
+  return { ...conversation, model, effort };
+}
+
+/**
+ * Keep a stored call's deferral marks only as this build writes them (M57.1):
+ * `deferred` and `cancelled` while true, and nothing else. `paused` is memory
+ * only, and a value some build wrote that is not `true` would draw a status
+ * the call never had, so it is dropped.
+ */
+function healDeferred(conversation: Conversation): Conversation {
+  let changed = false;
+  const messages = conversation.messages.map((m) => {
+    let touched = false;
+    const tools = m.tools.map((tool) => {
+      const raw = tool as unknown as Record<string, unknown>;
+      const stray = (['deferred', 'cancelled'] as const).filter(
+        (key) => key in raw && raw[key] !== true,
+      );
+      if (stray.length === 0 && !('paused' in raw)) return tool;
+      touched = true;
+      const kept = { ...raw };
+      for (const key of [...stray, 'paused']) delete kept[key];
+      return kept as unknown as typeof tool;
+    });
+    if (!touched) return m;
+    changed = true;
+    return { ...m, tools };
+  });
+  return changed ? { ...conversation, messages } : conversation;
+}
+
 export function loadConversations(): Conversation[] {
   try {
     const raw = window.localStorage.getItem(KEY);
@@ -146,7 +243,14 @@ export function loadConversations(): Conversation[] {
     if (!Array.isArray(parsed)) return [];
     // Tolerant like every other load path: one malformed record must not
     // take the whole history with it.
-    return parsed.filter(isConversation).map(healToolIds).map(healPlace);
+    return parsed
+      .filter(isConversation)
+      .map(healToolIds)
+      .map(healPlace)
+      .map(healSessionId)
+      .map(healNotices)
+      .map(healRunOptions)
+      .map(healDeferred);
   } catch {
     return [];
   }
@@ -155,10 +259,19 @@ export function loadConversations(): Conversation[] {
 export function saveConversations(conversations: Conversation[]): void {
   try {
     // Streaming flags are per-session; persisting one leaves a conversation
-    // that reopens claiming to still be thinking.
+    // that reopens claiming to still be thinking. The reducer's live state
+    // (M56.3) is memory only, for the same reason. So are whole tool payloads
+    // (M56.8, Q21): the threads share localStorage's quota, and Claude Code's
+    // session file holds them, so a reload heals them back while it exists
+    // and the copy keeps the previews. A hook outside Cerebro's pause
+    // (M57.1) is memory only too: after a reload the call reads not run.
     const clean = conversations.slice(0, MAX_KEPT).map((c) => ({
       ...c,
-      messages: c.messages.map(({ streaming: _s, ...m }) => m),
+      messages: c.messages.map(({ streaming: _s, live: _l, ...m }) =>
+        m.tools.some((t) => t.payload !== undefined || t.paused !== undefined)
+          ? { ...m, tools: m.tools.map(({ payload: _p, paused: _q, ...t }) => t) }
+          : m,
+      ),
     }));
     window.localStorage.setItem(KEY, JSON.stringify(clean));
   } catch {

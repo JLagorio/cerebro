@@ -50,3 +50,42 @@ UPDATE_CONFORMANCE=1 cargo test --lib vault::scan::tests::scan_golden
 
 then run `pnpm test:run src/lib/scanGolden`. An untracked file in
 `demo-vault/` changes the scan too.
+
+## Transcript goldens (M56.3)
+
+`transcript/<case>.json` holds Claude Code's two formats folded:
+`src-tauri/src/agent/fold.rs` folds each case's live stream fixtures and
+its session file (from `src-tauri/fixtures/cli-stream/`) and writes the
+events, the per-reason line counts, and each turn's content (the model
+last in effect, then what the person reads). A test in `agent::fold`
+fails when the committed bytes are stale or missing, and holds a turn's
+stream and session-file content equal. `long-payload` (M56.8) is the case
+whose input and result the previews cut, so its content carries the
+`ToolPayload` events both formats must agree on. `src/agent/transcript.test.ts`
+replays the same files through the one TS reducer, live and restored.
+A new or re-recorded fixture regenerates them. From `src-tauri/`:
+
+```
+UPDATE_CONFORMANCE=1 cargo test --lib agent::fold::tests::transcript_goldens
+```
+
+then run `pnpm test:run src/agent/transcript`. `scripts/fixtures.test.ts`
+scans them like the fixtures they come from.
+
+## Failure golden (M56.4)
+
+`failure/notices.json` maps each failure fixture under
+`src-tauri/fixtures/cli-stream/` (and one good run that must stay quiet)
+to the notice `src-tauri/src/agent/failure.rs` classifies it to: kind,
+title, body, action, reset, window and the reporting CLI version, or null.
+`agent::failure::tests::the_failure_notices_golden_is_current` compares
+parsed values, since prettier formats the file. `src/agent/mockAgent.test.ts`
+holds the mock's failure scripts to the same entries. A new fixture, or a
+change to the classifier's words, regenerates it. From `src-tauri/`:
+
+```
+cargo test --lib agent::failure::tests::write_failure_notices -- --ignored
+```
+
+then `pnpm exec prettier --write conformance/failure/notices.json`.
+`scripts/fixtures.test.ts` scans it like the fixtures it comes from.

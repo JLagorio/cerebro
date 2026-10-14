@@ -10,6 +10,8 @@
 *.yml text
 *.yaml text
 *.json text
+# Recorded Claude Code streams (M56.2): one event per line, LF everywhere.
+*.jsonl text eol=lf
 *.html text
 *.css text
 *.sh text eol=lf

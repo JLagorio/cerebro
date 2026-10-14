@@ -393,10 +393,119 @@ describe('the load refuses what tools.rs refuses, in the same words', () => {
       ],
       [
         'change card on a reader',
-        (v) => (cli(v, 'Grep').renderer = 'change'),
-        ['cli tool Grep', '`renderer`'],
+        (v) => (cli(v, 'WebFetch').renderer = 'change'),
+        ['cli tool WebFetch', '`renderer`', 'change needs a tool that writes'],
       ],
       ['icon shape', (v) => (cli(v, 'Grep').icon = 'search_icon'), ['cli tool Grep', '`icon`']],
+    ]);
+  });
+
+  it('keeps fold phrases on read rows alone (M56.8)', () => {
+    const fold = (row: ToolRow | CliTool) => {
+      if (row.fold === null) throw new Error(`${row.name} has no fold`);
+      return row.fold;
+    };
+    expectNames([
+      [
+        'fold on a writer',
+        (v) => (tool(v, 'create_note').fold = { one: 'made a note', many: 'made {n} notes' }),
+        ['tool create_note', '`fold`', 'whose kind is additive', 'only a read folds'],
+      ],
+      [
+        'fold on a CLI writer',
+        (v) => (cli(v, 'Write').fold = { one: 'wrote a file', many: 'wrote {n} files' }),
+        ['cli tool Write', '`fold`', 'a tool that writes'],
+      ],
+      [
+        'fold on a change row',
+        (v) => (tool(v, 'get_note').renderer = 'change'),
+        ['tool get_note', '`fold`', 'a change row', 'only a step folds'],
+      ],
+      [
+        'many without {n}',
+        (v) => (fold(tool(v, 'get_note')).many = 'read notes'),
+        ['tool get_note', '`fold.many`', 'exactly one {n}'],
+      ],
+      [
+        'many with two {n}',
+        (v) => (fold(tool(v, 'get_note')).many = 'read {n} of {n} notes'),
+        ['tool get_note', '`fold.many`', 'exactly one {n}'],
+      ],
+      [
+        'one with {n}',
+        (v) => (fold(tool(v, 'get_note')).one = 'read {n} note'),
+        ['tool get_note', '`fold.one`', 'without {n}'],
+      ],
+      ['blank one', (v) => (fold(tool(v, 'get_note')).one = ' '), ['tool get_note', '`fold.one`']],
+      [
+        'capitalized one',
+        (v) => (fold(tool(v, 'get_note')).one = 'Read a note'),
+        ['tool get_note', '`fold.one`', 'lowercase'],
+      ],
+      [
+        'capitalized many',
+        (v) => (fold(tool(v, 'get_note')).many = 'Read {n} notes'),
+        ['tool get_note', '`fold.many`', 'lowercase'],
+      ],
+      [
+        '41 characters',
+        (v) => (fold(tool(v, 'get_note')).one = 'r'.repeat(41)),
+        ['tool get_note', '`fold.one`', '1 to 40'],
+      ],
+      [
+        'a long many',
+        (v) => (fold(tool(v, 'get_note')).many = `${'r'.repeat(38)}{n}`),
+        ['tool get_note', '`fold.many`', '1 to 40'],
+      ],
+      [
+        'an unknown fold field',
+        (v) => put(fold(tool(v, 'get_note')), 'few', 'read a few notes'),
+        ['tool get_note', '`fold.few`'],
+      ],
+    ]);
+    // Exactly 40 characters loads.
+    const raw = JSON.parse(RAW) as ToolsManifest;
+    fold(tool(raw, 'get_note')).one = 'r'.repeat(40);
+    expect(() => parseToolsManifest(raw)).not.toThrow();
+  });
+
+  it('keeps each renderer on its own door (M56.8)', () => {
+    expectNames([
+      [
+        'concept off the concept door',
+        (v) => (tool(v, 'create_note').renderer = 'concept'),
+        ['tool create_note', '`renderer`', 'concept needs door concept, not note'],
+      ],
+      [
+        'handoff off the run door',
+        (v) => (tool(v, 'open_note').renderer = 'handoff'),
+        ['tool open_note', '`renderer`', 'handoff needs door run, not ui'],
+      ],
+      [
+        'commit off the ledger door',
+        (v) => (tool(v, 'write_concept').renderer = 'commit'),
+        ['tool write_concept', '`renderer`', 'commit needs door ledger, not concept'],
+      ],
+      [
+        'commit on the base surface',
+        (v) => (tool(v, 'commit_proposals').surface = 'base'),
+        ['tool commit_proposals', '`renderer`', 'commit needs the proposals surface'],
+      ],
+      [
+        'a generated handoff',
+        (v) => (v.generated.renderer = 'handoff'),
+        ['generated', '`renderer`', 'handoff needs door run, not ledger'],
+      ],
+      [
+        'concept on a CLI row',
+        (v) => (cli(v, 'Write').renderer = 'concept'),
+        ['cli tool Write', '`renderer`', "concept draws a cerebro tool's own door"],
+      ],
+      [
+        'handoff on a CLI row',
+        (v) => (cli(v, 'Task').renderer = 'handoff'),
+        ['cli tool Task', '`renderer`', 'never a CLI tool'],
+      ],
     ]);
   });
 
@@ -497,6 +606,26 @@ describe('toolFacts', () => {
       writes: true,
       renderer: 'change',
     });
+  });
+
+  it('folds exactly the reads, and draws each tool by its renderer (M56.8)', () => {
+    const reads = TOOLS.tools.filter((row) => row.kind === 'read_only').map((row) => row.name);
+    expect(TOOLS.tools.filter((row) => row.fold !== null).map((row) => row.name)).toEqual(reads);
+    expect(TOOLS.cli_tools.filter((row) => row.fold !== null).map((row) => row.name)).toEqual([
+      'Read',
+      'Glob',
+      'Grep',
+    ]);
+    expect(toolFacts('mcp__cerebro__get_note')?.fold).toEqual({
+      one: 'read a note',
+      many: 'read {n} notes',
+    });
+    expect(toolFacts('propose_create_belief')?.fold).toBeNull();
+    expect(toolFacts('create_note')?.fold).toBeNull();
+    expect(toolFacts('hand_to')?.renderer).toBe('handoff');
+    expect(toolFacts('commit_proposals')?.renderer).toBe('commit');
+    expect(toolFacts('write_concept')?.renderer).toBe('concept');
+    expect(toolFacts('recheck_concept')?.renderer).toBe('concept');
   });
 
   it('carries a row’s target and its door’s writes flag', () => {

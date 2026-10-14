@@ -40,7 +40,7 @@ export function AgentActions() {
           break;
         case 'vault_changed':
           // The pages showing those files hold their saves until the rescan
-          // lands, then reload or ask (NoteBodyEditor, M53.6).
+          // lands, then merge the write in place (NoteBodyEditor, M55.6).
           void announceExternalWrites(action.paths ?? [], rescan);
           break;
         case 'propose_organize':

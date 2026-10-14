@@ -27,6 +27,8 @@ preemptively.)
 | `coverage-fold.v1.json` + `.sha256` | The Coverage dimension precedence and summary fold (M27.2). Loaded by `src-tauri/src/dynamics/coverage.rs`; `fold_rule_version` is carried on every folded answer. |
 | `staleness.v1.json` | When a concept is stale (M49.8): inclusive of its `stale_after` date, and a value that is not exactly a YYYY-MM-DD date (a non-string included) reads as stale — an unknown horizon is surfaced, never treated as "never". Read by `knowledge::is_stale` (Rust) and `staleFrom` (src/engine/okf.ts); both replay its `cases`, so the two evaluators cannot drift, and Rust also checks that `validate_stale_after` refuses every malformed case. |
 | `links.v1.json` | Where the webview may go (M53.12): its entry document (`tauri://localhost` at one of `entry.paths`, or the devUrl under `tauri dev`, with no credentials and no query) loads, an `external_schemes` address leaves for the system browser, and everything else is refused. A path or query on the app's own origin is refused too, because tauri's asset fallback serves `index.html` for any path it cannot find (tauri-2.11.5 manager/mod.rs:405-425), so following one reloads the app and drops unsaved state. Read by `shell::links` (Rust), which routes every navigation and every new-window request through it, and by `isWebUrl` (src/mermaid/flowchart/linkTargets.ts) for the scheme list; both replay its `cases`, and Rust also checks the artifact is closed and canonical. |
+| `agent-links.v1.json` | Open with's agent links (M55.9): four targets in menu order, each an id, a label, a base and a query param, and `max_url_bytes` (8192, the whole URL). A link is the base, `?`, the param, `=` and the prompt percent-encoded with `encodeURIComponent`'s set; a longer one is never opened and the prompt is copied instead. Rust (`shell::open`) builds every URL, checks the cap and replays the `cases`; TypeScript (`OpenWithMenu`) reads only the ids and labels and never builds a URL or checks a length, so no rule is twinned. No digest, like `links.v1.json`. |
+| `run-options.v1.json` | What a run may ask Claude Code for (M56.5): the five `effort_levels` 2.1.250's `--effort` takes, with labels; the model-name shape (`max_chars`, an ASCII letter or digit `first`, then the `also` characters); the `model_suggestions` the pickers offer; the refusal `messages` and `value_chars`, the cut a refused value is quoted at. Absent or blank is unset, which passes no flag. Read by `agent::run_options` (Rust, strict parse), which refuses a run before it starts in `run_agent`, `hand_to` and `spawn_run`, and by `src/engine/runOptions.ts`, which draws the agent page's rows and the composer's picker and gives the browser mock Rust's refusals word for word; both replay its `cases`. No digest, like `links.v1.json`. |
 | `lanes.v1.json` + `.sha256` | The four attention lanes (M27.6): lane order, the reason codes each lane may emit and their within-lane order, the reliance vocabulary, whether the debt lane requires reliance, and (M27.7) which lanes are PROTECTED under §33. Loaded by `src-tauri/src/attention/lanes.rs`, which refuses to start if the artifact and the code disagree about EITHER set — a lane or reason declared with no code behind it renders as permanently empty, which reads as "nothing here" — and refuses an artifact that protects nothing, because a firewall with no protected class is a comment. M27.9 added the three §78/§80 hygiene reasons to the debt lane — `dynamics::hygiene` had computed them since M27.2 with no caller, which is the same as not computing them. M49.10 (K31) stopped emitting `coverage_unassessed` as a lane item: no coverage assessor has shipped, so it pinned every belief in the protected blindness lane. It stays declared for the day an assessor leaves only some beliefs unassessed; until then the lanes COUNT unassessed beliefs (`Lanes::unassessed`) and the view says so — in the empty blindness lane's line, or in `incomplete` when the lane holds assessed items — so an empty lane never reads as "no coverage gaps". |
 | `critical-attention.v1.json` + `.sha256` | §8's bypass (M27.7): the deliberately small, complete inventory of deterministic signals that must not wait in a lane. Each trigger declares its required typed fields, the comparison operators and durations, and the copy key; the artifact declares the replacement relation and its DIRECTION. Interpreted by `src-tauri/src/attention/critical.rs` and `src/lib/attention/critical.ts` — two interpreters, one artifact, and no rule written in either language. **Adding a trigger is an artifact change plus a vector change, never hidden code.** |
 | `goldens-critical/*.json` | The bypass's parity mechanism, replayed by `cargo test` and `pnpm test:run` from the same bytes. Every shipped trigger has five: positive, boundary, replaced, wrong-environment, malformed — and BOTH suites assert that all five exist for every trigger, so a new trigger without vectors fails the build rather than shipping unchecked. |
@@ -34,7 +36,7 @@ preemptively.)
 | `goldens-trigger/*.json` | The trigger registry's parity mechanism (M28.0), replayed by `cargo test` and `pnpm test:run` from the same bytes. Each golden is a full `TriggerEvaluation` record (sometimes with its parent) and the outcome both validators must land on: `accepted`, or a refusal named by its CLOSED code — codes are the contract, prose is not. Both suites also assert every refusal code has at least one golden, so a code with no fixture fails the build. Accepted goldens carry ids that genuinely recompute (`sha256(domain\0gate\0scope\0rule_version\0snapshot_hash)`). |
 | `goldens/*.json` | Proposal + preconditions → expected verdict + destiny. Replayed by `cargo test` and `pnpm test:run` from these same files. A fixture may declare `signals` (server-derived escalators), `versions` (`"<class>/<id>": n`, the M22 `state_versions` its expected-version CAS runs against), `ancestry` (the support graph M26.3's preventive walk runs over), and `table` (a FROZEN table to replay against — `"v1"` or `"v2"` — for a refusal the shipped table can no longer produce; M27.4 made every shipped capability available, so `capability_unavailable` lives on against v2 rather than losing its shared fixture). Declaring either state field requires `rust_only: true` — both read reducer state that is out of the mock's scope by declaration, so the TS runner skips the *verdict replay* loudly rather than the directory quietly missing the case. It still asserts the artifact half of every such file: that the op declares the code possible, and that the code declares a destiny. |
 | `concept-types.v1.json` + `.sha256` | The words the agent may type a concept with (M33a.1), and a one-line hint for each. Loaded by `src-tauri/src/knowledge.rs`; the tool manifest's one token, `{{concept_types}}`, renders it into `write_concept`'s type description. Rust-only for now: the read side (`okf.ts`) resolves a concept's type against the vault's own catalog and tolerates unknown values by OKF §4.1, so there is no twin to disagree with. |
-| `tools.v1.json` + `.sha256` | **The tool manifest** (M54.1): one row per hand-written MCP tool in served order — title, kind, idempotence, door, grant axis and target argument, picker summary and toolset, renderer, icon, search hint, description and input schema — the facts every generated `propose_<op>` tool shares, the picker's toolsets, and the CLI's own built-ins in argv order. Read by `src-tauri/src/policy/tools.rs`: `mcp.rs` serves `tools/list` from it with annotations, and derives the scope and read targets, the open-page announcements and the read-to-replace guard; `agent/mod.rs` derives the CLI allow and deny lists. TS reads the same file through `src/lib/policy/tools.ts` (M54.2), refusal for refusal, and derives the picker's toolsets, summaries and writes flags, the transcript's icons and write cards, the turn checkpoint's trigger and the run log's paths from it. Both sides hash against `tools.v1.sha256`, and both replay `src-tauri/fixtures/tool-cases.json`, its shared case file. |
+| `tools.v1.json` + `.sha256` | **The tool manifest** (M54.1): one row per hand-written MCP tool in served order — title, kind, idempotence, door, grant axis and target argument, picker summary and toolset, renderer, fold phrases (M56.8), icon, search hint, description and input schema — the facts every generated `propose_<op>` tool shares, the picker's toolsets, and the CLI's own built-ins in argv order. Read by `src-tauri/src/policy/tools.rs`: `mcp.rs` serves `tools/list` from it with annotations, and derives the scope and read targets, the open-page announcements and the read-to-replace guard; `agent/mod.rs` derives the CLI allow and deny lists. TS reads the same file through `src/lib/policy/tools.ts` (M54.2), refusal for refusal, and derives the picker's toolsets, summaries and writes flags, the transcript's icons, write cards, row renderers and read folds (M56.8), the turn checkpoint's trigger and the run log's paths from it. Both sides hash against `tools.v1.sha256`, and both replay `src-tauri/fixtures/tool-cases.json`, its shared case file. |
 
 **Three of these are Rust-only, and that is not an exemption from the house
 rule.** `freshness`, `coverage-fold` and `lanes` are read by no TypeScript
@@ -377,6 +379,15 @@ order and its `cli_tools` in argv order, so neither is sorted.
   `read_outside_scope`, and a write-only run cannot use the hash to probe a
   note it may not read. Human saves never compare: the last write wins.
 
+## No longer waiting (M57.1)
+
+- **`no_longer_waiting` is a transport code.** It answers a person's late
+  click after its request ended (answered, cancelled, or its vault closed).
+  It fails at the door of `answer_interaction`, bounds no run and is
+  recorded nowhere: the card already says so, in its own words. Operational,
+  in no op row, not retryable, and `src-tauri/src/agent/interaction.rs` holds
+  it as a const.
+
 ## The live agent surface (M26.3c)
 
 - **`agent_facing` defaults to TRUE, and the artifact says only where it is
@@ -433,6 +444,22 @@ order and its `cli_tools` in argv order, so neither is sorted.
 - **Picker copy lives here.** Toolset labels and hints and each row's summary
   are the picker's words, and `src/engine/tools.ts` reads them from here
   (M54.2). A copy edit is an artifact edit with a digest regeneration.
+- **Fold phrases are owner-read copy (M56.8).** A read row's `fold {one,
+  many}` is how a run of its consecutive calls reads in a transcript ("Read
+  5 notes"), so a phrase edit is an artifact edit with a digest regeneration.
+  Only reads fold, cerebro's `read_only` rows and the CLI's readers, so a
+  write keeps its path in view; a failed or interrupted read is never folded
+  out of sight. Phrases are lowercase (the row capitalizes the label it
+  joins), at most 40 characters, `one` without `{n}` and `many` with exactly
+  one.
+- **The renderer vocabulary is data (M56.8).** `step` and `change` serve any
+  row; `concept`, `handoff` and `commit` draw one door's work and sit only on
+  it: `concept` on door `concept` (write_concept, recheck_concept), `handoff`
+  on door `run` (hand_to), `commit` on door `ledger` and the proposals
+  surface (commit_proposals). The generated `propose_*` tools stay `step`, a
+  CLI row takes only `step` or `change`, and a `concept` row, like a
+  `change` row, needs a target. A new renderer is an artifact edit and a
+  loader change on both sides.
 - **Two loaders, one refusal list.** `tools.rs` and `src/lib/policy/tools.ts`
   refuse the same manifests in the same words, and each holds one negative
   control per refusal. TS checks by hand the shape serde checks in Rust: an
@@ -463,6 +490,12 @@ order and its `cli_tools` in argv order, so neither is sorted.
 - **`concept_types` is the one token.** A `{{name}}` in a description or
   schema must be declared in `tokens`, and a declared token must be used;
   `mcp.rs` renders each one when it serves the row.
+- **`ask_gate` is a hook endpoint, not a manifest row (M57.1).** A run's
+  PreToolUse hook (`type: mcp_tool`) calls it on the run's own bearer to ask
+  whether a call may run, wait or not. `mcp.rs` answers it before every grant
+  axis, as hook JSON; `tools/list` never lists it, and nothing counts,
+  announces or records it. It can register a wait and read a person's
+  answer, never record one, so it has no row here and needs none.
 
 ## What is deliberately NOT here yet
 

@@ -1,7 +1,34 @@
 import { runMockAgent, type MockRun } from './mockAgent';
-import type { AgentEvent, AgentStatus, CliWorkspace, UiAction } from './types';
+import {
+  abortMockAnswer,
+  answerMockInteraction,
+  cancelMockInteraction,
+  confirmMockInteraction,
+  finishMockAnswer,
+  listMockInteractions,
+  mockAsks,
+  registerMockInteraction,
+  settleMockSession,
+} from './mockInteractions';
+import type {
+  AgentEvent,
+  AgentStatus,
+  AgentStreamEvent,
+  CliWorkspace,
+  PendingInteraction,
+  PersonAnswer,
+  TranscriptRead,
+  UiAction,
+} from './types';
 import type { RunCauseRequest } from '@/engine/jobs';
-import { agentAppend, agentEdit, refuseIfAgentPaused } from '@/lib/mockIpc';
+import { runOptionsRefusal } from '@/engine/runOptions';
+import {
+  agentAppend,
+  agentEdit,
+  readMockCliTranscript,
+  recordMockCliTranscript,
+  refuseIfAgentPaused,
+} from '@/lib/mockIpc';
 
 /**
  * Agent IPC facade (M6), same shape as lib/ipc.ts: inside Tauri these invoke
@@ -33,29 +60,77 @@ export function agentWorkspace(vault: string): Promise<CliWorkspace> {
         path: string;
         exists: boolean;
         sessions: number;
+        session_files: number;
         bytes: number;
         memory_files: number;
+        unreadable: number;
+        shared: boolean;
       }>('agent_workspace', { vault }).then((w) => ({
         path: w.path,
         exists: w.exists,
         sessions: w.sessions,
+        sessionFiles: w.session_files,
         bytes: w.bytes,
         memoryFiles: w.memory_files,
+        unreadable: w.unreadable,
+        shared: w.shared,
       }))
     : // Browser mode spawns no CLI, so there is nothing outside the vault to
       // report. Saying "0 files" would be a claim about a real directory.
-      Promise.resolve({ path: '', exists: false, sessions: 0, bytes: 0, memoryFiles: 0 });
+      Promise.resolve({
+        path: '',
+        exists: false,
+        sessions: 0,
+        sessionFiles: 0,
+        bytes: 0,
+        memoryFiles: 0,
+        unreadable: 0,
+        shared: false,
+      });
 }
 
 export function purgeAgentWorkspace(vault: string): Promise<number> {
   return inTauri() ? invokeTauri<number>('purge_agent_workspace', { vault }) : Promise.resolve(0);
 }
 
+/**
+ * A conversation's transcript, read back from Claude Code's own session file
+ * for `vault` and folded in Rust (M56.3). `lastActiveAt` is when its last
+ * turn ended, which tells Claude Code's sweep from a clear. Never rejects: a
+ * read that fails reads as unavailable, `unreadable`, in its own words.
+ */
+export async function readCliTranscript(
+  vault: string,
+  sessionId: string | null,
+  lastActiveAt: string | null,
+): Promise<TranscriptRead> {
+  try {
+    if (!inTauri()) return readMockCliTranscript(sessionId);
+    return await invokeTauri<TranscriptRead>('read_cli_transcript', {
+      vault,
+      sessionId,
+      lastActiveAt,
+    });
+  } catch (err) {
+    return {
+      state: 'unavailable',
+      reason: 'unreadable',
+      retention_days: null,
+      detail: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 export interface RunOptions {
   message: string;
   systemPrompt?: string;
   sessionId?: string | null;
+  /** The model and effort to ask Claude Code for (M56.5): the conversation's
+   * pick, else the addressed or scheduled agent's record. Absent or blank is
+   * Claude Code's default; Rust refuses anything outside run-options.v1.json
+   * before the run starts. */
   model?: string | null;
+  effort?: string | null;
   /** The Settings ceiling — see AgentPolicy. */
   shell: boolean;
   /** Let the run reach the user's own MCP servers (M8.2). */
@@ -117,6 +192,18 @@ export interface RunOptions {
   cause?: RunCauseRequest | null;
 }
 
+/** The kinds a mock run records for its session's replay (M56.3): what the
+ * fold reads off a session file, less the prompt, which is recorded first. */
+const REPLAYED = new Set<AgentStreamEvent['kind']>([
+  'Text',
+  'ModelChanged',
+  'ToolStart',
+  'ToolDone',
+  'ToolDeferred',
+  'Error',
+  'TurnEnded',
+]);
+
 /** Live mock runs by id (M17.3) — a Map for the same reason AgentState is one:
  * three module singletons could only ever describe a single child, so the mock
  * could not reproduce the concurrency the real backend now has. */
@@ -135,10 +222,15 @@ let mockRunSeq = 0;
  * than a placeholder: there is no runtime database there, so no row exists to
  * point at. It is the same "this device only" state a log entry written
  * before M33.7 is in.
+ *
+ * `sessionId` is the Claude Code session the run goes to (M56.3), minted or
+ * resumed before the child starts, so a conversation stores it before the
+ * first event. Optional because older test doubles do not name one.
  */
 export interface RunHandle {
   run: number;
   durableId: string | null;
+  sessionId?: string | null;
 }
 
 /**
@@ -175,62 +267,184 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunS
     // makes that parity a rule, and spec §6 makes this particular one the
     // point of the phase.
     refuseIfAgentPaused(vault, options.actor);
+    // M56.5: the same refusal Rust's run_options gives, in its words, from
+    // the same artifact, before anything starts.
+    const refused = runOptionsRefusal({ model: options.model, effort: options.effort });
+    if (refused !== null) throw new Error(refused);
     // No cause check here (M56.7), unlike the pause: the vocabulary and its
     // refusals live once, in src-tauri/src/runtime/cause.rs, and a second
     // copy of the kinds on this side is the twin list that rule forbids. The
     // browser records no runs, so there is no row a bad kind could reach.
-    const run = ++mockRunSeq;
-    // The mock drives the UI-action channel through the same fan-out the
-    // Tauri listener uses, so browser mode exercises the real subscriber.
-    // Tagging happens here for the same reason it happens in agent.rs: the
-    // script only knows its own stream, the runtime knows which run it is.
-    const mock = runMockAgent(
-      options.message,
-      (event) => {
-        emitLocal({ ...event, run });
-        // Reap at the terminal event, mirroring the reader thread's finish().
-        if (event.kind === 'Done') mockRuns.delete(run);
-      },
-      // The system prompt rides along (M52.3) so a scripted answer about
-      // Knowledge can read the snapshot the real agent would. The write
-      // scripts land on the mock disk through the same refusals as Rust's:
-      // the append as tool_append's (M53.6), the edit as tool_edit_note's
-      // (M55.5).
-      {
-        onUiAction: emitUiAction,
-        onAppend: (path, content) => agentAppend(vault, path, content),
-        onEdit: (path, edits) => agentEdit(vault, path, edits),
-        systemPrompt: options.systemPrompt,
-      },
-    );
-    mockRuns.set(run, mock);
+    // M56.3: the session is minted here for a new run and reused for a
+    // resumed one, as Rust's CliSession does, and the run's replay events are
+    // recorded under it, so a thread whose messages are lost rebuilds in the
+    // browser too. The mock takes the id it is handed; Rust validates the
+    // shape, and nothing here reaches a path.
+    const sessionId = options.sessionId ?? crypto.randomUUID();
+    // M57.1: a call this session left waiting, or one its card cancelled, is
+    // refused as Rust's settle refuses it, and the new text runs.
+    settleMockSession(sessionId);
+    const run = startMockRun(vault, options, sessionId, [
+      { kind: 'UserPrompt', text: options.message },
+    ]);
     // No runtime database in the browser, so no durable row and no id to
     // invent for it.
-    return { run, durableId: null };
+    return { run, durableId: null, sessionId };
   }
-  return invokeTauri<{ run: number; run_id: string } | { deferred: string[] }>('run_agent', {
-    vault,
-    request: {
-      message: options.message,
-      system_prompt: options.systemPrompt ?? null,
-      session_id: options.sessionId ?? null,
-      model: options.model ?? null,
-      shell: options.shell,
-      connectors: options.connectors,
-      attended: options.attended,
-      actor: options.actor ?? null,
-      approved_stdio: options.approvedStdio ?? [],
-      allowed_tools: options.allowedTools ?? null,
-      disallowed_tools: options.disallowedTools ?? null,
-      read_scope: options.readScope ?? null,
-      connector_names: options.connectorNames ?? null,
-      scope: options.scope ?? null,
-      lane: options.lane ?? null,
-      cause: options.cause ?? null,
+  return invokeTauri<{ run: number; run_id: string; session_id: string } | { deferred: string[] }>(
+    'run_agent',
+    {
+      vault,
+      request: {
+        message: options.message,
+        system_prompt: options.systemPrompt ?? null,
+        session_id: options.sessionId ?? null,
+        model: options.model ?? null,
+        effort: options.effort ?? null,
+        shell: options.shell,
+        connectors: options.connectors,
+        attended: options.attended,
+        actor: options.actor ?? null,
+        approved_stdio: options.approvedStdio ?? [],
+        allowed_tools: options.allowedTools ?? null,
+        disallowed_tools: options.disallowedTools ?? null,
+        read_scope: options.readScope ?? null,
+        connector_names: options.connectorNames ?? null,
+        scope: options.scope ?? null,
+        lane: options.lane ?? null,
+        cause: options.cause ?? null,
+      },
     },
-  }).then((result) =>
-    'deferred' in result ? result : { run: result.run, durableId: result.run_id },
+  ).then((result) =>
+    'deferred' in result
+      ? result
+      : { run: result.run, durableId: result.run_id, sessionId: result.session_id },
   );
+}
+
+/**
+ * Start one mock run (browser mode) and tag its events, as Rust's reader
+ * does, recording its replay under `sessionId`. `resume` makes it the turn
+ * that goes on after a held call's answer (M57.1).
+ */
+function startMockRun(
+  vault: string,
+  options: RunOptions,
+  sessionId: string,
+  replay: AgentStreamEvent[],
+  resume?: { toolId: string; answer: PersonAnswer },
+): number {
+  const run = ++mockRunSeq;
+  // The mock drives the UI-action channel through the same fan-out the
+  // Tauri listener uses, so browser mode exercises the real subscriber.
+  // Tagging happens here for the same reason it happens in agent.rs: the
+  // script only knows its own stream, the runtime knows which run it is.
+  const mock = runMockAgent(
+    options.message,
+    (event) => {
+      if (REPLAYED.has(event.kind)) replay.push(event);
+      if (event.kind === 'Done') {
+        // A turn held on a call is suspended, not stopped (M57.1).
+        const held = replay.some((e) => e.kind === 'ToolDeferred');
+        if (!held && !replay.some((e) => e.kind === 'TurnEnded')) {
+          replay.push({ kind: 'TurnInterrupted', reason: 'stopped' });
+        }
+        recordMockCliTranscript(sessionId, replay.splice(0));
+      }
+      emitLocal({ ...event, run });
+      // Reap at the terminal event, mirroring the reader thread's finish().
+      if (event.kind === 'Done') mockRuns.delete(run);
+    },
+    // The system prompt rides along (M52.3) so a scripted answer about
+    // Knowledge can read the snapshot the real agent would. The write
+    // scripts land on the mock disk through the same refusals as Rust's:
+    // the append as tool_append's (M53.6), the edit as tool_edit_note's
+    // (M55.5).
+    {
+      onUiAction: emitUiAction,
+      onAppend: (path, content) => agentAppend(vault, path, content),
+      onEdit: (path, edits) => agentEdit(vault, path, edits),
+      systemPrompt: options.systemPrompt,
+      sessionId,
+      model: options.model ?? null,
+      // M57.1: the mock gate. Only an attended run can ask; a run nobody
+      // watches has no card to show, as Rust's has no seat.
+      asks: options.attended ? mockAsks : undefined,
+      onDefer: (call) =>
+        confirmMockInteraction(
+          registerMockInteraction(
+            vault,
+            sessionId,
+            call.toolId,
+            call.toolName,
+            call.input,
+            (answer) => {
+              startMockRun(vault, options, sessionId, [], { toolId: call.toolId, answer });
+            },
+          ),
+        ),
+      resume,
+    },
+  );
+  mockRuns.set(run, mock);
+  return run;
+}
+
+/**
+ * What answering a waiting call says (M57.1): the resumed run's handle, or a
+ * typed refusal, `no_longer_waiting` when the request had already ended. A
+ * refusal is an answer to read, not an error (CV-03's proposal-channel rule):
+ * the card says it in its own words.
+ */
+export type AnswerResult = { resumed: RunHandle } | { refused: { code: string; message: string } };
+
+/**
+ * Answer a waiting call (M57.1): the one way an answer reaches the book. In
+ * Tauri, `answer_interaction` takes it only while the card waits in this
+ * vault, then resumes the run on the same session; the browser's book does
+ * the same, and its resume is a mock run.
+ */
+export async function answerInteraction(
+  vault: string,
+  id: string,
+  answer: PersonAnswer,
+): Promise<AnswerResult> {
+  if (!inTauri()) {
+    const taken = answerMockInteraction(vault, id);
+    if ('refused' in taken) return { refused: taken.refused };
+    const before = mockRunSeq;
+    try {
+      taken.resume(answer);
+    } catch (err) {
+      abortMockAnswer(id);
+      throw err;
+    }
+    finishMockAnswer(id);
+    // The resume took the next run id as it started.
+    const run = mockRunSeq > before ? mockRunSeq : before;
+    return { resumed: { run, durableId: null, sessionId: taken.card.session_id } };
+  }
+  const result = await invokeTauri<
+    { run: number; run_id: string; session_id: string } | { refused: { code: string; message: string } }
+  >('answer_interaction', { vault, id, answer });
+  return 'refused' in result
+    ? { refused: result.refused }
+    : {
+        resumed: { run: result.run, durableId: result.run_id, sessionId: result.session_id },
+      };
+}
+
+/** Cancel a waiting call (M57.1): Stop or New conversation with its card
+ * open. False when it was no longer waiting, which is not an error. */
+export async function cancelInteraction(id: string): Promise<boolean> {
+  if (!inTauri()) return cancelMockInteraction(id);
+  return invokeTauri<boolean>('cancel_interaction', { id });
+}
+
+/** The calls waiting for the person in `vault`, oldest first (M57.1). */
+export async function listInteractions(vault: string): Promise<PendingInteraction[]> {
+  if (!inTauri()) return listMockInteractions(vault);
+  return invokeTauri<PendingInteraction[]>('list_interactions', { vault });
 }
 
 /**

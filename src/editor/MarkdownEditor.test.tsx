@@ -3,6 +3,8 @@ import type { DefaultSuggestionItem } from '@blocknote/core/extensions';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useVaultStore } from '@/stores/vaultStore';
+import { anchorAt, type CommentAnchor } from '@/engine/commentAnchor';
+import { CommentHighlights, RESOLVE_DELAY_MS } from './commentHighlights';
 import { LazyMarkdownEditor } from './LazyMarkdownEditor';
 import {
   DROPPED_SLASH_KEYS,
@@ -11,6 +13,7 @@ import {
   type CerebroEditor,
   type EditorReadyInfo,
 } from './MarkdownEditor';
+import { readerText } from './readerText';
 
 type ReadyInfo = Pick<EditorReadyInfo, 'editor' | 'lossyCause'>;
 
@@ -182,6 +185,57 @@ describe('MarkdownEditor', () => {
     unmount();
     await waitFor(() => expect(onChange).toHaveBeenCalled());
     expect(onChange.mock.calls[0][0]).toBe(`${markdown}\nlast words\n`);
+  });
+
+  /* M55.13 — the child-page list is derived, so the save writes its empty
+     fence from the block's type alone, with no rendering to lean on in the
+     unmount flush (DOM trap 10). */
+  it('flushes a fresh child-page list on unmount as its empty fence', async () => {
+    const onChange = vi.fn();
+    const onReady = vi.fn<(info: ReadyInfo) => void>();
+    const { unmount } = render(
+      <MarkdownEditor
+        markdown={'# Doc\n'}
+        onChange={onChange}
+        onReady={onReady}
+        debounceMs={60_000}
+      />,
+    );
+    await waitFor(() => expect(onReady).toHaveBeenCalled());
+    const { editor } = onReady.mock.calls[0][0];
+    editor.insertBlocks(
+      [{ type: 'subPages' }],
+      editor.document[editor.document.length - 1],
+      'after',
+    );
+    unmount();
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    expect(onChange.mock.calls[0][0]).toBe('# Doc\n\n```cerebro-subpages\n```\n');
+  });
+
+  /* M55.14 — the page card's pointer is written from its props alone, so the
+     unmount flush, which renders nothing, still saves the fence (DOM trap 10). */
+  it('flushes a fresh page card on unmount as its fence', async () => {
+    const onChange = vi.fn();
+    const onReady = vi.fn<(info: ReadyInfo) => void>();
+    const { unmount } = render(
+      <MarkdownEditor
+        markdown={'# Doc\n'}
+        onChange={onChange}
+        onReady={onReady}
+        debounceMs={60_000}
+      />,
+    );
+    await waitFor(() => expect(onReady).toHaveBeenCalled());
+    const { editor } = onReady.mock.calls[0][0];
+    editor.insertBlocks(
+      [{ type: 'pageCard', props: { target: 'how-we-schedule', alias: '' } }],
+      editor.document[editor.document.length - 1],
+      'after',
+    );
+    unmount();
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    expect(onChange.mock.calls[0][0]).toBe('# Doc\n\n```cerebro-page\n[[how-we-schedule]]\n```\n');
   });
 
   /* The way an answer actually arrives: the run writes it into the live block
@@ -446,6 +500,243 @@ describe('MarkdownEditor', () => {
 });
 
 /**
+ * An outside write applied in place (M55.6): it is not an edit of the
+ * person's, so it neither saves nor marks the page dirty, and it is its own
+ * undo step. ProseMirror groups adjacent steps made within 500 ms, so typing
+ * just before or just after an apply would otherwise undo with it.
+ */
+describe('applyExternal', () => {
+  afterEach(cleanup);
+
+  const PAGE = '# Doc\n\nFirst paragraph.\n\nSecond paragraph.\n';
+
+  async function mount(debounceMs = 20) {
+    const onChange = vi.fn();
+    const onDirty = vi.fn();
+    const onReady = vi.fn<(info: EditorReadyInfo) => void>();
+    render(
+      <MarkdownEditor
+        markdown={PAGE}
+        onChange={onChange}
+        onDirty={onDirty}
+        onReady={onReady}
+        debounceMs={debounceMs}
+      />,
+    );
+    await waitFor(() => expect(onReady).toHaveBeenCalled());
+    const info = onReady.mock.calls[0][0];
+    // The view's first change adds its trailing paragraph; let it.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    onChange.mockClear();
+    onDirty.mockClear();
+    return { info, onChange, onDirty };
+  }
+
+  /** Type `text` at the end of the block holding `holding`, as a keystroke would. */
+  const typeAtEnd = (editor: CerebroEditor, holding: string, text: string) => {
+    const block = editor.document.find((b) => JSON.stringify(b.content).includes(holding));
+    if (block === undefined) throw new Error(`no block holds ${holding}`);
+    act(() => {
+      editor.setTextCursorPosition(block, 'end');
+      editor.insertInlineContent([text]);
+    });
+  };
+
+  const pause = (ms: number) => act(() => new Promise((resolve) => setTimeout(resolve, ms)));
+
+  it('calls neither onChange nor onDirty', async () => {
+    const { info, onChange, onDirty } = await mount();
+    const result = info.applyExternal(
+      PAGE.replace('First paragraph.', 'First, by the agent.'),
+      info.loadedAs,
+    );
+    expect(result.kind).toBe('applied');
+    await pause(80);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onDirty).not.toHaveBeenCalled();
+    expect(info.serialize()).toContain('First, by the agent.');
+  });
+
+  it('saves the undo of an apply, as the text from before it', async () => {
+    const { info, onChange } = await mount();
+    info.applyExternal(PAGE.replace('First paragraph.', 'First, by the agent.'), info.loadedAs);
+    act(() => void info.editor.undo());
+    await waitFor(() => expect(onChange).toHaveBeenCalledOnce());
+    expect(onChange.mock.calls[0][0]).toBe(info.loadedAs);
+  });
+
+  it('keeps typing just before an apply out of its undo step', async () => {
+    const { info } = await mount(60_000);
+    typeAtEnd(info.editor, 'First paragraph.', 'X');
+    const typed = info.serialize();
+    expect(typed).toContain('First paragraph.X');
+    info.markSaved(typed);
+    info.applyExternal(typed.replace('First paragraph.X', 'First, by the agent.'), typed);
+    act(() => void info.editor.undo());
+    expect(info.serialize()).toBe(typed);
+    act(() => void info.editor.undo());
+    expect(info.serialize()).toContain('First paragraph.\n');
+  });
+
+  // The apply adds a block and the typing goes into it: steps that touch,
+  // the case ProseMirror would fold into one undo step.
+  it('keeps typing just after an apply out of its undo step', async () => {
+    const { info } = await mount(60_000);
+    info.applyExternal(`${PAGE}\nThird, by the agent.\n`, info.loadedAs);
+    typeAtEnd(info.editor, 'Third, by the agent.', 'Y');
+    expect(info.serialize()).toContain('Third, by the agent.Y');
+    act(() => void info.editor.undo());
+    expect(info.serialize()).toBe(`${PAGE}\nThird, by the agent.\n`);
+  });
+
+  it('serializes what it emits, and emits nothing that was marked saved', async () => {
+    const { info, onChange } = await mount();
+    appendParagraph(info.editor, 'typed');
+    await waitFor(() => expect(onChange).toHaveBeenCalledOnce());
+    expect(onChange.mock.calls[0][0]).toBe(info.serialize());
+    appendParagraph(info.editor, 'more');
+    info.markSaved(info.serialize());
+    await pause(80);
+    expect(onChange).toHaveBeenCalledOnce();
+  });
+});
+
+/**
+ * Comment highlights are decorations (M70.1): drawing, restyling and clearing
+ * them is a transaction with no steps, so the page never learns of them. No
+ * save, no dirty mark, no undo entry, nothing in the unmount flush.
+ */
+describe('comment highlights stay out of the save (M70.1)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    cleanup();
+  });
+
+  const PAGE = '# Schedule\n\nOwner: TBD.\n\nWe ship on Thursdays, after the freeze.\n';
+
+  async function mount() {
+    const onChange = vi.fn();
+    const onDirty = vi.fn();
+    const onReady = vi.fn<(info: EditorReadyInfo) => void>();
+    const view = render(
+      <MarkdownEditor
+        markdown={PAGE}
+        onChange={onChange}
+        onDirty={onDirty}
+        onReady={onReady}
+        debounceMs={20}
+      />,
+    );
+    await waitFor(() => expect(onReady).toHaveBeenCalled());
+    const info = onReady.mock.calls[0][0];
+    // The view's first change adds its trailing paragraph; let it.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 40)));
+    onChange.mockClear();
+    onDirty.mockClear();
+    const highlights = info.editor.getExtension(CommentHighlights)!;
+    return { info, onChange, onDirty, highlights, view };
+  }
+
+  /** The anchor on the first copy of `quote` in the page as it is now. */
+  function anchorOn(editor: CerebroEditor, quote: string): CommentAnchor {
+    const { spans } = readerText(editor.prosemirrorState.doc);
+    const at = spans.text.indexOf(quote);
+    const result = anchorAt(spans, at, at + quote.length);
+    if (!result.ok) throw new Error(result.reason);
+    return result.anchor;
+  }
+
+  const pause = (ms: number) => act(() => new Promise((resolve) => setTimeout(resolve, ms)));
+
+  it('fires neither onChange nor onDirty, even past the debounce', async () => {
+    const { info, onChange, onDirty, highlights } = await mount();
+    act(() => {
+      highlights.setThreads([{ id: 't1', anchor: anchorOn(info.editor, 'after the freeze') }]);
+      highlights.setActive('t1');
+      highlights.setPending(anchorOn(info.editor, 'Owner'));
+      highlights.setPending(null);
+      highlights.setActive(null);
+    });
+    await pause(80);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onDirty).not.toHaveBeenCalled();
+  });
+
+  it('draws a .cb-comment span in the editor, so BlockNote and we share one prosemirror-view', async () => {
+    const { info, highlights, view } = await mount();
+    act(() =>
+      highlights.setThreads([{ id: 't1', anchor: anchorOn(info.editor, 'after the freeze') }]),
+    );
+    const span = view.container.querySelector('.cb-comment[data-thread="t1"]');
+    expect(span?.textContent).toBe('after the freeze');
+  });
+
+  // The undo takes back the typing before the highlight, not the highlight.
+  it('keeps the text and the highlight through an undo', async () => {
+    const { info, highlights, view } = await mount();
+    const before = info.serialize();
+    act(() => {
+      const owner = info.editor.document.find((b) => JSON.stringify(b.content).includes('Owner'));
+      info.editor.setTextCursorPosition(owner!, 'end');
+      info.editor.insertInlineContent([' Soon.']);
+    });
+    expect(info.serialize()).toContain('Owner: TBD. Soon.');
+    act(() =>
+      highlights.setThreads([{ id: 't1', anchor: anchorOn(info.editor, 'after the freeze') }]),
+    );
+    act(() => void info.editor.undo());
+    expect(info.serialize()).toBe(before);
+    expect(view.container.querySelector('.cb-comment')?.textContent).toBe('after the freeze');
+  });
+
+  it('writes nothing in the unmount flush', async () => {
+    const { info, onChange, highlights, view } = await mount();
+    act(() => {
+      highlights.setThreads([{ id: 't1', anchor: anchorOn(info.editor, 'after the freeze') }]);
+      highlights.setActive('t1');
+    });
+    view.unmount();
+    await pause(40);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('detaches a thread an outside write rewrote, once the delay passes', async () => {
+    const { info, highlights } = await mount();
+    act(() =>
+      highlights.setThreads([{ id: 't1', anchor: anchorOn(info.editor, 'after the freeze') }]),
+    );
+    vi.useFakeTimers();
+    const result = info.applyExternal(
+      PAGE.replace('after the freeze', 'before the release'),
+      info.loadedAs,
+    );
+    expect(result.kind).toBe('applied');
+    expect(highlights.store.state.resolutions.get('t1')).toMatchObject({ kind: 'attached' });
+    act(() => void vi.advanceTimersByTime(RESOLVE_DELAY_MS));
+    expect(highlights.store.state.resolutions.get('t1')).toEqual({
+      kind: 'detached',
+      reason: 'gone',
+      count: 0,
+    });
+  });
+
+  it('keeps a thread when an outside write rewrites another paragraph', async () => {
+    const { info, highlights, view } = await mount();
+    act(() =>
+      highlights.setThreads([{ id: 't1', anchor: anchorOn(info.editor, 'after the freeze') }]),
+    );
+    vi.useFakeTimers();
+    info.applyExternal(PAGE.replace('Owner: TBD.', 'Owner: Ana.'), info.loadedAs);
+    act(() => void vi.advanceTimersByTime(RESOLVE_DELAY_MS));
+    expect(highlights.store.state.resolutions.get('t1')).toMatchObject({
+      kind: 'attached',
+      moved: false,
+    });
+    expect(view.container.querySelector('.cb-comment')?.textContent).toBe('after the freeze');
+  });
+});
+
+/**
  * The `/` menu offers only blocks a save keeps (M53.31): since M55.4 gave
  * toggles, toggle headings, audio and file their carriers, that is every
  * block BlockNote has. Opened the way a keyboard opens it, the `/` offered to
@@ -515,6 +806,31 @@ describe('the / menu', () => {
         '2 columns · Turn into',
       ]),
     );
+  });
+
+  // M55.13 — the child-page list, beside Database.
+  it('offers Sub-pages, and choosing it inserts the list block', async () => {
+    const editor = await openMenu();
+    expect(offered()).toContain('Sub-pages');
+    fireEvent.click(options()[offered().indexOf('Sub-pages')]);
+    await waitFor(() => expect(editor.document.some((b) => b.type === 'subPages')).toBe(true));
+    // Outside a NoteBodyEditor the editor holds no file, and the block says so.
+    expect(screen.getByTestId('sub-page-list').textContent).toBe('Sub-pages show on a saved page.');
+  });
+
+  // M55.14 — a card for an existing page; its search field takes the caret.
+  it('offers Page, and choosing it inserts an unset card whose search takes focus', async () => {
+    const editor = await openMenu();
+    expect(offered()).toContain('Page');
+    // The page holds the caret while `/page` is typed, as it does in a browser;
+    // without it the editor takes focus back a frame after the field has it.
+    editor.prosemirrorView.dom.focus();
+    fireEvent.click(options()[offered().indexOf('Page')]);
+    await waitFor(() => expect(editor.document.some((b) => b.type === 'pageCard')).toBe(true));
+    const card = editor.document.find((b) => b.type === 'pageCard')!;
+    expect(card.props).toMatchObject({ target: '', alias: '' });
+    const field = await screen.findByLabelText('Find a page');
+    await waitFor(() => expect(document.activeElement).toBe(field));
   });
 
   it('inserts a table with a header row', async () => {

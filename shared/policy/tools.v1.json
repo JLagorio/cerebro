@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "artifact_version": 3,
+  "artifact_version": 4,
   "rule_version": "tools/2026-10-14",
   "server": "cerebro",
   "tokens": {
@@ -152,6 +152,10 @@
       "target": null,
       "exempt": null,
       "renderer": "step",
+      "fold": {
+        "one": "read the vault overview",
+        "many": "read the vault overview {n} times"
+      },
       "icon": "compass",
       "always_load": true,
       "search_hint": "vault overview types counts inbox",
@@ -176,6 +180,10 @@
       "target": null,
       "exempt": null,
       "renderer": "step",
+      "fold": {
+        "one": "searched notes",
+        "many": "searched notes {n} times"
+      },
       "icon": "search",
       "always_load": true,
       "search_hint": "find notes by text",
@@ -218,6 +226,10 @@
       },
       "exempt": null,
       "renderer": "step",
+      "fold": {
+        "one": "read a note",
+        "many": "read {n} notes"
+      },
       "icon": "file-text",
       "always_load": true,
       "search_hint": "read one note in full",
@@ -252,6 +264,10 @@
       },
       "exempt": null,
       "renderer": "step",
+      "fold": {
+        "one": "read what Knowledge holds",
+        "many": "read Knowledge {n} times"
+      },
       "icon": "library",
       "always_load": true,
       "search_hint": "what knowledge says about an entity",
@@ -287,6 +303,7 @@
       "target": null,
       "exempt": "records a run's own verdict in memory; writes no file and no event",
       "renderer": "step",
+      "fold": null,
       "icon": "flag",
       "always_load": true,
       "search_hint": "report an ingest window verdict",
@@ -365,6 +382,7 @@
       "target": null,
       "exempt": "records a run's own answer in memory; writes no file and no event",
       "renderer": "step",
+      "fold": null,
       "icon": "send",
       "always_load": true,
       "search_hint": "submit a synthesis answer",
@@ -396,6 +414,10 @@
       "target": null,
       "exempt": null,
       "renderer": "step",
+      "fold": {
+        "one": "listed the Inbox",
+        "many": "listed the Inbox {n} times"
+      },
       "icon": "inbox",
       "always_load": false,
       "search_hint": "inbox captures waiting to be filed",
@@ -419,7 +441,8 @@
       "axis": "none",
       "target": null,
       "exempt": "writes nothing itself; the run it starts writes under the CALLEE's own grant, minted from the callee's record — calling never lends the caller's scope",
-      "renderer": "step",
+      "renderer": "handoff",
+      "fold": null,
       "icon": "forward",
       "always_load": false,
       "search_hint": "start another agent with a task",
@@ -459,6 +482,7 @@
       },
       "exempt": null,
       "renderer": "change",
+      "fold": null,
       "icon": "file-plus",
       "always_load": false,
       "search_hint": "create a new note",
@@ -507,6 +531,7 @@
       },
       "exempt": null,
       "renderer": "change",
+      "fold": null,
       "icon": "list",
       "always_load": false,
       "search_hint": "set or remove note properties",
@@ -549,6 +574,7 @@
       },
       "exempt": null,
       "renderer": "change",
+      "fold": null,
       "icon": "file-pen",
       "always_load": false,
       "search_hint": "add text to the end of a note",
@@ -590,6 +616,7 @@
       },
       "exempt": null,
       "renderer": "change",
+      "fold": null,
       "icon": "replace",
       "always_load": false,
       "search_hint": "replace quoted text in a note",
@@ -652,7 +679,8 @@
         "kind": "concept"
       },
       "exempt": "records findings into knowledge/ through the ledger; replacing a concept needs read access to it (M49.4)",
-      "renderer": "change",
+      "renderer": "concept",
+      "fold": null,
       "icon": "brain",
       "always_load": false,
       "search_hint": "record a knowledge concept",
@@ -754,7 +782,8 @@
         "kind": "concept"
       },
       "exempt": "stamps one concept's stale_after through the ledger; needs read access to it (M49.7)",
-      "renderer": "change",
+      "renderer": "concept",
+      "fold": null,
       "icon": "calendar-check",
       "always_load": false,
       "search_hint": "mark a concept still true",
@@ -794,6 +823,7 @@
       },
       "exempt": "sources/ is the agent's own corpus, not the user's records",
       "renderer": "change",
+      "fold": null,
       "icon": "download",
       "always_load": false,
       "search_hint": "save fetched external material",
@@ -850,6 +880,7 @@
       },
       "exempt": "shows a card; the user decides",
       "renderer": "step",
+      "fold": null,
       "icon": "wand-sparkles",
       "always_load": false,
       "search_hint": "suggest how to file a capture",
@@ -901,6 +932,7 @@
       },
       "exempt": "moves the UI, changes nothing on disk",
       "renderer": "step",
+      "fold": null,
       "icon": "eye",
       "always_load": false,
       "search_hint": "show a note to the user",
@@ -931,6 +963,7 @@
       "target": null,
       "exempt": "moves the UI, changes nothing on disk",
       "renderer": "step",
+      "fold": null,
       "icon": "compass",
       "always_load": false,
       "search_hint": "move the app to a surface",
@@ -965,7 +998,8 @@
       "axis": "none",
       "target": null,
       "exempt": "decides this run's own proposals through the policy table, not a path",
-      "renderer": "step",
+      "renderer": "commit",
+      "fold": null,
       "icon": "check-check",
       "always_load": false,
       "search_hint": "apply this run's proposals",
@@ -1010,6 +1044,7 @@
       "denied_when_read_scoped": false,
       "with_shell": true,
       "renderer": "change",
+      "fold": null,
       "icon": "pencil"
     },
     {
@@ -1019,6 +1054,7 @@
       "denied_when_read_scoped": false,
       "with_shell": true,
       "renderer": "change",
+      "fold": null,
       "icon": "file-pen"
     },
     {
@@ -1028,6 +1064,7 @@
       "denied_when_read_scoped": false,
       "with_shell": false,
       "renderer": "change",
+      "fold": null,
       "icon": "file-pen"
     },
     {
@@ -1037,6 +1074,7 @@
       "denied_when_read_scoped": false,
       "with_shell": false,
       "renderer": "change",
+      "fold": null,
       "icon": "notebook-pen"
     },
     {
@@ -1046,6 +1084,7 @@
       "denied_when_read_scoped": false,
       "with_shell": true,
       "renderer": "step",
+      "fold": null,
       "icon": "terminal"
     },
     {
@@ -1055,6 +1094,10 @@
       "denied_when_read_scoped": true,
       "with_shell": true,
       "renderer": "step",
+      "fold": {
+        "one": "read a file",
+        "many": "read {n} files"
+      },
       "icon": "file-text"
     },
     {
@@ -1064,6 +1107,10 @@
       "denied_when_read_scoped": true,
       "with_shell": true,
       "renderer": "step",
+      "fold": {
+        "one": "listed files",
+        "many": "listed files {n} times"
+      },
       "icon": "folder-open"
     },
     {
@@ -1073,6 +1120,10 @@
       "denied_when_read_scoped": true,
       "with_shell": true,
       "renderer": "step",
+      "fold": {
+        "one": "searched files",
+        "many": "searched files {n} times"
+      },
       "icon": "search"
     },
     {
@@ -1082,6 +1133,7 @@
       "denied_when_read_scoped": false,
       "with_shell": false,
       "renderer": "step",
+      "fold": null,
       "icon": "globe"
     },
     {
@@ -1091,6 +1143,7 @@
       "denied_when_read_scoped": false,
       "with_shell": false,
       "renderer": "step",
+      "fold": null,
       "icon": "globe"
     },
     {
@@ -1100,6 +1153,7 @@
       "denied_when_read_scoped": false,
       "with_shell": false,
       "renderer": "step",
+      "fold": null,
       "icon": "bot"
     }
   ]

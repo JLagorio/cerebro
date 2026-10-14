@@ -3,13 +3,16 @@ import type { RunRecord } from '@/agent/runs';
 import type { OrganizeProposal } from '@/agent/types';
 import { scrubStdioApprovals } from '@/engine/connectors';
 import type { InboxPeriod } from '@/engine/inbox';
+import { getPanelAgent, setPanelAgent as writePanelAgent } from '@/lib/ipc';
 
-export type DocPanelTab = 'outline' | 'info' | 'links' | 'knowledge';
-/** The side panel on a concept page (M50.1): its provenance comes first, and
- *  a concept has no Info (its frontmatter is provenance) and no Knowledge tab
- *  (its related knowledge is part of the details). The review itself is the
- *  bar under the title since M51. */
-export type ConceptPanelTab = 'details' | 'outline' | 'links';
+/** A page's side panel tabs (DocSidePanel). Comments (M70.2b) holds the
+ *  page's threads. */
+export type DocPanelTab = 'outline' | 'info' | 'links' | 'knowledge' | 'comments';
+/** The side panel on a concept page (M50.1): its provenance comes first. A
+ *  concept has no Info (its frontmatter is provenance) and no Knowledge tab
+ *  (its related knowledge is part of the details), and takes comments like
+ *  any page (M70.2b). The review itself is the bar under the title since M51. */
+export type ConceptPanelTab = 'details' | 'outline' | 'links' | 'comments';
 
 /**
  * What the person chose, NOT what is on screen (M16.36).
@@ -31,6 +34,10 @@ export type ThemeMode = 'light' | 'dark' | 'system';
  */
 export function asThemeMode(v: unknown): ThemeMode {
   return v === 'light' || v === 'dark' || v === 'system' ? v : 'system';
+}
+
+function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 /** A prompt on its way to the Assistant — see `agentPendingPrompt`. */
@@ -161,7 +168,8 @@ interface UiState {
    * display order. Dirs without an entry sort folders-first alphabetical. */
   treeOrder: Record<string, string[]>;
   setTreeOrder(dir: string, order: string[]): void;
-  // Doc right-hand side panel (M2.x docs polish): one panel, three tabs.
+  // A page's right-hand side panel (M2.x docs polish): one panel, its tabs
+  // named by DocPanelTab.
   docPanelOpen: boolean;
   setDocPanelOpen(v: boolean): void;
   docPanelTab: DocPanelTab;
@@ -175,7 +183,7 @@ interface UiState {
   // assistant were four columns wide. Persisted like the doc panel's.
   conceptPanelOpen: boolean;
   setConceptPanelOpen(v: boolean): void;
-  // Left-hand Pages panel on multi-page docs; collapsed state persists.
+  // Left-hand Pages panel on a page with sub-pages; collapsed state persists.
   docPagesOpen: boolean;
   setDocPagesOpen(v: boolean): void;
   // Home tasks rollup assignee filter ('' = everyone), persisted.
@@ -208,6 +216,12 @@ interface UiState {
   favorites: Record<string, string[]>;
   toggleFavorite(vault: string, path: string): void;
   pruneFavorites(vault: string, existing: Set<string>): void;
+  /**
+   * Follow a page that moved (M55.13): a pin on `from`, or on anything under
+   * it, now names the same page at `to`. Growing a page into a folder of its
+   * own renames it, and a prune would otherwise drop the pin as dead.
+   */
+  replaceFavoritePath(vault: string, from: string, to: string): void;
 
   /**
    * Per-filetype icons and colour in the workspace tree (M30.22); persisted.
@@ -297,6 +311,19 @@ interface UiState {
   stdioApprovals: Record<string, string[]>;
   approveStdio(vault: string, fingerprint: string): void;
   revokeStdio(vault: string, fingerprint: string): void;
+  /**
+   * Who answers in each vault's assistant panel (M56.6): the handle of the
+   * Agent record it is bound to, null for the plain assistant, absent until
+   * read. Kept in the app's config.json (app_config.rs), never in the vault
+   * and never in localStorage: config.json is the store, and a vault must not
+   * be able to choose who the panel answers as.
+   */
+  panelAgents: Record<string, string | null>;
+  /** Read this vault's binding. A failed read toasts and changes nothing. */
+  loadPanelAgent(vault: string): Promise<void>;
+  /** Bind this vault's panel, or unbind it with null. Never throws (CV-03):
+   * a refusal toasts and answers false, and the binding stays as it was. */
+  setPanelAgent(vault: string, handle: string | null): Promise<boolean>;
   /** Comma-separated issue-tracker project keys, e.g. "PHX, SYN". Issue
    * references cannot be recognised by shape, only declared — see
    * engine/ingest.ts. Persisted. */
@@ -323,6 +350,13 @@ interface UiState {
    * One action because the two halves were always done together, and doing
    * only the second is a prompt that lands in a panel nobody can see. */
   askAgent(text: string, subject?: string | null, label?: string | null): void;
+  /**
+   * The Settings row to bring into view when Settings next renders (M56.4):
+   * a failure card's Open Settings sets it, and the row clears it once it
+   * has scrolled there. A one-shot, never persisted.
+   */
+  settingsFocus: string | null;
+  setSettingsFocus(v: string | null): void;
   // --- Automatic learning (M8.6) ---
   /**
    * Let the base read filed captures and edited notes on its own. Persisted.
@@ -516,8 +550,8 @@ export const AI_WIDTH_MIN = RIGHT_PANEL_MIN_WIDTH;
 export const AI_WIDTH_MAX = 720;
 
 /**
- * A page's own panels: the side panel (DocSidePanel) and a multi-page doc's
- * Pages panel (DocPagesPanel) — their widths, and how far they give.
+ * A page's own panels: the side panel (DocSidePanel) and the Pages panel of a
+ * page with sub-pages (DocPagesPanel) — their widths, and how far they give.
  *
  * The page's reading column gives first, down to DOC_COLUMN_MIN_WIDTH, and
  * only then the panels, down to their floors. Past that the Pages panel folds
@@ -693,7 +727,7 @@ function storeString(key: string, v: string): void {
 
 function loadPanelTab(): DocPanelTab {
   const v = loadString(PANEL_TAB_KEY, 'outline');
-  return v === 'info' || v === 'links' || v === 'knowledge' ? v : 'outline';
+  return v === 'info' || v === 'links' || v === 'knowledge' || v === 'comments' ? v : 'outline';
 }
 
 function loadInboxPeriod(): InboxPeriod {
@@ -896,6 +930,16 @@ export const useUiStore = create<UiState>((set, get) => ({
     storeString(FAVORITES_KEY, JSON.stringify(next));
     set({ favorites: next });
   },
+  replaceFavoritePath: (vault, from, to) => {
+    const current = get().favorites[vault] ?? [];
+    const swap = (p: string): string =>
+      p === from ? to : p.startsWith(`${from}/`) ? `${to}${p.slice(from.length)}` : p;
+    const pinned = current.map(swap);
+    if (from === to || pinned.every((p, i) => p === current[i])) return;
+    const next = { ...get().favorites, [vault]: pinned };
+    storeString(FAVORITES_KEY, JSON.stringify(next));
+    set({ favorites: next });
+  },
 
   workspaceFileIcons: loadString(FILE_ICONS_KEY, 'true') === 'true',
   setWorkspaceFileIcons: (v) => {
@@ -969,6 +1013,26 @@ export const useUiStore = create<UiState>((set, get) => ({
     storeString(AGENT_CONNECTORS_KEY, String(v));
     set({ agentConnectors: v });
   },
+  panelAgents: {},
+  loadPanelAgent: async (vault) => {
+    try {
+      const handle = await getPanelAgent(vault);
+      set((s) => ({ panelAgents: { ...s.panelAgents, [vault]: handle } }));
+    } catch (err) {
+      get().toast(`Couldn't read who answers in the assistant panel: ${messageOf(err)}`);
+    }
+  },
+  setPanelAgent: async (vault, handle) => {
+    try {
+      await writePanelAgent(vault, handle);
+    } catch (err) {
+      get().toast(`Couldn't change who answers in the assistant panel: ${messageOf(err)}`);
+      return false;
+    }
+    const bound = handle?.trim() ?? '';
+    set((s) => ({ panelAgents: { ...s.panelAgents, [vault]: bound === '' ? null : bound } }));
+    return true;
+  },
   stdioApprovals: loadStdioApprovals(STDIO_APPROVALS_KEY),
   approveStdio: (vault, fingerprint) =>
     set((s) => {
@@ -997,6 +1061,8 @@ export const useUiStore = create<UiState>((set, get) => ({
     storeString(AI_PANEL_KEY, 'true');
     set({ aiPanelOpen: true, agentPendingPrompt: { text, subject, label } });
   },
+  settingsFocus: null,
+  setSettingsFocus: (v) => set({ settingsFocus: v }),
 
   // Off until asked for (M49.7, K20): unattended runs cost money and
   // rewrite knowledge, so they are opted into, never inherited. A choice

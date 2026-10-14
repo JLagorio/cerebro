@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FileTree } from '@/components/FileTree';
+import { EntryIcon } from '@/components/PageIcon';
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { DrawerScrim, useDrawerFocus } from '@/components/ui/DrawerScrim';
 import { Icon } from '@/components/ui/Icon';
@@ -945,7 +946,12 @@ export function Sidebar({
                 onClick={onOpen}
                 className={rowClass(false)}
               >
-                <Icon name={icon} size={15} color={color} />
+                {/* A page's own icon first (M55.11); an agent keeps its bot. */}
+                {isAgentEntry(entry) ? (
+                  <Icon name={icon} size={15} color={color} />
+                ) : (
+                  <EntryIcon entry={entry} size={15} fallback={{ name: icon, color }} />
+                )}
                 <span className="overflow-hidden text-ellipsis whitespace-nowrap">
                   {entry.title}
                 </span>

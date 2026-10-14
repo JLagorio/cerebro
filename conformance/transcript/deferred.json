@@ -1,0 +1,112 @@
+{
+  "case": "deferred",
+  "cli_version": "2.1.250",
+  "streams": [
+    {
+      "file": "transcript-deferred.stream.json",
+      "events": [
+        {
+          "kind": "Init",
+          "session_id": "00000000-0000-4000-8000-000000000057"
+        },
+        {
+          "kind": "ModelChanged",
+          "model": "claude-haiku-4-5-20251001"
+        },
+        {
+          "kind": "TextDelta",
+          "text": "Adding it to your inbox."
+        },
+        {
+          "kind": "Text",
+          "message_id": "msg_000000000000000000005701",
+          "text": "Adding it to your inbox."
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "mcp__cerebro__append_to_note",
+          "tool_id": "toolu_000000000000000000005701",
+          "input": "{\"path\":\"notes/inbox.md\",\"content\":\"- Call the vendor about the delay\"}"
+        },
+        {
+          "kind": "ToolDeferred",
+          "tool_id": "toolu_000000000000000000005701",
+          "tool_name": "mcp__cerebro__append_to_note"
+        }
+      ],
+      "classes": {
+        "translated": 5,
+        "ignored": {
+          "a block closing, with nothing new in it": 2,
+          "a block opening; its content follows as deltas, or whole on the assistant line": 2,
+          "a progress word such as requesting; the panel shows its own": 1,
+          "a tool call's input in pieces; the assistant line carries it whole": 1,
+          "the turn's end, with nothing new in it": 1,
+          "the turn's model and opening usage; the assistant line and the result carry both": 1,
+          "the turn's stop reason and running usage; the assistant line and the result carry both": 1
+        },
+        "unclassified": {}
+      }
+    }
+  ],
+  "session": {
+    "file": "transcript-deferred.session.json",
+    "events": [
+      {
+        "kind": "UserPrompt",
+        "text": "Add 'call the vendor about the delay' to my inbox."
+      },
+      {
+        "kind": "ModelChanged",
+        "model": "claude-haiku-4-5-20251001"
+      },
+      {
+        "kind": "Text",
+        "message_id": "msg_000000000000000000005701",
+        "text": "Adding it to your inbox."
+      },
+      {
+        "kind": "ToolStart",
+        "tool_name": "mcp__cerebro__append_to_note",
+        "tool_id": "toolu_000000000000000000005701",
+        "input": "{\"path\":\"notes/inbox.md\",\"content\":\"- Call the vendor about the delay\"}"
+      },
+      {
+        "kind": "ToolDeferred",
+        "tool_id": "toolu_000000000000000000005701",
+        "tool_name": "mcp__cerebro__append_to_note"
+      }
+    ],
+    "classes": {
+      "translated": 4,
+      "ignored": {
+        "a prompt entering or leaving the CLI's queue; the prompt line follows": 2,
+        "context the CLI attached for the model, such as tool and skill listings, other than a deferral": 1,
+        "the last prompt again, for the CLI's own resume picker": 1
+      },
+      "unclassified": {}
+    }
+  },
+  "content": [
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "events": [
+        {
+          "kind": "Text",
+          "text": "Adding it to your inbox."
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "mcp__cerebro__append_to_note",
+          "tool_id": "toolu_000000000000000000005701",
+          "input": "{\"path\":\"notes/inbox.md\",\"content\":\"- Call the vendor about the delay\"}"
+        },
+        {
+          "kind": "ToolDeferred",
+          "tool_id": "toolu_000000000000000000005701",
+          "tool_name": "mcp__cerebro__append_to_note"
+        }
+      ]
+    }
+  ]
+}

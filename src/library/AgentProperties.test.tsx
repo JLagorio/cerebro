@@ -369,6 +369,99 @@ describe('AgentProperties', () => {
 });
 
 /**
+ * M56.5 — Model and Effort, from run-options.v1.json. Each writes only its own
+ * key on Done, the default removes it, and a stored value Rust would refuse
+ * says so on the closed row.
+ */
+describe('AgentProperties model and effort (M56.5)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    patch.mockResolvedValue(true);
+  });
+
+  const withProps = (props: Record<string, unknown>) =>
+    makeEntry({ ...AGENT, properties: { ...AGENT.properties, ...props } as never });
+
+  it('reads Claude Code default when unset', () => {
+    setup();
+    expect(row('model').textContent).toContain('Claude Code default');
+    expect(row('effort').textContent).toContain('Claude Code default');
+  });
+
+  it('Model writes {model} only on Done', async () => {
+    setup();
+    const editor = openRow('model');
+    fireEvent.click(within(editor).getByRole('radio', { name: 'Sonnet' }));
+    expect(patch).not.toHaveBeenCalled();
+    done(editor);
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    expect(lastPatch()).toEqual({ model: 'sonnet' });
+  });
+
+  it('Other takes a full name, and Done refuses one that is not a model name', async () => {
+    setup();
+    const editor = openRow('model');
+    fireEvent.click(within(editor).getByRole('radio', { name: 'Other' }));
+    const field = within(editor).getByTestId('agent-model-other');
+    fireEvent.change(field, { target: { value: '-x' } });
+    const doneButton = within(editor).getByRole('button', { name: 'Done' });
+    expect((doneButton as HTMLButtonElement).disabled).toBe(true);
+    expect(within(editor).getByText(/model "-x" is not a model name/)).toBeTruthy();
+    fireEvent.click(doneButton);
+    expect(patch).not.toHaveBeenCalled();
+    fireEvent.change(field, { target: { value: 'claude-opus-5-5[1m]' } });
+    expect((doneButton as HTMLButtonElement).disabled).toBe(false);
+    done(editor);
+    await waitFor(() => expect(lastPatch()).toEqual({ model: 'claude-opus-5-5[1m]' }));
+  });
+
+  it('Claude Code default writes null, removing the key', async () => {
+    setup([withProps({ model: 'opus' }), RISK]);
+    expect(row('model').textContent).toContain('Opus');
+    const editor = openRow('model');
+    fireEvent.click(within(editor).getByRole('radio', { name: 'Claude Code default' }));
+    done(editor);
+    await waitFor(() => expect(lastPatch()).toEqual({ model: null }));
+  });
+
+  it('Effort writes {effort} only', async () => {
+    setup();
+    const editor = openRow('effort');
+    fireEvent.click(within(editor).getByRole('radio', { name: 'Extra high' }));
+    done(editor);
+    await waitFor(() => expect(lastPatch()).toEqual({ effort: 'xhigh' }));
+  });
+
+  it('a stored value Claude Code would not take warns on the closed row', () => {
+    setup([withProps({ model: 'opus 5', effort: 'turbo' }), RISK]);
+    expect(row('model').textContent).toContain(
+      "opus 5 — Claude Code won't take this; runs are refused until you change it.",
+    );
+    expect(row('effort').textContent).toContain(
+      "turbo — Claude Code won't take this; runs are refused until you change it.",
+    );
+    // A full name it does take reads as itself.
+    cleanup();
+    setup([withProps({ model: 'claude-haiku-4-5-20251001', effort: 'high' }), RISK]);
+    expect(row('model').textContent).toContain('claude-haiku-4-5-20251001');
+    expect(row('effort').textContent).toContain('High');
+  });
+
+  it('Cancel and Escape write nothing', () => {
+    setup();
+    let editor = openRow('model');
+    fireEvent.click(within(editor).getByRole('radio', { name: 'Opus' }));
+    fireEvent.click(within(editor).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByTestId('agent-editor-model')).toBeNull();
+    editor = openRow('effort');
+    fireEvent.click(within(editor).getByRole('radio', { name: 'Max' }));
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByTestId('agent-editor-effort')).toBeNull();
+    expect(patch).not.toHaveBeenCalled();
+  });
+});
+
+/**
  * M54.9 — connectors are granted by name, so the tool picker offers them, a
  * single connector tool already in the file is a known chip, and the record's
  * `disallowed-tools:` is shown and never written.

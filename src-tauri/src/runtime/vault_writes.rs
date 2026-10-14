@@ -1,7 +1,10 @@
 //! The operational vault-write log (M49.10, the 2026-09 owner decision Q4).
 //!
 //! A note saved, patched, renamed or deleted is recorded here — in app-data,
-//! beside the operational log — and no longer in the vault ledger. The ledger
+//! beside the operational log — and no longer in the vault ledger. So is a
+//! page's comment sidecar (M70.2): each comment write is a `vault.write` of
+//! `.comments/<page>.json` under its author, and a carry on rename or delete
+//! is a `vault.rename` or `vault.delete` of the sidecar. The ledger
 //! is the EPISTEMIC record: what the knowledge base believes and why. These
 //! `vault.*` events were shadow observations nothing ever read, and they were
 //! most of the chain's bytes.

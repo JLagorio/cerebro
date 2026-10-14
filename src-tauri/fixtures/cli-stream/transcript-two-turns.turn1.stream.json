@@ -1,0 +1,473 @@
+[
+  {
+    "type": "system",
+    "subtype": "init",
+    "cwd": "/vault",
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "model": "claude-haiku-4-5-20251001",
+    "claude_code_version": "2.1.250",
+    "apiKeySource": "none",
+    "uuid": "00000000-0000-4000-8000-000000000900"
+  },
+  {
+    "type": "system",
+    "subtype": "status",
+    "status": "requesting",
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000101"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_start",
+      "message": {
+        "model": "claude-haiku-4-5-20251001",
+        "id": "msg_000000000000000000000001",
+        "type": "message",
+        "role": "assistant",
+        "content": [],
+        "stop_reason": null
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000102"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_start",
+      "index": 0,
+      "content_block": {
+        "type": "text",
+        "text": ""
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000103"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": {
+        "type": "text_delta",
+        "text": "Reading both "
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000104"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": {
+        "type": "text_delta",
+        "text": "notes."
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000105"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000000001",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Reading both notes."
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 6100,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 12,
+        "service_tier": "standard"
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000010"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_stop",
+      "index": 0
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000106"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_start",
+      "index": 1,
+      "content_block": {
+        "type": "tool_use",
+        "id": "toolu_000000000000000000000001",
+        "name": "Read",
+        "input": {}
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000107"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 1,
+      "delta": {
+        "type": "input_json_delta",
+        "partial_json": "{\"file_path\": \"/vault/a.md\"}"
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000108"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000000001",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000000001",
+          "name": "Read",
+          "input": {
+            "file_path": "/vault/a.md"
+          }
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 6100,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 12,
+        "service_tier": "standard"
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000011"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_stop",
+      "index": 1
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000109"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_start",
+      "index": 2,
+      "content_block": {
+        "type": "tool_use",
+        "id": "toolu_000000000000000000000002",
+        "name": "Read",
+        "input": {}
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-00000000010a"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 2,
+      "delta": {
+        "type": "input_json_delta",
+        "partial_json": "{\"file_path\": \"/vault/b.md\"}"
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-00000000010b"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000000001",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000000002",
+          "name": "Read",
+          "input": {
+            "file_path": "/vault/b.md"
+          }
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 6100,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 12,
+        "service_tier": "standard"
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000012"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_stop",
+      "index": 2
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-00000000010c"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_delta",
+      "delta": {
+        "stop_reason": "tool_use",
+        "stop_sequence": null
+      },
+      "usage": {
+        "output_tokens": 60
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-00000000010d"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_stop"
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-00000000010e"
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_000000000000000000000001",
+          "type": "tool_result",
+          "content": "1\t# A\n2\talpha"
+        }
+      ]
+    },
+    "parent_tool_use_id": null,
+    "timestamp": "2026-07-28T12:00:01.000Z",
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000110"
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_000000000000000000000002",
+          "type": "tool_result",
+          "content": "1\t# B\n2\tbeta"
+        }
+      ]
+    },
+    "parent_tool_use_id": null,
+    "timestamp": "2026-07-28T12:00:02.000Z",
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000111"
+  },
+  {
+    "type": "system",
+    "subtype": "status",
+    "status": "requesting",
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000120"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_start",
+      "message": {
+        "model": "claude-haiku-4-5-20251001",
+        "id": "msg_000000000000000000000002",
+        "type": "message",
+        "role": "assistant",
+        "content": [],
+        "stop_reason": null
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000121"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_start",
+      "index": 0,
+      "content_block": {
+        "type": "text",
+        "text": ""
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000122"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": {
+        "type": "text_delta",
+        "text": "done"
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000123"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000000002",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "done"
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 6100,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 12,
+        "service_tier": "standard"
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000124"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "content_block_stop",
+      "index": 0
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000125"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_delta",
+      "delta": {
+        "stop_reason": "end_turn",
+        "stop_sequence": null
+      },
+      "usage": {
+        "output_tokens": 4
+      }
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000126"
+  },
+  {
+    "type": "stream_event",
+    "event": {
+      "type": "message_stop"
+    },
+    "parent_tool_use_id": null,
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000127"
+  },
+  {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "duration_ms": 2400,
+    "duration_api_ms": 2100,
+    "num_turns": 2,
+    "result": "done",
+    "stop_reason": "end_turn",
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "total_cost_usd": 0.0021,
+    "usage": {
+      "input_tokens": 6,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 6100,
+      "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+      },
+      "output_tokens": 12,
+      "service_tier": "standard"
+    },
+    "modelUsage": {},
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "uuid": "00000000-0000-4000-8000-000000000130"
+  }
+]

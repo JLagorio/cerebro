@@ -1,0 +1,187 @@
+{
+  "case": "session-records",
+  "cli_version": "2.1.250",
+  "streams": [],
+  "session": {
+    "file": "transcript-session-records.session.json",
+    "events": [
+      {
+        "kind": "UserPrompt",
+        "text": "Open a pull request for the meeting notes."
+      },
+      {
+        "kind": "ModelChanged",
+        "model": "claude-haiku-4-5-20251001"
+      },
+      {
+        "kind": "Text",
+        "message_id": "msg_000000000000000000000041",
+        "text": "Opened pull request 7."
+      },
+      {
+        "kind": "PrLink",
+        "number": 7,
+        "url": "https://github.com/example/notes/pull/7",
+        "repository": "example/notes"
+      },
+      {
+        "kind": "TurnEnded",
+        "stop_reason": "end_turn"
+      },
+      {
+        "kind": "UserPrompt",
+        "text": "Thanks. Now tidy the inbox."
+      },
+      {
+        "kind": "ModelChanged",
+        "model": "claude-haiku-4-5-20251001"
+      },
+      {
+        "kind": "ToolStart",
+        "tool_name": "mcp__cerebro__list_inbox",
+        "tool_id": "toolu_000000000000000000000041",
+        "input": "{}"
+      },
+      {
+        "kind": "ToolDone",
+        "tool_id": "toolu_000000000000000000000041",
+        "output": "Two captures.",
+        "is_error": false
+      },
+      {
+        "kind": "ToolStart",
+        "tool_name": "mcp__cerebro__get_note",
+        "tool_id": "toolu_000000000000000000000042",
+        "input": "{\"path\":\"inbox/one.md\"}"
+      },
+      {
+        "kind": "TurnInterrupted",
+        "reason": "stopped"
+      },
+      {
+        "kind": "UserPrompt",
+        "text": "Check the build."
+      },
+      {
+        "kind": "ModelChanged",
+        "model": "claude-haiku-4-5-20251001"
+      },
+      {
+        "kind": "Text",
+        "message_id": "msg_000000000000000000000045",
+        "text": "The build is green."
+      },
+      {
+        "kind": "TurnEnded"
+      },
+      {
+        "kind": "UserPrompt",
+        "text": "And the release notes?"
+      },
+      {
+        "kind": "ModelChanged",
+        "model": "claude-haiku-4-5-20251001"
+      },
+      {
+        "kind": "ToolStart",
+        "tool_name": "Read",
+        "tool_id": "toolu_000000000000000000000043",
+        "input": "{\"file_path\":\"/vault/release.md\"}"
+      },
+      {
+        "kind": "TurnInterrupted",
+        "reason": "cut_off"
+      }
+    ],
+    "classes": {
+      "translated": 12,
+      "ignored": {
+        "a command typed into the CLI's own UI, never a panel turn": 1,
+        "a line already folded under the same uuid": 2,
+        "a line the CLI wrote for the model, never shown to the person": 1,
+        "a placeholder reply no model wrote": 1,
+        "a pr-link record without a usable number, https url or owner/repo": 1,
+        "a prompt entering or leaving the CLI's queue; the prompt line follows": 8,
+        "a subagent's line, which belongs to its own transcript": 1,
+        "a title set in the CLI's own picker; the panel keeps its own": 1,
+        "context the CLI attached for the model, such as tool and skill listings, other than a deferral": 1,
+        "the CLI compacted its context, which the transcript does not show": 1,
+        "the CLI's copies of files its own edits changed, for its rewind": 1,
+        "the CLI's own bookkeeping for the session, with nothing to show": 1,
+        "the last prompt again, for the CLI's own resume picker": 2,
+        "the model's reasoning, which the panel never shows as the reply; live, it arrives as thinking_delta events": 1,
+        "the permission mode the CLI's own UI was in": 1,
+        "the summary the CLI wrote when it compacted, never shown as a turn": 1,
+        "the title the CLI's own picker shows; the panel titles the thread itself": 1,
+        "what the CLI's Stop hooks said, which belongs to the CLI's own UI": 1
+      },
+      "unclassified": {}
+    }
+  },
+  "content": [
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "events": [
+        {
+          "kind": "Text",
+          "text": "Opened pull request 7."
+        },
+        {
+          "kind": "TurnEnded"
+        }
+      ]
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "events": [
+        {
+          "kind": "ToolStart",
+          "tool_name": "mcp__cerebro__list_inbox",
+          "tool_id": "toolu_000000000000000000000041",
+          "input": "{}"
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000000041",
+          "output": "Two captures.",
+          "is_error": false
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "mcp__cerebro__get_note",
+          "tool_id": "toolu_000000000000000000000042",
+          "input": "{\"path\":\"inbox/one.md\"}"
+        },
+        {
+          "kind": "TurnInterrupted"
+        }
+      ]
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "events": [
+        {
+          "kind": "Text",
+          "text": "The build is green."
+        },
+        {
+          "kind": "TurnEnded"
+        }
+      ]
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "events": [
+        {
+          "kind": "ToolStart",
+          "tool_name": "Read",
+          "tool_id": "toolu_000000000000000000000043",
+          "input": "{\"file_path\":\"/vault/release.md\"}"
+        },
+        {
+          "kind": "TurnInterrupted"
+        }
+      ]
+    }
+  ]
+}

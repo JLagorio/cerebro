@@ -31,6 +31,7 @@ const TEXT = new Set([
   '.yml',
   '.yaml',
   '.json',
+  '.jsonl',
   '.html',
   '.css',
   '.sh',

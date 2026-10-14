@@ -106,6 +106,19 @@ describe('placeOf — a place is a subject, not a lens', () => {
     );
   });
 
+  // M70.2b — a focused comment thread is a lens on its page, like a record
+  // tab: the conversation about the page stays one place whichever thread is
+  // open, and the place keeps no thread to go stale.
+  it('drops a focused comment thread, and keys and guards the page as before', () => {
+    const page = { kind: 'doc', path: 'records/decisions/a.md' } as const;
+    const focused = { ...page, thread: '0123456789abcdef' };
+    expect(placeOf(focused)).toEqual(page);
+    expect(selectionKey(focused)).toBe(placeKey(page));
+    expect(placeKey(page)).toBe('doc:records/decisions/a.md');
+    expect(isPlace(placeOf(focused))).toBe(true);
+    expect(isPlace(focused)).toBe(true);
+  });
+
   it('round-trips to a navigable selection', () => {
     // The whole reason placeOf returns a Selection: "go back to where this
     // thread happened" must not need a parser.

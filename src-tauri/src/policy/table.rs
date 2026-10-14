@@ -1468,6 +1468,35 @@ mod tests {
     }
 
     #[test]
+    fn no_longer_waiting_is_an_operational_transport_code() {
+        // M57.1. A person's late click on a card whose request already ended
+        // (answered, cancelled, or its vault closed) fails at the answer
+        // command's door: it bounds no run, claims nothing, and is recorded
+        // nowhere, so it is operational, a transport code, and in no op row.
+        use crate::policy::rejection::Rejection;
+        let table = PolicyTable::load().unwrap();
+        let code = crate::agent::interaction::NO_LONGER_WAITING;
+        assert_eq!(code, "no_longer_waiting");
+        assert_eq!(table.destiny(code), Some(Destiny::Operational));
+        assert!(table.transport_rejections.iter().any(|c| c == code));
+        for (name, op) in &table.ops {
+            assert!(
+                !op.possible_rejections.iter().any(|c| c == code),
+                "{name} lists {code}"
+            );
+        }
+        assert_eq!(table.retry_verdict(code, 0), RetryVerdict::NotRetryable);
+        let proposal = Rejection::new(
+            &table,
+            code,
+            "human_decision",
+            crate::ledger::schema::TypedValue::string("waiting"),
+            crate::ledger::schema::TypedValue::string("answered"),
+        );
+        assert!(proposal.is_err_and(|e| e.contains("transport failure")));
+    }
+
+    #[test]
     fn destiny_is_declared_for_every_code_an_op_can_produce() {
         let table = PolicyTable::load().unwrap();
         for (name, op) in &table.ops {

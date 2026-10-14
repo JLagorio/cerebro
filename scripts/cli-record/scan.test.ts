@@ -1,6 +1,30 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { FORBIDDEN, scan } from './scan';
+import { FORBIDDEN, scan, SECRETS } from './scan';
+
+/**
+ * A secret's shape, assembled at run time from harmless pieces, so this file
+ * holds no literal a secret scanner would stop at the door.
+ */
+function shaped(...parts: string[]): string {
+  return parts.join('');
+}
+
+/** One fake of each secret shape, by its kind, built at run time. */
+const SECRET_CASES: Record<string, string> = {
+  pem: shaped('-----BEGIN ', 'PRIVATE KEY-----\nMIIB', 'abc\n-----END ', 'PRIVATE KEY-----'),
+  oauth: shaped('sk-ant-', 'oat01-', 'Abc'.repeat(10)),
+  anthropic: shaped('sk-ant-', 'api03-', 'Abc'.repeat(10)),
+  'api-key': shaped('sk-', 'proj-', 'Abc'.repeat(8)),
+  github: shaped('gh', 'p_', 'Abc1'.repeat(9)),
+  slack: shaped('xo', 'xb-', '1234-5678-', 'abcdEFGH'),
+  aws: shaped('AK', 'IA', 'ABCDEFGH23456789'),
+  google: shaped('AI', 'za', 'Sy', 'A1b2C3d4'.repeat(4), '-'),
+  jwt: shaped('ey', 'JhbGciOiJIUzI1', '.', 'ey', 'JzdWIiOiIxMjM0', '.', 'c2lnbmF0dXJl'),
+  'url-credentials': shaped('https://', 'someone:', 'hunter2', '@example.com/'),
+  bearer: shaped('Bear', 'er ', 'abc'),
+  'mcp-bearer': 'q'.repeat(32),
+};
 
 /** One case per pattern: what the scan must find, as a raw recording would carry it. */
 const CASES: [string, string][] = [
@@ -11,7 +35,10 @@ const CASES: [string, string][] = [
   ['an email or other @-address', '{ "text": "write to someone@example.com" }'],
   ['a real UUID', '{ "session_id": "1b4e28ba-2fa1-41d2-883f-0016d3cca427" }'],
   ['a real message, tool or request id', '{ "id": "toolu_01AbCdEfGhIjKlMnOp" }'],
-  ['a bearer token', '{ "Authorization": "Bearer abc" }'],
+  ...SECRETS.map(({ what, kind }): [string, string] => [
+    what,
+    JSON.stringify({ value: SECRET_CASES[kind] }),
+  ]),
 ];
 
 describe('scan', () => {
@@ -44,6 +71,25 @@ describe('scan', () => {
       tool: 'toolu_000000000000000000000002',
       request: 'req_000000000000000000000003',
       server: 'srvtoolu_000000000000000000000004',
+    });
+    expect(scan(clean)).toEqual([]);
+  });
+
+  it('has a fake of every secret shape', () => {
+    expect(Object.keys(SECRET_CASES).sort()).toEqual(SECRETS.map(({ kind }) => kind).sort());
+  });
+
+  it.each(SECRETS.map(({ kind }) => kind))('misses the stand-in for %s', (kind) => {
+    for (const n of [1, 2, 12]) {
+      expect(scan(JSON.stringify({ value: `redacted-${kind}-${n}` }))).toEqual([]);
+    }
+  });
+
+  it('misses words and ids that only look long', () => {
+    const clean = JSON.stringify({
+      text: 'a task-list of desk-risk items, and an incomprehensibilities word',
+      words: 'q'.repeat(31) + ' ' + 'q'.repeat(33),
+      tool: 'mcp__cerebro__search_notes',
     });
     expect(scan(clean)).toEqual([]);
   });

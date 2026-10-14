@@ -1,0 +1,78 @@
+{
+  "cli_version": "2.1.250",
+  "notices": {
+    "real/spike-not-signed-in.stream.jsonl": {
+      "kind": "not_signed_in",
+      "title": "Claude Code isn't signed in",
+      "body": "Cerebro runs your own Claude Code, and it has no sign-in on this Mac. Open Terminal, run claude, and type /login. Then try again.",
+      "action": "open_settings",
+      "resets_at": null,
+      "window": null,
+      "cli_version": "2.1.250"
+    },
+    "real/spike-not-signed-in.session.jsonl": {
+      "kind": "not_signed_in",
+      "title": "Claude Code isn't signed in",
+      "body": "Cerebro runs your own Claude Code, and it has no sign-in on this Mac. Open Terminal, run claude, and type /login. Then try again.",
+      "action": "open_settings",
+      "resets_at": null,
+      "window": null,
+      "cli_version": "2.1.250"
+    },
+    "real/scripted-max-turns.stream.jsonl": {
+      "kind": "turn_limit",
+      "title": "The run reached its turn limit",
+      "body": "The run used every turn it was allowed before it finished. Ask again to carry on from where it stopped.",
+      "action": null,
+      "resets_at": null,
+      "window": null,
+      "cli_version": "2.1.250"
+    },
+    "real/scripted-bash.stream.jsonl": null,
+    "usage-limit-stream.json": {
+      "kind": "usage_limit",
+      "title": "You've reached your Claude usage limit",
+      "body": "Claude Code stopped because your weekly limit is used up. Background work waits until then.",
+      "action": null,
+      "resets_at": "2026-01-01T00:00:00Z",
+      "window": "weekly",
+      "cli_version": "2.1.250"
+    },
+    "jsonl/usage-limit-5h.json": {
+      "kind": "usage_limit",
+      "title": "You've reached your Claude usage limit",
+      "body": "Claude Code stopped because your 5-hour limit is used up. Background work waits until then.",
+      "action": null,
+      "resets_at": "2026-01-01T00:00:00Z",
+      "window": "5-hour",
+      "cli_version": "2.1.250"
+    },
+    "jsonl/usage-limit-weekly.json": {
+      "kind": "usage_limit",
+      "title": "You've reached your Claude usage limit",
+      "body": "Claude Code stopped because your weekly limit is used up. Background work waits until then.",
+      "action": null,
+      "resets_at": "2026-01-01T00:00:00Z",
+      "window": "weekly",
+      "cli_version": "2.1.250"
+    },
+    "transcript-api-error.stream.json": {
+      "kind": "rate_limited",
+      "title": "Claude is limiting requests",
+      "body": "Claude turned this request away after Claude Code's own retries. Wait a few minutes, then try again. Background work pauses for a while.",
+      "action": null,
+      "resets_at": null,
+      "window": null,
+      "cli_version": "2.1.250"
+    },
+    "transcript-api-error.session.json": {
+      "kind": "rate_limited",
+      "title": "Claude is limiting requests",
+      "body": "Claude turned this request away after Claude Code's own retries. Wait a few minutes, then try again. Background work pauses for a while.",
+      "action": null,
+      "resets_at": null,
+      "window": null,
+      "cli_version": "2.1.250"
+    }
+  }
+}

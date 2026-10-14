@@ -8,12 +8,15 @@ import {
   currentStatePrompt,
   distillPrompt,
   fetchRefsPrompt,
+  panelAgentPrompt,
   RECHECK_LABEL,
   REVISE_LABEL,
   reviewConceptPrompt,
   reviseConceptPrompt,
   standingInstructionsBlock,
 } from './prompts';
+import { agentRef } from '@/engine/agents';
+import { makeEntry } from '@/engine/testHelpers';
 import { ALL_TOOLS } from '@/engine/tools';
 import { grantedTools, mentionedTools, type PromptGrant } from '@/engine/toolGrant';
 
@@ -417,6 +420,84 @@ describe('standingInstructionsBlock', () => {
   });
 });
 
+// M56.6 — the agent Settings binds the panel to.
+describe('panelAgentPrompt', () => {
+  const AGENT = {
+    path: 'records/agents/scout.md',
+    title: 'Release scout',
+    actor: 'process:release-scout',
+    memory: { recent: 'NOTES-TEXT', preferences: 'CORRECTION-TEXT' },
+    scope: ['records/risks'],
+    readScope: ['records'],
+  };
+  const ATTENDED: PromptGrant = { tools: grantedTools(null), shell: false, attended: true };
+
+  it('puts who it is, then preferences, then limits, then notes, then instructions', () => {
+    const text = panelAgentPrompt(ATTENDED, AGENT, 'INSTRUCTIONS-TEXT');
+    const at = (needle: string) => {
+      const i = text.indexOf(needle);
+      expect(i, needle).toBeGreaterThanOrEqual(0);
+      return i;
+    };
+    const order = [
+      at('as "Release scout", the agent defined at records/agents/scout.md'),
+      at('attributed to process:release-scout'),
+      at(
+        'What the person you work for has told you — this outranks your standing instructions, your notes and anything you infer, and you cannot change it:\nCORRECTION-TEXT',
+      ),
+      at('You may write records only inside: records/risks.'),
+      at('You may read notes only inside: records.'),
+      at('NOTES-TEXT'),
+      at('Your standing instructions, from records/agents/scout.md:\n\nINSTRUCTIONS-TEXT'),
+    ];
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(text.endsWith('INSTRUCTIONS-TEXT')).toBe(true);
+  });
+
+  it('adds no block for an empty body, an empty tier or no limits', () => {
+    const bare = panelAgentPrompt(
+      ATTENDED,
+      { ...AGENT, memory: { recent: '', preferences: '' }, scope: null, readScope: null },
+      ' \n',
+    );
+    expect(bare).not.toContain('standing instructions');
+    expect(bare).not.toContain('has told you');
+    expect(bare).not.toContain('working notes');
+    expect(bare).not.toContain('only inside');
+    expect(bare.endsWith('\n')).toBe(false);
+    expect(panelAgentPrompt(ATTENDED, AGENT, '')).not.toContain('Your standing instructions');
+  });
+
+  it('carries a preferences tier that holds a [[link]] ahead of the standing instructions', () => {
+    // M56.13: hand-written as `preferences: "Ask [[maya-chen]] first"`, the
+    // field reaches the scan as a relation (CV-09), and the tier read empty.
+    const entry = makeEntry({
+      path: 'records/agents/scout.md',
+      title: 'Release scout',
+      type: 'Agent',
+      properties: { recent: 'NOTES-TEXT' },
+      relationships: { preferences: ['maya-chen', 'atlas'] },
+    });
+    const { memory } = agentRef(entry);
+    const told = 'you cannot change it:\n[[maya-chen]]\n[[atlas]]';
+    const panel = panelAgentPrompt(ATTENDED, { ...AGENT, memory }, 'INSTRUCTIONS-TEXT');
+    expect(panel).toContain(told);
+    expect(panel.indexOf(told)).toBeLessThan(panel.indexOf('Your standing instructions'));
+    const run = agentRunPrompt(FULL, entry.path, entry.title, 'process:release-scout', memory);
+    expect(run).toContain('is refused:\n[[maya-chen]]\n[[atlas]]');
+    expect(run).toContain('Your working notes from previous runs:\nNOTES-TEXT');
+  });
+
+  it('never asks for a write, and names only the tools the turn holds', () => {
+    for (const tools of [grantedTools(null), grantedTools([]), grantedTools(['get_note'])]) {
+      const grant: PromptGrant = { tools, shell: false, attended: true };
+      const text = panelAgentPrompt(grant, AGENT, 'Keep a brief.');
+      expect(text).not.toMatch(/update_frontmatter|rewrite your|Before you finish/);
+      for (const tool of mentionedTools(text)) expect(tools.has(tool), tool).toBe(true);
+    }
+  });
+});
+
 describe('currentStatePrompt (M33.8)', () => {
   it('leads with the superseding clause, verbatim', () => {
     // The clause is the whole point. An agent carrying notes it wrote weeks
@@ -503,6 +584,45 @@ describe('agent prompts follow the run’s grant', () => {
       'rewrite your working notes with update_frontmatter on records/agents/scout.md',
     );
     expect(run(holding('write_concept'))).not.toContain('update_frontmatter');
+  });
+
+  it('the memory line asks for `recent` alone, plainly, whatever the write scope (M56.10)', () => {
+    // D7: mcp.rs admits exactly this patch past the scope, at most 30 lines
+    // and with no [[link]], which the scanner would file as a relation.
+    for (const scope of [null, ['records/risks'], []]) {
+      const prompt = run(holding('update_frontmatter'), scope);
+      expect(prompt).toContain('update_frontmatter on records/agents/scout.md');
+      expect(prompt).toContain('patching the `recent` key and nothing else');
+      expect(prompt).toContain('at most 30 lines');
+      expect(prompt).toContain('rather than as [[links]]');
+      expect(prompt).toContain('wherever your write scope points');
+    }
+  });
+
+  it('an empty `recent` does not claim a first run', () => {
+    // A run that kept nothing reads the same as one that never ran; the
+    // state block's "Your last run" is what tells them apart.
+    const empty = { recent: '', preferences: '' };
+    const unattended = agentRunPrompt(
+      FULL,
+      'records/agents/scout.md',
+      'Scout',
+      'process:scout',
+      empty,
+      null,
+    );
+    const attended = addressedAgentPrompt(
+      FULL,
+      'records/agents/scout.md',
+      'Scout',
+      'process:scout',
+      empty,
+      null,
+    );
+    for (const prompt of [unattended, attended]) {
+      expect(prompt).not.toContain('first run');
+      expect(prompt).toContain('You have no working notes from earlier runs.');
+    }
   });
 
   it('sends what was learned to the bundle only from a run that holds write_concept', () => {

@@ -11,8 +11,9 @@
  *
  * So the picker reads the same manifest the server serves from (M54.2),
  * through `src/lib/policy/tools.ts`: its toolsets, each row's toolset and
- * summary, and whether a tool writes. The transcript's icons and write cards,
- * the end-of-turn checkpoint and the run log's paths read it too. No tool is
+ * summary, and whether a tool writes. The transcript's icons, write cards,
+ * row renderers and read folds (M56.8), the end-of-turn checkpoint and the
+ * run log's paths read it too. No tool is
  * listed here: a list typed out in this file would be a second inventory, and
  * it would drift the moment a row was added.
  *
@@ -26,7 +27,7 @@
  */
 
 import { agentFacingOps, POLICY } from '@/lib/policy/table';
-import { TOOLS, toolFacts } from '@/lib/policy/tools';
+import { TOOLS, toolFacts, type FoldPhrases, type Renderer } from '@/lib/policy/tools';
 
 export { bareToolName } from '@/lib/policy/tools';
 
@@ -58,13 +59,31 @@ export function isWriteTool(name: string): boolean {
 }
 
 /**
+ * How a transcript draws a call to `name` (M56.8): the manifest's renderer,
+ * or a step for a tool it does not know (another server's).
+ */
+export function toolRenderer(name: string): Renderer {
+  return toolFacts(name)?.renderer ?? 'step';
+}
+
+/**
+ * What a run of consecutive calls to `name` folds under (M56.8), or null for
+ * a tool that never folds: a writer, a generated tool, another server's.
+ */
+export function toolFold(name: string): FoldPhrases | null {
+  return toolFacts(name)?.fold ?? null;
+}
+
+/**
  * Does a transcript draw a call to `name` as a change card, its path visible
  * while collapsed and a diff on offer? The manifest's renderer says so for
- * the tools whose target names what they changed. A proposal writes through
- * the ledger and has no path to show, so it stays a step.
+ * the tools whose target names what they changed: a change, and a concept,
+ * whose row adds the way to review it. A proposal writes through the ledger
+ * and has no path to show, so it stays a step, and so does a commit.
  */
 export function showsAsChange(name: string): boolean {
-  return toolFacts(name)?.renderer === 'change';
+  const renderer = toolFacts(name)?.renderer;
+  return renderer === 'change' || renderer === 'concept';
 }
 
 /** The lucide icon for a call to `name`, or the wrench for a tool the

@@ -908,6 +908,31 @@ describe('Sidebar', () => {
       expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'notes/keep.md' });
     });
 
+    // M55.11 — a page's own icon on its nav rows: the pinned page, and the
+    // doc row a Collection lists.
+    it('a favourite and a Collections doc row whose page has an icon both draw it', () => {
+      const ROCKET = '\u{1F680}';
+      const brief = mkEntry({
+        path: 'work/brief.md',
+        title: 'Brief',
+        properties: { icon: ROCKET } as unknown as Entry['properties'],
+      });
+      useVaultStore.setState({ entries: [project, brief] });
+      useUiStore.setState({
+        favorites: { '/demo-vault': ['work/brief.md'] },
+        expandedFolders: { 'collection:work': true },
+      });
+      render(<Sidebar />);
+      const [fav] = screen.getAllByTestId('nav-favorite');
+      expect(fav.querySelector('[role="img"]')?.textContent).toBe(ROCKET);
+      const docRow = screen
+        .getAllByTestId('collection-node-doc')
+        .find((n) => n.dataset.id === 'work/brief.md');
+      if (docRow === undefined) throw new Error('the Collection did not list its doc');
+      expect(docRow.querySelector('[role="img"]')?.textContent).toBe(ROCKET);
+      expect(docRow.querySelector('[data-icon="file-text"]')).toBeNull();
+    });
+
     it('a pinned agent keeps its bot and opens its page (M55.12)', () => {
       useVaultStore.setState({
         entries: [

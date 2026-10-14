@@ -21,6 +21,7 @@ import {
   lineMatches,
   machine,
   pick,
+  pickRun,
   readRaw,
   recordRoot,
   reduceToFixture,
@@ -30,6 +31,9 @@ import {
   runScenario,
   SCENARIO_NAMES,
   SCENARIOS,
+  SCOUT,
+  SCRIPTED,
+  SCRIPTED_NAMES,
   sessionFiles,
   setup,
   stopGroup,
@@ -248,8 +252,47 @@ describe('pick', () => {
   it('names one scenario, or all of them, and nothing else', () => {
     expect(pick('kill-resume')).toEqual(['kill-resume']);
     expect(pick('all')).toEqual(SCENARIO_NAMES);
-    for (const bad of [undefined, 'constructor', 'nope'])
+    for (const bad of [undefined, 'constructor', 'nope', 'thinking'])
       expect(() => pick(bad)).toThrow(/Name a scenario/);
+  });
+
+  it('runs the scripted scenarios too, which reduce never sees', () => {
+    expect(pickRun('bash')).toEqual(['bash']);
+    expect(pickRun('all')).toEqual([...SCENARIO_NAMES, ...SCRIPTED_NAMES]);
+    expect(() => pickRun('nope')).toThrow(/Name a scenario, a scripted run or all/);
+  });
+});
+
+describe('the scripted scenarios (M56.2)', () => {
+  const only = (name: keyof typeof SCRIPTED) => SCRIPTED[name].turns[0] as Turn;
+
+  it('answer no fact, one minted turn each', () => {
+    for (const name of SCRIPTED_NAMES) {
+      expect(SCRIPTED[name].facts, name).toEqual([]);
+      expect(SCRIPTED[name].turns, name).toHaveLength(1);
+      expect(only(name).session, name).toEqual({ mint: 'a' });
+    }
+  });
+
+  it('think on sonnet at effort high', () => {
+    const argv = turnArgv(only('thinking'), PLACEHOLDER, 'S');
+    expect(flag(argv, '--model')).toBe('sonnet');
+    expect(flag(argv, '--effort')).toBe('high');
+    expect(flag(argv, '--session-id')).toBe('S');
+  });
+
+  it('grant Bash under acceptEdits for ls notes', () => {
+    const argv = turnArgv(only('bash'), PLACEHOLDER, 'S');
+    expect(flag(argv, '--allowedTools')).toBe('Bash');
+    expect(flag(argv, '--permission-mode')).toBe('acceptEdits');
+    expect(argv[1]).toContain('ls notes');
+  });
+
+  it('stop a two-tool task at one turn', () => {
+    const argv = turnArgv(only('max-turns'), PLACEHOLDER, 'S');
+    expect(flag(argv, '--max-turns')).toBe('1');
+    expect(flag(argv, '--model')).toBe('haiku');
+    expect(argv[1]).toMatch(/slow_echo.*'one'.*again.*'two'/);
   });
 });
 
@@ -376,6 +419,12 @@ describe('a recording against a stand-in claude', () => {
 
   it('sets up the toy vault, the probe server and the three settings files', () => {
     expect(readFileSync(join(at.vault, 'notes/alpha.md'), 'utf8')).toContain('# Alpha');
+    expect(readFileSync(join(at.vault, 'records/agents/scout.md'), 'utf8')).toBe(SCOUT);
+    expect(SCOUT).toMatch(
+      /^---\ntype: Agent\nslug: scout\n[\s\S]*\nscope:\n {2}- notes\nschedule: /,
+    );
+    expect(SCOUT).toContain('outside/secret.md');
+    expect(readFileSync(join(at.vault, 'outside/secret.md'), 'utf8')).toContain('# Outside');
     const config = JSON.parse(readFileSync(at.mcpConfig, 'utf8'));
     expect(config.mcpServers.probe.args).toEqual([
       join(REPO, 'scripts/cli-record/probe.ts'),

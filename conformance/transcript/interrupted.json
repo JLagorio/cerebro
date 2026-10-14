@@ -1,0 +1,87 @@
+{
+  "case": "interrupted",
+  "cli_version": "2.1.250",
+  "streams": [
+    {
+      "file": "real/spike-killed-mid-tool.stream.jsonl",
+      "events": [
+        {
+          "kind": "Init",
+          "session_id": "00000000-0000-4000-8000-000000000001"
+        },
+        {
+          "kind": "ModelChanged",
+          "model": "claude-haiku-4-5-20251001"
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "mcp__probe__slow_echo",
+          "tool_id": "toolu_000000000000000000000001",
+          "input": "{\"text\":\"stop\",\"seconds\":30}"
+        },
+        {
+          "kind": "TurnInterrupted",
+          "reason": "cut_off"
+        }
+      ],
+      "classes": {
+        "translated": 3,
+        "ignored": {
+          "a block closing, with nothing new in it": 1,
+          "a block opening; its content follows as deltas, or whole on the assistant line": 1,
+          "a progress word such as requesting; the panel shows its own": 1,
+          "a tool call's input in pieces; the assistant line carries it whole": 2,
+          "the turn's model and opening usage; the assistant line and the result carry both": 1
+        },
+        "unclassified": {}
+      }
+    }
+  ],
+  "session": {
+    "file": "real/spike-killed-mid-tool.session.jsonl",
+    "events": [
+      {
+        "kind": "UserPrompt",
+        "text": "Call slow_echo once with text 'stop' and seconds 30, then reply done."
+      },
+      {
+        "kind": "ModelChanged",
+        "model": "claude-haiku-4-5-20251001"
+      },
+      {
+        "kind": "ToolStart",
+        "tool_name": "mcp__probe__slow_echo",
+        "tool_id": "toolu_000000000000000000000001",
+        "input": "{\"text\":\"stop\",\"seconds\":30}"
+      },
+      {
+        "kind": "TurnInterrupted",
+        "reason": "cut_off"
+      }
+    ],
+    "classes": {
+      "translated": 2,
+      "ignored": {
+        "a prompt entering or leaving the CLI's queue; the prompt line follows": 2,
+        "context the CLI attached for the model, such as tool and skill listings, other than a deferral": 1
+      },
+      "unclassified": {}
+    }
+  },
+  "content": [
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "events": [
+        {
+          "kind": "ToolStart",
+          "tool_name": "mcp__probe__slow_echo",
+          "tool_id": "toolu_000000000000000000000001",
+          "input": "{\"text\":\"stop\",\"seconds\":30}"
+        },
+        {
+          "kind": "TurnInterrupted"
+        }
+      ]
+    }
+  ]
+}

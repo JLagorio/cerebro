@@ -5,6 +5,7 @@ import {
   formatTimestamp,
   findOptionByLabel,
   inferKindFromValue,
+  isSystemProperty,
   moveOption,
   optionId,
   normalizeUrl,
@@ -17,6 +18,7 @@ import {
   visibilityDelta,
   validatePatch,
   validateValue,
+  visibleProperties,
 } from './properties';
 import { buildSchema } from './schema';
 import { makeEntry } from './testHelpers';
@@ -668,5 +670,22 @@ describe('person cardinality', () => {
 
   it('leaves an unlimited person field alone', () => {
     expect(validateValue(def('person', { name: 'lead' }), ['[[ana]]', '[[bo]]'])).toBeNull();
+  });
+});
+
+describe('isSystemProperty (M4, M55.11)', () => {
+  it('covers the `_` namespace and the page chrome keys, and nothing near them', () => {
+    expect(isSystemProperty('_x')).toBe(true);
+    expect(isSystemProperty('icon')).toBe(true);
+    expect(isSystemProperty('cover')).toBe(true);
+    expect(isSystemProperty('iconic')).toBe(false);
+    expect(isSystemProperty('covers')).toBe(false);
+  });
+
+  it('visibleProperties drops both chrome keys', () => {
+    expect(visibleProperties(['status', 'icon', 'cover', '_pinned', 'covers'])).toEqual([
+      'status',
+      'covers',
+    ]);
   });
 });

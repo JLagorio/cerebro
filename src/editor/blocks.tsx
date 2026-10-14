@@ -3,9 +3,12 @@ import type { BlockNoteEditor } from '@blocknote/core';
 import { createReactBlockSpec, useEditorChange } from '@blocknote/react';
 import { ColumnGutter } from './ColumnGutter';
 import { Icon } from '@/components/ui/Icon';
+import { ConnectedPageCard } from '@/components/PageCard';
 import { MermaidBlockView } from '@/mermaid/MermaidBlockView';
 import { ConnectedDatabaseBlock } from '@/views/DatabaseBlockView';
 import { DATABASE_FENCE, serializeDatabaseRef } from '@/engine/databaseBlock';
+import { SUBPAGES_FENCE } from '@/engine/docPages';
+import { PAGE_CARD_FENCE, serializePageRef } from '@/engine/pageCard';
 import {
   BASE_MARKER_DEPTH,
   DEFAULT_COLUMN_WIDTH,
@@ -13,6 +16,7 @@ import {
   openListMarker,
 } from '@/engine/pageColumns';
 import { formatAiMarker } from './markdown';
+import { SubPageList } from './SubPageList';
 
 /**
  * Custom blocks (M2.x docs polish). All of them stay plain markdown on disk:
@@ -20,6 +24,8 @@ import { formatAiMarker } from './markdown';
  *   callout     Obsidian-style `> [!info] …` blockquote
  *   mermaid     ```mermaid fenced code block
  *   database    ```cerebro-database fence holding a POINTER (M47.2)
+ *   subPages    an EMPTY ```cerebro-subpages fence (M55.13)
+ *   pageCard    ```cerebro-page fence holding ONE wikilink (M55.14)
  *   columnList  `:::columns` directive container (M48.1)
  *   column      `::::column` directive container (M48.1)
  *   ai          `:::ai{prompt="…"}` directive container (M53.9)
@@ -497,6 +503,75 @@ export const DatabaseBlock = createReactBlockSpec(
       return (
         <pre>
           <code>{`\`\`\`${DATABASE_FENCE}\n${body}\n\`\`\``}</code>
+        </pre>
+      );
+    },
+  },
+);
+
+/**
+ * The child-page list (M55.13): the page's sub-pages, listed live.
+ *
+ * It holds nothing — the list is derived from the vault every render — so on
+ * disk it is an empty ```cerebro-subpages fence and on the clipboard the same
+ * fence, never the rendered titles (DOM trap 5: with no `toExternalHTML`
+ * BlockNote copies the rendered text).
+ */
+export const SubPagesBlock = createReactBlockSpec(
+  { type: 'subPages', propSchema: {}, content: 'none' },
+  {
+    render: () => <SubPageList />,
+    toExternalHTML: () => (
+      <pre>
+        <code>{`\`\`\`${SUBPAGES_FENCE}\n\`\`\``}</code>
+      </pre>
+    ),
+  },
+);
+
+/**
+ * The page card (M55.14): one other page, shown live — its icon, title and
+ * status — and opened with Open.
+ *
+ * It holds a pointer and nothing else: on disk a ```cerebro-page fence with
+ * one `[[target]]` or `[[target|alias]]`, empty while unset. The pointer is
+ * kept exactly as written, so a missing target stays missing until the person
+ * picks another page; the card never re-resolves or rewrites it on its own.
+ * Only an editable editor hands the card a writer, so a read-only page shows
+ * no picker.
+ */
+export const PageCardBlock = createReactBlockSpec(
+  {
+    type: 'pageCard',
+    // '' rather than null, as on the database block: prop defaults are
+    // primitives, and an empty alias is how "the link has none" survives.
+    propSchema: { target: { default: '' }, alias: { default: '' } },
+    content: 'none',
+  },
+  {
+    render: (props) => (
+      <ConnectedPageCard
+        target={String(props.block.props.target ?? '')}
+        alias={String(props.block.props.alias ?? '')}
+        onChange={
+          props.editor.isEditable
+            ? (ref) => props.editor.updateBlock(props.block, { props: ref } as never)
+            : undefined
+        }
+      />
+    ),
+    /**
+     * The fence, never the rendered face (DOM trap 5): without it a copy
+     * would carry "How we scheduleOpen" and the pointer nowhere in it.
+     */
+    toExternalHTML: (props) => {
+      const body = serializePageRef({
+        target: String(props.block.props.target ?? ''),
+        alias: String(props.block.props.alias ?? ''),
+      });
+      return (
+        <pre>
+          <code>{`\`\`\`${PAGE_CARD_FENCE}\n${body === '' ? '' : `${body}\n`}\`\`\``}</code>
         </pre>
       );
     },

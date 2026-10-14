@@ -1,12 +1,21 @@
 // IPC facade: every vault operation in the app goes through these functions.
 // Inside Tauri (detected via __TAURI_INTERNALS__) they invoke the Rust
 // commands; in the browser (pnpm dev, vitest, Playwright) they delegate to
-// the in-memory mock in mockIpc.ts. ipcContract.test.ts holds every command
-// name and payload key here to Rust's generate_handler!.
-// listenVaultChanged is the one event here: the watcher's `vault-changed`,
-// which the browser has no watcher to emit.
+// the in-memory mock in mockIpc.ts. A browser branch may pass through
+// `faulted` (mockFaults.ts, M64.1), which fails it once when the state lab or
+// a test arms that command; a part wraps exactly the commands its presets
+// fail. ipcContract.test.ts holds every command name and payload key here
+// to Rust's generate_handler!.
+// The watcher's two events are heard here: `vault-changed`
+// (listenVaultChanged) and `comments-changed` (listenCommentsChanged), which
+// the browser has no watcher to emit. So is the shell's
+// `cerebro://quit-requested` (listenQuitRequested, M55.10), which the mock
+// fires from `window.__cerebroMockQuit`.
+import type { CommentAnchor } from '@/engine/commentAnchor';
+import type { CommentsFile } from '@/engine/comments';
 import type { ConnectorStatusRow } from '@/engine/connectors';
 import type { Entry } from '@/engine/types';
+import { faulted } from './mockFaults';
 import * as mock from './mockIpc';
 
 function inTauri(): boolean {
@@ -34,6 +43,24 @@ export function getLastVault(): Promise<string | null> {
   return inTauri() ? invokeTauri('get_last_vault') : mock.getLastVault();
 }
 
+/**
+ * The Agent record handle this vault's assistant panel is bound to, or null
+ * for the plain assistant (M56.6). Stored in the app's config.json by vault
+ * path, never in the vault, so a vault cannot choose who the panel answers
+ * as.
+ */
+export function getPanelAgent(vault: string): Promise<string | null> {
+  return inTauri() ? invokeTauri('panel_agent', { vault }) : mock.getPanelAgent(vault);
+}
+
+/** Bind this vault's panel to a handle, or unbind it with null or a blank.
+ * Throws, writing nothing, for a value that is not a handle. */
+export function setPanelAgent(vault: string, handle: string | null): Promise<void> {
+  return inTauri()
+    ? invokeTauri('set_panel_agent', { vault, handle })
+    : mock.setPanelAgent(vault, handle);
+}
+
 export function scanVault(vault: string): Promise<Entry[]> {
   return inTauri() ? invokeTauri('scan_vault', { vault }) : mock.scanVault(vault);
 }
@@ -42,10 +69,77 @@ export function readNote(vault: string, path: string): Promise<string> {
   return inTauri() ? invokeTauri('read_note', { vault, path }) : mock.readNote(vault, path);
 }
 
+// --- Page writes (M55.10) ---------------------------------------------------
+//
+// A quit waits for the writes a page makes: the editor's save, a property
+// commit and a title commit. Each goes through `pageWrite`, which keeps a
+// settled copy until it lands and counts the ones that fail. Callers get a
+// promise that settles the same way, so a rejection still reaches them, and
+// one nobody handles is still reported as unhandled (M53.24). A create,
+// rename, delete or view save is not tracked.
+
+const pageWrites = new Set<Promise<void>>();
+let pageWriteFailureCount = 0;
+
+function pageWrite<T>(write: Promise<T>): Promise<T> {
+  const settled: Promise<void> = write
+    .then(
+      () => undefined,
+      () => {
+        pageWriteFailureCount += 1;
+      },
+    )
+    .finally(() => {
+      pageWrites.delete(settled);
+    });
+  pageWrites.add(settled);
+  return write.then((value) => value);
+}
+
+/** How many page writes have failed in this session. */
+export function pageWriteFailures(): number {
+  return pageWriteFailureCount;
+}
+
+const macrotask = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+/**
+ * Wait for every page write in flight, including one started while waiting.
+ * Resolves true once none is left and none starts for one more macrotask, or
+ * false when `budgetMs` runs out first. Never rejects.
+ */
+export async function settlePageWrites(budgetMs: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let done = false;
+  const budget = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), budgetMs);
+  });
+  const drained = (async () => {
+    while (!done) {
+      while (pageWrites.size > 0 && !done) await Promise.all([...pageWrites]);
+      await macrotask();
+      if (pageWrites.size === 0) return true;
+    }
+    return false;
+  })();
+  try {
+    return await Promise.race([drained, budget]);
+  } finally {
+    done = true;
+    clearTimeout(timer);
+  }
+}
+
+/** Test isolation: forget every tracked write and failure. */
+export function __resetPageWrites(): void {
+  pageWrites.clear();
+  pageWriteFailureCount = 0;
+}
+
 export function saveNote(vault: string, path: string, body: string): Promise<void> {
-  return inTauri()
-    ? invokeTauri('save_note', { vault, path, body })
-    : mock.saveNote(vault, path, body);
+  return pageWrite(
+    inTauri() ? invokeTauri('save_note', { vault, path, body }) : mock.saveNote(vault, path, body),
+  );
 }
 
 /**
@@ -58,9 +152,11 @@ export function updateFrontmatter(
   path: string,
   patch: Record<string, unknown>,
 ): Promise<string | null> {
-  return inTauri()
-    ? invokeTauri('update_frontmatter', { vault, path, patch })
-    : mock.updateFrontmatter(vault, path, patch);
+  return pageWrite(
+    inTauri()
+      ? invokeTauri('update_frontmatter', { vault, path, patch })
+      : mock.updateFrontmatter(vault, path, patch),
+  );
 }
 
 /**
@@ -105,9 +201,11 @@ export function createNote(
 }
 
 export function setNoteTitle(vault: string, path: string, title: string): Promise<void> {
-  return inTauri()
-    ? invokeTauri('set_note_title', { vault, path, title })
-    : mock.setNoteTitle(vault, path, title);
+  return pageWrite(
+    inTauri()
+      ? invokeTauri('set_note_title', { vault, path, title })
+      : mock.setNoteTitle(vault, path, title),
+  );
 }
 
 export interface RawList {
@@ -221,6 +319,94 @@ export function listFolders(vault: string): Promise<string[]> {
   return inTauri() ? invokeTauri('list_folders', { vault }) : mock.listFolders(vault);
 }
 
+// --- Page comments (M70.2) --------------------------------------------------
+//
+// A page's threads live in `.comments/<page>.json`, never in the page. Each
+// write answers the page's whole file as written; a person's comments are
+// always signed `human:owner` by the backend, never by the webview. Rejects
+// in plain words (CV-03): `commentsStore` toasts them.
+
+/** A page's threads: none when it has no sidecar; rejects when the sidecar
+ * can't be read, which the page shows as unavailable (CV-05). */
+export function listComments(vault: string, path: string): Promise<CommentsFile> {
+  return inTauri() ? invokeTauri('list_comments', { vault, path }) : mock.listComments(vault, path);
+}
+
+/** Start a thread on a passage, or on the whole page with no anchor. */
+export function startCommentThread(
+  vault: string,
+  path: string,
+  anchor: CommentAnchor | null,
+  body: string,
+): Promise<CommentsFile> {
+  return inTauri()
+    ? invokeTauri('start_comment_thread', { vault, path, anchor, body })
+    : mock.startCommentThread(vault, path, anchor, body);
+}
+
+/** Reply at the end of a thread; a resolved thread reopens. */
+export function replyToCommentThread(
+  vault: string,
+  path: string,
+  thread: string,
+  body: string,
+): Promise<CommentsFile> {
+  return inTauri()
+    ? invokeTauri('reply_to_comment_thread', { vault, path, thread, body })
+    : mock.replyToCommentThread(vault, path, thread, body);
+}
+
+/** Resolve or reopen a thread. */
+export function setCommentThreadResolved(
+  vault: string,
+  path: string,
+  thread: string,
+  resolved: boolean,
+): Promise<CommentsFile> {
+  return inTauri()
+    ? invokeTauri('set_comment_thread_resolved', { vault, path, thread, resolved })
+    : mock.setCommentThreadResolved(vault, path, thread, resolved);
+}
+
+/** Delete one comment: it keeps its place, emptied and stamped. */
+export function deleteComment(
+  vault: string,
+  path: string,
+  thread: string,
+  comment: string,
+): Promise<CommentsFile> {
+  return inTauri()
+    ? invokeTauri('delete_comment', { vault, path, thread, comment })
+    : mock.deleteComment(vault, path, thread, comment);
+}
+
+/** Delete a whole thread, stamping it and every live comment. */
+export function deleteCommentThread(
+  vault: string,
+  path: string,
+  thread: string,
+): Promise<CommentsFile> {
+  return inTauri()
+    ? invokeTauri('delete_comment_thread', { vault, path, thread })
+    : mock.deleteCommentThread(vault, path, thread);
+}
+
+/**
+ * Call `handler` on every `comments-changed` event the watcher emits: the
+ * pages whose sidecars changed outside Cerebro, or null when the OS dropped
+ * events and every loaded page should reload. The browser has no watcher,
+ * so there it binds nothing and resolves a no-op.
+ */
+export async function listenCommentsChanged(
+  handler: (pages: string[] | null) => void,
+): Promise<() => void> {
+  if (!inTauri()) return () => undefined;
+  const { listen } = await import('@tauri-apps/api/event');
+  return listen<{ pages: string[] | null }>('comments-changed', (event) =>
+    handler(event.payload?.pages ?? null),
+  );
+}
+
 // --- Attachments (M16.13c) --------------------------------------------------
 
 /**
@@ -265,6 +451,60 @@ export function writeTextFile(vault: string, path: string, content: string): Pro
   return inTauri()
     ? invokeTauri('write_text_file', { vault, path, content })
     : mock.writeTextFile(vault, path, content);
+}
+
+// --- Open with (M55.9) ------------------------------------------------------
+
+/** What an agent link did: Rust's `AgentLinkOutcome`. */
+export type AgentLinkOutcome = 'opened' | 'too_long' | 'no_app';
+
+const DESKTOP_ONLY = 'Desktop app only';
+
+/**
+ * Whether Open with can reach Finder, the default app and the agent apps.
+ * A browser build has none of them, so the menu disables those items.
+ */
+export function canOpenOutside(): boolean {
+  return inTauri();
+}
+
+/** Finder selects the note. Rust refuses anything but a vault note. */
+export function revealInFinder(vault: string, path: string): Promise<void> {
+  return inTauri()
+    ? invokeTauri('reveal_in_finder', { vault, path })
+    : Promise.reject(new Error(DESKTOP_ONLY));
+}
+
+/** The app the Mac opens markdown with opens the note. */
+export function openInDefaultApp(vault: string, path: string): Promise<void> {
+  return inTauri()
+    ? invokeTauri('open_in_default_app', { vault, path })
+    : Promise.reject(new Error(DESKTOP_ONLY));
+}
+
+/**
+ * Hand a prompt to an agent app by its `agent-links.v1.json` id. Rust builds
+ * the link and checks its length; `too_long` and `no_app` open nothing, and
+ * the caller copies the prompt instead.
+ */
+export function openAgentLink(target: string, prompt: string): Promise<AgentLinkOutcome> {
+  return inTauri()
+    ? invokeTauri('open_agent_link', { target, prompt })
+    : Promise.reject(new Error(DESKTOP_ONLY));
+}
+
+/**
+ * Write the clipboard. In the app this goes through `/usr/bin/pbcopy`,
+ * because WebKit allows a clipboard write only inside a user gesture and a
+ * prompt is built after awaits. The browser writes it itself, and rejects
+ * when it has no clipboard.
+ */
+export function writeClipboard(text: string): Promise<void> {
+  if (inTauri()) return invokeTauri('write_clipboard', { text });
+  const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
+  return clipboard === undefined
+    ? Promise.reject(new Error('No clipboard here'))
+    : clipboard.writeText(text);
 }
 
 // --- Mermaid diagram export (M29.4) -----------------------------------------
@@ -497,8 +737,10 @@ import type {
   FleetCostComponent,
   FleetAssemblyMetrics,
   FleetRunDetail,
+  FleetRefusal,
   FleetActorSummary,
   FleetFilter,
+  RunTranscript,
   RunWrite,
 } from './mockIpc';
 
@@ -508,8 +750,10 @@ export type {
   FleetCostComponent,
   FleetAssemblyMetrics,
   FleetRunDetail,
+  FleetRefusal,
   FleetActorSummary,
   FleetFilter,
+  RunTranscript,
   RunWrite,
 };
 
@@ -521,11 +765,11 @@ export type {
  * the section renders "unavailable", which is not "no runs".
  */
 export function fleetRuns(filter: FleetFilter = {}): Promise<FleetRun[]> {
-  return inTauri() ? invokeTauri('fleet_runs', { filter }) : mock.fleetRunsPage(filter);
+  return inTauri()
+    ? invokeTauri('fleet_runs', { filter })
+    : faulted('fleet_runs', () => mock.fleetRunsPage(filter));
 }
 
-/** One run and whatever the governance tables recorded about it. An unknown
- * id is refused, so a typo and an unmetered run never look the same. */
 /** What one run changed in Knowledge (M50.3): the concepts its proposals
  * named and what became of each. `null` is NOT RECORDED — a vault that keeps
  * no ledger — never "changed nothing", which is `[]`. */
@@ -535,8 +779,21 @@ export function runKnowledgeWrites(vault: string, runId: string): Promise<RunWri
     : mock.runKnowledgeWrites(vault, runId);
 }
 
+/** One run and whatever the governance tables recorded about it, with the
+ * model Claude Code reported answering and the refusals recorded against it
+ * (M56.9). An unknown id is refused, so a typo and an unmetered run never
+ * look the same. */
 export function fleetRunDetail(runId: string): Promise<FleetRunDetail> {
   return inTauri() ? invokeTauri('fleet_run_detail', { runId }) : mock.fleetRunDetail(runId);
+}
+
+/** One run's transcript, folded from Claude Code's own session file (M56.9,
+ * D5): read only when asked for, and stored nowhere. A run with no session
+ * reads not recorded; an unknown id is refused, as `fleetRunDetail` is. */
+export function fleetRunTranscript(runId: string): Promise<RunTranscript> {
+  return inTauri()
+    ? invokeTauri('fleet_run_transcript', { runId })
+    : mock.fleetRunTranscript(runId);
 }
 
 /** What one actor's runs add up to (M33.6). An actor with no runs answers
@@ -772,7 +1029,9 @@ export function triggerRecordPack(
  * the roster renders that as unavailable rather than as an empty team.
  */
 export function fleetActorSummaries(): Promise<FleetActorSummary[]> {
-  return inTauri() ? invokeTauri('fleet_actor_summaries') : mock.fleetActorSummaries();
+  return inTauri()
+    ? invokeTauri('fleet_actor_summaries')
+    : faulted('fleet_actor_summaries', () => mock.fleetActorSummaries());
 }
 
 // --- One agent's own pause (M33b.5) -----------------------------------------
@@ -828,4 +1087,32 @@ export type { FrontendLogEntry };
 export function logFrontend(entry: FrontendLogEntry): Promise<void> {
   const sent = inTauri() ? invokeTauri<void>('log_frontend', { entry }) : mock.logFrontend(entry);
   return sent.catch(() => undefined);
+}
+
+// --- Quit (M55.10) -----------------------------------------------------------
+
+import type { QuitRequest } from './mockIpc';
+export type { QuitRequest };
+
+/**
+ * Hear the shell ask to quit: ⌘Q, the close button or ⌘W. The webview saves
+ * and answers with `finishQuit`, or `cancelQuit` to stay open. Resolves to
+ * the unlisten function. In the browser, `window.__cerebroMockQuit` asks.
+ */
+export async function listenQuitRequested(
+  handler: (request: QuitRequest) => void,
+): Promise<() => void> {
+  if (!inTauri()) return mock.listenQuitRequested(handler);
+  const { listen } = await import('@tauri-apps/api/event');
+  return listen<QuitRequest>('cerebro://quit-requested', (event) => handler(event.payload));
+}
+
+/** Every pending edit is saved: exit. Rejects when no quit is in progress. */
+export function finishQuit(): Promise<void> {
+  return inTauri() ? invokeTauri('finish_quit') : mock.finishQuit();
+}
+
+/** A save failed: stay open, and let a later quit ask again. */
+export function cancelQuit(): Promise<void> {
+  return inTauri() ? invokeTauri('cancel_quit') : mock.cancelQuit();
 }

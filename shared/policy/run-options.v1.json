@@ -1,0 +1,58 @@
+{
+  "format": 1,
+  "rule": "What a run may ask Claude Code for (M56.5): an effort from effort_levels, and a model whose name fits the model shape — at most max_chars characters, an ASCII letter or digit first, then letters, digits and the characters in also. Absent, or blank, is unset: no flag, and Claude Code's default. Anything else is refused before a run starts, because Claude Code 2.1.250 only warns about an effort it does not take and then runs at its default. Each id is passed as its own argv element, never through a shell. A refusal reads the message for its field, with {value} the value cut at value_chars characters (then …) and JSON-quoted, {levels} the effort ids and {aliases} the suggestion ids.",
+  "cli_version": "2.1.250",
+  "effort_levels": [
+    {"id": "low", "label": "Low"},
+    {"id": "medium", "label": "Medium"},
+    {"id": "high", "label": "High"},
+    {"id": "xhigh", "label": "Extra high"},
+    {"id": "max", "label": "Max"}
+  ],
+  "model": {"max_chars": 128, "first": "alnum", "also": "._-:@/[]"},
+  "model_suggestions": [
+    {"id": "fable", "label": "Fable"},
+    {"id": "opus", "label": "Opus"},
+    {"id": "sonnet", "label": "Sonnet"},
+    {"id": "haiku", "label": "Haiku"}
+  ],
+  "value_chars": 64,
+  "messages": {
+    "effort": "effort {value} is not one Claude Code accepts — use {levels}, or remove it for Claude Code's default. Nothing was started.",
+    "model": "model {value} is not a model name Claude Code can take — use an alias ({aliases}) or a full model name, or remove it for Claude Code's default. Nothing was started."
+  },
+  "cases": [
+    {"field": "effort", "value": null, "verdict": "unset"},
+    {"field": "effort", "value": "", "verdict": "unset"},
+    {"field": "effort", "value": "   ", "verdict": "unset"},
+    {"field": "effort", "value": "low", "verdict": "valid"},
+    {"field": "effort", "value": "medium", "verdict": "valid"},
+    {"field": "effort", "value": "high", "verdict": "valid"},
+    {"field": "effort", "value": "xhigh", "verdict": "valid"},
+    {"field": "effort", "value": "max", "verdict": "valid"},
+    {"field": "effort", "value": "default", "verdict": "refused", "message": "effort \"default\" is not one Claude Code accepts — use low, medium, high, xhigh or max, or remove it for Claude Code's default. Nothing was started."},
+    {"field": "effort", "value": "MAX", "verdict": "refused"},
+    {"field": "effort", "value": " high", "verdict": "refused", "message": "effort \" high\" is not one Claude Code accepts — use low, medium, high, xhigh or max, or remove it for Claude Code's default. Nothing was started."},
+    {"field": "effort", "value": "high\n--model", "verdict": "refused", "message": "effort \"high\\n--model\" is not one Claude Code accepts — use low, medium, high, xhigh or max, or remove it for Claude Code's default. Nothing was started."},
+    {"field": "effort", "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "verdict": "refused", "message": "effort \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…\" is not one Claude Code accepts — use low, medium, high, xhigh or max, or remove it for Claude Code's default. Nothing was started."},
+    {"field": "model", "value": null, "verdict": "unset"},
+    {"field": "model", "value": "", "verdict": "unset"},
+    {"field": "model", "value": " \t", "verdict": "unset"},
+    {"field": "model", "value": "opus", "verdict": "valid"},
+    {"field": "model", "value": "sonnet", "verdict": "valid"},
+    {"field": "model", "value": "claude-opus-5-5[1m]", "verdict": "valid"},
+    {"field": "model", "value": "us.anthropic.claude-x:0", "verdict": "valid"},
+    {"field": "model", "value": "claude-haiku-4-5-20251001", "verdict": "valid"},
+    {"field": "model", "value": "org/model@v2", "verdict": "valid"},
+    {"field": "model", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "verdict": "valid"},
+    {"field": "model", "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "verdict": "refused"},
+    {"field": "model", "value": "-x", "verdict": "refused", "message": "model \"-x\" is not a model name Claude Code can take — use an alias (fable, opus, sonnet, haiku) or a full model name, or remove it for Claude Code's default. Nothing was started."},
+    {"field": "model", "value": "--dangerously-skip-permissions", "verdict": "refused"},
+    {"field": "model", "value": "opus 5", "verdict": "refused"},
+    {"field": "model", "value": " opus", "verdict": "refused"},
+    {"field": "model", "value": "[1m]", "verdict": "refused"},
+    {"field": "model", "value": "opus\u0000", "verdict": "refused", "message": "model \"opus\\u0000\" is not a model name Claude Code can take — use an alias (fable, opus, sonnet, haiku) or a full model name, or remove it for Claude Code's default. Nothing was started."},
+    {"field": "model", "value": "opüs", "verdict": "refused"},
+    {"field": "model", "value": "opus;rm", "verdict": "refused"}
+  ]
+}

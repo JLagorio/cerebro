@@ -6,11 +6,13 @@ import { en } from '@blocknote/core/locales';
 import { getFormattingToolbarItems } from '@blocknote/react';
 import {
   blocksToMarkdown,
+  blocksToMarkdownNow,
   escapeMarkerLines,
   formatAiMarker,
   isLossyImport,
   lossyImportCause,
   markdownToBlocks,
+  markdownToBlocksNow,
   normalizeParsedBlocks,
   parseAiMarker,
   spliceTitleIntoBlocks,
@@ -74,6 +76,14 @@ const CORPUS: { name: string; md: string; out: string }[] = [
     name: 'wikilinks and task chips',
     md: 'See [[kickoff]] and [[kickoff|the kickoff]].\n\n- [ ] follow up @[[maya-chen]] 📅 2026-08-01\n',
     out: 'See [[kickoff]] and [[kickoff|the kickoff]].\n\n* [ ] follow up @[[maya-chen]] 📅 2026-08-01\n',
+  },
+  {
+    // M55.8: a section link keeps its fragment on disk. Only the chip reads
+    // it; the target is never rewritten, the alias form included, and a
+    // `[[#…]]` opening a line is not a heading.
+    name: 'section links',
+    md: 'See [[systems-map#Rollback]], [[systems-map#Rollback|the rollback]] and [[#Rollback]].\n\n[[#Rollback]] opens this line.\n',
+    out: 'See [[systems-map#Rollback]], [[systems-map#Rollback|the rollback]] and [[#Rollback]].\n\n[[#Rollback]] opens this line.\n',
   },
   {
     name: 'code fence (byte-identical)',
@@ -156,6 +166,22 @@ describe('markdown round trip', () => {
   });
 });
 
+/* M55.6 plans an outside write in one task, so it parses and serializes
+   synchronously. The Now forms are the async ones, minus the promise. */
+describe('the synchronous forms', () => {
+  // Ids are fresh per parse; everything else must match.
+  const withoutIds = (blocks: unknown): string =>
+    JSON.stringify(blocks, (key, value: unknown) => (key === 'id' ? undefined : value));
+
+  for (const { name, md } of CORPUS) {
+    it(`${name}: parses and serializes as the async forms do`, async () => {
+      const now = markdownToBlocksNow(editor, md);
+      expect(withoutIds(now)).toBe(withoutIds(await markdownToBlocks(editor, md)));
+      expect(blocksToMarkdownNow(editor, now)).toBe(await blocksToMarkdown(editor, now));
+    });
+  }
+});
+
 /**
  * The database fence (M47.2).
  *
@@ -219,6 +245,65 @@ describe('the cerebro-database fence', () => {
   it('does not claim a fence in another language', async () => {
     const blocks = await markdownToBlocks(editor, '```yaml\ndatabase: Reading list\n```\n');
     expect(blocks.map((b) => b.type)).toEqual(['codeBlock']);
+  });
+});
+
+// M55.13 — the child-page list is an EMPTY fence: the list is derived, so the
+// file holds nothing but the marker that says where it goes.
+describe('the cerebro-subpages fence', () => {
+  const EMPTY = 'Before.\n\n```cerebro-subpages\n```\n\nAfter.\n';
+
+  it('promotes an empty fence into the list block', async () => {
+    const blocks = await markdownToBlocks(editor, EMPTY);
+    expect(blocks.map((b) => b.type)).toEqual(['paragraph', 'subPages', 'paragraph']);
+  });
+
+  it('round-trips byte-stable', async () => {
+    expect(await roundTrip(EMPTY)).toBe(EMPTY);
+    expect(await roundTrip(await roundTrip(EMPTY))).toBe(EMPTY);
+  });
+
+  it('leaves a fence holding text as the code block it is', async () => {
+    const held = '```cerebro-subpages\nkeep these words\n```\n';
+    const blocks = await markdownToBlocks(editor, held);
+    expect(blocks.map((b) => b.type)).toEqual(['codeBlock']);
+    expect(await roundTrip(held)).toBe(held);
+  });
+});
+
+// M55.14 — a page card is a POINTER: one wikilink in a ```cerebro-page fence,
+// written back exactly as held, whether or not the page it names exists.
+describe('the cerebro-page fence', () => {
+  const fence = (body: string) =>
+    body === '' ? '```cerebro-page\n```\n' : `\`\`\`cerebro-page\n${body}\n\`\`\`\n`;
+
+  it('promotes one link into a page card, and the empty fence into an unset one', async () => {
+    const set = await markdownToBlocks(editor, fence('[[how-we-schedule|Scheduling]]'));
+    expect(set.map((b) => b.type)).toEqual(['pageCard']);
+    expect(set[0].props).toMatchObject({ target: 'how-we-schedule', alias: 'Scheduling' });
+    const unset = await markdownToBlocks(editor, fence(''));
+    expect(unset.map((b) => b.type)).toEqual(['pageCard']);
+    expect(unset[0].props).toMatchObject({ target: '', alias: '' });
+  });
+
+  it.each([
+    ['set', '[[how-we-schedule]]'],
+    ['aliased', '[[how-we-schedule|Scheduling]]'],
+    ['a section', '[[how-we-schedule#Windows, not deadlines]]'],
+    ['dangling', '[[no-such-page]]'],
+    ['unset', ''],
+  ])('round-trips byte-stable when %s', async (_name, body) => {
+    const page = `Before.\n\n${fence(body)}\nAfter.\n`;
+    expect(await roundTrip(page)).toBe(page);
+    expect(await roundTrip(await roundTrip(page))).toBe(page);
+  });
+
+  it('leaves a fence holding more than one link as the code block it is', async () => {
+    for (const body of ['[[a]] and more', '[[a]]\n[[b]]', 'plain words']) {
+      const blocks = await markdownToBlocks(editor, fence(body));
+      expect(blocks.map((b) => b.type)).toEqual(['codeBlock']);
+      expect(await roundTrip(fence(body))).toBe(fence(body));
+    }
   });
 });
 
@@ -1128,6 +1213,12 @@ describe('every / item survives a save or is not offered', () => {
     callout: [{ type: 'callout', props: { kind: 'warning' }, content: 'Mind the gap' }],
     mermaid: [{ type: 'mermaid', props: { code: 'flowchart TD\n  A --> B' } }],
     database: [{ type: 'database', props: { database: 'Reading list', view: 'shelf' } }],
+    subPages: [{ type: 'subPages' }],
+    // Set, then unset (the picker `/Page` inserts): each is its own fence.
+    pageCard: [
+      { type: 'pageCard', props: { target: 'how-we-schedule', alias: '' } },
+      { type: 'pageCard', props: { target: '', alias: '' } },
+    ],
     // A column only exists in a row, so the row is the column's fixture too.
     columnList: [
       {

@@ -5,7 +5,8 @@ import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { ResizeHandle } from '@/components/ui/ResizeHandle';
 import { checkAgent } from '@/agent/agentIpc';
-import { AiActionCard, historyOf, type GitHistory } from '@/agent/AiActionCard';
+import { historyOf, type GitHistory } from '@/agent/AiActionCard';
+import { TranscriptRows } from '@/agent/toolRenderers';
 import { ChatInput } from '@/agent/ChatInput';
 import { buildSnapshot, extractReferences, renderSnapshot } from '@/agent/context';
 import {
@@ -16,13 +17,19 @@ import {
   type ContextChip,
 } from '@/agent/contextChips';
 import { ConversationSwitcher } from '@/agent/ConversationSwitcher';
+import { FailureNoticeCard } from '@/agent/FailureNoticeCard';
+import { InteractionCard } from '@/agent/InteractionCard';
+import { RunOptionsPicker } from '@/agent/RunOptionsPicker';
 import { MessageText } from '@/agent/MessageMarkdown';
+import { TranscriptNotice } from '@/agent/TranscriptNotice';
 import { useConversations } from '@/agent/useConversations';
 import { useAgentChat, type TurnContext } from '@/agent/useAgentChat';
-import { type AgentStatus, type ChatMessage } from '@/agent/types';
+import { type AgentStatus, type ChatMessage, type PrLink } from '@/agent/types';
 import { listSkills, matchSkillInvocation, skillPrompt } from '@/engine/skills';
 import { buildSystemPrompt } from '@/agent/systemPrompt';
 import type { PromptGrant } from '@/engine/toolGrant';
+import { listAgents } from '@/engine/agents';
+import { isPaused } from '@/engine/jobs';
 import { isKnowledgePath, listConcepts, type Concept } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
 import {
@@ -38,7 +45,7 @@ import {
 import { placeOf, samePlace } from '@/engine/place';
 import { resolveSurface } from '@/engine/surface';
 import { resolveView } from '@/engine/views';
-import { readNote } from '@/lib/ipc';
+import { pausedAgents, readNote } from '@/lib/ipc';
 import { todayIso } from '@/lib/templates';
 import { useAgentCheckpoint, useGit } from '@/git/useGit';
 import { useSchema } from '@/stores/vaultStore';
@@ -84,7 +91,7 @@ function UserMessage({ text, addressed }: { text: string; addressed?: ChatMessag
       {addressed !== undefined && (
         <span data-testid="turn-addressed" className="text-2xs text-n-400">
           {addressed.title === null
-            ? `No agent called @${addressed.handle} — the assistant took this one.`
+            ? `No agent called @${addressed.handle} — ${addressed.answeredBy ?? 'the assistant'} took this one.`
             : `To ${addressed.title}`}
         </span>
       )}
@@ -109,33 +116,41 @@ function Message({
   onViewDiff,
   history,
   onRetry,
+  noticeActions,
+  waitingToolId = null,
 }: {
   message: ChatMessage;
   onOpen: (t: string) => void;
   onOpenPath: (p: string) => void;
   onViewDiff?: (p: string) => void;
+  /** The call a card waits on in this message (M57.1), whose row reads
+   * waiting. */
+  waitingToolId?: string | null;
   /** Whether the vault keeps git history, so a write card can say it has no
    * revert (M55.5); undefined until git status is read. */
   history?: GitHistory;
   /** Re-send the question this answer belongs to (M15). */
   onRetry?: () => void;
+  /** What a failure card's fix does, by action (M56.4). */
+  noticeActions?: Partial<Record<string, () => void>>;
 }) {
   if (message.role === 'user')
     return <UserMessage text={message.text} addressed={message.addressed} />;
   return (
     <div className="flex flex-col gap-1.5" data-testid="chat-message" data-role="assistant">
+      {/* M56.8: rows by the tool manifest's renderer, consecutive reads
+          folded into one; the message's streaming flag decides whether an
+          unfinished call is running or interrupted, and a call a hook held
+          reads waiting, cancelled, not run or paused (M57.1). */}
       {message.tools.length > 0 && (
-        <div className="flex flex-col gap-1">
-          {message.tools.map((tool) => (
-            <AiActionCard
-              key={tool.id}
-              tool={tool}
-              onOpenPath={onOpenPath}
-              onViewDiff={onViewDiff}
-              history={history}
-            />
-          ))}
-        </div>
+        <TranscriptRows
+          tools={message.tools}
+          streaming={message.streaming === true}
+          onOpenPath={onOpenPath}
+          onViewDiff={onViewDiff}
+          history={history}
+          waitingToolId={waitingToolId}
+        />
       )}
       {/* M15: the text and the error are no longer mutually exclusive. A turn
           that wrote three paragraphs and then failed used to show only the red
@@ -145,7 +160,17 @@ function Message({
           <MessageText text={message.text} onOpen={onOpen} />
         </div>
       )}
-      {message.error !== undefined && (
+      {/* M56.4: a failure Rust could type is a card with its fix; one it
+          could not keeps the red box and Claude Code's own words. */}
+      {message.error !== undefined && message.notice !== undefined && (
+        <FailureNoticeCard
+          notice={message.notice}
+          raw={message.error}
+          actions={noticeActions}
+          onRetry={onRetry}
+        />
+      )}
+      {message.error !== undefined && message.notice === undefined && (
         <div className="flex flex-col items-start gap-1.5 rounded-lg border border-danger-200 bg-danger-50 px-3 py-2 text-xs leading-[17px] text-danger-700">
           <span>{message.error}</span>
           {onRetry !== undefined && (
@@ -163,6 +188,117 @@ function Message({
       {message.streaming === true && message.text === '' && message.error === undefined && (
         <span className="text-sm text-n-400">Thinking…</span>
       )}
+      {/* M56.3: a turn stopped or cut off before it said anything says so,
+          rather than leaving an empty bubble. */}
+      {message.interrupted === true &&
+        message.streaming !== true &&
+        message.text === '' &&
+        message.tools.length === 0 &&
+        message.error === undefined && (
+          <span data-testid="turn-stopped" className="text-sm text-n-400">
+            Stopped before it replied.
+          </span>
+        )}
+    </div>
+  );
+}
+
+/** What the composer says when a thread cannot continue (Q7). */
+const BLOCKED_WORDS = {
+  elsewhere: 'This conversation was had in another vault. Open that vault to continue it.',
+  gone: "Claude Code no longer has this conversation, so it can't continue here.",
+};
+
+/** The pull requests a conversation's session opened (M56.3), as plain links:
+ * the shell's link guard (M53.12) sends an https href to the browser. */
+/**
+ * Who answers in this panel, when Settings binds it to an Agent record
+ * (M56.6): the agent's title, which opens its page (D18), and "(paused)"
+ * when its record or the fleet pauses it. A pause on the fleet refuses its
+ * turns in Rust, so the header says so before a turn is refused. A handle no
+ * record answers to is named, because those turns go to the plain assistant.
+ * Nothing at all when the panel is unbound, which is the common case.
+ */
+function PanelAgentLabel({
+  vaultPath,
+  handle,
+  entries,
+  streaming,
+  onOpen,
+}: {
+  vaultPath: string;
+  handle: string;
+  entries: Entry[];
+  streaming: boolean;
+  onOpen: (path: string) => void;
+}) {
+  const agent = useMemo(
+    () => listAgents(entries).find((a) => a.handle === handle) ?? null,
+    [entries, handle],
+  );
+  const recordPaused = useMemo(() => {
+    const entry = agent === null ? undefined : entries.find((e) => e.path === agent.path);
+    return entry !== undefined && isPaused(entry);
+  }, [agent, entries]);
+  // The fleet's pause, re-read when a turn ends: it is what refuses a turn,
+  // and it can change on the fleet while this panel is open. A failed read
+  // claims nothing, so only the record's own pause shows then.
+  const actor = agent?.actor ?? null;
+  const [fleetPaused, setFleetPaused] = useState(false);
+  useEffect(() => {
+    if (actor === null || streaming) return;
+    let live = true;
+    void pausedAgents(vaultPath).then(
+      (paused) => live && setFleetPaused(paused.includes(actor)),
+      () => live && setFleetPaused(false),
+    );
+    return () => {
+      live = false;
+    };
+  }, [actor, streaming, vaultPath]);
+  if (agent === null) {
+    return (
+      <span
+        data-testid="panel-agent"
+        data-state="missing"
+        title={`@${handle} — no agent answers to this name, so the assistant answers`}
+        className="min-w-0 truncate text-2xs text-warn-600"
+      >
+        @{handle} not found
+      </span>
+    );
+  }
+  const paused = recordPaused || fleetPaused;
+  return (
+    <button
+      type="button"
+      data-testid="panel-agent"
+      data-state={paused ? 'paused' : 'bound'}
+      title={`${agent.title} answers in this panel. Open its page.`}
+      onClick={() => onOpen(agent.path)}
+      className="min-w-0 truncate border-0 bg-transparent p-0 text-2xs text-n-600 hover:text-n-900"
+    >
+      {agent.title}
+      {paused ? ' (paused)' : ''}
+    </button>
+  );
+}
+
+function PrLinks({ links }: { links: PrLink[] }) {
+  return (
+    <div data-testid="thread-pr-links" className="flex flex-wrap items-center gap-2 text-2xs">
+      <Icon name="git-pull-request" size={11} color="var(--n-400)" />
+      {links.map((link) => (
+        <a
+          key={link.url}
+          href={link.url}
+          target="_blank"
+          rel="noreferrer"
+          className="text-cortex-600 hover:underline"
+        >
+          {`${link.repository}#${link.number}`}
+        </a>
+      ))}
     </div>
   );
 }
@@ -239,6 +375,8 @@ export function AiPanel({
   const issuePrefixes = useUiStore((s) => s.issuePrefixes);
   const pendingPrompt = useUiStore((s) => s.agentPendingPrompt);
   const setPendingPrompt = useUiStore((s) => s.setAgentPendingPrompt);
+  const setSettingsFocus = useUiStore((s) => s.setSettingsFocus);
+  const navigate = useNavStore((s) => s.navigate);
   const detailPath = useUiStore((s) => s.detailPath);
   const selection = useNavStore((s) => s.selection);
   const entries = useVaultStore((s) => s.entries);
@@ -248,6 +386,14 @@ export function AiPanel({
   const schema = useSchema();
   const openPath = useOpenPath();
   const openDiff = useUiStore((s) => s.openDiff);
+  // M56.6 — who answers in this vault's panel, from the app's config.
+  const loadPanelAgent = useUiStore((s) => s.loadPanelAgent);
+  const boundAgent = useUiStore((s) =>
+    vaultPath === null ? null : (s.panelAgents[vaultPath] ?? null),
+  );
+  useEffect(() => {
+    if (vaultPath !== null) void loadPanelAgent(vaultPath);
+  }, [loadPanelAgent, vaultPath]);
 
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [draft, setDraft] = useState('');
@@ -293,7 +439,7 @@ export function AiPanel({
     conversationId: null,
   });
   const getTurn = useCallback(() => turnRef.current, []);
-  const chat = useAgentChat(getTurn, { shell, connectors }, null, isRepo ? checkpoint : undefined);
+  const chat = useAgentChat(getTurn, { shell, connectors }, isRepo ? checkpoint : undefined);
   // M17.5: the SUBJECT of the current selection, with its lenses stripped —
   // the board tab and the table tab of one List are one place. A thread is
   // stamped with it at its first turn, which is what lets a thread be found
@@ -303,7 +449,11 @@ export function AiPanel({
     () => ({ entries, views, collections }),
     [entries, views, collections],
   );
-  const conversations = useConversations(chat, place, placeLookup);
+  const conversations = useConversations(chat, place, placeLookup, vaultPath);
+  const blocked = conversations.blocked;
+  // M56.5: the composer's model and effort picker, opened by its button or
+  // by a failure card's "Choose another model".
+  const [runOptionsOpen, setRunOptionsOpen] = useState(false);
 
   // --- Context chips (M17.6) ------------------------------------------------
   //
@@ -483,6 +633,11 @@ export function AiPanel({
     systemPrompt: composeSystemPrompt,
     place: conversations.active?.place ?? place,
     conversationId: conversations.activeId,
+    // M56.5: the conversation's pick, read at send like the rest.
+    model: conversations.active?.model ?? null,
+    effort: conversations.active?.effort ?? null,
+    // M56.6: who answers when the turn names nobody, read at send.
+    boundAgent,
   };
 
   // Every send goes through here so no path can leave a thread unanchored —
@@ -521,8 +676,15 @@ export function AiPanel({
   // sending mid-turn would be dropped by the hook's one-turn guard — and
   // delivered when the stream ends (PR #5 review).
   const streaming = chat.streaming;
+  const startConversation = conversations.start;
   useEffect(() => {
     if (pendingPrompt === null || streaming) return;
+    // M56.3: a thread that cannot continue takes no handoff. A new
+    // conversation opens first, and the handoff is delivered on the next pass.
+    if (blocked !== null) {
+      startConversation();
+      return;
+    }
     // M17.6: the handoff's SUBJECT becomes a context chip. Six call sites used
     // to hand over a prompt naming a record and drop the record itself, so the
     // agent was asked to revise a concept and handed whatever surface the user
@@ -547,7 +709,7 @@ export function AiPanel({
     // the bubble and the thread's title, the prompt is what the agent reads.
     if (pendingPrompt.label === null) ask(pendingPrompt.text);
     else ask(pendingPrompt.label, pendingPrompt.text);
-  }, [ask, entries, pendingPrompt, setPendingPrompt, streaming]);
+  }, [ask, blocked, entries, pendingPrompt, setPendingPrompt, startConversation, streaming]);
 
   const submit = () => {
     // Mid-turn, Enter is a no-op: the Send button is already replaced by
@@ -604,6 +766,17 @@ export function AiPanel({
     ask(question.text, question.prompt);
   };
 
+  // M56.4: the fixes a failure card offers; choose_model opens the
+  // composer's picker (M56.5).
+  const noticeActions = {
+    open_settings: () => {
+      setSettingsFocus('claude-code');
+      navigate({ kind: 'settings' });
+    },
+    new_conversation: conversations.start,
+    choose_model: () => setRunOptionsOpen(true),
+  };
+
   const onListScroll = () => {
     const el = listRef.current;
     if (el === null) return;
@@ -647,6 +820,15 @@ export function AiPanel({
         {/* M9.5: conversations are kept and named, so this is a switcher
             rather than a label beside a button that erased the transcript. */}
         <ConversationSwitcher state={conversations} />
+        {vaultPath !== null && boundAgent !== null && (
+          <PanelAgentLabel
+            vaultPath={vaultPath}
+            handle={boundAgent}
+            entries={entries}
+            streaming={chat.streaming}
+            onOpen={openPath}
+          />
+        )}
         {status !== null && !status.installed && (
           <span className="text-2xs text-warn-600">not installed</span>
         )}
@@ -670,7 +852,19 @@ export function AiPanel({
         onScroll={onListScroll}
         className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3"
       >
-        {chat.messages.length === 0 ? (
+        {conversations.transcript.state === 'unavailable' && (
+          <TranscriptNotice
+            reason={conversations.transcript.reason}
+            retentionDays={conversations.transcript.retentionDays}
+            detail={conversations.transcript.detail}
+            cached={chat.messages.length > 0}
+          />
+        )}
+        {chat.messages.length === 0 && conversations.transcript.state === 'reading' ? (
+          <p data-testid="transcript-reading" className="m-0 pt-2 text-sm text-n-500">
+            Reading the transcript…
+          </p>
+        ) : chat.messages.length === 0 && blocked !== null ? null : chat.messages.length === 0 ? (
           <div className="flex flex-col gap-2 pt-2">
             <p className="m-0 text-sm leading-[18px] text-n-500">
               {status?.installed === false
@@ -699,10 +893,25 @@ export function AiPanel({
               onOpenPath={openPath}
               onViewDiff={isRepo ? viewDiff : undefined}
               history={historyOf(ready, isRepo)}
-              onRetry={message.error !== undefined ? () => retry(message.id) : undefined}
+              onRetry={
+                message.error !== undefined && blocked === null
+                  ? () => retry(message.id)
+                  : undefined
+              }
+              noticeActions={noticeActions}
+              waitingToolId={
+                chat.waiting && chat.interaction?.messageId === message.id
+                  ? chat.interaction.card.tool_id
+                  : null
+              }
             />
           ))
         )}
+        {/* M57.1: the call the turn waits on, after the last message. */}
+        {chat.interaction !== null && (
+          <InteractionCard interaction={chat.interaction} onAnswer={chat.answer} />
+        )}
+        {chat.prLinks.length > 0 && <PrLinks links={chat.prLinks} />}
       </div>
 
       <div className="relative flex-none border-t border-n-200 p-2.5">
@@ -796,37 +1005,85 @@ export function AiPanel({
             ))}
           </ul>
         )}
-        {/* M9.5: `[[` completes against the vault, and the note you name
-            travels into the snapshot with its content rather than as a word
-            the agent has to go searching for. */}
-        <ChatInput
-          autoFocus
-          value={draft}
-          onChange={setDraft}
-          onSubmit={submit}
-          // M17.6b: `@` attaches. A chip re-added on purpose beats an earlier
-          // dismissal — see resolveChips.
-          onAttach={(chip) => {
-            const id = chipId(chip);
-            setDismissed((prev) => prev.filter((d) => d !== id));
-            setAdded((prev) => (prev.some((c) => chipId(c) === id) ? prev : [...prev, chip]));
-          }}
-          attached={attachedIds}
-        />
-        <div className="mt-1.5 flex items-center gap-2">
-          <span className="flex-1 text-2xs text-n-400">
-            {chat.streaming ? 'Working…' : 'Enter to send · [[ to reference a note'}
-          </span>
-          {chat.streaming ? (
-            <Button variant="secondary" size="sm" icon="square" onClick={chat.stop}>
-              Stop
+        {blocked !== null ? (
+          <div data-testid="thread-blocked" className="flex flex-col items-start gap-2 px-1 py-1">
+            <p className="m-0 text-xs leading-[17px] text-n-600">
+              {blocked === 'elsewhere' ? BLOCKED_WORDS.elsewhere : BLOCKED_WORDS.gone}
+            </p>
+            <Button
+              variant="primary"
+              size="sm"
+              icon="square-pen"
+              testId="thread-start-new"
+              onClick={conversations.start}
+            >
+              Start a new conversation
             </Button>
-          ) : (
-            <Button variant="primary" size="sm" icon="send" onClick={submit}>
-              Send
-            </Button>
-          )}
-        </div>
+          </div>
+        ) : (
+          <>
+            {/* M9.5: `[[` completes against the vault, and the note you name
+              travels into the snapshot with its content rather than as a word
+              the agent has to go searching for. */}
+            <ChatInput
+              autoFocus
+              value={draft}
+              onChange={setDraft}
+              onSubmit={submit}
+              // M17.6b: `@` attaches. A chip re-added on purpose beats an earlier
+              // dismissal — see resolveChips.
+              onAttach={(chip) => {
+                const id = chipId(chip);
+                setDismissed((prev) => prev.filter((d) => d !== id));
+                setAdded((prev) => (prev.some((c) => chipId(c) === id) ? prev : [...prev, chip]));
+              }}
+              attached={attachedIds}
+            />
+            <div className="mt-1.5 flex items-center gap-2">
+              {/* M56.5: the model Claude Code last reported answering, as the
+                  fold named it, never the one asked for. */}
+              {chat.model !== null && (
+                <span
+                  data-testid="turn-model"
+                  className="max-w-[140px] flex-none truncate font-mono text-2xs text-n-500"
+                  title={chat.model}
+                >
+                  {chat.model}
+                </span>
+              )}
+              <span
+                data-testid="composer-status"
+                className="min-w-0 flex-1 truncate text-2xs text-n-400"
+              >
+                {chat.waiting
+                  ? 'Waiting for your answer'
+                  : chat.streaming
+                    ? 'Working…'
+                    : 'Enter to send · [[ to reference a note'}
+              </span>
+              <RunOptionsPicker
+                key={conversations.activeId}
+                value={{
+                  model: conversations.active?.model ?? null,
+                  effort: conversations.active?.effort ?? null,
+                }}
+                onChange={(choice) => conversations.setRunOptions(conversations.activeId, choice)}
+                open={runOptionsOpen}
+                onOpenChange={setRunOptionsOpen}
+                disabled={chat.streaming}
+              />
+              {chat.streaming ? (
+                <Button variant="secondary" size="sm" icon="square" onClick={chat.stop}>
+                  Stop
+                </Button>
+              ) : (
+                <Button variant="primary" size="sm" icon="send" onClick={submit}>
+                  Send
+                </Button>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </aside>
   );

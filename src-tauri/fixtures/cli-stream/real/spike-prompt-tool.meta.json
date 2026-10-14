@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "cli_version": "2.1.250",
+  "source": "spike",
+  "recorded": "derived",
+  "derived_from": [
+    "spike/prompt-tool.json step 1",
+    "06-agents study (prompt tool, from the bundle)",
+    "the 2.1.250 bundle (stream_event, assistant and result schemas)",
+    "real/spike-not-signed-in (the 2.1.250 init and session-file framing)"
+  ],
+  "transport": "per-turn",
+  "scenario": "prompt-tool step 1",
+  "proves": "With a permission prompt tool that allows it, a Write runs on the input it returned.",
+  "ends": "result",
+  "session": "00000000-0000-4000-8000-000000000001.jsonl",
+  "sanitizer": 1
+}

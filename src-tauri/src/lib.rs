@@ -81,6 +81,24 @@ fn get_last_vault(app: tauri::AppHandle) -> Result<Option<String>, String> {
     Ok(app_config::load(&config_dir(&app)?).last_vault)
 }
 
+/// The Agent record handle this vault's assistant panel is bound to, or
+/// None for the plain assistant (M56.6). App config, never the vault.
+#[tauri::command(async)]
+fn panel_agent(app: tauri::AppHandle, vault: String) -> Result<Option<String>, String> {
+    Ok(app_config::panel_agent(&config_dir(&app)?, &vault))
+}
+
+/// Bind this vault's panel to an agent handle, or unbind it with None or a
+/// blank (M56.6). A value outside the slug grammar is refused unwritten.
+#[tauri::command(async)]
+fn set_panel_agent(
+    app: tauri::AppHandle,
+    vault: String,
+    handle: Option<String>,
+) -> Result<(), String> {
+    app_config::set_panel_agent(&config_dir(&app)?, &vault, handle.as_deref())
+}
+
 #[tauri::command(async)]
 fn scan_vault(vault: String) -> Result<Vec<Entry>, String> {
     // M21.1 janitor: reap atomic-write temps abandoned by a crash. Here in
@@ -232,10 +250,15 @@ fn pipeline_overview(
 /// the process tag, which restarts at zero every launch and therefore cannot
 /// address a row in a database; carrying the durable id beside it is what
 /// lets a finished run in the status bar open its own fleet detail.
+///
+/// `session_id` (M56.3) is the Claude Code session the run goes to, minted or
+/// resumed before the child spawns, so the panel stores it before the first
+/// event and a conversation can be rebuilt from its session file.
 #[derive(Debug, Serialize)]
 pub struct RunHandle {
     pub run: u64,
     pub run_id: String,
+    pub session_id: String,
 }
 
 /// One page of the fleet's run history (M33.2).
@@ -249,11 +272,13 @@ fn fleet_runs(
     app: tauri::AppHandle,
     filter: runtime::fleet::Filter,
 ) -> Result<Vec<runtime::fleet::FleetRun>, String> {
-    let conn = runtime::open_existing(&config_dir(&app)?)?;
-    runtime::fleet::runs(&conn, &filter)
+    let ro = runtime::ReadOnly::open(&config_dir(&app)?)?;
+    runtime::fleet::runs(&ro, &filter)
 }
 
-/// One run, with whatever the governance tables recorded about it (M33.2).
+/// One run, with whatever the governance tables recorded about it (M33.2),
+/// the model Claude Code reported answering, and the refusals recorded
+/// against it (M56.9).
 ///
 /// An id nothing knows is an error rather than an empty detail: a typo and a
 /// run that recorded nothing must not look the same.
@@ -262,8 +287,34 @@ fn fleet_run_detail(
     app: tauri::AppHandle,
     run_id: String,
 ) -> Result<runtime::fleet::RunDetail, String> {
-    let conn = runtime::open_existing(&config_dir(&app)?)?;
-    runtime::fleet::run_detail(&conn, &run_id)
+    let ro = runtime::ReadOnly::open(&config_dir(&app)?)?;
+    runtime::fleet::run_detail(&ro, &run_id)
+}
+
+/// One run's transcript, folded from Claude Code's own session file (M56.9,
+/// D5): folded on read and stored nowhere — no runtime.db row, no vault file.
+/// The run's session, vault and siblings come from a read-only handle; a run
+/// with no session or no vault reads as not recorded. An unknown id is an
+/// error, as it is for `fleet_run_detail`.
+#[tauri::command(async)]
+fn fleet_run_transcript(
+    app: tauri::AppHandle,
+    run_id: String,
+) -> Result<agent::transcript::RunTranscript, String> {
+    let key = {
+        let ro = runtime::ReadOnly::open(&config_dir(&app)?)?;
+        runtime::fleet::transcript_key(&ro, &run_id)?
+    };
+    let last_active = chrono::DateTime::parse_from_rfc3339(&key.last_activity_at)
+        .ok()
+        .map(|at| at.with_timezone(&chrono::Utc));
+    Ok(agent::transcript::read_run_transcript(
+        key.vault_path.as_deref().map(Path::new),
+        key.session_id.as_deref(),
+        last_active,
+        key.runs_in_session,
+        chrono::Utc::now(),
+    ))
 }
 
 /// What one run changed in Knowledge (M50.3): the concepts its proposals
@@ -293,8 +344,8 @@ fn fleet_actor_summary(
     app: tauri::AppHandle,
     actor: String,
 ) -> Result<runtime::fleet::ActorSummary, String> {
-    let conn = runtime::open_existing(&config_dir(&app)?)?;
-    runtime::fleet::actor_summary(&conn, &actor)
+    let ro = runtime::ReadOnly::open(&config_dir(&app)?)?;
+    runtime::fleet::actor_summary(&ro, &actor)
 }
 
 /// Every actor the run table has attributed anything to, summed (M33b.3).
@@ -307,8 +358,8 @@ fn fleet_actor_summary(
 fn fleet_actor_summaries(
     app: tauri::AppHandle,
 ) -> Result<Vec<runtime::fleet::ActorSummary>, String> {
-    let conn = runtime::open_existing(&config_dir(&app)?)?;
-    runtime::fleet::actor_summaries(&conn)
+    let ro = runtime::ReadOnly::open(&config_dir(&app)?)?;
+    runtime::fleet::actor_summaries(&ro)
 }
 
 /// The three job ledgers, hydrated per vault (M34.2.2).
@@ -1077,6 +1128,101 @@ fn delete_note(vault: String, path: String) -> Result<(), String> {
     vault::write::delete_note(Path::new(&vault), &path)
 }
 
+// --- Page comments (M70.2) -------------------------------------------------
+//
+// Each writes only the page's sidecar, `.comments/<page>.json`, never the
+// page, so none runs `guard_human_write` on it: a concept page in knowledge/
+// takes comments like any page (`vault::comments::comment_page` still holds
+// the bundle to its own name). The author is always `human:owner`; the
+// webview never names one.
+
+#[tauri::command(async)]
+fn list_comments(vault: String, path: String) -> Result<vault::comments::CommentsFile, String> {
+    vault::comments::list_comments(Path::new(&vault), &path)
+}
+
+/// The one door every human comment op takes.
+fn human_comment(
+    vault: &str,
+    path: &str,
+    op: vault::comments::CommentOp,
+) -> Result<vault::comments::CommentsFile, String> {
+    vault::comments::write_comment(Path::new(vault), path, &op, vault::comments::OWNER, None)
+}
+
+#[tauri::command(async)]
+fn start_comment_thread(
+    vault: String,
+    path: String,
+    anchor: Option<vault::comments::AnchorInput>,
+    body: String,
+) -> Result<vault::comments::CommentsFile, String> {
+    human_comment(
+        &vault,
+        &path,
+        vault::comments::CommentOp::Start { anchor, body },
+    )
+}
+
+#[tauri::command(async)]
+fn reply_to_comment_thread(
+    vault: String,
+    path: String,
+    thread: String,
+    body: String,
+) -> Result<vault::comments::CommentsFile, String> {
+    human_comment(
+        &vault,
+        &path,
+        vault::comments::CommentOp::Reply { thread, body },
+    )
+}
+
+#[tauri::command(async)]
+fn set_comment_thread_resolved(
+    vault: String,
+    path: String,
+    thread: String,
+    resolved: bool,
+) -> Result<vault::comments::CommentsFile, String> {
+    human_comment(
+        &vault,
+        &path,
+        vault::comments::CommentOp::SetResolved {
+            thread,
+            resolved,
+            closing: None,
+        },
+    )
+}
+
+#[tauri::command(async)]
+fn delete_comment(
+    vault: String,
+    path: String,
+    thread: String,
+    comment: String,
+) -> Result<vault::comments::CommentsFile, String> {
+    human_comment(
+        &vault,
+        &path,
+        vault::comments::CommentOp::DeleteComment { thread, comment },
+    )
+}
+
+#[tauri::command(async)]
+fn delete_comment_thread(
+    vault: String,
+    path: String,
+    thread: String,
+) -> Result<vault::comments::CommentsFile, String> {
+    human_comment(
+        &vault,
+        &path,
+        vault::comments::CommentOp::DeleteThread { thread },
+    )
+}
+
 #[tauri::command(async)]
 fn list_folders(vault: String) -> Result<Vec<String>, String> {
     vault::scan::list_folders(Path::new(&vault))
@@ -1188,6 +1334,24 @@ fn agent_workspace(vault: String) -> agent::CliWorkspace {
 #[tauri::command(async)]
 fn purge_agent_workspace(vault: String) -> Result<usize, String> {
     agent::purge_cli_workspace(Path::new(&vault))
+}
+
+/// A conversation's transcript, folded from Claude Code's own session file
+/// for this vault (M56.3): read-only, read through once, stored nowhere. A
+/// session id that is not a UUID reads as not recorded and never reaches a
+/// path; `last_active_at` (RFC 3339) tells a sweep from a clear, and one that
+/// does not parse reads as unknown.
+#[tauri::command(async)]
+fn read_cli_transcript(
+    vault: String,
+    session_id: Option<String>,
+    last_active_at: Option<String>,
+) -> agent::transcript::TranscriptRead {
+    let last_active = last_active_at
+        .as_deref()
+        .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
+        .map(|at| at.with_timezone(&chrono::Utc));
+    agent::transcript::read_cli_transcript(Path::new(&vault), session_id.as_deref(), last_active)
 }
 
 /// M34.1.1: the tools half of the grant, taken from the REQUEST like the
@@ -1305,6 +1469,9 @@ fn run_agent(
     vault: String,
     request: agent::AgentRequest,
 ) -> Result<RunStart, String> {
+    // M56.5: the run's model and effort first, before the pause check, the
+    // endpoint and any lease, so a refused run leaves no token, lease or row.
+    agent::run_options::validate_request(&request)?;
     // Attribution rides the run's own bearer token (M13.4): the MCP server
     // stamps `generated.by` from the token each request presents, so a
     // child killed while a write is in flight still stamps as itself.
@@ -1413,6 +1580,39 @@ fn run_agent(
             }
         }
     }
+    spawn_requested_run(
+        &app,
+        state.inner(),
+        mcp_state.inner(),
+        Path::new(&vault),
+        request,
+        scope.as_ref(),
+        cause,
+        lease,
+    )
+    .map(RunStart::Started)
+}
+
+/// Start an admitted run (out of `run_agent` for M57.1, whose answers resume
+/// through it): the durable id, the bearer, the meter and the stream. The
+/// request's endpoint is already set, its pause gate and cause already
+/// passed. `lease` is the ambient claim an unattended laned run made; an
+/// attended run, an answer's resume among them, has none.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each is a different fact run_agent and the answer command already hold"
+)]
+fn spawn_requested_run(
+    app: &tauri::AppHandle,
+    agents: &agent::AgentState,
+    mcp_state: &mcp::McpState,
+    vault: &Path,
+    mut request: agent::AgentRequest,
+    scope: Option<&runtime::VaultScope>,
+    cause: Option<runtime::cause::RunCause>,
+    lease: Option<runtime::dispatch::Lease>,
+) -> Result<RunHandle, String> {
+    let dir = config_dir(app)?;
     // M31.2a: the durable id is minted BEFORE the token so the grant and the
     // meter carry the SAME one — an attended run used to hold two (the meter's
     // here, a token-derived hash in the grant), and everything that joins runs
@@ -1446,7 +1646,7 @@ fn run_agent(
         request.read_scope.clone(),
         grant_tools(&request),
         run_id.clone(),
-        Path::new(&vault),
+        vault,
     )?);
     let meter = agent::meter::Meter {
         data_dir: dir.clone(),
@@ -1459,8 +1659,8 @@ fn run_agent(
         } else {
             agent::meter::Mode::Attended
         },
-        vault_id: scope.as_ref().map(|s| s.vault_id.clone()),
-        store_uuid: scope.as_ref().and_then(|s| s.store_uuid.clone()),
+        vault_id: scope.map(|s| s.vault_id.clone()),
+        store_uuid: scope.and_then(|s| s.store_uuid.clone()),
         started_at: chrono::Utc::now(),
         // The lease's own limit, so the watchdog and the lease agree about
         // when a run has outstayed its welcome.
@@ -1477,8 +1677,8 @@ fn run_agent(
     };
     agent::stream(
         app.clone(),
-        state.inner(),
-        Path::new(&vault),
+        agents,
+        vault,
         request,
         &dir,
         Some(meter),
@@ -1486,11 +1686,10 @@ fn run_agent(
         // event stream, and the person is watching it.
         None,
     )
-    .map(|run| {
-        RunStart::Started(RunHandle {
-            run,
-            run_id: durable,
-        })
+    .map(|spawned| RunHandle {
+        run: spawned.run,
+        run_id: durable,
+        session_id: spawned.session_id,
     })
 }
 
@@ -1543,6 +1742,105 @@ fn stop_agent(state: tauri::State<'_, agent::AgentState>, run: u64) -> Result<bo
 #[tauri::command(async)]
 fn stop_all_agents(state: tauri::State<'_, agent::AgentState>) -> Result<Vec<u64>, String> {
     state.stop_all()
+}
+
+/// What answering a waiting call says (M57.1): the resumed run's handle, or
+/// a typed refusal the panel words (`no_longer_waiting` when the request
+/// already ended). Untagged: the renderer tells the arms apart by which field
+/// is present, as with `RunStart`.
+#[derive(Serialize)]
+#[serde(untagged)]
+enum AnswerResult {
+    Resumed(RunHandle),
+    Refused {
+        refused: agent::interaction::Refusal,
+    },
+}
+
+/// A person's answer to a waiting call (M57.1), the one door an answer
+/// enters by (CV-27): no MCP tool, hook or bearer reaches it. The answer is
+/// taken only while its card waits in this vault, then the run's request
+/// resumes on the same Claude Code session with no new text, where the
+/// call's hook reads the answer. The resume passes the same pause gate any
+/// run of that actor does, and is recorded as attended (M56.7). A resume
+/// that cannot start puts the card back and says why.
+#[tauri::command(async)]
+fn answer_interaction(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, agent::AgentState>,
+    mcp_state: tauri::State<'_, mcp::McpState>,
+    vault: String,
+    id: String,
+    answer: agent::interaction::WireAnswer,
+) -> Result<AnswerResult, String> {
+    let book = state.interactions();
+    let answer = agent::interaction::PersonAnswer::from_ipc(answer);
+    let resume = match book.begin_answer(&agent::vault_key(Path::new(&vault)), &id, answer) {
+        Ok(resume) => resume,
+        Err(refused) => return Ok(AnswerResult::Refused { refused }),
+    };
+    let started: Result<RunHandle, String> = (|| {
+        let vault_path = resume.vault.as_path();
+        let scope = runtime::open_vault(vault_path);
+        let mut request = resume.snapshot.clone();
+        if let Some(scope) = scope.as_ref() {
+            runtime::sink::with_sink(|conn| {
+                runtime::settings::refuse_if_agent_paused(
+                    conn,
+                    &scope.vault_id,
+                    request.actor.as_deref(),
+                )
+            })
+            .unwrap_or(Ok(()))?;
+        }
+        request.message = String::new();
+        request.session_id = Some(resume.session_id.clone());
+        request.attended = Some(true);
+        let cause = runtime::cause::admit(true, None)?;
+        request.mcp_url = Some(mcp_state.ensure(&app)?.url);
+        spawn_requested_run(
+            &app,
+            state.inner(),
+            mcp_state.inner(),
+            vault_path,
+            request,
+            scope.as_ref(),
+            cause,
+            None,
+        )
+    })();
+    match started {
+        Ok(handle) => {
+            book.finish_answer(&resume.id, &handle.run_id);
+            Ok(AnswerResult::Resumed(handle))
+        }
+        Err(why) => {
+            book.abort_answer(&resume.id);
+            Err(why)
+        }
+    }
+}
+
+/// Cancel a waiting call (M57.1): the panel's Stop or New conversation with
+/// a card open. The call is refused as stopped when its thread goes on.
+/// False when it was no longer waiting, which is not an error.
+#[tauri::command(async)]
+fn cancel_interaction(state: tauri::State<'_, agent::AgentState>, id: String) -> bool {
+    state
+        .interactions()
+        .cancel(&id, agent::interaction::CancelReason::Stopped)
+}
+
+/// The calls waiting for the person in `vault` (M57.1), oldest first: what a
+/// reloaded panel shows again.
+#[tauri::command(async)]
+fn list_interactions(
+    state: tauri::State<'_, agent::AgentState>,
+    vault: String,
+) -> Vec<agent::interaction::InteractionCard> {
+    state
+        .interactions()
+        .pending(&agent::vault_key(Path::new(&vault)))
 }
 
 /// The ledger chain head for git checkpoint trailers (M21.7) — a join key
@@ -1633,6 +1931,11 @@ pub fn run() {
         .manage(agent::AgentState::default())
         .manage(mcp::McpState::default())
         .manage(ingest::ambient::AmbientState::default())
+        // M55.10: ⌘Q is Cerebro's own menu item, and it and the close guard
+        // ask the webview to save before the app exits.
+        .manage(shell::quit::QuitState::default())
+        .menu(shell::quit::app_menu)
+        .on_menu_event(shell::quit::on_menu_event)
         // M53.12: tauri.conf.json declares the window `create: false`, so it
         // is built here, with the link guard tauri's own path never attaches.
         .setup(|app| shell::build_main_window(app))
@@ -1640,6 +1943,8 @@ pub fn run() {
             pick_vault,
             open_demo_vault,
             get_last_vault,
+            panel_agent,
+            set_panel_agent,
             scan_vault,
             read_note,
             save_note,
@@ -1654,6 +1959,7 @@ pub fn run() {
             pipeline_overview,
             fleet_runs,
             fleet_run_detail,
+            fleet_run_transcript,
             run_knowledge_writes,
             fleet_actor_summary,
             fleet_actor_summaries,
@@ -1690,6 +1996,12 @@ pub fn run() {
             create_folder,
             rename_note,
             delete_note,
+            list_comments,
+            start_comment_thread,
+            reply_to_comment_thread,
+            set_comment_thread_resolved,
+            delete_comment,
+            delete_comment_thread,
             list_folders,
             pick_files,
             import_attachment,
@@ -1705,9 +2017,13 @@ pub fn run() {
             check_agent,
             agent_workspace,
             purge_agent_workspace,
+            read_cli_transcript,
             run_agent,
             stop_agent,
             stop_all_agents,
+            answer_interaction,
+            cancel_interaction,
+            list_interactions,
             diagnostics::log_frontend,
             // M9.4 — git tracking. Every command resolves the workspace
             // first, so a vault nested in a larger repo scopes correctly.
@@ -1749,7 +2065,16 @@ pub fn run() {
             roots_git_commands::root_git_pulse,
             roots_git_commands::root_git_file_url,
             roots_git_commands::root_git_fetch,
-            roots_git_commands::root_git_pull_ff
+            roots_git_commands::root_git_pull_ff,
+            // M55.9 — Open with: Finder, the default app, agent links and
+            // the clipboard. Each target is a vault note or an artifact base.
+            shell::open::reveal_in_finder,
+            shell::open::open_in_default_app,
+            shell::open::open_agent_link,
+            shell::open::write_clipboard,
+            // M55.10 — the webview's answer to a quit request.
+            shell::quit::finish_quit,
+            shell::quit::cancel_quit
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -1798,6 +2123,7 @@ mod tests {
             disallowed_tools: None,
             lane: None,
             cause: None,
+            effort: None,
             internal: false,
         }
     }
@@ -1905,6 +2231,27 @@ mod tests {
             landed.contains("status: done") && landed.contains("# Titled"),
             "{landed}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// M70.2: a comment writes no page byte, so the comment commands run no
+    /// knowledge guard, and a concept page takes comments like any page.
+    #[test]
+    fn the_comment_commands_take_a_concept_page() {
+        let dir = vault::testutil::temp_vault("ipc-concept-comments");
+        let concept = "knowledge/systems/status-model.md";
+        let bytes = "---\ntype: System\n---\n\n# Status model\n";
+        vault::testutil::write(&dir, concept, bytes);
+        let v = dir.to_string_lossy().to_string();
+        let file =
+            start_comment_thread(v.clone(), concept.into(), None, "Still true?".into()).unwrap();
+        let thread = file.threads[0].id().to_string();
+        assert_eq!(file.threads[0].comments[0].author, vault::comments::OWNER);
+        reply_to_comment_thread(v.clone(), concept.into(), thread.clone(), "Yes.".into()).unwrap();
+        set_comment_thread_resolved(v.clone(), concept.into(), thread.clone(), true).unwrap();
+        delete_comment_thread(v.clone(), concept.into(), thread).unwrap();
+        assert_eq!(list_comments(v, concept.into()).unwrap().threads.len(), 1);
+        assert_eq!(std::fs::read_to_string(dir.join(concept)).unwrap(), bytes);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

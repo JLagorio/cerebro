@@ -1,0 +1,104 @@
+{
+  "case": "api-error",
+  "cli_version": "2.1.250",
+  "streams": [
+    {
+      "file": "transcript-api-error.stream.json",
+      "events": [
+        {
+          "kind": "Init",
+          "session_id": "00000000-0000-4000-8000-000000000003"
+        },
+        {
+          "kind": "ModelChanged",
+          "model": "claude-haiku-4-5-20251001"
+        },
+        {
+          "kind": "Error",
+          "message": "API Error: Claude AI usage limit reached. Your limit resets at 3pm.",
+          "code": "rate_limit",
+          "notice": {
+            "kind": "rate_limited",
+            "title": "Claude is limiting requests",
+            "body": "Claude turned this request away after Claude Code's own retries. Wait a few minutes, then try again. Background work pauses for a while.",
+            "action": null,
+            "resets_at": null,
+            "window": null,
+            "cli_version": "2.1.250"
+          }
+        },
+        {
+          "kind": "TurnEnded",
+          "stop_reason": "stop_sequence"
+        }
+      ],
+      "classes": {
+        "translated": 4,
+        "ignored": {
+          "a progress word such as requesting; the panel shows its own": 1
+        },
+        "unclassified": {}
+      }
+    }
+  ],
+  "session": {
+    "file": "transcript-api-error.session.json",
+    "events": [
+      {
+        "kind": "UserPrompt",
+        "text": "What changed in the vault this week?"
+      },
+      {
+        "kind": "Error",
+        "message": "API Error: Claude AI usage limit reached. Your limit resets at 3pm.",
+        "code": "rate_limit",
+        "notice": {
+          "kind": "rate_limited",
+          "title": "Claude is limiting requests",
+          "body": "Claude turned this request away after Claude Code's own retries. Wait a few minutes, then try again. Background work pauses for a while.",
+          "action": null,
+          "resets_at": null,
+          "window": null,
+          "cli_version": "2.1.250"
+        }
+      },
+      {
+        "kind": "TurnEnded",
+        "stop_reason": "error"
+      }
+    ],
+    "classes": {
+      "translated": 3,
+      "ignored": {
+        "a prompt entering or leaving the CLI's queue; the prompt line follows": 2,
+        "context the CLI attached for the model, such as tool and skill listings, other than a deferral": 1,
+        "the last prompt again, for the CLI's own resume picker": 1
+      },
+      "unclassified": {}
+    }
+  },
+  "content": [
+    {
+      "model": null,
+      "events": [
+        {
+          "kind": "Error",
+          "message": "API Error: Claude AI usage limit reached. Your limit resets at 3pm.",
+          "code": "rate_limit",
+          "notice": {
+            "kind": "rate_limited",
+            "title": "Claude is limiting requests",
+            "body": "Claude turned this request away after Claude Code's own retries. Wait a few minutes, then try again. Background work pauses for a while.",
+            "action": null,
+            "resets_at": null,
+            "window": null,
+            "cli_version": "2.1.250"
+          }
+        },
+        {
+          "kind": "TurnEnded"
+        }
+      ]
+    }
+  ]
+}

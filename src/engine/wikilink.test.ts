@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { formatWikilink, freshStem, parseWikilinks, resolveTarget } from './wikilink';
+import TARGET_CASES from '../../src-tauri/fixtures/wikilink-targets.json';
+import {
+  formatWikilink,
+  freshStem,
+  parseLinkTarget,
+  parseWikilinks,
+  resolveLink,
+  resolveTarget,
+} from './wikilink';
 import { makeEntry } from './testHelpers';
 
 describe('parseWikilinks', () => {
@@ -108,6 +116,80 @@ describe('resolveTarget', () => {
       });
       expect(resolveTarget('items', [item])).toBeNull();
     });
+  });
+});
+
+/** A page from its vault path, filename and folder read off it. */
+const pageAt = (path: string, title: string) =>
+  makeEntry({
+    path,
+    filename: path.slice(path.lastIndexOf('/') + 1),
+    folder: path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '',
+    title,
+  });
+
+describe('parseLinkTarget', () => {
+  const cases: [string, string, string | null][] = [
+    ['notes', 'notes', null],
+    ['notes#Risks', 'notes', 'Risks'],
+    [' notes # Risks ', 'notes', 'Risks'],
+    ['notes#', 'notes', null],
+    ['notes#  ', 'notes', null],
+    ['notes#A#B', 'notes', 'A#B'],
+    ['#Risks', '', 'Risks'],
+    ['#', '', null],
+    ['C# notes', 'C', 'notes'],
+  ];
+  it.each(cases)('%j is the page %j and the section %j', (target, page, section) => {
+    expect(parseLinkTarget(target)).toEqual({ page, section });
+  });
+});
+
+/** Section links (M55.8): the whole target first, then the page before the first `#`. */
+describe('resolveLink', () => {
+  const notes = pageAt('docs/notes.md', 'Notes');
+  const sharp = pageAt('docs/c-sharp.md', 'C# notes');
+  const c = pageAt('docs/c.md', 'C');
+  const entries = [notes, sharp, c];
+
+  it('resolves the page and keeps the section', () => {
+    expect(resolveLink('notes#Risks', entries)).toEqual({ entry: notes, section: 'Risks' });
+    expect(resolveLink('Notes # Open questions ', entries)).toEqual({
+      entry: notes,
+      section: 'Open questions',
+    });
+  });
+
+  it('reads a link with no section as the page alone', () => {
+    expect(resolveLink('notes', entries)).toEqual({ entry: notes, section: null });
+  });
+
+  it('reads a whole target that names a page first, so C# notes stays a title link', () => {
+    expect(resolveLink('C# notes', entries)).toEqual({ entry: sharp, section: null });
+  });
+
+  it('resolves nothing with no page half, or a page half that names nothing', () => {
+    expect(resolveLink('#Risks', entries)).toBeNull();
+    expect(resolveLink('nothing#Risks', entries)).toBeNull();
+  });
+
+  it('gives resolveTarget the page, so every reader of a link reads a section link', () => {
+    expect(resolveTarget('notes#Risks', entries)).toBe(notes);
+    expect(resolveTarget('C# notes', entries)).toBe(sharp);
+  });
+
+  // The same cases link.rs replays, so the twins answer alike.
+  it('replays the shared target cases', () => {
+    expect(TARGET_CASES.format).toBe(1);
+    const corpus = TARGET_CASES.entries.map((e) => pageAt(e.path, e.title));
+    expect(TARGET_CASES.cases.length).toBeGreaterThan(0);
+    for (const { target, path, section } of TARGET_CASES.cases) {
+      const link = resolveLink(target, corpus);
+      expect(
+        link === null ? null : { path: link.entry.path, section: link.section },
+        target,
+      ).toEqual(path === null ? null : { path, section });
+    }
   });
 });
 

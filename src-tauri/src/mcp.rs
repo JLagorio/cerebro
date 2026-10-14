@@ -1237,7 +1237,19 @@ fn handle_rpc(app: &AppHandle, grant: &RunGrant, body: &str) -> Value {
                 .and_then(Value::as_object)
                 .cloned()
                 .unwrap_or_default();
-            call_tool(app, grant, name, &args)
+            // M57.1: the run's own hook asks first, ahead of every grant axis
+            // and every count: the gate is no tool the run calls.
+            use tauri::Manager;
+            let agents = app.try_state::<crate::agent::AgentState>();
+            match answer_gate(
+                name,
+                &args,
+                grant,
+                agents.as_ref().map(|a| a.interactions()),
+            ) {
+                Some(answer) => Ok(answer),
+                None => call_tool(app, grant, name, &args),
+            }
         }
         // `answer_protocol` answered every other method.
         other => return method_not_found(id, other),
@@ -1248,6 +1260,31 @@ fn handle_rpc(app: &AppHandle, grant: &RunGrant, body: &str) -> Value {
         // call_tool's own refusal, the one -32000 left.
         Err(message) => rpc_error(id, -32000, &message),
     }
+}
+
+/// The ask gate's answer (M57.1), when `name` is the gate: the PreToolUse
+/// hook JSON for the call it carries, as one text block, from the book
+/// (`agent::interaction`) under the bearer's own run. Answered before
+/// `call_tool`, so it is never counted, held to a grant axis, announced or
+/// recorded, and it is never `error_result`: a hook that cannot read its
+/// answer would fall back to argv, which already refuses an asked tool, but
+/// the gate says so itself. With no book it has no opinion. It can register
+/// a wait and read a person's answer; it can never record one.
+fn answer_gate(
+    name: &str,
+    args: &Map<String, Value>,
+    grant: &RunGrant,
+    book: Option<&crate::agent::interaction::Interactions>,
+) -> Option<Value> {
+    use crate::agent::interaction::{GateAnswer, GateCall, GATE_TOOL};
+    if name != GATE_TOOL {
+        return None;
+    }
+    let call = GateCall::from_args(args);
+    let answer = book.map_or(GateAnswer::NoOpinion, |book| {
+        book.gate(&grant.run_id, &call)
+    });
+    Some(text_result(answer.hook_json().to_string()))
 }
 
 /// MCP tool results are content blocks. Errors come back as `isError` content
@@ -1693,13 +1730,34 @@ fn arg_str(args: &Map<String, Value>, key: &str) -> Option<String> {
 }
 
 /// The `about` item that names the concept at `path` itself, if any: a bare
-/// wikilink (`[[stem]]`, `[[stem|label]]`) whose stem is the concept's own,
-/// or a path that IS the concept's — vault-relative, or bundle-relative
-/// with a leading `/` (OKF §6.1). A path to a record that merely shares the
-/// stem (`records/people/jane-doe.md`) names that record, and is the way to
-/// anchor to one.
+/// wikilink (`[[stem]]`, `[[stem|label]]`, `[[stem#section]]`) whose stem is
+/// the concept's own, or a path that IS the concept's — vault-relative, or
+/// bundle-relative with a leading `/` (OKF §6.1), with or without a
+/// `#section`. A path to a record that merely shares the stem
+/// (`records/people/jane-doe.md`) names that record, and is the way to anchor
+/// to one.
+///
+/// Each target is judged whole, then as the page before its first `#`, the
+/// way `vault::link` resolves it (M55.8): `[[gcs-5#Why]]` reaches gcs-5, so
+/// it anchors the concept to itself.
 fn self_anchor(path: &str, about: &Value) -> Option<String> {
     let own = path.rsplit('/').next()?.strip_suffix(".md")?.to_lowercase();
+    let names_self = |name: &str| {
+        let name = name.trim();
+        if name.contains('/') {
+            let named = match name.strip_prefix('/') {
+                Some(bundle) => format!("knowledge/{bundle}"),
+                None => name.to_string(),
+            };
+            let named = if named.ends_with(".md") {
+                named
+            } else {
+                format!("{named}.md")
+            };
+            return named.eq_ignore_ascii_case(path);
+        }
+        name.strip_suffix(".md").unwrap_or(name).to_lowercase() == own
+    };
     // Read the way the scanner reads the file this becomes
     // (`knowledge::link_targets`): every `[[…]]` in any string or nested
     // array — "see [[x]]" and "[[a]] [[x]]" included — else plain strings.
@@ -1707,20 +1765,8 @@ fn self_anchor(path: &str, about: &Value) -> Option<String> {
         .into_iter()
         .find_map(|target| {
             let target = target.trim();
-            if target.contains('/') {
-                let named = match target.strip_prefix('/') {
-                    Some(bundle) => format!("knowledge/{bundle}"),
-                    None => target.to_string(),
-                };
-                let named = if named.ends_with(".md") {
-                    named
-                } else {
-                    format!("{named}.md")
-                };
-                return named.eq_ignore_ascii_case(path).then(|| target.to_string());
-            }
-            let stem = target.strip_suffix(".md").unwrap_or(target).to_lowercase();
-            (stem == own).then(|| target.to_string())
+            let page = target.split_once('#').map(|(page, _)| page);
+            (names_self(target) || page.is_some_and(names_self)).then(|| target.to_string())
         })
 }
 
@@ -2052,6 +2098,180 @@ fn writes_preferences(actor: &str, name: &str, args: &Map<String, Value>) -> boo
         .is_some_and(|patch| patch.contains_key("preferences"))
 }
 
+/// D7 (M56.10) — the one key a run may write on its own Agent record, and
+/// how much of it. `recent` is the agent's working notes, which every later
+/// run of it reads in its prompt, so the cap bounds what one run can leave
+/// the next. The prompt's memory line names the same 30 lines
+/// (src/lib/prompts.ts), and each side's test pins it.
+const RECENT_KEY: &str = "recent";
+const RECENT_MAX_LINES: usize = 30;
+const RECENT_MAX_BYTES: usize = 4096;
+
+const RECENT_NOT_TEXT: &str = "`recent` takes text, or null to clear it. Nothing was written.";
+const RECENT_LINKS: &str = "Write note names in your notes plainly, not as [[links]]: a link \
+turns the property into a relation, and the next scan would drop the text. Nothing was written.";
+const OWN_RECORD_CHANGED: &str = "The record changed under this write and is no longer this \
+run's agent record, so nothing was written.";
+const ONLY_RECENT: &str = "Only `recent` may change on your own record, so nothing was written.";
+
+/// The run's own Agent record, found for a write to its notes (M56.10): the
+/// handle the run answers to and the record's path as the scan read it.
+#[derive(Debug, Clone, PartialEq)]
+struct OwnRecord {
+    handle: String,
+    path: String,
+}
+
+/// Is this call a run rewriting its notes on its own Agent record (D7)?
+///
+/// `Ok(None)` unless the call is update_frontmatter, from a `process:<handle>`
+/// actor with a handle, whose patch holds `recent`: everything else keeps the
+/// rules it always had, and pays for no scan. Then the scan's `type: Agent`
+/// records answering to that handle are compared with the target, `./`
+/// trimmed and ASCII case ignored. That is a lookup, not the judgement: the
+/// handler judges the bytes again under the write's lock
+/// (`own_memory_bytes_refusal`), so a loose spelling can never admit a
+/// different file.
+///
+/// One record at the target, patched in `recent` alone, is admitted; other
+/// keys beside it are refused in words that name them; two records answering
+/// to the handle with the target among them are refused, since neither can
+/// be told to be this run's. Any other target is `Ok(None)`.
+fn own_memory_record(
+    vault: &Path,
+    grant: &RunGrant,
+    name: &str,
+    args: &Map<String, Value>,
+) -> Result<Option<OwnRecord>, String> {
+    if name != "update_frontmatter" {
+        return Ok(None);
+    }
+    let Some(handle) = grant
+        .actor
+        .strip_prefix("process:")
+        .filter(|handle| !handle.is_empty())
+    else {
+        return Ok(None);
+    };
+    let Some(patch) = args.get("patch").and_then(Value::as_object) else {
+        return Ok(None);
+    };
+    if !patch.contains_key(RECENT_KEY) {
+        return Ok(None);
+    }
+    let Some(path) = arg_str(args, "path") else {
+        return Ok(None);
+    };
+    let entries = vault::scan::scan_vault(vault).map_err(|error| {
+        format!(
+            "Cerebro could not read the vault to find this run's agent record ({error}), so it \
+             kept no notes."
+        )
+    })?;
+    let records: Vec<&vault::entry::Entry> = entries
+        .iter()
+        .filter(|e| e.entry_type.as_deref() == Some("Agent") && e.parse_error.is_none())
+        .filter(|e| agent_handle(e) == handle)
+        .collect();
+    let loose = |p: &str| p.trim_start_matches("./").to_string();
+    let Some(record) = records
+        .iter()
+        .find(|e| loose(&e.path).eq_ignore_ascii_case(&loose(&path)))
+    else {
+        return Ok(None);
+    };
+    if records.len() > 1 {
+        let paths: Vec<&str> = records.iter().map(|e| e.path.as_str()).collect();
+        return Err(format!(
+            "More than one agent record answers to {} ({}), so Cerebro can't tell which one is \
+             this run's and keeps no notes. Ask the person to give each its own `slug:`.",
+            grant.actor,
+            paths.join(", ")
+        ));
+    }
+    let others: Vec<String> = patch
+        .keys()
+        .filter(|key| key.as_str() != RECENT_KEY)
+        .map(|key| format!("`{key}`"))
+        .collect();
+    if !others.is_empty() {
+        return Err(format!(
+            "On your own record a run may change `recent` and nothing else; {} {} the person's \
+             to change. Patch `recent` by itself. Nothing was written.",
+            others.join(", "),
+            if others.len() == 1 { "is" } else { "are" }
+        ));
+    }
+    Ok(Some(OwnRecord {
+        handle: handle.to_string(),
+        path: record.path.clone(),
+    }))
+}
+
+/// What a run may write as its notes (M56.10): text within the cap, or null
+/// to clear them. A `[[link]]` is refused because the scanner files a value
+/// holding one under relationships (CV-09), where every prompt reads the
+/// notes as empty; the test is the scanner's own, so no second rule exists.
+fn recent_value_refusal(value: &Value) -> Option<String> {
+    let text = match value {
+        Value::Null => return None,
+        Value::String(text) => text,
+        _ => return Some(RECENT_NOT_TEXT.to_string()),
+    };
+    let lines = text.lines().count();
+    let bytes = text.len();
+    if lines > RECENT_MAX_LINES || bytes > RECENT_MAX_BYTES {
+        return Some(format!(
+            "Your `recent` notes are {lines} lines and {bytes} bytes; a run may keep at most \
+             {RECENT_MAX_LINES} lines and {RECENT_MAX_BYTES} bytes there. Keep only what your \
+             next run needs and write them again. Nothing was written."
+        ));
+    }
+    if vault::entry::relationship_targets(value).is_some() {
+        return Some(RECENT_LINKS.to_string());
+    }
+    None
+}
+
+/// The byte check for a notes write (M56.10), judged under the write's lock
+/// on the bytes it replaces (M55.1). What the lock holds must still be the
+/// run's own record: a `type: Agent` answering to `handle`, read at the
+/// scanned `rel`. What the write would land must keep that type and handle,
+/// every other key and relation, and the body byte for byte. Only `recent`
+/// may differ.
+fn own_memory_bytes_refusal(
+    rel: &str,
+    handle: &str,
+    before: &str,
+    after: &str,
+) -> Option<&'static str> {
+    let read =
+        |content: &str| vault::entry::build_entry(rel, content, String::new(), String::new());
+    let is_own = |entry: &vault::entry::Entry| {
+        entry.entry_type.as_deref() == Some("Agent")
+            && entry.parse_error.is_none()
+            && agent_handle(entry) == handle
+    };
+    let without_recent = |entry: &vault::entry::Entry| {
+        let mut properties = entry.properties.clone();
+        properties.remove(RECENT_KEY);
+        let mut relationships = entry.relationships.clone();
+        relationships.remove(RECENT_KEY);
+        (properties, relationships)
+    };
+    let held = read(before);
+    if !is_own(&held) {
+        return Some(OWN_RECORD_CHANGED);
+    }
+    let landed = read(after);
+    let same_body =
+        vault::parse::split_frontmatter(before).1 == vault::parse::split_frontmatter(after).1;
+    if !is_own(&landed) || without_recent(&held) != without_recent(&landed) || !same_body {
+        return Some(ONLY_RECENT);
+    }
+    None
+}
+
 /// A scope as a refusal names it: its folders, or "nothing" when it was
 /// declared empty.
 fn scope_words(scope: &Option<Vec<String>>) -> String {
@@ -2067,15 +2287,49 @@ fn scope_words(scope: &Option<Vec<String>>) -> String {
         .unwrap_or_default()
 }
 
-/// The grant's refusal of this call, if it has one (M54.10): its write
-/// scope, its tools, then its read scope, in the order they have always been
-/// asked, each in the words it has always used and typed by its own code.
-fn grant_refusal(
-    vault: &Path,
+/// Why a call does not reach its tool body.
+#[derive(Debug, PartialEq)]
+enum Refusal {
+    /// An axis of the grant, or the corpus (M54.10): recorded against the
+    /// run under its code.
+    Coded(GrantRefusal),
+    /// A memory rule's refusal (M17.14, M56.10): the model reads it, and
+    /// nothing records it, since it is no axis of the grant.
+    Plain(String),
+}
+
+/// The write axis (M17.13): the scope's refusal of this call's target, or
+/// `None` when the call writes nothing or writes inside its scope.
+fn write_scope_refusal(
     grant: &RunGrant,
     name: &str,
     args: &Map<String, Value>,
 ) -> Option<GrantRefusal> {
+    let target = write_target(name, args)?;
+    if grant.may_write(&target) {
+        return None;
+    }
+    Some(GrantRefusal {
+        code: WRITE_OUTSIDE_SCOPE,
+        message: format!(
+            "This run is scoped to {} and cannot write to {target}.",
+            scope_words(&grant.scope)
+        ),
+        target,
+    })
+}
+
+/// What the grant says of this call (M54.10): its write scope, its tools,
+/// then its read scope, in the order they have always been asked, each in
+/// the words it has always used and typed by its own code. A call it admits
+/// comes back with the run's own record when the call rewrites that
+/// record's notes (M56.10), the one write that crosses the write scope.
+fn grant_admission(
+    vault: &Path,
+    grant: &RunGrant,
+    name: &str,
+    args: &Map<String, Value>,
+) -> Result<Option<OwnRecord>, Refusal> {
     // M17.13 — scope is a refusal rather than a request. An agent bound to
     // `projects/atlas` cannot write outside it even if its instructions, or a
     // note it just read, tell it to. `write_concept` and `cache_source` are
@@ -2084,28 +2338,30 @@ fn grant_refusal(
     // What bounds write_concept is the ledger (every write is a governed
     // transition, M24), the tool allowlist (`tools:` may omit it), and — to
     // REPLACE a concept — read access to it (M49.4, below).
-    if let Some(target) = write_target(name, args) {
-        if !grant.may_write(&target) {
-            return Some(GrantRefusal {
-                code: WRITE_OUTSIDE_SCOPE,
-                message: format!(
-                    "This run is scoped to {} and cannot write to {target}.",
-                    scope_words(&grant.scope)
-                ),
-                target,
-            });
-        }
-    }
+    let outside = write_scope_refusal(grant, name, args);
 
     // M31.1b — reads were the one surface the grant did not bound. A name
     // outside the grant is refused exactly like scope, before any tool body
-    // runs.
+    // runs. A call outside both keeps the write axis's refusal, which speaks
+    // first, and an ungranted call never scans for its run's record.
     if let Some(message) = ungranted_tool_refusal(grant, name) {
-        return Some(GrantRefusal {
+        return Err(Refusal::Coded(outside.unwrap_or(GrantRefusal {
             code: TOOL_OUTSIDE_GRANT,
             target: name.to_string(),
             message,
-        });
+        })));
+    }
+
+    // M56.10 (D7) — the one crossing. A run's working notes live on its own
+    // Agent record, which is rarely inside its write scope (release-scout
+    // writes records/risks, and its record sits in records/agents). A granted
+    // update_frontmatter that rewrites `recent` there, and nothing else, is
+    // admitted past the scope; any other target keeps the scope's refusal.
+    let own = own_memory_record(vault, grant, name, args).map_err(Refusal::Plain)?;
+    if let Some(refusal) = outside {
+        if own.is_none() {
+            return Err(Refusal::Coded(refusal));
+        }
     }
 
     // M34.4 — and read PATHS, the axis the tool allowlist cannot express.
@@ -2121,17 +2377,20 @@ fn grant_refusal(
     // the bundle at all is a separate question from which notes it may name.
     if let Some(target) = read_target(name, args).or_else(|| hashed_read_target(name, args)) {
         if !grant.may_read(&target) {
-            return Some(GrantRefusal {
+            return Err(Refusal::Coded(GrantRefusal {
                 code: READ_OUTSIDE_SCOPE,
                 message: format!(
                     "This run may read only {} and cannot read {target}.",
                     scope_words(&grant.read_scope)
                 ),
                 target,
-            });
+            }));
         }
     }
-    unreadable_replacement(vault, grant, name, args)
+    match unreadable_replacement(vault, grant, name, args) {
+        Some(refusal) => Err(Refusal::Coded(refusal)),
+        None => Ok(own),
+    }
 }
 
 /// The note a note door judges for one call (M54.10).
@@ -2248,31 +2507,49 @@ fn record_refusal(run_id: &str, tool: &str, code: &'static str, target: &str, me
 
 /// What a call is refused before any tool body runs, in order (M54.10): the
 /// grant's write scope, tools and read scope, then the preferences tier,
-/// then the corpus.
+/// then the corpus. A call it admits comes back with the run's own record
+/// when it rewrites that record's notes (M56.10), which the handler holds the
+/// write to.
 ///
 /// M31.1b left the grant's refusals as plain errors that recorded nothing,
 /// and kept them symmetric: if one ever recorded, all would. They do now.
 /// Each of the four axes records under its own code against the run, and
-/// the model reads the same words. The preferences refusal stays plain: it
-/// is a memory rule, not an axis of the grant.
+/// the model reads the same words. The preferences refusal and the notes
+/// refusals stay plain: they are memory rules, not axes of the grant, and an
+/// admitted notes write records nothing.
+fn admit_before_dispatch(
+    vault: &Path,
+    grant: &RunGrant,
+    name: &str,
+    args: &Map<String, Value>,
+) -> Result<Option<OwnRecord>, Value> {
+    let own = match grant_admission(vault, grant, name, args) {
+        Ok(own) => own,
+        Err(Refusal::Coded(refusal)) => {
+            record_grant_refusal(grant, name, &refusal);
+            return Err(error_result(refusal.message));
+        }
+        Err(Refusal::Plain(message)) => return Err(error_result(message)),
+    };
+    if writes_preferences(&grant.actor, name, args) {
+        return Err(error_result(PREFERENCES_REFUSAL.to_string()));
+    }
+    if let Some(refusal) = corpus_refusal(vault, name, args) {
+        record_grant_refusal(grant, name, &refusal);
+        return Err(error_result(refusal.message));
+    }
+    Ok(own)
+}
+
+/// `admit_before_dispatch`'s refusal alone, as the tests read it.
+#[cfg(test)]
 fn refuse_before_dispatch(
     vault: &Path,
     grant: &RunGrant,
     name: &str,
     args: &Map<String, Value>,
 ) -> Option<Value> {
-    if let Some(refusal) = grant_refusal(vault, grant, name, args) {
-        record_grant_refusal(grant, name, &refusal);
-        return Some(error_result(refusal.message));
-    }
-    if writes_preferences(&grant.actor, name, args) {
-        return Some(error_result(PREFERENCES_REFUSAL.to_string()));
-    }
-    if let Some(refusal) = corpus_refusal(vault, name, args) {
-        record_grant_refusal(grant, name, &refusal);
-        return Some(error_result(refusal.message));
-    }
-    None
+    admit_before_dispatch(vault, grant, name, args).err()
 }
 
 /// The vault a call works in: its bearer's, fixed when the bearer was minted
@@ -2302,10 +2579,12 @@ fn call_tool(
     // rather than a request: write scope (M17.13), tools (M31.1b), read scope
     // (M34.4) and the corpus (M53.4), each recorded against the run under its
     // own code (M54.10). A refused call is still counted above, and it
-    // returns before the open pages are told anything (M53.6).
-    if let Some(refused) = refuse_before_dispatch(&vault, grant, name, args) {
-        return Ok(refused);
-    }
+    // returns before the open pages are told anything (M53.6). `own` is the
+    // run's own Agent record when the call rewrites its notes there (M56.10).
+    let own = match admit_before_dispatch(&vault, grant, name, args) {
+        Ok(own) => own,
+        Err(refused) => return Ok(refused),
+    };
 
     let actor = grant.actor.as_str();
     let outcome = match name {
@@ -2317,7 +2596,10 @@ fn call_tool(
         "hand_to" => tool_hand_to(app, &vault, args, grant),
         "create_note" => tool_create_note(&vault, args),
         // The run's id, so a stale `expect_hash` is recorded against it (M55.3).
-        "update_frontmatter" => tool_update_frontmatter_in(&vault, args, Some(&grant.run_id)),
+        // And the run's own record, when the patch is its notes (M56.10).
+        "update_frontmatter" => {
+            tool_update_frontmatter_in(&vault, args, Some(&grant.run_id), own.as_ref())
+        }
         "append_to_note" => tool_append_in(&vault, args, Some(&grant.run_id)),
         "edit_note" => tool_edit_note_in(&vault, args, Some(&grant.run_id)),
         "write_concept" => tool_write_concept_in(&vault, args, actor, Some(&grant.run_id)),
@@ -3219,6 +3501,18 @@ fn resolve_agent<'a>(
 /// One frontmatter list, as the folder/tool grammar both axes share: a
 /// string or an array of strings; absent is None (unrestricted), declared
 /// and empty is Some([]) — the TS parse's exact reading (engine/agents.ts).
+/// One string a record's frontmatter names (M56.5), trimmed. Blank, absent
+/// or not a string is unset.
+fn frontmatter_str(entry: &vault::entry::Entry, key: &str) -> Option<String> {
+    entry
+        .properties
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+}
+
 fn frontmatter_list(entry: &vault::entry::Entry, key: &str) -> Option<Vec<String>> {
     let raw = entry.properties.get(key)?;
     let items: Vec<String> = match raw {
@@ -3281,7 +3575,37 @@ fn tool_hand_to(
     let body = vault::write::read_note(vault, &record.path)
         .map(|text| strip_frontmatter(&text))
         .unwrap_or_default();
-    let request = crate::agent::AgentRequest {
+    let request = match handoff_request(record, &body, &callee_actor, message) {
+        Ok(request) => request,
+        // Nothing is started: no bearer, no row, no child.
+        Err(refusal) => return Ok(error_result(refusal)),
+    };
+    let run_id = crate::start_handoff_run(app, vault, request, grant)?;
+    Ok(text_result(format!(
+        "Started {} (run {run_id}) with what you handed it. It works under its own scope and \
+         writes to the vault; it cannot reply here. Its outcome lands in the fleet, billed to \
+         this chain's root.",
+        record.title
+    )))
+}
+
+/// The request a handed-to run starts with, read off the callee's record.
+///
+/// The callee runs on its own record's `model:` and `effort:` (M56.5), never
+/// the caller's, and a value Claude Code would not take refuses the hand-off
+/// with the record named, before anything is started.
+fn handoff_request(
+    record: &vault::entry::Entry,
+    body: &str,
+    callee_actor: &str,
+    message: String,
+) -> Result<crate::agent::AgentRequest, String> {
+    let model = frontmatter_str(record, "model");
+    let effort = frontmatter_str(record, "effort");
+    let refused = |refusal: String| format!("{}'s record: {refusal}", record.title);
+    crate::agent::run_options::validate_model(model.as_deref()).map_err(refused)?;
+    crate::agent::run_options::validate_effort(effort.as_deref()).map_err(refused)?;
+    Ok(crate::agent::AgentRequest {
         // The handed text alone: `start_handoff_run` opens it with the WHY
         // block, which names the caller as data (M56.7).
         message,
@@ -3293,7 +3617,7 @@ fn tool_hand_to(
             record.title, record.path, callee_actor, body
         )),
         session_id: None,
-        model: None,
+        model,
         // Fail closed, both: shell needs the Settings ceiling and connectors
         // need the per-machine approvals, and both live in the renderer. A
         // missing field must never widen access — a handed-to run that needs
@@ -3304,7 +3628,7 @@ fn tool_hand_to(
         attended: Some(false),
         mcp_url: None,
         mcp_token: None,
-        actor: Some(callee_actor.clone()),
+        actor: Some(callee_actor.to_string()),
         approved_stdio: Some(vec![]),
         scope: frontmatter_list(record, "scope"),
         read_scope: frontmatter_list(record, "read-scope"),
@@ -3318,15 +3642,9 @@ fn tool_hand_to(
         lane: None,
         // The runtime records `handoff` with its caller, never the request.
         cause: None,
+        effort,
         internal: false,
-    };
-    let run_id = crate::start_handoff_run(app, vault, request, grant)?;
-    Ok(text_result(format!(
-        "Started {} (run {run_id}) with what you handed it. It works under its own scope and \
-         writes to the vault; it cannot reply here. Its outcome lands in the fleet, billed to \
-         this chain's root.",
-        record.title
-    )))
+    })
 }
 
 /// The body without its frontmatter block — the record's standing
@@ -3355,7 +3673,9 @@ const TYPE_DOC_REFUSAL: &str = "type: Type docs are the vault's schema and are c
 /// see — folder-independent, since the scanner reads the frontmatter. A run
 /// that could author one could therefore mint itself a wider delegate inside
 /// its own write scope and call it in the same turn, unattended (PR #17
-/// security review). Agents are written by people, like schema.
+/// security review). Agents are written by people, like schema, with one
+/// exception: a run may rewrite `recent`, its working notes and nothing else,
+/// on its own record (D7, M56.10; `own_memory_record`).
 const AGENT_DOC_REFUSAL: &str = "type: Agent records are grants — their scope:, read-scope: and \
      allowed-tools: are what a run of them is handed, and hand_to starts a run of any of them. \
      They are written by people, not by agent runs. Tell the user what agent you need instead.";
@@ -3383,7 +3703,8 @@ fn governed_write_refusal(frontmatter: &Map<String, Value>) -> Option<&'static s
 ///
 /// The one byte check (M55.1). An agent's patch, append and edit run it
 /// twice under the write's path lock (`vault::write::patch_note_checked`,
-/// `append_note_checked`, `edit_note`): on the bytes the lock holds — editing a Type doc
+/// `append_note_checked`, `edit_note`; a run's patch of its own notes runs
+/// `own_memory_bytes_refusal` instead, M56.10): on the bytes the lock holds — editing a Type doc
 /// or an Agent record — and on the bytes the write would land, because
 /// neither mint below ever says `type: Agent` in its own argument:
 /// - The patch side: nulling out the last surviving key empties the mapping,
@@ -3452,18 +3773,21 @@ fn tool_create_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, St
     Ok(text_result(format!("Created {path}")))
 }
 
-/// The run-less form tests call; the server always books a run.
+/// The run-less form tests call; the server always books a run. It opens no
+/// notes lane, so every Agent record is governed here.
 #[cfg(test)]
 fn tool_update_frontmatter(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
-    tool_update_frontmatter_in(vault, args, None)
+    tool_update_frontmatter_in(vault, args, None, None)
 }
 
 /// `update_frontmatter`, with a stale `expect_hash` recorded against the
-/// calling run when there is one (M55.3).
+/// calling run when there is one (M55.3). `own` is the run's own Agent record
+/// when the admission found the call rewriting its notes there (M56.10).
 fn tool_update_frontmatter_in(
     vault: &Path,
     args: &Map<String, Value>,
     run: Option<&str>,
+    own: Option<&OwnRecord>,
 ) -> Result<Value, String> {
     let path = arg_str(args, "path").ok_or("update_frontmatter needs a path")?;
     let patch = args
@@ -3472,6 +3796,9 @@ fn tool_update_frontmatter_in(
         .cloned()
         .ok_or("update_frontmatter needs a patch object")?;
     let expect = parse_expect_hash(args)?;
+    if let Some(own) = own {
+        return write_own_notes(vault, &path, &patch, expect.as_deref(), run, own);
+    }
     // The self-certification hole (M17.1): this tool could patch `verified`
     // onto any concept, which is exactly what write_concept refuses to do.
     crate::knowledge::guard_agent_write(&path)?;
@@ -3491,6 +3818,34 @@ fn tool_update_frontmatter_in(
         expect.as_deref(),
         governed_bytes_check,
     )
+    .map_err(|e| note_write_refusal(run, "update_frontmatter", e))?;
+    Ok(text_result(format!("Updated frontmatter on {path}")))
+}
+
+/// The notes lane of `update_frontmatter` (D7, M56.10): a run rewriting
+/// `recent` on its own Agent record. The value is judged first, then the
+/// bundle guard, then the bytes under the write's lock, held to the run's own
+/// record with only `recent` changed, in place of the governed check that
+/// refuses every other write to an Agent record. The reply is the ordinary
+/// one, so nothing downstream reads a notes write as anything new.
+fn write_own_notes(
+    vault: &Path,
+    path: &str,
+    patch: &Map<String, Value>,
+    expect: Option<&str>,
+    run: Option<&str>,
+    own: &OwnRecord,
+) -> Result<Value, String> {
+    if let Some(refusal) = recent_value_refusal(patch.get(RECENT_KEY).unwrap_or(&Value::Null)) {
+        return Err(refusal);
+    }
+    crate::knowledge::guard_agent_write(path)?;
+    vault::write::patch_note_checked(vault, path, patch, expect, |before, after| {
+        match own_memory_bytes_refusal(&own.path, &own.handle, before, after) {
+            Some(refusal) => Err(refusal.into()),
+            None => Ok(()),
+        }
+    })
     .map_err(|e| note_write_refusal(run, "update_frontmatter", e))?;
     Ok(text_result(format!("Updated frontmatter on {path}")))
 }
@@ -4609,6 +4964,20 @@ mod tests {
                 case["read_target"].as_str(),
                 "{case}"
             );
+            // How a transcript draws the call, and what a run of it folds
+            // under (M56.8): every case states both.
+            assert_eq!(
+                crate::policy::tools::renderer(tool).as_str(),
+                case["renderer"].as_str().expect("renderer"),
+                "{case}"
+            );
+            let fold = crate::policy::tools::fold(tool)
+                .map(|fold| json!({ "one": fold.one, "many": fold.many }));
+            assert_eq!(
+                fold.as_ref().unwrap_or(&Value::Null),
+                &case["fold"],
+                "{case}"
+            );
         }
     }
 
@@ -5588,17 +5957,430 @@ mod tests {
         ));
     }
 
+    // --- D7 (M56.10): a run keeps its notes on its own record -----------
+
+    const SCOUT_RECORD: &str = "---\ntype: Agent\nslug: release-scout\ndescription: Watches \
+         risks.\ntools: safe\nscope:\n  - records/risks\npreferences: be terse\nrecent: old \
+         notes\n---\n\n# Release scout\n\nKeep a brief on what threatens the release.\n";
+    const LIBRARIAN_RECORD: &str =
+        "---\ntype: Agent\nslug: librarian\n---\n\n# Librarian\n\nFile what arrives.\n";
+    const SCOUT_PATH: &str = "records/agents/release-scout.md";
+    const LIBRARIAN_PATH: &str = "records/agents/librarian.md";
+
+    /// release-scout's vault: its record, another agent's, a risk and a note.
+    fn memory_vault(label: &str) -> PathBuf {
+        let vault = crate::vault::testutil::temp_vault(label);
+        crate::vault::testutil::write(&vault, SCOUT_PATH, SCOUT_RECORD);
+        crate::vault::testutil::write(&vault, LIBRARIAN_PATH, LIBRARIAN_RECORD);
+        crate::vault::testutil::write(&vault, "records/risks/r-1.md", "---\ntype: Risk\n---\n");
+        crate::vault::testutil::write(&vault, "notes/n.md", "---\ntype: Note\n---\n\n# N\n");
+        vault
+    }
+
+    /// A run of `actor` in `vault`, writing inside `scope` (`None` is
+    /// unrestricted), on its own run id.
+    fn run_of(vault: &Path, actor: &str, scope: Option<&[&str]>) -> RunGrant {
+        RunGrant {
+            run_id: crate::ledger::new_run_id(),
+            vault: Some(vault.to_path_buf()),
+            scope: scope.map(|s| s.iter().map(|f| f.to_string()).collect()),
+            ..RunGrant::unrestricted(actor)
+        }
+    }
+
+    /// One update_frontmatter call the way call_tool makes it, short of the
+    /// app: the admission, then the handler with the lane it opened.
+    fn patch_as(
+        vault: &Path,
+        grant: &RunGrant,
+        path: &str,
+        patch: Value,
+    ) -> Result<String, String> {
+        let args = args_of(json!({ "path": path, "patch": patch }));
+        let text = |value: &Value| value["content"][0]["text"].as_str().unwrap().to_string();
+        let own = admit_before_dispatch(vault, grant, "update_frontmatter", &args)
+            .map_err(|refused| text(&refused))?;
+        tool_update_frontmatter_in(vault, &args, Some(&grant.run_id), own.as_ref())
+            .map(|value| text(&value))
+    }
+
+    /// The record at `rel` as the scanner reads it.
+    fn scanned(vault: &Path, rel: &str) -> vault::entry::Entry {
+        let content = std::fs::read_to_string(vault.join(rel)).unwrap();
+        vault::entry::build_entry(rel, &content, String::new(), String::new())
+    }
+
+    fn body_of(vault: &Path, rel: &str) -> String {
+        let content = std::fs::read_to_string(vault.join(rel)).unwrap();
+        vault::parse::split_frontmatter(&content).1.to_string()
+    }
+
     #[test]
-    fn an_agent_may_still_write_its_own_working_notes() {
-        // `recent` is the agent's tier and rewriting it every run is the whole
-        // mechanism — refusing it would leave an agent with no memory at all.
-        let patch: Map<String, Value> =
-            serde_json::from_value(json!({ "patch": { "recent": "saw three risks" } })).unwrap();
-        assert!(!writes_preferences(
-            "process:scout",
-            "update_frontmatter",
-            &patch
-        ));
+    fn an_agent_run_keeps_its_own_notes_on_its_own_record() {
+        // D7, AUTOMATION-14. release-scout writes records/risks, and its record
+        // sits in records/agents: until M56.10 every notes patch its prompt
+        // asked for was refused, by the scope or by the governed check.
+        let vault = memory_vault("mcp-own-notes");
+        let grant = run_of(&vault, "process:release-scout", Some(&["records/risks"]));
+        let before = scanned(&vault, SCOUT_PATH);
+        let body = body_of(&vault, SCOUT_PATH);
+
+        let notes = "R-1 is slipping.\nNo owner on the deploy risk yet.";
+        assert_eq!(
+            patch_as(&vault, &grant, SCOUT_PATH, json!({ "recent": notes })),
+            Ok(format!("Updated frontmatter on {SCOUT_PATH}"))
+        );
+
+        let after = scanned(&vault, SCOUT_PATH);
+        assert_eq!(after.properties["recent"], json!(notes));
+        assert_eq!(after.entry_type.as_deref(), Some("Agent"));
+        for key in ["slug", "scope", "preferences", "description", "tools"] {
+            assert_eq!(after.properties[key], before.properties[key], "{key}");
+        }
+        assert_eq!(after.relationships, before.relationships);
+        assert_eq!(body_of(&vault, SCOUT_PATH), body, "the body bytes stay");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn notes_cross_the_write_scope_and_nothing_else_does() {
+        let vault = memory_vault("mcp-notes-cross");
+        let own = Some(OwnRecord {
+            handle: "release-scout".into(),
+            path: SCOUT_PATH.into(),
+        });
+        let scopes: [&[&str]; 2] = [&["records/risks"], &[]];
+        for scope in scopes {
+            let grant = run_of(&vault, "process:release-scout", Some(scope));
+            let admit = |path: &str, patch: Value| {
+                let args = args_of(json!({ "path": path, "patch": patch }));
+                admit_before_dispatch(&vault, &grant, "update_frontmatter", &args)
+            };
+            // The one crossing, in any spelling the scan's path answers to.
+            assert_eq!(admit(SCOUT_PATH, json!({ "recent": "n" })), Ok(own.clone()));
+            assert_eq!(
+                admit(
+                    "./Records/Agents/Release-Scout.md",
+                    json!({ "recent": "n" })
+                ),
+                Ok(own.clone()),
+                "the lane names the path the scan read"
+            );
+            // Notes anywhere else, and any other key here, keep the scope.
+            for (path, patch) in [
+                ("notes/n.md", json!({ "recent": "n" })),
+                (SCOUT_PATH, json!({ "status": "done" })),
+            ] {
+                let text = refused_text(admit(path, patch).err());
+                assert!(text.starts_with("This run is scoped to "), "{text}");
+                assert!(
+                    text.ends_with(&format!("cannot write to {path}.")),
+                    "{text}"
+                );
+            }
+        }
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_ungranted_notes_patch_outside_scope_stays_a_scope_refusal() {
+        // M54.10's order: the write axis speaks first, and an ungranted call
+        // never scans. The vault is missing, so a scan would have answered
+        // with the scan text instead.
+        let _sink = ArmedSink::new("mcp-notes-ungranted-sink");
+        let missing = crate::vault::testutil::temp_vault("mcp-notes-ungranted");
+        let _ = std::fs::remove_dir_all(&missing);
+        let args = args_of(json!({ "path": SCOUT_PATH, "patch": { "recent": "n" } }));
+        let message =
+            format!("This run is scoped to records/risks and cannot write to {SCOUT_PATH}.");
+
+        let ungranted = RunGrant {
+            tools: Some(vec!["get_note".into()]),
+            ..run_of(&missing, "process:release-scout", Some(&["records/risks"]))
+        };
+        let answer = refuse_before_dispatch(&missing, &ungranted, "update_frontmatter", &args);
+        assert_eq!(refused_text(answer), message);
+        assert_eq!(
+            rows_for_run(&ungranted.run_id),
+            vec![(
+                WRITE_OUTSIDE_SCOPE.to_string(),
+                "update_frontmatter".to_string(),
+                message
+            )]
+        );
+
+        // Granted, the same call scans, and says so when it cannot.
+        let granted = run_of(&missing, "process:release-scout", Some(&["records/risks"]));
+        let answer = refuse_before_dispatch(&missing, &granted, "update_frontmatter", &args);
+        assert!(refused_text(answer)
+            .starts_with("Cerebro could not read the vault to find this run's agent record ("));
+        assert_eq!(
+            rows_for_run(&granted.run_id),
+            vec![],
+            "a notes refusal records nothing"
+        );
+    }
+
+    #[test]
+    fn an_admitted_notes_write_records_no_refusal() {
+        let _sink = ArmedSink::new("mcp-notes-admitted-sink");
+        let vault = memory_vault("mcp-notes-admitted");
+        let grant = run_of(&vault, "process:release-scout", Some(&["records/risks"]));
+        assert!(patch_as(&vault, &grant, SCOUT_PATH, json!({ "recent": "n" })).is_ok());
+        assert_eq!(rows_for_run(&grant.run_id), vec![]);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn on_its_own_record_a_run_changes_recent_alone() {
+        let vault = memory_vault("mcp-notes-alone");
+        let grant = run_of(&vault, "process:release-scout", None);
+        let bytes = std::fs::read(vault.join(SCOUT_PATH)).unwrap();
+
+        assert_eq!(
+            patch_as(
+                &vault,
+                &grant,
+                SCOUT_PATH,
+                json!({ "recent": "n", "scope": null })
+            ),
+            Err(
+                "On your own record a run may change `recent` and nothing else; `scope` is the \
+                 person's to change. Patch `recent` by itself. Nothing was written."
+                    .to_string()
+            )
+        );
+        let both = patch_as(
+            &vault,
+            &grant,
+            SCOUT_PATH,
+            json!({ "recent": "n", "scope": null, "tools": "all" }),
+        )
+        .unwrap_err();
+        assert!(both.contains("`scope`, `tools` are the person's"), "{both}");
+        assert_eq!(
+            patch_as(&vault, &grant, SCOUT_PATH, json!({ "scope": null })),
+            Err(AGENT_DOC_REFUSAL.to_string())
+        );
+        // The preferences tier is the person's even beside `recent`.
+        assert!(patch_as(
+            &vault,
+            &grant,
+            SCOUT_PATH,
+            json!({ "recent": "n", "preferences": "be loud" })
+        )
+        .is_err());
+        assert_eq!(std::fs::read(vault.join(SCOUT_PATH)).unwrap(), bytes);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_run_cannot_keep_notes_on_another_agents_record() {
+        let vault = memory_vault("mcp-notes-other");
+        let grant = run_of(&vault, "process:release-scout", None);
+        let bytes = std::fs::read(vault.join(LIBRARIAN_PATH)).unwrap();
+        assert_eq!(
+            patch_as(&vault, &grant, LIBRARIAN_PATH, json!({ "recent": "n" })),
+            Err(AGENT_DOC_REFUSAL.to_string())
+        );
+        assert_eq!(std::fs::read(vault.join(LIBRARIAN_PATH)).unwrap(), bytes);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn notes_are_text_capped_and_plain() {
+        let vault = memory_vault("mcp-notes-capped");
+        let grant = run_of(&vault, "process:release-scout", Some(&["records/risks"]));
+        let write = |value: Value| patch_as(&vault, &grant, SCOUT_PATH, json!({ "recent": value }));
+        let limits = "a run may keep at most 30 lines and 4096 bytes there";
+        let bytes = std::fs::read(vault.join(SCOUT_PATH)).unwrap();
+
+        let too_many = write(json!("risk\n".repeat(31))).unwrap_err();
+        assert!(too_many.starts_with("Your `recent` notes are 31 lines and 155 bytes;"));
+        assert!(too_many.contains(limits), "{too_many}");
+        let too_big = write(json!("x".repeat(4097))).unwrap_err();
+        assert!(too_big.starts_with("Your `recent` notes are 1 lines and 4097 bytes;"));
+        assert!(too_big.contains(limits), "{too_big}");
+        assert_eq!(
+            write(json!("Watch [[R-1]].")),
+            Err(RECENT_LINKS.to_string())
+        );
+        for not_text in [json!(3), json!(["a", "b"]), json!({ "a": 1 }), json!(true)] {
+            assert_eq!(write(not_text), Err(RECENT_NOT_TEXT.to_string()));
+        }
+        assert_eq!(std::fs::read(vault.join(SCOUT_PATH)).unwrap(), bytes);
+
+        let thirty = "risk\n".repeat(30);
+        assert!(write(json!(thirty)).is_ok());
+        assert_eq!(
+            scanned(&vault, SCOUT_PATH).properties["recent"],
+            json!(thirty)
+        );
+        assert!(write(Value::Null).is_ok());
+        let cleared = scanned(&vault, SCOUT_PATH);
+        assert!(
+            !cleared.properties.contains_key("recent"),
+            "null clears the key"
+        );
+        assert_eq!(cleared.properties["preferences"], json!("be terse"));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn only_a_process_actor_has_an_own_record() {
+        // The panel, Cerebro's internal runs and a bare `process:` answer to
+        // no record, so the governed refusal stands for each.
+        let vault = memory_vault("mcp-notes-actor");
+        crate::vault::testutil::write(
+            &vault,
+            "records/agents/blank.md",
+            "---\ntype: Agent\nslug: \"\"\n---\n",
+        );
+        let args = args_of(json!({ "path": SCOUT_PATH, "patch": { "recent": "n" } }));
+        for actor in [DEFAULT_ACTOR, "agent:m26-ingest", "process:"] {
+            let grant = run_of(&vault, actor, None);
+            assert_eq!(
+                own_memory_record(&vault, &grant, "update_frontmatter", &args),
+                Ok(None),
+                "{actor}"
+            );
+            assert_eq!(
+                patch_as(&vault, &grant, SCOUT_PATH, json!({ "recent": "n" })),
+                Err(AGENT_DOC_REFUSAL.to_string()),
+                "{actor}"
+            );
+        }
+        // And only update_frontmatter opens the lane.
+        let scout = run_of(&vault, "process:release-scout", None);
+        assert_eq!(
+            own_memory_record(&vault, &scout, "append_to_note", &args),
+            Ok(None)
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    /// An Agent record with these extra frontmatter lines, as scanned.
+    fn agent_record(extra: &str) -> vault::entry::Entry {
+        let content = format!("---\ntype: Agent\ntitle: Helper\n{extra}---\nDo the thing.\n");
+        vault::entry::build_entry(
+            "records/agents/helper.md",
+            &content,
+            String::new(),
+            String::new(),
+        )
+    }
+
+    #[test]
+    fn hand_to_passes_the_callee_records_model_and_effort() {
+        let record = agent_record("model: \" sonnet \"\neffort: high\n");
+        let request =
+            handoff_request(&record, "Do the thing.", "process:helper", "go".into()).unwrap();
+        assert_eq!(request.model.as_deref(), Some("sonnet"));
+        assert_eq!(request.effort.as_deref(), Some("high"));
+        assert_eq!(request.actor.as_deref(), Some("process:helper"));
+        // A record that names neither runs at Claude Code's default.
+        let plain = handoff_request(&agent_record(""), "", "process:helper", "go".into()).unwrap();
+        assert_eq!((plain.model, plain.effort), (None, None));
+        let blank = handoff_request(
+            &agent_record("model: \"  \"\neffort: 3\n"),
+            "",
+            "process:helper",
+            "go".into(),
+        )
+        .unwrap();
+        assert_eq!((blank.model, blank.effort), (None, None));
+    }
+
+    #[test]
+    fn hand_to_refuses_a_callee_with_an_effort_claude_code_ignores() {
+        // Refused in handoff_request, which tool_hand_to asks before
+        // start_handoff_run: no bearer, no row, no child.
+        let refusal = handoff_request(
+            &agent_record("effort: turbo\n"),
+            "",
+            "process:helper",
+            "go".into(),
+        )
+        .unwrap_err();
+        assert!(
+            refusal.starts_with("Helper's record: effort \"turbo\" is not one Claude Code"),
+            "{refusal}"
+        );
+        assert!(refusal.ends_with("Nothing was started."), "{refusal}");
+        let refusal = handoff_request(
+            &agent_record("model: \"-p\"\n"),
+            "",
+            "process:helper",
+            "go".into(),
+        )
+        .unwrap_err();
+        assert!(
+            refusal.starts_with("Helper's record: model \"-p\""),
+            "{refusal}"
+        );
+    }
+
+    #[test]
+    fn two_records_answering_to_one_handle_keep_no_notes() {
+        let vault = memory_vault("mcp-notes-two");
+        let scout = "---\ntype: Agent\n---\n\n# Scout\n\nWatch.\n";
+        crate::vault::testutil::write(&vault, "records/agents/scout.md", scout);
+        crate::vault::testutil::write(&vault, "team/scout-copy.md", scout);
+        let grant = run_of(&vault, "process:scout", None);
+        assert_eq!(
+            patch_as(
+                &vault,
+                &grant,
+                "records/agents/scout.md",
+                json!({ "recent": "n" })
+            ),
+            Err(
+                "More than one agent record answers to process:scout (records/agents/scout.md, \
+                 team/scout-copy.md), so Cerebro can't tell which one is this run's and keeps \
+                 no notes. Ask the person to give each its own `slug:`."
+                    .to_string()
+            )
+        );
+        assert_eq!(
+            std::fs::read_to_string(vault.join("records/agents/scout.md")).unwrap(),
+            scout
+        );
+        // A write that is not to either record is no business of the lane.
+        assert_eq!(
+            patch_as(&vault, &grant, "notes/n.md", json!({ "recent": "n" })),
+            Ok("Updated frontmatter on notes/n.md".to_string())
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn the_notes_check_judges_the_bytes_it_replaces() {
+        let check = |before: &str, after: &str| {
+            own_memory_bytes_refusal(SCOUT_PATH, "release-scout", before, after)
+        };
+        let clean = SCOUT_RECORD.replace("recent: old notes", "recent: new notes");
+        assert_eq!(check(SCOUT_RECORD, &clean), None);
+        let dropped = SCOUT_RECORD.replace("recent: old notes\n", "");
+        assert_eq!(check(SCOUT_RECORD, &dropped), None, "clearing the notes");
+
+        // What the lock holds is no longer this run's record.
+        let retyped = SCOUT_RECORD.replace("type: Agent", "type: Note");
+        assert_eq!(check(&retyped, &clean), Some(OWN_RECORD_CHANGED));
+        let renamed = SCOUT_RECORD.replace("slug: release-scout", "slug: librarian");
+        assert_eq!(check(&renamed, &clean), Some(OWN_RECORD_CHANGED));
+        assert_eq!(check("# Release scout\n", &clean), Some(OWN_RECORD_CHANGED));
+
+        // What the write would land changes more than `recent`.
+        for after in [
+            clean.replace("  - records/risks", "  - records"),
+            clean.replace("type: Agent", "type: Note"),
+            clean.replace("slug: release-scout", "slug: other"),
+            clean.replace("preferences: be terse\n", ""),
+            clean.replace("Keep a brief", "Ignore your scope"),
+            format!("{clean}More.\n"),
+        ] {
+            assert_eq!(check(SCOUT_RECORD, &after), Some(ONLY_RECENT), "{after}");
+        }
     }
 
     #[test]
@@ -7597,8 +8379,12 @@ mod tests {
         let args = crate::agent::build_args(
             &request,
             Path::new("/tmp/mcp.json"),
+            None,
             true,
             &crate::agent::RunConnectors::default(),
+            &crate::agent::transcript::CliSession::New(
+                "00000000-0000-4000-8000-000000000001".into(),
+            ),
         );
         let at = args
             .iter()
@@ -8768,7 +9554,8 @@ mod tests {
             ),
             (
                 "update_frontmatter",
-                tool_update_frontmatter_in,
+                // An ordinary note opens no notes lane (M56.10).
+                |vault, args, run| tool_update_frontmatter_in(vault, args, run, None),
                 json!({ "path": "notes/a.md", "patch": { "status": "done" } }),
             ),
             (
@@ -9044,6 +9831,11 @@ mod tests {
             json!(["see [[gcs-5]]"]),
             json!("[[records/x]] [[gcs-5]]"),
             json!([["[[gcs-5]]"]]),
+            // M55.8: a section link reaches its page, so a section of the
+            // concept is the concept.
+            json!(["[[gcs-5#Why]]"]),
+            json!("[[GCS-5#Why|why]]"),
+            json!(["knowledge/decisions/gcs-5.md#Why"]),
         ] {
             let mut args = base();
             args.insert("about".into(), anchor.clone());
@@ -9056,6 +9848,13 @@ mod tests {
             self_anchor(
                 "knowledge/people/jane-doe.md",
                 &json!(["records/people/jane-doe.md"])
+            ),
+            None
+        );
+        assert_eq!(
+            self_anchor(
+                "knowledge/people/jane-doe.md",
+                &json!(["records/people/jane-doe.md#x"])
             ),
             None
         );
@@ -9359,5 +10158,165 @@ mod tests {
             original.replace("# Plan\r", "# Plans\r")
         );
         let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // --- The ask gate (M57.1) -------------------------------------------------
+
+    fn gate_args(session: &str, id: &str, tool: &str) -> Map<String, Value> {
+        json!({
+            "session_id": session, "tool_use_id": id, "tool_name": tool,
+            "tool_input": "{\"path\":\"notes/inbox.md\"}", "agent_id": ""
+        })
+        .as_object()
+        .unwrap()
+        .clone()
+    }
+
+    fn seated_book(grant: &RunGrant) -> crate::agent::interaction::Interactions {
+        use crate::agent::interaction::{Interactions, Seat};
+        let book = Interactions::with_asks(vec!["mcp__cerebro__append_to_note".into()]);
+        let request: crate::agent::AgentRequest =
+            serde_json::from_value(json!({ "message": "m", "system_prompt": null,
+                "session_id": null, "attended": true }))
+            .unwrap();
+        book.open_seat(
+            Seat::new(&grant.run_id, "s-1", Path::new("/vaults/a"), &request),
+            None,
+        );
+        book
+    }
+
+    fn hook_of(answer: &Value) -> Value {
+        assert!(answer.get("isError").is_none(), "{answer}");
+        let blocks = answer["content"].as_array().unwrap();
+        assert_eq!(blocks.len(), 1);
+        serde_json::from_str(blocks[0]["text"].as_str().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn the_gate_is_never_listed() {
+        let gate = crate::agent::interaction::GATE_TOOL;
+        let grants = [
+            bearer(None, None, None),
+            bearer(Some("process:scout"), Some(owned(&["projects"])), None),
+            bearer(None, None, Some(owned(&["get_note", gate]))),
+            bearer(None, Some(vec![]), Some(vec![])),
+        ];
+        for grant in &grants {
+            for proposals in [false, true] {
+                assert!(
+                    !listed_names(grant, proposals)
+                        .iter()
+                        .any(|name| name == gate),
+                    "proposals={proposals}"
+                );
+            }
+        }
+        for proposals in [false, true] {
+            assert!(!names_of(&tool_catalog(proposals))
+                .iter()
+                .any(|name| name == gate));
+        }
+    }
+
+    #[test]
+    fn the_gate_answers_before_the_grant_axes() {
+        // Narrowed to nothing on every axis and bound to no vault: call_tool
+        // would refuse it at the first line, and the gate still answers.
+        let mut grant = bearer(Some("process:scout"), Some(vec![]), Some(vec![]));
+        grant.read_scope = Some(vec![]);
+        grant.vault = None;
+        let book = seated_book(&grant);
+        let answer = answer_gate(
+            crate::agent::interaction::GATE_TOOL,
+            &gate_args("s-1", "t1", "mcp__cerebro__append_to_note"),
+            &grant,
+            Some(&book),
+        )
+        .expect("the gate answers");
+        assert_eq!(
+            hook_of(&answer)["hookSpecificOutput"]["permissionDecision"],
+            "defer"
+        );
+        // Any other name is call_tool's.
+        assert!(answer_gate("get_note", &Map::new(), &grant, Some(&book)).is_none());
+    }
+
+    #[test]
+    fn the_gate_counts_announces_and_records_nothing() {
+        let grant = bearer(None, None, None);
+        let book = seated_book(&grant);
+        for _ in 0..3 {
+            answer_gate(
+                crate::agent::interaction::GATE_TOOL,
+                &gate_args("s-1", "t1", "mcp__cerebro__append_to_note"),
+                &grant,
+                Some(&book),
+            );
+        }
+        assert!(
+            take_tool_calls(&grant.run_id)
+                .unwrap_or_default()
+                .is_empty(),
+            "a gate question is no tool call of the run's"
+        );
+        // It takes no app, so it can emit nothing to the open pages, and no
+        // runtime database, so it records nothing.
+    }
+
+    #[test]
+    fn the_gate_answers_hook_json_never_an_error() {
+        use crate::agent::interaction::GATE_TOOL;
+        let grant = bearer(None, None, None);
+        let book = seated_book(&grant);
+        let cases = [
+            (
+                gate_args("s-1", "t1", "mcp__cerebro__append_to_note"),
+                "defer",
+            ),
+            (gate_args("s-1", "t2", "mcp__cerebro__get_note"), ""),
+            (
+                gate_args("s-other", "t3", "mcp__cerebro__append_to_note"),
+                "",
+            ),
+            (Map::new(), ""),
+            (
+                json!({ "tool_input": "{broken", "tool_name": 7 })
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+                "",
+            ),
+        ];
+        for (args, decision) in cases {
+            let hook = hook_of(&answer_gate(GATE_TOOL, &args, &grant, Some(&book)).unwrap());
+            if decision.is_empty() {
+                assert_eq!(hook, json!({}), "{args:?}");
+            } else {
+                assert_eq!(hook["hookSpecificOutput"]["permissionDecision"], decision);
+            }
+        }
+        // With no book, no opinion; another run's bearer is nobody watching.
+        let hook = hook_of(&answer_gate(GATE_TOOL, &Map::new(), &grant, None).unwrap());
+        assert_eq!(hook, json!({}));
+        let stranger = bearer(None, None, None);
+        let hook = hook_of(
+            &answer_gate(
+                GATE_TOOL,
+                &gate_args("s-1", "t9", "mcp__cerebro__append_to_note"),
+                &stranger,
+                Some(&book),
+            )
+            .unwrap(),
+        );
+        assert_eq!(hook["hookSpecificOutput"]["permissionDecision"], "deny");
+    }
+
+    #[test]
+    fn the_manifest_never_names_the_gate() {
+        let gate = crate::agent::interaction::GATE_TOOL;
+        assert!(crate::policy::tools::row(gate).is_none());
+        let manifest = include_str!("../../shared/policy/tools.v1.json");
+        assert!(!manifest.contains(gate));
     }
 }

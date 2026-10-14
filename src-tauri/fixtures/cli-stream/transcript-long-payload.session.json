@@ -1,0 +1,268 @@
+[
+  {
+    "type": "queue-operation",
+    "operation": "enqueue",
+    "timestamp": "2026-07-28T12:00:01.000Z",
+    "sessionId": "00000000-0000-4000-8000-000000000008",
+    "content": "Read records/churn-notes.md and write it up as the churn concept."
+  },
+  {
+    "type": "queue-operation",
+    "operation": "dequeue",
+    "timestamp": "2026-07-28T12:00:02.000Z",
+    "sessionId": "00000000-0000-4000-8000-000000000008"
+  },
+  {
+    "parentUuid": null,
+    "isSidechain": false,
+    "promptId": "00000000-0000-4000-8000-000000000501",
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": "Read records/churn-notes.md and write it up as the churn concept."
+    },
+    "permissionMode": "acceptEdits",
+    "promptSource": "sdk",
+    "uuid": "00000000-0000-4000-8000-000000000008",
+    "timestamp": "2026-07-28T12:00:03.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000008",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000008",
+    "isSidechain": false,
+    "type": "attachment",
+    "attachment": {
+      "type": "deferred_tools_delta",
+      "addedNames": ["WebFetch"],
+      "addedLines": ["WebFetch"],
+      "removedNames": []
+    },
+    "uuid": "00000000-0000-4000-8000-000000000002",
+    "timestamp": "2026-07-28T12:00:04.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000008",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000002",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000000001",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Reading the notes and writing the concept."
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 6100,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 12,
+        "service_tier": "standard"
+      }
+    },
+    "requestId": "req_000000000000000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000010",
+    "timestamp": "2026-07-28T12:00:05.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000008",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000010",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000000001",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000000001",
+          "name": "mcp__cerebro__get_note",
+          "input": {
+            "path": "records/churn-notes.md"
+          }
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 6100,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 12,
+        "service_tier": "standard"
+      }
+    },
+    "requestId": "req_000000000000000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000011",
+    "timestamp": "2026-07-28T12:00:06.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000008",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000011",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000000001",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000000002",
+          "name": "mcp__cerebro__write_concept",
+          "input": {
+            "path": "knowledge/metrics/churn.md",
+            "type": "Metric",
+            "title": "Churn",
+            "description": "How many paying accounts cancel each month.",
+            "body": "# Churn\n\nMonthly churn is the share of paying accounts that cancel in a month. Monthly churn is the share of paying accounts that cancel in a month. Monthly churn is the share of paying accounts that cancel in a month. Monthly churn is the share of paying accounts that cancel in a month. Monthly churn is the share of paying accounts that cancel in a month. Monthly churn is the share of paying acco"
+          }
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 6100,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 12,
+        "service_tier": "standard"
+      }
+    },
+    "requestId": "req_000000000000000000000001",
+    "uuid": "00000000-0000-4000-8000-000000000012",
+    "timestamp": "2026-07-28T12:00:07.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000008",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000012",
+    "isSidechain": false,
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_000000000000000000000001",
+          "type": "tool_result",
+          "content": "1\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n2\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n3\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n4\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n5\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n6\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n7\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n8\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n9\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n10\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n11\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n12\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n13\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n14\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n15\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n16\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n17\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n18\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n19\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n20\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n21\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n22\tChurn is counted each month as the share of paying accounts that cancel, and the notes keep every month since the pricing change. \n23\tChurn is counted each month as the share of paying accoun."
+        }
+      ]
+    },
+    "sourceToolAssistantUUID": "00000000-0000-4000-8000-000000000011",
+    "uuid": "00000000-0000-4000-8000-000000000013",
+    "timestamp": "2026-07-28T12:00:08.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000008",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000013",
+    "isSidechain": false,
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_000000000000000000000002",
+          "type": "tool_result",
+          "content": "Wrote knowledge/metrics/churn.md"
+        }
+      ]
+    },
+    "sourceToolAssistantUUID": "00000000-0000-4000-8000-000000000012",
+    "uuid": "00000000-0000-4000-8000-000000000014",
+    "timestamp": "2026-07-28T12:00:09.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000008",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000014",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000000002",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Wrote the churn concept."
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 6100,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 12,
+        "service_tier": "standard"
+      }
+    },
+    "requestId": "req_000000000000000000000002",
+    "uuid": "00000000-0000-4000-8000-000000000015",
+    "timestamp": "2026-07-28T12:00:10.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000008",
+    "version": "2.1.250"
+  },
+  {
+    "type": "last-prompt",
+    "lastPrompt": "Read records/churn-notes.md and write it up as the churn concept.",
+    "leafUuid": "00000000-0000-4000-8000-000000000015",
+    "sessionId": "00000000-0000-4000-8000-000000000008"
+  }
+]

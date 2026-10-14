@@ -1,6 +1,7 @@
 import { slugify } from '@/lib/slug';
 import { declaredSlug, recordIdentity } from './identity';
 import { AGENT_TYPE, libraryKind } from './library';
+import { storedChoice } from './runOptions';
 import { parseAllowedTools } from './skills';
 import type { Entry } from './types';
 
@@ -12,7 +13,8 @@ import type { Entry } from './types';
  * `process:<slug>` — the actor slot the OKF schema has reserved since M8 —
  * and its working notes between runs are the `recent:` frontmatter property
  * (M17.14; `memory:` before it), which a run that holds update_frontmatter is
- * asked to rewrite at the end of each run (M54.7). Memory in frontmatter
+ * asked to rewrite at the end of each run (M54.7) and may: `recent` alone, on
+ * its own record, size-capped (D7, mcp.rs, M56.10). Memory in frontmatter
  * rather than a hidden state file on purpose: it renders as an ordinary
  * property on the record, so what the agent carries forward is always one
  * click from the person it works for.
@@ -117,13 +119,24 @@ export interface AgentRef {
    */
   connectors: string[] | null;
   /**
+   * The model its runs ask Claude Code for (M56.5) — `model:`, trimmed. Null
+   * when blank, absent or not a string: Claude Code's default. Whether the
+   * value is one Claude Code takes is the agent page's warning and Rust's
+   * refusal, never this parser's.
+   */
+  model: string | null;
+  /** The effort its runs ask for (M56.5) — `effort:`, read like `model`. */
+  effort: string | null;
+  /**
    * What this agent carries between runs (M17.14).
    *
    * ClickUp's three tiers, and only two of them are fields — which is the
    * finding rather than a shortcut:
    *
    * - **Recent** is `recent:` (or the pre-M17 `memory:`): the agent's own
-   *   working notes, rewritten at the end of every run. Volatile by design.
+   *   working notes, which the agent's own runs may rewrite: `recent` alone,
+   *   at most 30 lines and 4096 bytes, held so in mcp.rs (D7, M56.10).
+   *   Volatile by design.
    * - **Preferences** is `preferences:`: what the HUMAN corrected. Durable,
    *   higher priority than anything the agent concluded itself, and an agent
    *   run is refused if it tries to write the key (mcp.rs) — an agent that can
@@ -138,7 +151,8 @@ export interface AgentRef {
 }
 
 export interface AgentMemory {
-  /** The agent's own working notes, rewritten each run. */
+  /** The agent's own working notes, which its own runs may rewrite (`recent`
+   * alone and size-capped, mcp.rs, M56.10). */
   recent: string;
   /** What the human told it. The agent may read this and never write it. */
   preferences: string;
@@ -151,13 +165,40 @@ function textOf(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+/**
+ * One memory tier's text, wherever the scan filed it (M56.13).
+ *
+ * A hand-written `[[link]]` in `preferences:` or `recent:` turns the field
+ * into a relation: it arrives bracket-stripped in `entry.relationships`, not
+ * `properties` (CV-09), and read from properties alone the tier was empty, so
+ * a correction that named a note silently stopped reaching every prompt and
+ * the Memory tab. The scan keeps a relation's targets and nothing around
+ * them, so the tier reads back as its links, `[[target]]` one per line in
+ * the order written: less than the file says, never nothing.
+ *
+ * A read, and only that: nothing writes this text back, which would replace
+ * the prose still on disk with the links alone. Agent runs cannot cause the
+ * case: mcp.rs refuses a `[[link]]` in the `recent` a run writes (M56.10).
+ */
+function tierOf(entry: Entry, key: string): string {
+  const text = textOf(entry.properties[key]);
+  if (text !== '') return text;
+  return (entry.relationships[key] ?? [])
+    .map((target) => target.trim())
+    .filter((target) => target !== '')
+    .map((target) => `[[${target}]]`)
+    .join('\n');
+}
+
+/** The agent's memory tiers (M17.14) — the one reader prompts and the agent
+ * page's Memory tab go through. */
 export function parseMemory(entry: Entry): AgentMemory {
   return {
     // `memory:` is the pre-M17.14 name and is still read, because a vault
     // written against the old shape must not silently forget everything its
     // agents had learned. A record carrying both prefers the new key.
-    recent: textOf(entry.properties.recent) || textOf(entry.properties.memory),
-    preferences: textOf(entry.properties.preferences),
+    recent: tierOf(entry, 'recent') || tierOf(entry, 'memory'),
+    preferences: tierOf(entry, 'preferences'),
   };
 }
 
@@ -225,6 +266,8 @@ export function agentRef(entry: Entry): AgentRef {
     disallowedTools: parseAllowedTools(entry.properties['disallowed-tools']),
     capabilities: parseAllowedTools(entry.properties.capabilities) ?? [],
     connectors: parseAllowedTools(entry.properties.connectors),
+    model: storedChoice(entry.properties.model),
+    effort: storedChoice(entry.properties.effort),
     memory: parseMemory(entry),
   };
 }

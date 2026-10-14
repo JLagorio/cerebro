@@ -1,0 +1,29 @@
+{
+  "recorded": {
+    "cli": "2.1.250",
+    "entrypoint": "sdk-cli",
+    "from": "synthetic, in the shape the 2.1.250 bundle writes a session file's API-error line; a sanitized line from the owner's session history is owed (Q8)"
+  },
+  "line": {
+    "type": "assistant",
+    "uuid": "00000000-0000-4000-8000-000000000051",
+    "isApiErrorMessage": true,
+    "error": "rate_limit",
+    "apiErrorStatus": 429,
+    "quotaLimits": {
+      "status": "rejected",
+      "resetsAt": 1767225600,
+      "rateLimitType": "five_hour",
+      "overageStatus": "rejected",
+      "isUsingOverage": false
+    },
+    "message": {
+      "role": "assistant",
+      "model": "<synthetic>",
+      "stop_reason": "stop_sequence",
+      "content": [{ "type": "text", "text": "You've hit your session limit · resets 12am (UTC)" }]
+    },
+    "version": "2.1.250",
+    "entrypoint": "sdk-cli"
+  }
+}

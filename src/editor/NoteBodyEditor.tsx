@@ -4,15 +4,17 @@ import { refusalText } from '@/lib/refusal';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { LazyMarkdownEditor } from './LazyMarkdownEditor';
-import type { EditorReadyInfo } from './MarkdownEditor';
+import type { ChoiceView, EditorReadyInfo } from './MarkdownEditor';
 import type { LossyCause } from './markdown';
+import { MergeChoices } from './MergeChoices';
 import { NotePathContext } from './notePath';
 import { onExternalWrite, registerFlush } from './openPages';
 
 /** Where the body currently stands relative to disk. */
 export type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'failed';
 
-/** A save autosave did not write, while the page waits on the person (M53.6). */
+/** A save autosave did not write, while the page waits on a write, a
+ * reconcile or the person's choice (M53.6, M55.6). */
 interface Held {
   vault: string;
   path: string;
@@ -49,10 +51,27 @@ const LOSSY_COPY: Record<LossyCause, { locked: string; unlocked: string; button:
   },
 };
 
+/** The choice offered when a write the editor cannot show meets unsaved typing. */
+const PAGE_CHOICE = 'page';
+
 /**
  * Loads a note's body, shows the rich editor, and persists debounced edits.
  * Every save rescans, so editing the H1 syncs the entry title everywhere
  * (scanner derives titles from the first H1 — that IS the title sync).
+ *
+ * Reconciliation with the disk (M55.6). The editor is uncontrolled, so an
+ * outside write (almost always the agent's) has to be brought into it, or
+ * the next keystroke's save would put the old text back over it. The agent's
+ * MCP writes announce their paths (`openPages.ts`); any other change shows as
+ * a new content hash on the entry. Either way the page reads the body again
+ * and, when it differs from `base` (what it last read or saved), applies it
+ * in place: a clean page takes it block by block, and a page with unsaved
+ * typing merges three ways, so only blocks both sides changed are left for
+ * the person, as choices above the page. The caret, the scroll, the undo
+ * history and every untouched block stay. While a write is pending, a
+ * reconcile runs or a choice is open, autosave HOLDS what is typed, and
+ * `release` writes the page as it stands once nothing holds. Leaving the page
+ * meanwhile writes it too: yours wins.
  */
 export function NoteBodyEditor({
   path,
@@ -74,10 +93,11 @@ export function NoteBodyEditor({
   /** Save lifecycle, for a visible saved/unsaved indicator in the host. */
   onSaveState?: (state: SaveState) => void;
   /**
-   * The body exactly as the disk returned it — on load, and again after each
-   * own save (M50.1). A concept page pins Verify to it (M49.3): what a person
-   * attests is the text they had on screen, and an edit of their own is part
-   * of that text once it has landed.
+   * The body exactly as the disk returned it — on load, after each own save
+   * (M50.1), and after an outside write the page took whole (M55.6). A
+   * concept page pins Verify to it (M49.3): what a person attests is the text
+   * they had on screen, and an edit of their own is part of that text once it
+   * has landed.
    */
   onBodyLoaded?: (path: string, raw: string) => void;
   /** A file the person reads but does not write here — the knowledge log and
@@ -95,72 +115,57 @@ export function NoteBodyEditor({
   // would mount the keyed editor with the PREVIOUS doc's body for one
   // render, and its unmount flush could write that body into the new file
   // (cross-doc corruption seen live in M2.x doc-polish testing).
-  // `gen` travels WITH the body, never ahead of it: the editor is uncontrolled
-  // and remounts on its key, so bumping the key while the re-read is still in
-  // flight remounts with the stale body and then ignores the new one when it
-  // lands (M17.4).
+  // `gen` counts the remounts outside writes still need: a locked page, and
+  // a write the editor cannot show on a clean one. It travels WITH the body,
+  // so a remount never shows the stale body while the re-read is in flight.
   const [loaded, setLoaded] = useState<{ path: string; body: string; gen: number } | null>(null);
   const [failed, setFailed] = useState(false);
   const [lossy, setLossy] = useState<LossyCause | null>(null);
-  /**
-   * Reconciliation with the disk (M17.4, M53.6).
-   *
-   * The editor is uncontrolled, so nothing reloads it when the file changes
-   * underneath, and the next keystroke's debounce would save the stale buffer
-   * back over whoever wrote it. Almost always the agent. Its MCP writes go
-   * through the app's own `write_file`, which registers every write as the
-   * app's, so the watcher drops their echo; the tools announce what they
-   * wrote instead (`openPages.ts`). A write announced for this path is handled
-   * by that announcement alone. Anything else (a write that names no path, an
-   * outside editor) is noticed through `baseline`, the modifiedAt this buffer
-   * corresponds to, which Rust stamps to the second and so cannot see a
-   * second write within one.
-   *
-   * Either way: reload silently when the buffer is clean, and ask when it is
-   * not, because discarding what someone typed is not a decision this
-   * component gets to make. While an announced write is catching up, or the
-   * question is open, autosave HOLDS what is typed instead of writing it over
-   * the new version (`held`). Keep writes it; Load drops it. Leaving the page
-   * writes it too: theirs wins, as it did before there was a hold.
-   */
-  const baseline = useRef<string | null>(null);
   const [generation, setGeneration] = useState(0);
-  const [conflict, setConflict] = useState(false);
-  // The banner's state, readable synchronously — a save deciding whether to
-  // hold cannot wait for a render to learn the question is open.
-  const conflictRef = useRef(false);
-  const showConflict = useCallback((on: boolean) => {
-    conflictRef.current = on;
-    setConflict(on);
+  const [choices, setChoices] = useState<ChoiceView[]>([]);
+  // The open choices, readable synchronously: a save deciding whether to
+  // hold cannot wait for a render to learn one is open.
+  const choicesRef = useRef<ChoiceView[]>([]);
+  const showChoices = useCallback((next: ChoiceView[]) => {
+    choicesRef.current = next;
+    setChoices(next);
   }, []);
-  const dirty = useRef(false);
-  // Every edit, counted, so a save that lands clears `dirty` only if nothing
-  // was typed while it was in flight.
-  const edits = useRef(0);
+  /** What the page last read or saved: the body as read, and its canonical
+   *  text, which the editor's serialization is compared against. */
+  const base = useRef<{ raw: string; canon: string } | null>(null);
+  /** The entry's content hash this page last heard. */
+  const seenHash = useRef<string | null>(null);
   // Announced writes to this path still catching up.
   const externalPending = useRef(0);
   const held = useRef<Held | null>(null);
-  // A body the person chose to discard (Load): saves from its editor are
-  // dropped, however late they arrive.
-  const discarded = useRef<{ path: string; gen: number } | null>(null);
+  /** The page has something to write once nothing holds: a held save, a
+   *  merge with unsaved typing, or a choice. */
+  const owed = useRef(false);
+  /** The editor showing this path, once it is ready. */
+  const ready = useRef<{ path: string; info: EditorReadyInfo } | null>(null);
+  /** The reconcile running now; another is queued behind it at most. */
+  const reconciling = useRef<Promise<void> | null>(null);
+  const queued = useRef(false);
+  /** A trigger heard before the editor was ready. */
+  const missed = useRef(false);
   const mounted = useRef(false);
   const pathRef = useRef(path);
   pathRef.current = path;
-  // An own save's rescan publishes the new mtime to the store BEFORE the
-  // `await rescan()` continuation below re-baselines — and React can flush
-  // the reconciler effect in that gap (observed in the M29.13 e2e: every
-  // save silently reloaded the editor ~100ms later, which remounted the
-  // mermaid block and threw away its open edit session). While this flag is
-  // up, the mtime change is ours, not somebody else's.
-  const ownSaveInFlight = useRef(false);
-  const entryModifiedAt = useVaultStore(
-    (s) => s.entries.find((e) => e.path === path)?.modifiedAt ?? null,
-  );
+  const vaultRef = useRef(vaultPath);
+  vaultRef.current = vaultPath;
+  const entryHash = useVaultStore((s) => s.entries.find((e) => e.path === path)?.hash ?? null);
   // A lossy import mounts READ-ONLY. The old behaviour warned about the loss
   // and then let the very next keystroke autosave it away half a second
   // later — the warning was the entire mitigation. Editing is now an
   // explicit, undoable-by-choice act.
   const [unlocked, setUnlocked] = useState(false);
+  // The same facts, for a reconcile that runs between renders.
+  const lossyRef = useRef<LossyCause | null>(null);
+  const unlockedRef = useRef(unlocked);
+  unlockedRef.current = unlocked;
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
+  const isLocked = () => readOnlyRef.current || (lossyRef.current !== null && !unlockedRef.current);
   const flushRef = useRef<(() => Promise<void>) | null>(null);
   const cancelRef = useRef<(() => void) | null>(null);
 
@@ -182,10 +187,13 @@ export function NoteBodyEditor({
   useEffect(() => {
     setFailed(false);
     setLossy(null);
+    lossyRef.current = null;
     setUnlocked(false);
-    conflictRef.current = false;
-    setConflict(false);
-    dirty.current = false;
+    showChoices([]);
+    base.current = null;
+    ready.current = null;
+    seenHash.current = null;
+    owed.current = false;
     emitSaveState('idle');
     if (vaultPath === null) return;
     let cancelled = false;
@@ -195,11 +203,11 @@ export function NoteBodyEditor({
         // after the frontmatter fence; the mock strips leading newlines —
         // normalize so both backends match (M1 note 10 discipline).
         if (cancelled) return;
-        // Re-baselined from the store rather than from the value captured
-        // when this effect ran: the read is async, and a write that landed
-        // during it is already IN the body we just read.
-        baseline.current =
-          useVaultStore.getState().entries.find((e) => e.path === path)?.modifiedAt ?? null;
+        // The hash this body answers to, read from the store rather than
+        // captured when this effect ran: a write that landed during the read
+        // is already IN the body.
+        seenHash.current =
+          useVaultStore.getState().entries.find((e) => e.path === path)?.hash ?? null;
         setLoaded({ path, body: text.replace(/^\n+/, ''), gen: generation });
         onBodyLoadedRef.current?.(path, text);
       })
@@ -212,96 +220,46 @@ export function NoteBodyEditor({
     return () => {
       cancelled = true;
     };
-    // `generation` re-runs this effect to re-read from disk — that is what
-    // makes a reload a reload rather than a remount of the same stale body.
-  }, [path, vaultPath, toast, emitSaveState, generation]);
+    // `generation` re-runs this effect to re-read from disk: the remounts
+    // above, which take the file whole.
+  }, [path, vaultPath, toast, emitSaveState, generation, showChoices]);
 
-  // Someone else wrote this file (M17.4), and nobody announced it for this
-  // path: a write that named no path, or an editor outside the app.
-  useEffect(() => {
-    if (loaded === null || loaded.path !== path) return;
-    if (ownSaveInFlight.current) return;
-    // An announced write is settled by its announcement (below), which knows
-    // when its rescan has landed; this would only act on half of it.
-    if (externalPending.current > 0) return;
-    if (entryModifiedAt === null || entryModifiedAt === baseline.current) return;
-    if (dirty.current) {
-      showConflict(true);
-      return;
+  /** Write it, or hold it while the page waits on a write, a reconcile or a
+   *  choice. */
+  const land = (parked: Held): Promise<void> => {
+    if (
+      mounted.current &&
+      parked.path === pathRef.current &&
+      (externalPending.current > 0 || reconciling.current !== null || choicesRef.current.length > 0)
+    ) {
+      held.current = parked;
+      owed.current = true;
+      emitSaveState('dirty');
+      return Promise.resolve();
     }
-    // Clean buffer: nothing of the user's to lose, so take the new version
-    // without asking. Asking here would be a dialog for every agent write.
-    setGeneration((g) => g + 1);
-  }, [entryModifiedAt, loaded, path, showConflict]);
-
-  // An agent wrote THIS file (M53.6). Saves hold from the announcement until
-  // the vault has caught up; then a clean page reloads and a dirty one asks.
-  useEffect(() => {
-    let live = true;
-    const stop = onExternalWrite(path, {
-      pending: () => {
-        if (live) externalPending.current += 1;
-      },
-      settled: () => {
-        if (!live) return;
-        externalPending.current = Math.max(0, externalPending.current - 1);
-        // A burst is answered once, after its last catch-up.
-        if (externalPending.current > 0) return;
-        if (dirty.current) showConflict(true);
-        else setGeneration((g) => g + 1);
-      },
-    });
-    return () => {
-      live = false;
-      externalPending.current = 0;
-      stop();
-    };
-  }, [path, showConflict]);
-
-  // A panel turn lands every open page's pending save before its child
-  // starts (useAgentChat), so the agent reads what is on screen.
-  useEffect(() => registerFlush(() => flushRef.current?.() ?? Promise.resolve()), []);
-
-  // ⌘S / Ctrl+S force-flushes the debounce. The instinctive shortcut was a
-  // no-op before, which read as "my work is not being saved".
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 's' || !(e.metaKey || e.ctrlKey) || e.altKey) return;
-      e.preventDefault();
-      void flushRef.current?.();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+    return write(parked.vault, parked.path, parked.markdown);
+  };
 
   /**
    * Write `markdown` to `forPath` now. Resolves once the save has landed, or
-   * failed and said so; the rescan, re-baseline and pin that follow a landed
-   * save run on behind it.
+   * failed and said so; the rescan and pin that follow a landed save run on
+   * behind it.
    */
   const write = (vault: string, forPath: string, markdown: string): Promise<void> => {
-    const upTo = edits.current;
     emitSaveState('saving');
     // Separate catches: after a successful save the disk already holds the
     // edit, so a refresh failure must not claim the save failed.
     return saveNote(vault, forPath, markdown).then(
       () => {
         emitSaveState('saved');
-        if (edits.current === upTo) dirty.current = false;
+        // What the page saved is what it stands on now; the hash change the
+        // rescan brings reads it back and finds nothing new.
+        if (ready.current?.path === forPath) base.current = { raw: markdown, canon: markdown };
         void (async () => {
-          ownSaveInFlight.current = true;
           try {
             await rescan();
-            // Our own write moved the file's mtime. Re-baselining here is what
-            // stops the reconciler treating every save as somebody else's edit
-            // and reloading the buffer out from under the person typing.
-            baseline.current =
-              useVaultStore.getState().entries.find((e) => e.path === forPath)?.modifiedAt ??
-              baseline.current;
           } catch {
             toast("Couldn't refresh vault");
-          } finally {
-            ownSaveInFlight.current = false;
           }
           // What the disk holds now — a capture may have canonicalized it.
           if (onBodyLoadedRef.current !== undefined) {
@@ -323,46 +281,223 @@ export function NoteBodyEditor({
     );
   };
 
-  /** Write it, or hold it while the page on screen waits on an announced
-   *  write or on the person's answer. */
-  const land = (parked: Held): Promise<void> => {
+  /**
+   * Once nothing holds: drop the held save and write the page as it stands,
+   * when that differs from the base. A merge, a held save and a choice all
+   * end here.
+   */
+  const release = () => {
     if (
-      mounted.current &&
-      parked.path === pathRef.current &&
-      (externalPending.current > 0 || conflictRef.current)
+      !owed.current ||
+      externalPending.current > 0 ||
+      reconciling.current !== null ||
+      choicesRef.current.length > 0
     ) {
-      held.current = parked;
-      emitSaveState('dirty');
-      return Promise.resolve();
+      return;
     }
-    return write(parked.vault, parked.path, parked.markdown);
+    owed.current = false;
+    held.current = null;
+    const at = ready.current;
+    const was = base.current;
+    const vault = vaultRef.current;
+    if (at === null || was === null || vault === null || at.path !== pathRef.current) return;
+    if (isLocked()) return;
+    const md = at.info.serialize();
+    at.info.markSaved(md);
+    if (md !== was.canon) void write(vault, at.path, md);
+    else emitSaveState('saved');
   };
+
+  /** Take the file whole: a locked page, or a write the editor cannot show. */
+  const remount = () => {
+    cancelRef.current?.();
+    held.current = null;
+    owed.current = false;
+    showChoices([]);
+    setGeneration((g) => g + 1);
+  };
+
+  /** Read the file and bring what changed into the page. */
+  const reconcileOnce = async (): Promise<void> => {
+    const at = ready.current;
+    const vault = vaultRef.current;
+    if (at === null || vault === null) return;
+    let text: string;
+    try {
+      text = await readNote(vault, at.path);
+    } catch {
+      if (mounted.current && ready.current === at) toast("Couldn't reload page");
+      return;
+    }
+    if (!mounted.current || ready.current !== at) return;
+    const raw = text.replace(/^\n+/, '');
+    const was = base.current;
+    // An own save, or a change to the frontmatter alone.
+    if (was === null || raw === was.raw) return;
+    if (isLocked()) {
+      remount();
+      return;
+    }
+    const result = at.info.applyExternal(raw, was.canon, {
+      allowLoss: lossyRef.current !== null && unlockedRef.current,
+    });
+    switch (result.kind) {
+      case 'same':
+        base.current = { raw, canon: was.canon };
+        return;
+      case 'applied':
+        base.current = { raw, canon: result.next };
+        showChoices([]);
+        if (result.after === result.next) onBodyLoadedRef.current?.(at.path, text);
+        else owed.current = true;
+        return;
+      case 'choices':
+        base.current = { raw, canon: result.next };
+        owed.current = true;
+        showChoices(result.choices);
+        return;
+      case 'unrepresentable':
+        if (!result.dirty) {
+          remount();
+          return;
+        }
+        // Nothing of the write can land without losing text, and the page
+        // holds typing: the whole page is the choice.
+        base.current = { raw, canon: was.canon };
+        owed.current = true;
+        showChoices([
+          ...choicesRef.current.filter((choice) => choice.id !== PAGE_CHOICE),
+          { id: PAGE_CHOICE, mine: at.info.serialize(), theirs: raw, firstBlockId: null },
+        ]);
+        return;
+    }
+  };
+
+  // Through refs: the reconcile loop outlives the render that started it.
+  const reconcileRef = useRef(reconcileOnce);
+  reconcileRef.current = reconcileOnce;
+  const releaseRef = useRef(release);
+  releaseRef.current = release;
+
+  /** Reconcile now, or after the one running; once ready, if not yet. */
+  const requestReconcile = useCallback(() => {
+    if (ready.current === null || ready.current.path !== pathRef.current) {
+      missed.current = true;
+      return;
+    }
+    if (reconciling.current !== null) {
+      queued.current = true;
+      return;
+    }
+    const run: Promise<void> = (async () => {
+      do {
+        queued.current = false;
+        await reconcileRef.current();
+      } while (queued.current && mounted.current);
+    })().finally(() => {
+      if (reconciling.current === run) reconciling.current = null;
+      releaseRef.current();
+    });
+    reconciling.current = run;
+  }, []);
+
+  // A change of the file's content, from anyone. The agent's announced
+  // writes are settled by their announcement (below), which knows when the
+  // vault has caught up.
+  useEffect(() => {
+    if (seenHash.current === null || entryHash === null) {
+      seenHash.current = entryHash;
+      return;
+    }
+    if (entryHash === seenHash.current) return;
+    seenHash.current = entryHash;
+    if (externalPending.current === 0) requestReconcile();
+  }, [entryHash, path, requestReconcile]);
+
+  // An agent wrote THIS file (M53.6). Saves hold from the announcement; once
+  // the vault has caught up with the last of a burst, the page reconciles.
+  useEffect(() => {
+    let live = true;
+    const stop = onExternalWrite(path, {
+      pending: () => {
+        if (live) externalPending.current += 1;
+      },
+      settled: () => {
+        if (!live) return;
+        externalPending.current = Math.max(0, externalPending.current - 1);
+        if (externalPending.current > 0) return;
+        requestReconcile();
+        // Nothing to read if the editor is not up yet; a save held meanwhile
+        // still lands.
+        releaseRef.current();
+      },
+    });
+    return () => {
+      live = false;
+      externalPending.current = 0;
+      stop();
+    };
+  }, [path, requestReconcile]);
+
+  // A panel turn lands every open page's pending save before its child
+  // starts (useAgentChat), so the agent reads what is on screen.
+  useEffect(() => registerFlush(() => flushRef.current?.() ?? Promise.resolve()), []);
+
+  // ⌘S / Ctrl+S force-flushes the debounce. The instinctive shortcut was a
+  // no-op before, which read as "my work is not being saved".
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 's' || !(e.metaKey || e.ctrlKey) || e.altKey) return;
+      e.preventDefault();
+      void flushRef.current?.();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   // Saves target the path the body was LOADED for, never the current prop —
   // a debounce flush racing a navigation must land in its own file.
-  const saveFor = (forPath: string, gen: number) => (markdown: string) => {
+  const saveFor = (forPath: string) => (markdown: string) => {
     if (vaultPath === null) return Promise.resolve();
-    const dropped = discarded.current;
-    if (dropped !== null && dropped.path === forPath && gen <= dropped.gen) {
-      return Promise.resolve();
-    }
     return land({ vault: vaultPath, path: forPath, markdown });
   };
 
-  // Leaving the page (another path, or unmounting) writes what was held for
-  // it: theirs wins, as before the hold. Through a ref, because the cleanup
-  // belongs to the render that created it.
+  // Leaving the page (another path, or unmounting) while it holds a save or
+  // a choice writes the page as it stands: yours wins (M53 Q5). Through a
+  // ref, because the cleanup belongs to the render that created it.
   const writeRef = useRef(write);
   writeRef.current = write;
   useEffect(
     () => () => {
-      const parked = held.current;
-      if (parked === null || parked.path !== path) return;
+      const at = ready.current;
+      const owing = held.current !== null || choicesRef.current.length > 0;
+      const vault = held.current?.vault ?? vaultRef.current;
       held.current = null;
-      void writeRef.current(parked.vault, parked.path, parked.markdown);
+      if (!owing || at === null || at.path !== path || vault === null) return;
+      at.info.cancelPendingSave();
+      void writeRef.current(vault, path, at.info.serialize());
     },
     [path],
   );
+
+  /** Settle a row of the choice bar. */
+  const pick = (id: string, which: 'mine' | 'theirs') => {
+    const at = ready.current;
+    if (at === null) return;
+    if (id === PAGE_CHOICE) {
+      // The new version, whole: what was typed is discarded, so the pending
+      // debounce and the held save go before the remount.
+      if (which === 'theirs') {
+        remount();
+        return;
+      }
+      showChoices(choicesRef.current.filter((choice) => choice.id !== PAGE_CHOICE));
+    } else {
+      const page = choicesRef.current.filter((choice) => choice.id === PAGE_CHOICE);
+      showChoices([...at.info.choose(id, which), ...page]);
+    }
+    release();
+  };
 
   if (failed) {
     return <p className="m-0 px-1 py-2 text-sm text-n-500">This page couldn't be loaded.</p>;
@@ -379,55 +514,7 @@ export function NoteBodyEditor({
         sections ? ' cerebro-editor-sections' : ''
       }`}
     >
-      {conflict && (
-        <div
-          role="alert"
-          data-testid="external-change-banner"
-          className="mx-1 mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-warn-500 bg-warn-50 px-3 py-2 text-sm text-warn-700"
-        >
-          <span className="min-w-0 flex-1">
-            This page changed on disk while you were editing it — usually the assistant. Your edits
-            are held, not saved, until you choose.
-          </span>
-          <button
-            type="button"
-            data-testid="external-change-reload"
-            onClick={() => {
-              // Discarded means discarded: the pending debounce is cancelled
-              // and the held save dropped BEFORE the remount, whose unmount
-              // flush would otherwise write this buffer back over the version
-              // being loaded.
-              cancelRef.current?.();
-              held.current = null;
-              discarded.current = { path: loaded.path, gen: loaded.gen };
-              dirty.current = false;
-              showConflict(false);
-              setGeneration((g) => g + 1);
-            }}
-            className="flex-none rounded-md border border-warn-500 bg-transparent px-2 py-0.5 text-xs font-medium text-warn-700 hover:bg-warn-500 hover:text-n-0"
-          >
-            Load the new version
-          </button>
-          <button
-            type="button"
-            data-testid="external-change-keep"
-            onClick={() => {
-              // Take the disk's mtime as ours so the banner does not come
-              // back on the next rescan; the user has answered this question.
-              baseline.current = entryModifiedAt;
-              showConflict(false);
-              // And write what was held. Through `land`, so a write announced
-              // while they decided is asked about rather than overwritten.
-              const parked = held.current;
-              held.current = null;
-              if (parked !== null) void land(parked);
-            }}
-            className="flex-none rounded-md border-0 bg-transparent px-1 py-0.5 text-xs text-warn-700 underline"
-          >
-            Keep mine
-          </button>
-        </div>
-      )}
+      <MergeChoices choices={choices} onPick={pick} />
       {lossy !== null && !readOnly && (
         <div
           role="alert"
@@ -453,22 +540,25 @@ export function NoteBodyEditor({
           note's frontmatter `sources` (M51.5) — is about the file on screen. */}
       <NotePathContext.Provider value={loaded.path}>
         <LazyMarkdownEditor
-          // The generation is part of the key: the editor takes `markdown` as an
-          // initial value only, so a reload has to be a remount.
+          // A remount (`gen`) takes the file whole; every other outside write
+          // lands in place through `applyExternal`.
           key={`${loaded.path}#${loaded.gen}`}
           markdown={loaded.body}
           readOnly={locked}
-          onChange={saveFor(loaded.path, loaded.gen)}
-          onDirty={() => {
-            dirty.current = true;
-            edits.current += 1;
-            emitSaveState('dirty');
-          }}
+          onChange={saveFor(loaded.path)}
+          onDirty={() => emitSaveState('dirty')}
           onReady={(info: EditorReadyInfo) => {
             flushRef.current = info.flushPendingSave;
             cancelRef.current = info.cancelPendingSave;
+            lossyRef.current = info.lossyCause;
             setLossy(info.lossyCause);
+            ready.current = { path: loaded.path, info };
+            base.current = { raw: loaded.body, canon: info.loadedAs };
             onReady?.(info);
+            if (missed.current) {
+              missed.current = false;
+              requestReconcile();
+            }
           }}
           autoFocus={autoFocus}
           debounceMs={debounceMs}

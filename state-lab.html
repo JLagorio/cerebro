@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Cerebro state lab</title>
+    <!--
+      The state lab (M64.1): real sections over the browser mock, each in its
+      five states, at /state-lab.html?section=<id>&state=<state> under pnpm dev.
+
+      It never ships. Vite builds only index.html (vite.config.ts sets no
+      build.rollupOptions.input), so this page and src/lab/ never reach dist/
+      or the Tauri bundle; and src/lab/main.tsx refuses outside DEV as a
+      second gate. It reads and writes no localStorage, so the theme starts
+      light here and the toggle changes this document only.
+    -->
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/lab/main.tsx"></script>
+  </body>
+</html>

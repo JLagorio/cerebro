@@ -121,6 +121,17 @@ describe('navStore', () => {
       });
     });
 
+    it('a doc selection keeps its focused comment thread through a rename (M70.2b)', () => {
+      const { navigate, replacePath } = useNavStore.getState();
+      navigate({ kind: 'doc', path: 'notes/a.md', thread: '0123456789abcdef' });
+      replacePath('notes', 'archive');
+      expect(useNavStore.getState().selection).toEqual({
+        kind: 'doc',
+        path: 'archive/a.md',
+        thread: '0123456789abcdef',
+      });
+    });
+
     it('carries descendants when a folder moves', () => {
       const { navigate, replacePath } = useNavStore.getState();
       navigate({ kind: 'doc', path: 'notes/trip/day-one.md' });
@@ -189,6 +200,24 @@ describe('navStore', () => {
     // The stored selection is the stripped shape — no undefined-valued key
     // survives to poison a LATER compare from the other direction.
     expect('tab' in s.selection).toBe(false);
+  });
+
+  // M70.2b — a thread is a place the back button returns to: focusing another
+  // thread of the same page is a step, and Back lands on the one before.
+  it('navigating to another comment thread of the same page is a history step', () => {
+    const { navigate, back } = useNavStore.getState();
+    navigate({ kind: 'doc', path: 'a.md' });
+    navigate({ kind: 'doc', path: 'a.md', thread: '1111111111111111' });
+    navigate({ kind: 'doc', path: 'a.md', thread: '2222222222222222' });
+    expect(useNavStore.getState().history).toHaveLength(4);
+    back();
+    expect(useNavStore.getState().selection).toEqual({
+      kind: 'doc',
+      path: 'a.md',
+      thread: '1111111111111111',
+    });
+    back();
+    expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'a.md' });
   });
 
   it('back and forward walk the history', () => {

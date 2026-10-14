@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "cli_version": "2.1.250",
+  "source": "spike",
+  "recorded": "derived",
+  "derived_from": [
+    "spike/defer-resume.json step 1",
+    "the 2.1.250 bundle (stream_event, assistant and result schemas)",
+    "real/spike-not-signed-in (the 2.1.250 init and session-file framing)"
+  ],
+  "transport": "per-turn",
+  "scenario": "defer-resume step 1",
+  "proves": "Resumed after a defer and allowed, the held call runs and the turn answers.",
+  "ends": "result",
+  "session": "00000000-0000-4000-8000-000000000001.jsonl",
+  "sanitizer": 1
+}

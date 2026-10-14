@@ -579,13 +579,13 @@ test.describe('shell layout (M52)', () => {
     await expect(side).toHaveCount(0);
   });
 
-  test('a multi-page doc folds its Pages panel before the side panel', async ({ page }) => {
+  test('a page with sub-pages folds its Pages panel before the side panel', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.addInitScript(() => window.localStorage.setItem('cerebro.docPanelOpen', 'true'));
     await boot(page);
     await openPage(page, 'How we schedule');
     await page.getByTestId('doc-page').getByRole('button', { name: 'Page options' }).click();
-    await page.getByRole('menuitem', { name: 'Add page' }).click();
+    await page.getByRole('menuitem', { name: 'Add sub-page' }).click();
     await page.getByPlaceholder('Page name').fill('Appendix');
     await page.keyboard.press('Enter');
     await expect(page.getByTestId('doc-pages-panel')).toBeVisible();

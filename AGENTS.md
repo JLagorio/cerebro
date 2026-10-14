@@ -23,6 +23,7 @@ server — no API key ever enters the app.
 | Rust       | `cd src-tauri && cargo test`        | Also `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`                          |
 | Toolchain  | `rust-toolchain.toml`               | Pins Rust; `package.json` `engines` + `packageManager` pin Node, pnpm. CI installs all three   |
 | Mac build  | `./scripts/mac-build.sh`            | Local build + install                                                                          |
+| State lab  | `pnpm dev`                          | Then `/state-lab.html?section=<id>&state=<state>`: one section in one of five states (CV-44)   |
 
 Hooks (husky): pre-commit lints; pre-push runs the full gate. **CV-01 Never
 `--no-verify`** — if a hook is wrong, fix the hook. The pre-push hook also
@@ -39,7 +40,8 @@ enforced: `.github/workflows/mac-app.yml`
   no-DOM typecheck (`tsconfig.engine.json`) keep `engine/` pure;
   `@tauri-apps/*` loads only in the four IPC adapters (`lib/ipc.ts`,
   `lib/gitIpc.ts`, `lib/rootsIpc.ts`, `agent/agentIpc.ts`), and only
-  `lib/mockIpc.ts` reads `lib/mockParse.ts` (M53.20).
+  `lib/mockIpc.ts` reads `lib/mockParse.ts` (M53.20). `lab/` is the dev-only
+  state lab (`state-lab.html`, M64.1), which Vite never builds.
 - **Knowledge is three tabs, and a concept is a page** (M50–M51). The page
   (`pages/KnowledgePage.tsx`) is Concepts (every concept, filed by folder),
   Review (the queue — `engine/okf.ts` `reviewQueue` orders it and names each
@@ -87,12 +89,19 @@ enforced: `.github/workflows/mac-app.yml`
   a library agent path forward to the page with `navigate(…, {replace: true})`,
   so Back never lands on a forwarder; only construct actors keep a page on the
   Agents surface.
-- `src-tauri/src/` — Rust: `vault/` (scan/parse/write), `git/`, `mcp.rs`
-  (loopback MCP server), `agent.rs` (CLI spawn), `knowledge.rs` (OKF guards),
+- `src-tauri/src/` — Rust: `vault/` (scan/parse/write, and `comments.rs`,
+  each page's comment sidecar under `.comments/`), `git/`, `mcp.rs`
+  (loopback MCP server), `agent/` (CLI spawn; `fold.rs` folds the live
+  stream and Claude Code's session file into one event vocabulary, and
+  `transcript.rs` finds that file and reads it back), `knowledge.rs` (OKF guards),
   `connectors.rs`, `shell/` (the main window, built in setup so its
-  navigation guard is attached), `runtime/fleet.rs` (SELECT-only run
-  history — it writes nothing, and a phase that needs a new fact goes through
-  the Meter or the governance writers instead).
+  navigation guard is attached; `open.rs` is Open with: Finder, the default
+  app, agent links and the clipboard; `quit.rs` owns ⌘Q and the close guard,
+  which flush every pending save before exit (M55.10), while Dock Quit,
+  logout and shutdown exit without them), `runtime/fleet.rs` (run history,
+  read through `runtime::ReadOnly`, a connection SQLite refuses writes on; a
+  phase that needs a new fact still goes through the Meter or the governance
+  writers).
 - `shared/prompt/` — prose the model reads, which Rust compiles in and TS
   imports `?raw` (M54.7). `server-instructions.md` is the MCP `instructions`
   every run hears, whatever it holds; its README holds the rules (CV-19).
@@ -112,7 +121,8 @@ enforced: `.github/workflows/mac-app.yml`
   via `tsconfig.tools.json`. `scripts/cli-record/` is the CLI recording kit
   (M56.1): it records Claude Code in an isolated config outside the repo
   (`spike.ts`, against the toy `probe.ts`), reduces each run to a fixture
-  (`reduce.ts`) and refuses any leak through one pattern list (`scan.ts`).
+  (`reduce.ts`), sanitizes whole runs into `cli-stream/real/` (`sanitize.ts`,
+  M56.2) and refuses any leak through one pattern list (`scan.ts`).
 
 ## Conventions that will bite you
 
@@ -183,7 +193,10 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
   enforced: prose
 - **CV-09 Wikilink fields** arrive from the scanner bracket-stripped in
   `entry.relationships`, not `properties` — test fixtures must use that shape.
-  enforced: `src-tauri/src/vault/entry.rs::wikilink_arrays_become_relationships`, `src/lib/scanGolden.test.ts`
+  A target is read whole first, then as the page before its first `#`
+  (M55.8); the fragment stays in the file and in `outgoingLinks`.
+  `link.rs` and `wikilink.ts` replay `src-tauri/fixtures/wikilink-targets.json`.
+  enforced: `src-tauri/src/vault/entry.rs::wikilink_arrays_become_relationships`, `src/lib/scanGolden.test.ts`, `src-tauri/src/vault/link.rs::replays_the_shared_target_cases`, `src/engine/wikilink.test.ts::replays the shared target cases`
 - **CV-16 The webview never leaves its entry document** (M53.12).
   `src-tauri/src/shell/links.rs` routes every navigation and every
   `window.open` by `shared/policy/links.v1.json`: the entry document loads,
@@ -191,8 +204,9 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
   needs no code — a plain `href` or `target="_blank"` reaches the guard.
   `pnpm dev` has no guard (Chromium follows links itself), so surfaces keep
   routing vault paths in-app, never through an `href`. Only a packaged build
-  proves it.
-  enforced: `src-tauri/src/shell/links.rs::replays_the_shared_link_cases`, `src-tauri/src/shell/mod.rs::both_guards_are_attached`
+  proves it. Agent links (M55.9) are a command, not a navigation:
+  `shell/open.rs` opens only `shared/policy/agent-links.v1.json`'s bases.
+  enforced: `src-tauri/src/shell/links.rs::replays_the_shared_link_cases`, `src-tauri/src/shell/mod.rs::both_guards_are_attached`, `src-tauri/src/shell/open.rs::replays_the_agent_link_cases`
 - **CV-10 Suppressions carry reasons**: every `eslint-disable` states why, in place.
   The compiler-era react-hooks rules are off by documented choice
   (`eslint.config.js`) — candidates to ratchet on, not free to violate.
@@ -285,6 +299,27 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
   only that row's key(s) through `agentPatch`; Cancel and Escape write nothing,
   and no surface edits an agent's grants through the generic property editor.
   enforced: `src/library/AgentProperties.test.tsx`
+- **CV-26 Recorded CLI output is sanitized, and every kind it shows is
+  classified** (M56.2). Real recordings reach
+  `src-tauri/fixtures/cli-stream/real/` only through
+  `scripts/cli-record/sanitize.ts`, and no fixture under `cli-stream/` holds a
+  user path, an email, a host name, a token or a real id. Every stream kind a
+  real recording shows is translated or listed as ignored, with its reason, in
+  `src-tauri/src/agent/kinds.rs`.
+  enforced: `scripts/fixtures.test.ts`, `src-tauri/src/agent/recordings.rs::every_real_recording_shows_only_classified_kinds`
+- **CV-27 One fold, one reducer** (M56.3). Claude Code's live stream and its
+  session file fold through `src-tauri/src/agent/fold.rs` into one event
+  vocabulary, and `src/agent/transcript.ts` is the one reducer from events to
+  messages, live and restored. A third reader of either format is a defect;
+  the meter's Tally reads raw lines for accounting only.
+  enforced: `src-tauri/src/agent/fold.rs::every_recorded_line_is_classified`, `src/agent/transcript.test.ts::replays the transcript goldens`
+- **CV-31 Comments live beside the page, never in it** (M70.2). A page's
+  threads are `<vault>/.comments/<page path>.json`. Only `vault/comments.rs`
+  and its mock twin write them, under the page's path lock, and a rename or
+  delete carries them. No comment action writes the page. The scan, search,
+  vault-changed and every note writer leave `.comments/` alone. A sidecar
+  that does not parse reads as unavailable and is never overwritten.
+  enforced: `src-tauri/src/vault/comments.rs::a_comment_never_touches_the_page_bytes`, `src-tauri/src/vault/comments.rs::replays_the_shared_comment_cases`, `src/engine/comments.test.ts::replays the shared comment cases`
 
 ## Verifying UI work
 
@@ -309,6 +344,19 @@ browser timezone is fixed to UTC in `playwright.config.ts` for the same
 reason. For live checks, follow the `verify-ui` dev skill; synthetic `blur`
 events don't fire React `onBlur` (call `el.blur()`).
 enforced: prose
+
+**CV-44 A section that reads ships five lab presets** (M64.1). A file in
+`src/lab/sections/` exports `section` or `sections`, each with a preset for
+ready, empty, not recorded, partial and unavailable, built from the mock's
+seeds and `failNext` (`src/lib/mockFaults.ts`); a browser branch reaches a
+fault only through `faulted(command, …)`. The state lab (`pnpm dev`, then
+`/state-lab.html?section=<id>&state=<state>`) mounts the real section over the
+mock with the clock pinned to `VAULT_TODAY`, and vitest and e2e replay every
+preset. Every section in `src/lab/sections/` carries all five states:
+`labSections()` refuses one that does not. That a new section registers at all
+is review's to hold. To see a section's states, open the lab rather than
+staging data by hand (`e2e/boot.ts` `openStateLab` for a spec).
+enforced: `src/lab/presets.ts::has no preset for`, `src/lab/presets.test.tsx::every preset renders the state it names`, `e2e/state-lab.spec.ts::every preset renders the state it names`
 
 **A scattered e2e failure is usually the machine, not the branch.** The suite
 runs in about a minute (124 tests, parallel — `workers` is Playwright's default
@@ -341,3 +389,4 @@ enforced: `scripts/dev-skills.test.ts::the list names exactly the skills on disk
 - `policy-artifact-edit` — edit `shared/policy/` or `shared/runtime/` without breaking the byte anchor.
 - `land-stacked-pr` — land a PR stacked on another PR so its commits reach main.
 - `dependabot-triage` — sort alerts and PRs into a bump, an override or a proposed dismissal.
+- `record-cli` — record Claude Code runs on the pinned CLI and sanitize them into real fixtures.

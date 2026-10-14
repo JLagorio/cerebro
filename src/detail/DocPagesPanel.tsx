@@ -1,3 +1,4 @@
+import { EntryIcon } from '@/components/PageIcon';
 import { useDrawerFocus } from '@/components/ui/DrawerScrim';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
@@ -6,10 +7,10 @@ import { useNavStore } from '@/stores/navStore';
 import { DOC_PAGES_MIN_WIDTH, DOC_PAGES_WIDTH, useUiStore } from '@/stores/uiStore';
 
 /**
- * Left-hand Pages panel on multi-page docs — the mirror of the right-hand
- * Outline/Info/Links panel. Lists every page of the doc (main page first),
- * collapsible; collapsed docs show a floating list icon instead
- * (see DocPagesFloatingButton).
+ * Left-hand Pages panel on a page that has sub-pages — the mirror of the
+ * right-hand Outline/Info/Links panel. Lists the page first, then its
+ * sub-pages, grown ones included (M55.13); collapsible, and a collapsed panel
+ * shows a floating list icon instead (see DocPagesFloatingButton).
  *
  * M52: it gives a little (216 → 180) and then the page folds it to its button
  * rather than let it crush the reading column (shellLayout `pageAsides`).
@@ -19,12 +20,13 @@ import { DOC_PAGES_MIN_WIDTH, DOC_PAGES_WIDTH, useUiStore } from '@/stores/uiSto
 export function DocPagesPanel({
   pages,
   activePath,
-  onAddPage,
+  onAddSubPage,
   onHide,
 }: {
   pages: DocPages;
   activePath: string;
-  onAddPage: () => void;
+  /** Opens the page's Add sub-page dialog, for the page this panel lists. */
+  onAddSubPage: () => void;
   /** Set when drawn as a drawer over a folded panel. */
   onHide?: () => void;
 }) {
@@ -80,10 +82,14 @@ export function DocPagesPanel({
                       : 'bg-transparent text-n-700 hover:bg-n-50 hover:text-n-900',
                   ].join(' ')}
                 >
-                  <Icon
-                    name="file-text"
+                  {/* A page's own icon (M55.11): this row is its tab. */}
+                  <EntryIcon
+                    entry={page}
                     size={13}
-                    color={active ? 'var(--cortex-500)' : 'var(--n-400)'}
+                    fallback={{
+                      name: 'file-text',
+                      color: active ? 'var(--cortex-500)' : 'var(--n-400)',
+                    }}
                   />
                   <span className="truncate">{page.title}</span>
                 </button>
@@ -93,11 +99,11 @@ export function DocPagesPanel({
         </ul>
         <button
           type="button"
-          onClick={onAddPage}
+          onClick={onAddSubPage}
           className="mt-0.5 flex w-full items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-[5px] text-left text-xs text-n-400 hover:bg-n-50 hover:text-n-700"
         >
           <Icon name="plus" size={13} />
-          Add page
+          Add sub-page
         </button>
       </div>
     </aside>

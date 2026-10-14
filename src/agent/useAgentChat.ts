@@ -1,14 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { onAgentEvent, runAgent, startedOrThrow, stopAgent } from './agentIpc';
+import {
+  answerInteraction,
+  cancelInteraction,
+  listInteractions,
+  onAgentEvent,
+  runAgent,
+  startedOrThrow,
+  stopAgent,
+} from './agentIpc';
 import { newRunId } from './runs';
-import type { AgentEvent, ChatMessage } from './types';
+import { applyEvent, endLiveTurn } from './transcript';
+import type { AgentEvent, ChatMessage, PendingInteraction, PersonAnswer, PrLink } from './types';
 import { flushOpenPages } from '@/editor/openPages';
-import { narrowTools, readAddress } from '@/engine/agents';
+import { listAgents, narrowTools, readAddress } from '@/engine/agents';
 import type { Place } from '@/engine/place';
 import { grantedTools, type PromptGrant } from '@/engine/toolGrant';
 import { isWriteTool } from '@/engine/tools';
 import { readNote } from '@/lib/ipc';
-import { addressedAgentPrompt, standingInstructionsBlock } from '@/lib/prompts';
+import { addressedAgentPrompt, panelAgentPrompt, standingInstructionsBlock } from '@/lib/prompts';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -35,6 +44,22 @@ export interface TurnContext {
   place: Place | null;
   /** Which conversation, so the run list can open it. */
   conversationId: string | null;
+  /**
+   * The model and effort the conversation picked (M56.5). Null or absent is
+   * unset: an addressed agent's record decides, else Claude Code's default.
+   * The pick beats the record (Q11) because it is the person's choice for
+   * this thread, made where they are typing.
+   */
+  model?: string | null;
+  effort?: string | null;
+  /**
+   * The handle of the Agent record Settings binds this vault's panel to
+   * (M56.6), or null for the plain assistant. A turn that names an agent
+   * with `@` still goes to that agent; otherwise this one answers, and an
+   * `@name` no record answers to goes to it too. A handle no record answers
+   * to sends as the plain assistant, which the panel's header says.
+   */
+  boundAgent?: string | null;
 }
 
 /**
@@ -55,9 +80,29 @@ function newIdPrefix(): string {
     .slice(2, 6)}`;
 }
 
+/**
+ * A call the turn waits on (M57.1): Rust's card, the bubble it belongs to (the
+ * resume goes on there), whether an answer is on its way, and, once an answer
+ * came too late, Rust's words for that.
+ */
+export interface WaitingCard {
+  card: PendingInteraction;
+  messageId: string;
+  answering: boolean;
+  stale: string | null;
+}
+
 export interface AgentChat {
   messages: ChatMessage[];
+  /** A turn is in flight, a turn waiting on the person's answer included
+   * (M57.1). */
   streaming: boolean;
+  /** The card this conversation shows (M57.1): waiting, answering, or stale. */
+  interaction: WaitingCard | null;
+  /** A card waits for the person (M57.1): the turn is held, not running. */
+  waiting: boolean;
+  /** Answer the waiting card (M57.1): the run resumes in the same bubble. */
+  answer(answer: PersonAnswer): void;
   /** `message` is what the agent runs when it differs from what the transcript
    * shows — a skill invocation displays as `/name` but sends the body (M13.1).
    * As a FUNCTION it is awaited inside the turn, so the transcript appends and
@@ -82,10 +127,23 @@ export interface AgentChat {
   stop(): void;
   reset(): void;
   /** M9.5: the CLI session behind this transcript, so a conversation can be
-   * resumed after a reload rather than starting over. */
+   * resumed after a reload rather than starting over. Minted before the first
+   * event (M56.3), and the session file a lost thread is rebuilt from. */
   sessionId: string | null;
-  /** Restore a persisted conversation into the hook. */
-  restore(messages: ChatMessage[], sessionId: string | null): void;
+  /** The model Claude Code last reported answering (M56.3), or null. */
+  model: string | null;
+  /** Pull requests the conversation's session opened (M56.3). */
+  prLinks: PrLink[];
+  /** When the last turn ended (ISO), or null while none has this session. */
+  turnEndedAt: string | null;
+  /** Restore a persisted conversation into the hook, with what its
+   * transcript says about it when it was read back (M56.3); without facts,
+   * the model and the links clear. */
+  restore(
+    messages: ChatMessage[],
+    sessionId: string | null,
+    facts?: { model: string | null; prLinks: PrLink[] },
+  ): void;
 }
 
 /**
@@ -109,7 +167,6 @@ export function useAgentChat(
   /** This turn's context — see TurnContext for why it is a getter. */
   getTurn: () => TurnContext,
   { shell, connectors }: { shell: boolean; connectors: boolean },
-  model: string | null,
   /** Fires after a turn that wrote files, with a one-line summary (M9.5). */
   onWroteFiles?: (summary: string) => void,
 ): AgentChat {
@@ -134,6 +191,9 @@ export function useAgentChat(
   }, []);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const sessionRef = useRef<string | null>(null);
+  const [reportedModel, setReportedModel] = useState<string | null>(null);
+  const [prLinks, setPrLinks] = useState<PrLink[]>([]);
+  const [turnEndedAt, setTurnEndedAt] = useState<string | null>(null);
   // The prompt that started the in-flight turn, so a write checkpoint can say
   // what the agent was asked to do rather than just that it wrote.
   const lastPrompt = useRef<string>('');
@@ -160,6 +220,16 @@ export function useAgentChat(
   // The agent writes straight to disk; a turn that touched files must end
   // with a rescan or the UI keeps showing the pre-agent vault.
   const touchedFiles = useRef(false);
+  // M57.1: the card this conversation shows, mirrored in a ref so the event
+  // handler reads it in the same dispatch that set it, and the calls this
+  // turn's run deferred that have not come back.
+  const [interaction, setInteraction] = useState<WaitingCard | null>(null);
+  const interactionRef = useRef<WaitingCard | null>(null);
+  const showInteraction = useCallback((next: WaitingCard | null) => {
+    interactionRef.current = next;
+    setInteraction(next);
+  }, []);
+  const deferredIds = useRef<Set<string>>(new Set());
 
   const patchMessage = useCallback((id: string, update: (m: ChatMessage) => ChatMessage) => {
     setMessages((prev) => prev.map((m) => (m.id === id ? update(m) : m)));
@@ -191,99 +261,116 @@ export function useAgentChat(
     void stopAgent(run).catch(() => undefined);
   }, []);
 
+  /**
+   * One event of this turn's run. What the message shows is the reducer's
+   * (`transcript.ts`, the same one a restored thread replays through); this
+   * keeps only the side effects: the session, touched files, the model, the
+   * links, and ending the turn.
+   */
+  /** The turn is over: it frees its run and its task, notes when it ended,
+   * and a turn that wrote rescans and checkpoints. */
+  const finishTurn = useCallback(() => {
+    deferredIds.current.clear();
+    endTurn();
+    setTurnEndedAt(new Date().toISOString());
+    if (touchedFiles.current) {
+      touchedFiles.current = false;
+      void rescan();
+      // M9.5/M9.4: a turn that wrote files gets its own checkpoint, so
+      // the assistant's work is revertible on its own rather than
+      // tangled into the user's next one.
+      onWrote.current?.(lastPrompt.current);
+    }
+  }, [endTurn, rescan]);
+
   const handleEvent = useCallback(
     (assistantId: string, event: AgentEvent) => {
       switch (event.kind) {
         case 'Init':
           sessionRef.current = event.session_id;
           setSessionId(event.session_id);
+          return;
+        case 'Interaction':
+          // M57.1: this run's own gate holds a call for the person.
+          showInteraction({
+            card: event.interaction,
+            messageId: assistantId,
+            answering: false,
+            stale: null,
+          });
+          return;
+        case 'ToolDeferred':
+          deferredIds.current.add(event.tool_id);
           break;
-        case 'TextDelta':
-          patchMessage(assistantId, (m) => ({ ...m, text: m.text + event.text }));
-          break;
-        case 'ThinkingDelta':
-          // Reasoning is not shown as prose — it would read as the answer.
-          // Only its arrival matters, as a "working" signal.
+        case 'ToolDone':
+          deferredIds.current.delete(event.tool_id);
           break;
         case 'ToolStart':
           if (isWriteTool(event.tool_name)) touchedFiles.current = true;
-          patchMessage(assistantId, (m) => {
-            // A tool_id is unique within a turn by definition, so a repeat is a
-            // redelivery of the same call — never a second call. Appending it
-            // blindly is what put `["t-1","t-1","t-2","t-2"]` in shipped
-            // transcripts: duplicate React keys (AiPanel keys rows by tool.id),
-            // and every tool row drawn twice (M15).
-            const at = m.tools.findIndex((t) => t.id === event.tool_id);
-            if (at === -1) {
-              const started = {
-                id: event.tool_id,
-                name: event.tool_name,
-                input: event.input ?? null,
-                output: null,
-                done: false,
-                failed: false,
-              };
-              return { ...m, tools: [...m.tools, started] };
-            }
-            // A redelivery must not un-finish a tool (PR #7 review). ToolDone
-            // may already have landed for this id, and rebuilding the row from
-            // the start event alone would blank the result and set the row
-            // spinning again — so only what the start event actually knows is
-            // refreshed, and the completion the row already has is kept.
-            const tools = m.tools.slice();
-            tools[at] = {
-              ...tools[at],
-              name: event.tool_name,
-              input: event.input ?? tools[at].input,
-            };
-            return { ...m, tools };
-          });
           break;
-        case 'ToolDone':
-          patchMessage(assistantId, (m) => ({
-            ...m,
-            tools: m.tools.map((t) =>
-              t.id === event.tool_id
-                ? {
-                    ...t,
-                    done: true,
-                    output: event.output ?? null,
-                    failed: event.is_error === true,
-                  }
-                : t,
-            ),
-          }));
+        case 'ModelChanged':
+          setReportedModel(event.model);
           break;
+        case 'PrLink':
+          setPrLinks((prev) =>
+            prev.some((link) => link.url === event.url)
+              ? prev
+              : [...prev, { number: event.number, url: event.url, repository: event.repository }],
+          );
+          return;
         case 'Result':
           if (event.session_id) {
             sessionRef.current = event.session_id;
             setSessionId(event.session_id);
           }
-          // The final result is authoritative: streamed deltas can be partial
-          // when a turn is interrupted, so prefer it when it has content.
-          patchMessage(assistantId, (m) => ({
-            ...m,
-            text: event.text.trim() !== '' ? event.text : m.text,
-          }));
           break;
-        case 'Error':
-          patchMessage(assistantId, (m) => ({ ...m, error: event.message }));
-          break;
-        case 'Done':
-          patchMessage(assistantId, (m) => ({ ...m, streaming: false }));
-          endTurn();
-          if (touchedFiles.current) {
-            touchedFiles.current = false;
-            void rescan();
-            // M9.5/M9.4: a turn that wrote files gets its own checkpoint, so
-            // the assistant's work is revertible on its own rather than
-            // tangled into the user's next one.
-            onWrote.current?.(lastPrompt.current);
+        case 'Done': {
+          patchMessage(assistantId, endLiveTurn);
+          // M57.1: a run that stopped on a call for the person has ended,
+          // and its turn has not: it stays in flight, waiting, with no run,
+          // until an answer resumes it or Stop cancels it.
+          const waitingOn = interactionRef.current;
+          if (waitingOn !== null && waitingOn.stale === null) {
+            releaseRun();
+            return;
           }
-          break;
+          if (deferredIds.current.size === 0) {
+            finishTurn();
+            return;
+          }
+          // A deferral with no card: the book may hold one this event raced,
+          // or a hook outside Cerebro held the call, which no card answers.
+          const held = [...deferredIds.current];
+          const session = sessionRef.current;
+          const epoch = sendEpoch.current;
+          releaseRun();
+          const settle = (card: PendingInteraction | undefined) => {
+            if (sendEpoch.current !== epoch) return;
+            if (card !== undefined) {
+              showInteraction({ card, messageId: assistantId, answering: false, stale: null });
+              return;
+            }
+            patchMessage(assistantId, (m) => ({
+              ...m,
+              tools: m.tools.map((t) => (held.includes(t.id) ? { ...t, paused: true } : t)),
+            }));
+            finishTurn();
+          };
+          if (vaultPath === null) {
+            settle(undefined);
+            return;
+          }
+          void listInteractions(vaultPath)
+            .then((cards) =>
+              settle(cards.find((c) => c.session_id === session && held.includes(c.tool_id))),
+            )
+            .catch(() => settle(undefined));
+          return;
+        }
       }
+      patchMessage(assistantId, (m) => applyEvent(m, event, 'live'));
     },
-    [endTurn, patchMessage, rescan],
+    [finishTurn, patchMessage, releaseRun, showInteraction, vaultPath],
   );
 
   const send = useCallback(
@@ -295,6 +382,9 @@ export function useAgentChat(
       // that hit it kept its draft, so nothing is lost.
       if (turnInFlight.current) return;
       turnInFlight.current = true;
+      // A card an answer came too late for goes with the next turn (M57.1).
+      showInteraction(null);
+      deferredIds.current.clear();
       // Frozen here, before anything can await: this turn's context is the
       // context the question was asked in.
       const turn = getTurn();
@@ -307,8 +397,16 @@ export function useAgentChat(
       // D8: this changes who the turn goes to and nothing else. No new
       // conversation, no per-agent thread list, and the anchor `anchorNow`
       // stamps is untouched — addressing someone is not going somewhere.
-      const address = readAddress(trimmed, useVaultStore.getState().entries);
-      const recipient = address?.agent ?? null;
+      const entries = useVaultStore.getState().entries;
+      const address = readAddress(trimmed, entries);
+      const addressedTo = address?.agent ?? null;
+      // M56.6 — no `@` that routed, so the agent Settings binds the panel to
+      // answers, if any record still answers to its handle.
+      const bound =
+        addressedTo === null && turn.boundAgent != null
+          ? (listAgents(entries).find((a) => a.handle === turn.boundAgent) ?? null)
+          : null;
+      const recipient = addressedTo ?? bound;
       const assistantId = nextId();
       lastPrompt.current = trimmed;
       // A labelled ask's prompt rides on its bubble (ChatMessage.prompt), so a
@@ -329,7 +427,13 @@ export function useAgentChat(
           // see ChatMessage.addressed.
           ...(address === null
             ? {}
-            : { addressed: { handle: address.handle, title: recipient?.title ?? null } }),
+            : {
+                addressed: {
+                  handle: address.handle,
+                  title: addressedTo?.title ?? null,
+                  ...(bound === null ? {} : { answeredBy: bound.title }),
+                },
+              }),
         },
         { id: assistantId, role: 'assistant', text: '', tools: [], streaming: true },
       ]);
@@ -372,14 +476,15 @@ export function useAgentChat(
             typeof message === 'function' ? await message().catch(() => trimmed) : message?.trim();
           const composed = expanded === undefined || expanded === '' ? trimmed : expanded;
           // M53.5 — the recipient's standing instructions close this turn's
-          // system prompt, where useJobRunner (M34.1.4) and hand_to put them.
+          // system prompt, where useJobRunner (M34.1.4) and hand_to put them;
+          // a bound agent's close it inside panelAgentPrompt (M56.6).
           // The turn is not told to fetch its own record: a read-scoped
           // agent's one reader is get_note, which holds that record to its
           // read limit like any other note. This read is the app's, made for
-          // the person who addressed the agent, so no agent's limit applies.
-          let instructions = '';
+          // the person who addressed or bound the agent, so no agent's limit
+          // applies.
+          let body = '';
           if (recipient !== null) {
-            let body: string;
             try {
               body = await readNote(vaultPath, recipient.path);
             } catch (err) {
@@ -392,10 +497,9 @@ export function useAgentChat(
                 { cause: err },
               );
             }
-            instructions = standingInstructionsBlock(recipient.path, body);
           }
           // Two narrowings can meet on one turn — a skill's `allowed-tools:`
-          // and the addressed agent's — so they intersect. Never union. What
+          // and the recipient's — so they intersect. Never union. What
           // the turn then holds is what its prompts may name (M54.7): the
           // narrowing, the shell this turn is granted, which a read limit
           // withdraws in Rust (M53.5), and a person watching.
@@ -405,24 +509,38 @@ export function useAgentChat(
             shell: shell && (recipient?.shell ?? true) && recipient?.readScope == null,
             attended: true,
           };
-          // The recipient's block LEADS, like useJobRunner's CURRENT STATE
-          // block and for the same reason. An unresolved mention adds nothing
-          // here: `@nobody` was only ever text, and inventing a preamble about
-          // an agent that does not exist would be the app answering for it.
+          // An addressed recipient's block LEADS the message, like
+          // useJobRunner's CURRENT STATE block and for the same reason. A
+          // bound agent's goes in the system prompt instead and the message
+          // goes as typed: the person named nobody, so who answers is standing
+          // context, not something they just said. An unresolved mention with
+          // no binding adds nothing: `@nobody` was only ever text, and a
+          // preamble about an agent that does not exist would be the app
+          // answering for it.
           const outgoing =
-            recipient === null
+            addressedTo === null
               ? composed
-              : `${addressedAgentPrompt(grant, recipient.path, recipient.title, recipient.actor, recipient.memory, recipient.scope, recipient.readScope)}\n\n${composed}`;
+              : `${addressedAgentPrompt(grant, addressedTo.path, addressedTo.title, addressedTo.actor, addressedTo.memory, addressedTo.scope, addressedTo.readScope)}\n\n${composed}`;
+          const closing =
+            bound !== null
+              ? `\n\n${panelAgentPrompt(grant, bound, body)}`
+              : recipient === null
+                ? ''
+                : standingInstructionsBlock(recipient.path, body);
           if (cancelled()) return;
           // Attended, no lane: never gated, so a deferral here would be a
           // contract break — startedOrThrow turns it into a visible error.
-          const { run } = startedOrThrow(
+          const { run, sessionId: started } = startedOrThrow(
             await runAgent(vaultPath, {
               message: outgoing,
-              systemPrompt: turn.systemPrompt(grant) + instructions,
+              systemPrompt: turn.systemPrompt(grant) + closing,
               sessionId: sessionRef.current,
-              model,
-              // M33b.6 — the addressed agent's grant, and it can only ever
+              // M56.5 — the conversation's pick, else the addressed agent's
+              // record, else Claude Code's default. Rust checks both.
+              model: turn.model ?? recipient?.model ?? null,
+              effort: turn.effort ?? recipient?.effort ?? null,
+              // M33b.6 — the recipient's grant (addressed, or bound in
+              // Settings since M56.6), and it can only ever
               // SUBTRACT. `shell` here is the Settings ceiling; a record that
               // declares `tools: shell` in a vault whose owner never switched
               // shell on still gets false, exactly as it does on a schedule
@@ -468,6 +586,13 @@ export function useAgentChat(
           // conversation, background job or killed child can reach this turn.
           // The mock and the Rust reader both emit asynchronously, so the id
           // is always in hand before the first event.
+          // M56.3: the session is known before the first event — minted or
+          // resumed in Rust — so the thread stores it now, and a reload
+          // mid-turn still knows which file to rebuild from.
+          if (started !== undefined && started !== null) {
+            sessionRef.current = started;
+            setSessionId(started);
+          }
           runRef.current = run;
           attachChild(taskId, run);
           unsubscribe.current = onAgentEvent((event) => handleEvent(assistantId, event), run);
@@ -485,10 +610,10 @@ export function useAgentChat(
       endTurn,
       getTurn,
       handleEvent,
-      model,
       nextId,
       patchMessage,
       shell,
+      showInteraction,
       startRun,
       toast,
       vaultPath,
@@ -496,7 +621,71 @@ export function useAgentChat(
   );
 
   /**
-   * Unmounting mid-turn ends the turn (M15).
+   * Answer the waiting card (M57.1). Rust resumes the run on the same
+   * session, and its events land in the card's bubble, under the same task.
+   * A late answer is refused `no_longer_waiting`: handled here, without a
+   * toast, because the card says it in Rust's words and the turn it waited
+   * for is over (CV-03 written reason: a typed outcome, not a failure). Any
+   * other failure is toasted and the card stays, to be answered again.
+   */
+  const answer = useCallback(
+    (given: PersonAnswer) => {
+      const current = interactionRef.current;
+      if (current === null || current.answering || current.stale !== null || vaultPath === null) {
+        return;
+      }
+      showInteraction({ ...current, answering: true });
+      const epoch = sendEpoch.current;
+      void (async () => {
+        try {
+          const result = await answerInteraction(vaultPath, current.card.id, given);
+          if (sendEpoch.current !== epoch) return;
+          if ('refused' in result) {
+            showInteraction({ ...current, answering: false, stale: result.refused.message });
+            finishTurn();
+            return;
+          }
+          showInteraction(null);
+          const { run, sessionId: resumed } = result.resumed;
+          if (resumed !== undefined && resumed !== null) {
+            sessionRef.current = resumed;
+            setSessionId(resumed);
+          }
+          patchMessage(current.messageId, (m) => ({ ...m, streaming: true }));
+          runRef.current = run;
+          if (taskRef.current !== null) attachChild(taskRef.current, run);
+          unsubscribe.current = onAgentEvent(
+            (event) => handleEvent(current.messageId, event),
+            run,
+          );
+        } catch (err) {
+          if (sendEpoch.current !== epoch) return;
+          showInteraction({ ...current, answering: false });
+          toast(err instanceof Error ? err.message : String(err));
+        }
+      })();
+    },
+    [attachChild, finishTurn, handleEvent, patchMessage, showInteraction, toast, vaultPath],
+  );
+
+  /** Refuse the waiting card's call as stopped (M57.1): Stop and New
+   * conversation do; a thread switch and closing the panel leave it waiting. */
+  const cancelWaiting = useCallback(() => {
+    const current = interactionRef.current;
+    if (current === null) return;
+    if (current.stale === null) {
+      void cancelInteraction(current.card.id).catch(() => undefined);
+      patchMessage(current.messageId, (m) =>
+        applyEvent(m, { kind: 'ToolCancelled', tool_id: current.card.tool_id }, 'live'),
+      );
+    }
+    showInteraction(null);
+  }, [patchMessage, showInteraction]);
+
+  /**
+   * Unmounting mid-turn ends the turn (M15). A turn waiting on a card has no
+   * run to stop, and its card stays in Rust's book (M57.1): reopening the
+   * panel lists it again.
    *
    * The panel is rendered conditionally, so closing the assistant while an
    * answer streams tears this hook down. Nothing here used to run on the way
@@ -526,38 +715,96 @@ export function useAgentChat(
   }, [killRun, releaseRun]);
 
   const stop = useCallback(() => {
+    cancelWaiting();
     killRun();
     // The epoch bump is what reaches a send still parked on a skill expansion
     // — killRun can only kill a child that already exists.
     sendEpoch.current += 1;
-    // Un-spin whatever is still streaming. Not just the run's bubble: a send
-    // parked before its child exists has a spinning message and no run at all.
-    setMessages((prev) => prev.map((m) => (m.streaming === true ? { ...m, streaming: false } : m)));
+    // Un-spin whatever is still streaming, and say it was stopped. Not just
+    // the run's bubble: a send parked before its child exists has a spinning
+    // message and no run at all.
+    setMessages((prev) =>
+      prev.map((m) => (m.streaming === true ? { ...m, streaming: false, interrupted: true } : m)),
+    );
     endTurn();
-  }, [endTurn, killRun]);
+  }, [cancelWaiting, endTurn, killRun]);
 
   const reset = useCallback(() => {
+    cancelWaiting();
     killRun();
     sendEpoch.current += 1;
     sessionRef.current = null;
     setSessionId(null);
+    setReportedModel(null);
+    setPrLinks([]);
+    setTurnEndedAt(null);
     endTurn();
     setMessages([]);
-  }, [endTurn, killRun]);
+  }, [cancelWaiting, endTurn, killRun]);
 
   /** Load a stored conversation. Ends this conversation's turn first: the
-   * events still in flight belong to the transcript being replaced. */
+   * events still in flight belong to the transcript being replaced. A card
+   * the thread left is not cancelled (M57.1): it stays in Rust's book, and
+   * the restored thread's own card, if it has one, is listed back. */
   const restore = useCallback(
-    (restored: ChatMessage[], restoredSession: string | null) => {
+    (
+      restored: ChatMessage[],
+      restoredSession: string | null,
+      facts?: { model: string | null; prLinks: PrLink[] },
+    ) => {
       killRun();
       sendEpoch.current += 1;
+      showInteraction(null);
+      deferredIds.current.clear();
       endTurn();
       sessionRef.current = restoredSession;
       setSessionId(restoredSession);
+      setReportedModel(facts?.model ?? null);
+      setPrLinks(facts?.prLinks ?? []);
+      setTurnEndedAt(null);
       setMessages(restored);
+      if (restoredSession === null || vaultPath === null) return;
+      const epoch = sendEpoch.current;
+      void listInteractions(vaultPath)
+        .then((cards) => {
+          if (sendEpoch.current !== epoch) return;
+          const card = cards.find((c) => c.session_id === restoredSession);
+          if (card === undefined) return;
+          const assistants = restored.filter((m) => m.role === 'assistant');
+          const bubble =
+            assistants.find((m) => m.tools.some((t) => t.id === card.tool_id)) ??
+            assistants[assistants.length - 1];
+          if (bubble === undefined) return;
+          // The thread waits again: held in flight, its row marked held.
+          patchMessage(bubble.id, (m) =>
+            applyEvent(
+              m,
+              { kind: 'ToolDeferred', tool_id: card.tool_id, tool_name: card.tool_name },
+              'live',
+            ),
+          );
+          showInteraction({ card, messageId: bubble.id, answering: false, stale: null });
+          turnInFlight.current = true;
+          setStreaming(true);
+        })
+        .catch(() => undefined);
     },
-    [endTurn, killRun],
+    [endTurn, killRun, patchMessage, showInteraction, vaultPath],
   );
 
-  return { messages, streaming, send, stop, reset, sessionId, restore };
+  return {
+    messages,
+    streaming,
+    interaction,
+    waiting: interaction !== null && interaction.stale === null,
+    answer,
+    send,
+    stop,
+    reset,
+    sessionId,
+    model: reportedModel,
+    prLinks,
+    turnEndedAt,
+    restore,
+  };
 }

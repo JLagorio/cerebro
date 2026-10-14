@@ -37,6 +37,10 @@ use super::{prompt, store};
 /// The actor an attended synthesis run's MCP calls are attributed to.
 pub const ACTOR: &str = "agent:m26-synthesis";
 
+/// The surface a cost-accounting gap is filed under: telemetry, not a
+/// refusal, so the run detail's Refused section leaves it out (M56.9).
+pub(crate) const COSTS_SURFACE: &str = "assembly.costs";
+
 /// What one run needs from the outside world.
 pub trait Spawn {
     /// A bearer for this run, granted the durable id `run_id()` names. The
@@ -292,7 +296,7 @@ fn record_run_costs(
                     crate::policy::rejection::OperationalRefusal::new(
                         &table,
                         "capability_unavailable",
-                        "assembly.costs",
+                        COSTS_SURFACE,
                         &detail,
                     )
                     .ok()

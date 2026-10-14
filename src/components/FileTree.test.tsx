@@ -263,7 +263,7 @@ describe('FileTree', () => {
     await waitFor(() => expect(fs().has(`${ROOT}/meetings/kickoff.md`)).toBe(false));
   });
 
-  // M2.x docs polish: folder-note docs render as documents with page tabs.
+  // M2.x docs polish: a folder note renders as its page, its sub-pages beneath.
   it('renders a folder-note as a doc row that opens its main page', async () => {
     fs().set(`${ROOT}/notes/notes.md`, '# Team Notes\n');
     fs().set(`${ROOT}/notes/extra.md`, '# Extra page\n');
@@ -274,11 +274,38 @@ describe('FileTree', () => {
     expect(doc.textContent).toContain('Team Notes');
     fireEvent.click(doc);
     expect(onOpen).toHaveBeenCalledWith(`${ROOT}/notes/notes.md`);
-    // Expanding shows only the extra pages, not the folder note itself.
+    // Expanding shows only the sub-pages, not the folder note itself.
     fireEvent.click(screen.getByRole('button', { name: 'Expand Team Notes' }));
     const files = screen.getAllByTestId('tree-file').map((el) => el.textContent);
     expect(files).toContain('Extra page');
     expect(files).not.toContain('Team Notes');
+  });
+
+  // M55.11 — a page's own icon comes first on its row; without one, the row
+  // keeps its type's glyph (a file) or the stack (a doc).
+  it('file rows and doc rows draw page icons, and fall back to the type style', async () => {
+    const ROCKET = '\u{1F680}';
+    const PARTY = '\u{1F389}';
+    fs().set(`${ROOT}/notes/notes.md`, `---\nicon: ${ROCKET}\n---\n# Team Notes\n`);
+    fs().set(`${ROOT}/notes/extra.md`, `---\nicon: ${PARTY}\n---\n# Extra page\n`);
+    fs().set(`${ROOT}/notes/plain.md`, '# Plain page\n');
+    await useVaultStore.getState().rescan();
+    renderTree();
+    const doc = screen.getByTestId('tree-doc');
+    expect(doc.querySelector('[role="img"]')?.textContent).toBe(ROCKET);
+    expect(doc.querySelector('[data-icon="file-stack"]')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Team Notes' }));
+    const rows = screen.getAllByTestId('tree-file');
+    const extra = rows.find((r) => r.textContent?.includes('Extra page'));
+    const plain = rows.find((r) => r.textContent?.includes('Plain page'));
+    expect(extra?.querySelector('[role="img"]')?.textContent).toBe(PARTY);
+    expect(plain?.querySelector('[role="img"]')).toBeNull();
+    expect(plain?.querySelector('[data-icon="file-text"]')).not.toBe(null);
+    // A typed file with no icon keeps its type's glyph.
+    fireEvent.click(screen.getByRole('button', { name: /^Meetings/ }));
+    const kickoff = screen.getByRole('button', { name: KICKOFF_TITLE });
+    expect(kickoff.querySelector('[role="img"]')).toBeNull();
+    expect(kickoff.querySelector('svg[data-icon]')).not.toBe(null);
   });
 
   it('creates a page from a template with placeholders filled', async () => {
@@ -300,7 +327,8 @@ describe('FileTree', () => {
 
   // --- Drag & drop (M2.x): reorder siblings, move into folders ------------
   // jsdom rects are zero-sized, so onRowDragOver's ratio reduces to the raw
-  // clientY: 0 → before, 0.5 → into, 1 → after.
+  // clientY: 0 → before, 0.5 → into, 1 → after. A file row that cannot take
+  // sub-pages has no middle: below 0.5 is before, the rest after.
 
   const rowFor = (path: string) =>
     screen
@@ -349,6 +377,94 @@ describe('FileTree', () => {
     expect(fs().has(`${ROOT}/meetings/kickoff.md`)).toBe(false);
     // The destination folder reveals the moved file.
     expect(useUiStore.getState().expandedFolders[`${ROOT}/items`]).toBe(true);
+  });
+
+  // M55.13 — a page row takes a drop into its middle half as nesting; its
+  // outer quarters still reorder.
+  describe('sub-pages', () => {
+    beforeEach(async () => {
+      fs().set(`${ROOT}/alpha.md`, '# Alpha\n');
+      fs().set(`${ROOT}/beta.md`, '# Beta\n');
+      await useVaultStore.getState().rescan();
+    });
+
+    it('nests a page dropped on the middle of a page row, growing the target', async () => {
+      const onOpen = vi.fn();
+      render(
+        <FileTree
+          root={ROOT}
+          hide={(p) => p === PROJECT}
+          activePath={`${ROOT}/alpha.md`}
+          onOpen={onOpen}
+        />,
+      );
+      drag(`${ROOT}/beta.md`, `${ROOT}/alpha.md`, 0.5);
+      await waitFor(() => expect(fs().get(`${ROOT}/alpha/beta.md`)).toBe('# Beta\n'));
+      expect(fs().get(`${ROOT}/alpha/alpha.md`)).toBe('# Alpha\n');
+      expect(fs().has(`${ROOT}/alpha.md`)).toBe(false);
+      // The open page follows its file, and the new folder opens.
+      expect(onOpen).toHaveBeenCalledWith(`${ROOT}/alpha/alpha.md`);
+      expect(useUiStore.getState().expandedFolders[`${ROOT}/alpha`]).toBe(true);
+    });
+
+    it('still reorders on the outer quarters of a page row', async () => {
+      renderTree();
+      drag(`${ROOT}/beta.md`, `${ROOT}/alpha.md`, 0);
+      await waitFor(() => expect(useUiStore.getState().treeOrder[ROOT]).toBeDefined());
+      const order = useUiStore.getState().treeOrder[ROOT];
+      expect(order.indexOf('beta')).toBeLessThan(order.indexOf('alpha'));
+      drag(`${ROOT}/beta.md`, `${ROOT}/alpha.md`, 1);
+      await waitFor(() => {
+        const next = useUiStore.getState().treeOrder[ROOT];
+        expect(next.indexOf('beta')).toBe(next.indexOf('alpha') + 1);
+      });
+      expect(fs().has(`${ROOT}/alpha.md`)).toBe(true);
+      expect(fs().has(`${ROOT}/beta.md`)).toBe(true);
+    });
+
+    it('refuses a doc dropped onto its own sub-page, and moves nothing', async () => {
+      fs().set(`${ROOT}/notes/notes.md`, '# Team Notes\n');
+      fs().set(`${ROOT}/notes/extra.md`, '# Extra page\n');
+      await useVaultStore.getState().rescan();
+      renderTree();
+      fireEvent.click(screen.getByRole('button', { name: 'Expand Team Notes' }));
+      const before = new Map(fs());
+      drag(`${ROOT}/notes`, `${ROOT}/notes/extra.md`, 0.5);
+      await waitFor(() =>
+        expect(
+          useUiStore.getState().toasts.some((t) => t.message.startsWith("Couldn't add sub-page")),
+        ).toBe(true),
+      );
+      expect(new Map(fs())).toEqual(before);
+    });
+
+    it("a page row's + and its menu open Add sub-page", async () => {
+      const onOpen = renderTree();
+      fireEvent.click(screen.getByRole('button', { name: 'Add a sub-page to Alpha' }));
+      expect(screen.getByRole('dialog', { name: 'Add sub-page' })).toBeTruthy();
+      expect(
+        screen.getByText('"Alpha" moves into a folder of its own. Its text does not change.'),
+      ).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+      fireEvent.contextMenu(screen.getByRole('button', { name: 'Alpha' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Add sub-page' }));
+      fireEvent.change(screen.getByPlaceholderText('Page name'), { target: { value: 'Goals' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+      await waitFor(() => expect(onOpen).toHaveBeenCalledWith(`${ROOT}/alpha/goals.md`));
+      expect(fs().get(`${ROOT}/alpha/alpha.md`)).toBe('# Alpha\n');
+      // The grown page is a doc row now, open, with its sub-page under it.
+      expect(screen.getByTestId('tree-doc').textContent).toContain('Alpha');
+      expect(screen.getAllByTestId('tree-file').map((el) => el.textContent)).toContain('Goals');
+    });
+
+    it('says No sub-pages under a page that has none', async () => {
+      fs().set(`${ROOT}/notes/notes.md`, '# Team Notes\n');
+      await useVaultStore.getState().rescan();
+      renderTree();
+      fireEvent.click(screen.getByRole('button', { name: 'Expand Team Notes' }));
+      expect(screen.getByText('No sub-pages')).toBeTruthy();
+    });
   });
 
   it('refuses to drop a folder into itself or its descendants', async () => {

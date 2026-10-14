@@ -89,6 +89,88 @@ describe('persistence', () => {
     expect(loadConversations()[0].messages[0].streaming).toBeUndefined();
   });
 
+  // M56.8 (Q21): whole tool payloads are memory only; the session file holds
+  // them, and the copy keeps the previews.
+  it('drops tool payloads and keeps the previews', () => {
+    const tool = {
+      id: 't-1',
+      name: 'mcp__cerebro__get_note',
+      input: '{"path":"a.md"}',
+      output: 'the first 2000 characters…',
+      done: true,
+      failed: false,
+      payload: { output: 'the whole result', outputBytes: 16, outputTruncated: false },
+    };
+    const c = {
+      ...newConversation(),
+      messages: [{ ...msg('assistant', 'read it'), tools: [tool] }],
+    };
+    saveConversations([c]);
+    const raw = window.localStorage.getItem('cerebro.conversations') ?? '';
+    expect(raw).not.toContain('the whole result');
+    const [saved] = loadConversations()[0].messages[0].tools;
+    expect(saved.payload).toBeUndefined();
+    expect(saved).toMatchObject({ input: '{"path":"a.md"}', output: 'the first 2000 characters…' });
+    // What is in memory keeps it.
+    expect(c.messages[0].tools[0].payload?.output).toBe('the whole result');
+  });
+
+  it('keeps a held call deferred and cancelled, and drops what is not true (M57.1)', () => {
+    const tool = (id: string, over: Record<string, unknown>) => ({
+      id,
+      name: 'mcp__cerebro__append_to_note',
+      input: '{"path":"a.md"}',
+      output: null,
+      done: false,
+      failed: false,
+      ...over,
+    });
+    const c = {
+      ...newConversation(),
+      messages: [
+        {
+          ...msg('assistant', 'held'),
+          tools: [
+            tool('t-1', { deferred: true }),
+            tool('t-2', { deferred: true, cancelled: true }),
+            tool('t-3', { deferred: true, paused: true }),
+          ],
+        },
+      ],
+    };
+    saveConversations([c]);
+    const [one, two, three] = loadConversations()[0].messages[0].tools;
+    expect(one.deferred).toBe(true);
+    expect(two).toMatchObject({ deferred: true, cancelled: true });
+    // Paused is memory only: after a reload the call reads not run.
+    expect(three.deferred).toBe(true);
+    expect('paused' in three).toBe(false);
+    // Whatever another build wrote that is not `true` is dropped.
+    window.localStorage.setItem(
+      'cerebro.conversations',
+      JSON.stringify([
+        {
+          ...newConversation(),
+          messages: [
+            {
+              ...msg('assistant', 'odd'),
+              tools: [
+                tool('t-4', { deferred: 'yes', cancelled: 1 }),
+                tool('t-5', { deferred: false, paused: true }),
+              ],
+            },
+          ],
+        },
+      ]),
+    );
+    const [four, five] = loadConversations()[0].messages[0].tools;
+    for (const kept of [four, five]) {
+      expect('deferred' in kept).toBe(false);
+      expect('cancelled' in kept).toBe(false);
+      expect('paused' in kept).toBe(false);
+    }
+  });
+
   it('survives a corrupted record without losing the rest', () => {
     window.localStorage.setItem(
       'cerebro.conversations',
@@ -100,6 +182,37 @@ describe('persistence', () => {
   it('returns nothing when storage holds garbage', () => {
     window.localStorage.setItem('cerebro.conversations', 'not json');
     expect(loadConversations()).toEqual([]);
+  });
+
+  // M56.4: a failed turn's card comes back with its thread.
+  it('keeps a failure notice through save and load', () => {
+    const notice = {
+      kind: 'not_signed_in',
+      title: "Claude Code isn't signed in",
+      body: 'Open Terminal, run claude, and type /login.',
+      action: 'open_settings',
+      resets_at: null,
+      window: null,
+      cli_version: '2.1.250',
+    };
+    const failed = { ...msg('assistant', ''), error: 'Not logged in', notice };
+    saveConversations([{ ...newConversation(), messages: [failed] }]);
+    expect(loadConversations()[0].messages[0].notice).toEqual(notice);
+  });
+
+  it('drops a stored notice whose words are missing, keeping the raw error', () => {
+    const c = {
+      ...newConversation(),
+      messages: [
+        { ...msg('assistant', ''), error: 'raw', notice: { kind: 'usage_limit', title: 7 } },
+        { ...msg('assistant', ''), error: 'raw', notice: 'nonsense' },
+      ],
+    };
+    window.localStorage.setItem('cerebro.conversations', JSON.stringify([c]));
+    const [first, second] = loadConversations()[0].messages;
+    expect('notice' in first).toBe(false);
+    expect('notice' in second).toBe(false);
+    expect(first.error).toBe('raw');
   });
 });
 
@@ -282,5 +395,87 @@ describe('loading a transcript written before the ToolStart dedupe (M15)', () =>
     ];
     saveConversations([clean]);
     expect(loadConversations()[0].messages[0].tools.map((t) => t.id)).toEqual(['t-1', 't-2']);
+  });
+});
+
+describe('a thread whose transcript is Claude Code’s file (M56.3)', () => {
+  const SESSION = '00000000-0000-4000-8000-000000000001';
+  const thread = (over: Partial<Conversation>): Conversation => ({
+    ...newConversation(),
+    id: 'c-1',
+    ...over,
+  });
+
+  it('keeps the vault it was had in and when its last turn ended', () => {
+    saveConversations([
+      thread({ sessionId: SESSION, vault: '/demo-vault', updatedAt: '2026-07-28T12:00:00.000Z' }),
+    ]);
+    expect(loadConversations()[0]).toMatchObject({
+      sessionId: SESSION,
+      vault: '/demo-vault',
+      updatedAt: '2026-07-28T12:00:00.000Z',
+    });
+  });
+
+  it('drops a session id that is not UUID-shaped', () => {
+    for (const bad of [
+      'mock-session',
+      '--dangerously-skip-permissions',
+      'ABCDEF00-0000-4000-8000-00000000000A',
+    ]) {
+      saveConversations([thread({ sessionId: bad })]);
+      expect(loadConversations()[0].sessionId, bad).toBeNull();
+    }
+  });
+
+  it('never persists the reducer’s live state', () => {
+    saveConversations([
+      thread({
+        messages: [
+          {
+            id: 'a',
+            role: 'assistant',
+            text: 'done',
+            tools: [],
+            streaming: true,
+            live: { messageId: 'm1', finalText: 'done', allText: 'x\n\ndone', ended: true },
+          },
+        ],
+      }),
+    ]);
+    const raw = window.localStorage.getItem('cerebro.conversations') ?? '';
+    expect(raw).not.toContain('allText');
+    expect(raw).not.toContain('streaming');
+    expect(loadConversations()[0].messages[0].text).toBe('done');
+  });
+});
+
+describe('a conversation’s model and effort (M56.5)', () => {
+  const thread = (over: Partial<Conversation>): Conversation => ({
+    ...newConversation(),
+    id: 'c-1',
+    ...over,
+  });
+
+  it('persists the pick with its conversation', () => {
+    saveConversations([
+      thread({ id: 'a', model: 'opus', effort: 'high' }),
+      thread({ id: 'b', model: 'claude-sonnet-5', effort: null }),
+    ]);
+    const [a, b] = loadConversations();
+    expect([a.model, a.effort]).toEqual(['opus', 'high']);
+    expect([b.model, b.effort]).toEqual(['claude-sonnet-5', null]);
+  });
+
+  it('drops a stored value Rust would refuse, keeping the rest', () => {
+    saveConversations([
+      thread({ id: 'a', model: '-x', effort: 'high' }),
+      thread({ id: 'b', model: 'opus', effort: 'turbo' }),
+      thread({ id: 'c', model: 3 as never, effort: '  ' }),
+    ]);
+    const [a, b, c] = loadConversations();
+    expect([a.model, a.effort]).toEqual([null, 'high']);
+    expect([b.model, b.effort]).toEqual(['opus', null]);
+    expect([c.model, c.effort]).toEqual([null, null]);
   });
 });

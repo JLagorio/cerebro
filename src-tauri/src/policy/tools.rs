@@ -3,7 +3,8 @@
 //! Every tool cerebro's loopback serves is a row here: its title, the kind of
 //! change it makes, the door it writes through, the grant axis that binds it
 //! and by which argument, how a transcript renders it, its icon and search
-//! hint, and the description and schema the model reads. The generated
+//! hint, the phrase a run of its calls folds under (M56.8), and the
+//! description and schema the model reads. The generated
 //! `propose_<op>` tools take their facts from one `generated` block (their
 //! names, descriptions and schemas stay policy.v3's), and the CLI's own
 //! built-ins are one list, in argv order.
@@ -55,6 +56,12 @@ const SEARCH_HINT_LIMIT: usize = 80;
 /// The roadmap's bounds on a served description: a thinner one is how an
 /// agent picks the wrong tool, and 2048 is the most one may carry.
 const DESCRIPTION_CHARS: std::ops::RangeInclusive<usize> = 21..=2048;
+
+/// A fold phrase is a row label, not a sentence (M56.8).
+const FOLD_LIMIT: usize = 40;
+
+/// Where a fold phrase's count goes.
+const FOLD_COUNT: &str = "{n}";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -136,12 +143,51 @@ impl TargetKind {
     }
 }
 
-/// How a transcript shows a call: a step in the run, or a change card.
+/// How a transcript shows a call (M56.8): a step in the run, a change card,
+/// or one of the rows a cerebro tool owns: a concept to review, a handoff to
+/// another agent, a commit of proposals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Renderer {
     Step,
     Change,
+    Concept,
+    Handoff,
+    Commit,
+}
+
+impl Renderer {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Renderer::Step => "step",
+            Renderer::Change => "change",
+            Renderer::Concept => "concept",
+            Renderer::Handoff => "handoff",
+            Renderer::Commit => "commit",
+        }
+    }
+
+    /// The door a cerebro tool's own row must go through, for the renderers
+    /// that draw what that door does.
+    fn door(self) -> Option<&'static str> {
+        match self {
+            Renderer::Concept => Some("concept"),
+            Renderer::Handoff => Some("run"),
+            Renderer::Commit => Some("ledger"),
+            Renderer::Step | Renderer::Change => None,
+        }
+    }
+}
+
+/// How consecutive calls to one read fold into a single transcript row
+/// (M56.8): `one` names a single call and `many` a count of them, `{n}`
+/// standing for the count. Owner-read copy, lowercase: the row capitalizes
+/// the label it joins them into.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FoldPhrases {
+    pub one: String,
+    pub many: String,
 }
 
 /// The text a `{{name}}` in a description or schema stands for.
@@ -208,6 +254,8 @@ pub struct ToolRow {
     /// Why no folder axis binds the tool; set exactly when `axis` is none.
     pub exempt: Option<String>,
     pub renderer: Renderer,
+    /// Set only on a read: what a run of its calls folds under.
+    pub fold: Option<FoldPhrases>,
     /// A lucide icon name.
     pub icon: String,
     pub always_load: bool,
@@ -247,6 +295,8 @@ pub struct CliTool {
     /// Granted, with the cerebro tools, to a run that holds shell.
     pub with_shell: bool,
     pub renderer: Renderer,
+    /// Set only on a reader: what a run of its calls folds under.
+    pub fold: Option<FoldPhrases>,
     pub icon: String,
 }
 
@@ -347,6 +397,57 @@ fn strings_in<'a>(value: &'a Value, out: &mut Vec<&'a str>) {
 /// Is `text` within `limit` characters, and not blank?
 fn fits(text: &str, limit: usize) -> bool {
     !text.trim().is_empty() && text.chars().count() <= limit
+}
+
+/// A row's fold phrases (M56.8), for a row that may fold: it reads, and it
+/// renders as a step. `writer` says why a row may not, in the row's terms.
+fn check_fold(
+    subject: &str,
+    fold: Option<&FoldPhrases>,
+    writer: Option<&str>,
+    renderer: Renderer,
+) -> Result<(), String> {
+    let Some(fold) = fold else {
+        return Ok(());
+    };
+    if let Some(why) = writer {
+        return Err(refusal(
+            subject,
+            "fold",
+            format!("is set on {why}; only a read folds, so a write keeps its path in view"),
+        ));
+    }
+    if renderer != Renderer::Step {
+        return Err(refusal(
+            subject,
+            "fold",
+            format!("is set on a {} row; only a step folds", renderer.as_str()),
+        ));
+    }
+    if !fits(&fold.one, FOLD_LIMIT) || fold.one.contains(FOLD_COUNT) {
+        return Err(refusal(
+            subject,
+            "fold.one",
+            format!("must be 1 to {FOLD_LIMIT} characters, without {FOLD_COUNT}"),
+        ));
+    }
+    if !fits(&fold.many, FOLD_LIMIT) || fold.many.matches(FOLD_COUNT).count() != 1 {
+        return Err(refusal(
+            subject,
+            "fold.many",
+            format!("must be 1 to {FOLD_LIMIT} characters, with exactly one {FOLD_COUNT}"),
+        ));
+    }
+    for (field, phrase) in [("fold.one", &fold.one), ("fold.many", &fold.many)] {
+        if phrase.chars().next().is_some_and(char::is_uppercase) {
+            return Err(refusal(
+                subject,
+                field,
+                "must start lowercase; the row capitalizes the label it joins",
+            ));
+        }
+    }
+    Ok(())
 }
 
 impl ToolsManifest {
@@ -522,6 +623,14 @@ impl ToolsManifest {
                 ),
             ));
         }
+        check_fold(
+            subject,
+            row.fold.as_ref(),
+            (row.kind != Kind::ReadOnly)
+                .then(|| format!("a tool whose kind is {}", row.kind.as_str()))
+                .as_deref(),
+            row.renderer,
+        )?;
         self.check_facts(
             subject,
             &Facts {
@@ -537,6 +646,13 @@ impl ToolsManifest {
                 search_hint: &row.search_hint,
             },
         )?;
+        if row.renderer == Renderer::Commit && row.surface != Surface::Proposals {
+            return Err(refusal(
+                subject,
+                "renderer",
+                "commit needs the proposals surface",
+            ));
+        }
         let chars = row.description.chars().count();
         if !DESCRIPTION_CHARS.contains(&chars) {
             return Err(refusal(
@@ -726,8 +842,28 @@ impl ToolsManifest {
                     format!("change needs a door that writes, and {} does not", door.id),
                 ));
             }
-            if facts.target.is_none() {
-                return Err(refusal(subject, "renderer", "change needs a target"));
+        }
+        // A change card shows the path it changed, and a concept row opens
+        // the concept to review: both need the argument that names it.
+        if matches!(facts.renderer, Renderer::Change | Renderer::Concept) && facts.target.is_none()
+        {
+            return Err(refusal(
+                subject,
+                "renderer",
+                format!("{} needs a target", facts.renderer.as_str()),
+            ));
+        }
+        if let Some(needed) = facts.renderer.door() {
+            if door.id != needed {
+                return Err(refusal(
+                    subject,
+                    "renderer",
+                    format!(
+                        "{} needs door {needed}, not {}",
+                        facts.renderer.as_str(),
+                        door.id
+                    ),
+                ));
             }
         }
         if !is_kebab(facts.icon) {
@@ -781,6 +917,22 @@ fn check_cli(tool: &CliTool) -> Result<(), String> {
     let subject = subject.as_str();
     if !is_pascal(&tool.name) {
         return Err(refusal(subject, "name", "must match [A-Z][A-Za-z]*"));
+    }
+    check_fold(
+        subject,
+        tool.fold.as_ref(),
+        tool.writes.then_some("a tool that writes"),
+        tool.renderer,
+    )?;
+    if tool.renderer.door().is_some() {
+        return Err(refusal(
+            subject,
+            "renderer",
+            format!(
+                "{} draws a cerebro tool's own door, never a CLI tool",
+                tool.renderer.as_str()
+            ),
+        ));
     }
     if tool.with_shell && !tool.denied_without_shell && !tool.denied_when_read_scoped {
         return Err(refusal(
@@ -895,6 +1047,40 @@ pub fn writes_disk(name: &str) -> bool {
         .iter()
         .find(|tool| tool.name == bare)
         .is_some_and(|tool| tool.writes)
+}
+
+/// How a transcript draws a call to `name` (M56.8): the row's renderer, the
+/// generated block's for an agent-facing op, or the CLI row's; a step for a
+/// name the manifest does not know (another server's tool).
+pub fn renderer(name: &str) -> Renderer {
+    let bare = bare_name(name);
+    if let Some(row) = row(bare) {
+        return row.renderer;
+    }
+    if bare.starts_with(generated().prefix.as_str())
+        && PolicyTable::load().is_ok_and(|table| generated_op(bare, &table).is_some())
+    {
+        return generated().renderer;
+    }
+    manifest()
+        .cli_tools
+        .iter()
+        .find(|tool| tool.name == bare)
+        .map_or(Renderer::Step, |tool| tool.renderer)
+}
+
+/// The phrases a run of calls to `name` folds under (M56.8), or `None` for a
+/// tool that never folds: a writer, a generated tool, another server's tool.
+pub fn fold(name: &str) -> Option<&'static FoldPhrases> {
+    let bare = bare_name(name);
+    if let Some(row) = row(bare) {
+        return row.fold.as_ref();
+    }
+    manifest()
+        .cli_tools
+        .iter()
+        .find(|tool| tool.name == bare)
+        .and_then(|tool| tool.fold.as_ref())
 }
 
 /// The CLI built-ins `select` keeps, in argv order.
@@ -1329,8 +1515,12 @@ mod tests {
                 &["cli tool WebFetch", "`denied_without_shell`"],
             ),
             (
-                Box::new(|v| cli(v, "Grep")["renderer"] = json!("change")),
-                &["cli tool Grep", "`renderer`"],
+                Box::new(|v| cli(v, "WebFetch")["renderer"] = json!("change")),
+                &[
+                    "cli tool WebFetch",
+                    "`renderer`",
+                    "change needs a tool that writes",
+                ],
             ),
             (
                 Box::new(|v| cli(v, "Grep")["icon"] = json!("search_icon")),
@@ -1339,6 +1529,206 @@ mod tests {
         ];
         for (mutate, fragments) in cases {
             assert_names(&refused(mutate), fragments);
+        }
+    }
+
+    #[test]
+    fn fold_phrases_live_only_on_read_rows() {
+        let cases: Vec<Case> = vec![
+            (
+                Box::new(|v| {
+                    tool(v, "create_note")["fold"] =
+                        json!({ "one": "made a note", "many": "made {n} notes" });
+                }),
+                &[
+                    "tool create_note",
+                    "`fold`",
+                    "whose kind is additive",
+                    "only a read folds",
+                ],
+            ),
+            (
+                Box::new(|v| {
+                    cli(v, "Write")["fold"] =
+                        json!({ "one": "wrote a file", "many": "wrote {n} files" });
+                }),
+                &["cli tool Write", "`fold`", "a tool that writes"],
+            ),
+            (
+                Box::new(|v| tool(v, "get_note")["renderer"] = json!("change")),
+                &[
+                    "tool get_note",
+                    "`fold`",
+                    "a change row",
+                    "only a step folds",
+                ],
+            ),
+            (
+                Box::new(|v| tool(v, "get_note")["fold"]["many"] = json!("read notes")),
+                &["tool get_note", "`fold.many`", "exactly one {n}"],
+            ),
+            (
+                Box::new(|v| tool(v, "get_note")["fold"]["many"] = json!("read {n} of {n} notes")),
+                &["tool get_note", "`fold.many`", "exactly one {n}"],
+            ),
+            (
+                Box::new(|v| tool(v, "get_note")["fold"]["one"] = json!("read {n} note")),
+                &["tool get_note", "`fold.one`", "without {n}"],
+            ),
+            (
+                Box::new(|v| tool(v, "get_note")["fold"]["one"] = json!(" ")),
+                &["tool get_note", "`fold.one`"],
+            ),
+            (
+                Box::new(|v| tool(v, "get_note")["fold"]["one"] = json!("Read a note")),
+                &["tool get_note", "`fold.one`", "lowercase"],
+            ),
+            (
+                Box::new(|v| tool(v, "get_note")["fold"]["many"] = json!("Read {n} notes")),
+                &["tool get_note", "`fold.many`", "lowercase"],
+            ),
+            (
+                Box::new(|v| tool(v, "get_note")["fold"]["one"] = json!("r".repeat(41))),
+                &["tool get_note", "`fold.one`", "1 to 40"],
+            ),
+            (
+                Box::new(|v| {
+                    tool(v, "get_note")["fold"]["many"] = json!(format!("{}{{n}}", "r".repeat(38)))
+                }),
+                &["tool get_note", "`fold.many`", "1 to 40"],
+            ),
+        ];
+        for (mutate, fragments) in cases {
+            assert_names(&refused(mutate), fragments);
+        }
+        // Exactly 40 characters loads.
+        let mut raw: Value = serde_json::from_str(TOOLS_JSON).unwrap();
+        tool(&mut raw, "get_note")["fold"]["one"] = json!("r".repeat(40));
+        parse(&raw.to_string()).expect("a 40-character phrase loads");
+        // And an unknown field inside a fold fails the parse.
+        let err = refused(|v| tool(v, "get_note")["fold"]["few"] = json!("read a few notes"));
+        assert_names(&err, &[TOOLS_PATH, "few"]);
+    }
+
+    #[test]
+    fn renderers_sit_on_their_doors() {
+        let cases: Vec<Case> = vec![
+            (
+                Box::new(|v| tool(v, "create_note")["renderer"] = json!("concept")),
+                &[
+                    "tool create_note",
+                    "`renderer`",
+                    "concept needs door concept, not note",
+                ],
+            ),
+            (
+                Box::new(|v| tool(v, "open_note")["renderer"] = json!("handoff")),
+                &[
+                    "tool open_note",
+                    "`renderer`",
+                    "handoff needs door run, not ui",
+                ],
+            ),
+            (
+                Box::new(|v| tool(v, "write_concept")["renderer"] = json!("commit")),
+                &[
+                    "tool write_concept",
+                    "`renderer`",
+                    "commit needs door ledger, not concept",
+                ],
+            ),
+            (
+                Box::new(|v| tool(v, "commit_proposals")["surface"] = json!("base")),
+                &[
+                    "tool commit_proposals",
+                    "`renderer`",
+                    "commit needs the proposals surface",
+                ],
+            ),
+            (
+                Box::new(|v| v["generated"]["renderer"] = json!("handoff")),
+                &[
+                    "generated",
+                    "`renderer`",
+                    "handoff needs door run, not ledger",
+                ],
+            ),
+            (
+                Box::new(|v| cli(v, "Write")["renderer"] = json!("concept")),
+                &[
+                    "cli tool Write",
+                    "`renderer`",
+                    "concept draws a cerebro tool's own door",
+                ],
+            ),
+            (
+                Box::new(|v| cli(v, "Task")["renderer"] = json!("handoff")),
+                &["cli tool Task", "`renderer`", "never a CLI tool"],
+            ),
+        ];
+        for (mutate, fragments) in cases {
+            assert_names(&refused(mutate), fragments);
+        }
+    }
+
+    #[test]
+    fn the_shipped_manifest_folds_exactly_the_reads() {
+        // Every read folds, cerebro's and the CLI's own, and nothing else
+        // does: a write keeps its path in view.
+        let folded: BTreeSet<&str> = manifest()
+            .tools
+            .iter()
+            .filter(|row| row.fold.is_some())
+            .map(|row| row.name.as_str())
+            .collect();
+        let reads: BTreeSet<&str> = manifest()
+            .tools
+            .iter()
+            .filter(|row| row.kind == Kind::ReadOnly)
+            .map(|row| row.name.as_str())
+            .collect();
+        assert_eq!(folded, reads);
+        assert_eq!(
+            folded,
+            BTreeSet::from([
+                "get_vault_context",
+                "search_notes",
+                "get_note",
+                "knowledge_about",
+                "list_inbox"
+            ])
+        );
+        assert_eq!(
+            cli_names(|tool| tool.fold.is_some()),
+            ["Read", "Glob", "Grep"]
+        );
+        let note = fold("mcp__cerebro__get_note").expect("get_note folds");
+        assert_eq!(
+            (note.one.as_str(), note.many.as_str()),
+            ("read a note", "read {n} notes")
+        );
+        for name in [
+            "create_note",
+            "Write",
+            "Bash",
+            "propose_create_belief",
+            "mcp__gmail__search",
+        ] {
+            assert!(fold(name).is_none(), "{name}");
+        }
+        // The renderers the transcript draws by.
+        for (name, expected) in [
+            ("write_concept", Renderer::Concept),
+            ("recheck_concept", Renderer::Concept),
+            ("mcp__cerebro__hand_to", Renderer::Handoff),
+            ("commit_proposals", Renderer::Commit),
+            ("create_note", Renderer::Change),
+            ("propose_create_belief", Renderer::Step),
+            ("propose_organize", Renderer::Step),
+            ("MultiEdit", Renderer::Change),
+            ("mcp__gmail__search", Renderer::Step),
+        ] {
+            assert_eq!(renderer(name), expected, "{name}");
         }
     }
 

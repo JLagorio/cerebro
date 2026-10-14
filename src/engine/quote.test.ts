@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import QUOTE_CASES from '../../src-tauri/fixtures/quote-cases.json';
-import { planEdits, QUOTE_LIMITS, type QuoteEdit } from './quote';
+import { occurrencesOf, planEdits, QUOTE_LIMITS, type QuoteEdit } from './quote';
 
 /**
  * The TS half of edit_note's quote rules (M55.5). Rust replays the same file
@@ -46,5 +46,24 @@ describe('planEdits', () => {
       message:
         'edit_note takes at most 100 edits in one call; this call has 101.\nNothing was written.',
     });
+  });
+});
+
+/* The finder, exported for comment anchors (M70.1) with no change to what it
+   finds: the shared cases above replay through it unchanged. */
+describe('occurrencesOf', () => {
+  it('returns every start, overlapping ones included, as UTF-16 offsets', () => {
+    expect(occurrencesOf('aaa', 'aa')).toEqual([0, 1]);
+    expect(occurrencesOf('Owner: TBD. Deadline: TBD.', 'TBD')).toEqual([7, 22]);
+    expect(occurrencesOf('😀ab😀ab', 'ab')).toEqual([2, 6]);
+  });
+
+  it('steps one code point, never into a surrogate pair', () => {
+    expect(occurrencesOf('😀😀😀', '😀😀')).toEqual([0, 2]);
+  });
+
+  it('finds nothing for a missing or an empty quote', () => {
+    expect(occurrencesOf('abc', 'x')).toEqual([]);
+    expect(occurrencesOf('abc', '')).toEqual([]);
   });
 });

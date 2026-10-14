@@ -89,7 +89,7 @@ const ORPHAN_TEMP_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(
 ///
 /// Every write runs under its path lock (M55.1): the funnel takes the
 /// `PathLock` that covers `abs`, so a write outside one does not compile.
-fn write_file(lock: &PathLock, abs: &Path, content: &str) -> Result<(), String> {
+pub(super) fn write_file(lock: &PathLock, abs: &Path, content: &str) -> Result<(), String> {
     debug_assert!(
         lock.covers(abs),
         "{} is written outside its path lock",
@@ -149,16 +149,19 @@ fn write_via_temp(abs: &Path, parent: &Path, temp: &Path, content: &str) -> Resu
 }
 
 /// Reap atomic-write temps abandoned by a crash, anywhere in the vault
-/// (skipping dot-directories, where `write_file` never writes). Best-effort
-/// janitor run once per `scan_vault` command; temps younger than
-/// [`ORPHAN_TEMP_MAX_AGE`] are spared — they may belong to a write in flight.
+/// `write_file` writes: every folder but the dot-folders, plus the comment
+/// sidecars under `.comments/` (M70.2). Best-effort janitor run once per
+/// `scan_vault` command; temps younger than [`ORPHAN_TEMP_MAX_AGE`] are
+/// spared — they may belong to a write in flight.
 pub fn clean_orphan_temps(vault: &Path) {
     let walker = walkdir::WalkDir::new(vault)
         .into_iter()
         .filter_entry(|e| {
+            let name = e.file_name().to_string_lossy();
             e.depth() == 0
                 || e.file_type().is_file()
-                || !e.file_name().to_string_lossy().starts_with('.')
+                || !name.starts_with('.')
+                || (e.depth() == 1 && name == super::comments::COMMENTS_DIR)
         })
         .filter_map(Result::ok);
     for item in walker {
@@ -185,7 +188,7 @@ pub fn clean_orphan_temps(vault: &Path) {
 /// alone only looks at the string; a name with no `..` in it can still be a
 /// symlink pointing wherever it likes, so containment has to be verified
 /// against the resolved filesystem path, not the requested one.
-fn safe_join(vault: &Path, rel: &str) -> Result<PathBuf, String> {
+pub(super) fn safe_join(vault: &Path, rel: &str) -> Result<PathBuf, String> {
     resolve(vault, rel)
         .map(|resolved| resolved.joined)
         .map_err(String::from)
@@ -534,7 +537,7 @@ fn safe_component(kind: &str, value: &str) -> Result<(), String> {
 // --- Note targets (PLATFORM-API-1, CANVAS-1) --------------------------------
 
 /// What the markdown-only note writers accept.
-const MARKDOWN: &[&str] = &["md"];
+pub(super) const MARKDOWN: &[&str] = &["md"];
 
 /// `save_note`'s set: the diagram page and the whiteboard tab save a `.mmd`
 /// raw, through the body editor's own door (M29.20, M29.46).
@@ -677,7 +680,7 @@ fn slashed(path: &Path) -> String {
 /// recorded against its run in the words the door would use. The doors
 /// still come through here, so a path that changes on disk between that
 /// check and the write is refused all the same, uncoded.
-fn note_join(vault: &Path, rel: &str, extensions: &[&str]) -> Result<PathBuf, String> {
+pub(super) fn note_join(vault: &Path, rel: &str, extensions: &[&str]) -> Result<PathBuf, String> {
     Ok(judge_note(vault, rel, extensions)?.joined)
 }
 
@@ -724,6 +727,21 @@ pub(crate) fn note_target_refusal(vault: &Path, rel: &str) -> Option<String> {
         return None;
     }
     refused(judge_note(vault, rel, MARKDOWN))
+}
+
+/// The markdown note `rel` names, as an absolute canonical path, for a door
+/// that hands the file to something outside the app (M55.9: Reveal in Finder
+/// and Open in default editor). `note_join` judges it, so M53.4's refusals
+/// hold here too: no dot-path, no non-note, nothing in `views/` or
+/// `attachments/`, no bundle alias and no symlink out. Then it must exist and
+/// be a file. It reads and writes nothing.
+pub(crate) fn existing_note(vault: &Path, rel: &str) -> Result<PathBuf, String> {
+    let joined = note_join(vault, rel, MARKDOWN)?;
+    joined
+        .canonicalize()
+        .ok()
+        .filter(|abs| abs.is_file())
+        .ok_or_else(|| format!("{rel} is not a file in the vault"))
 }
 
 /// `safe_join` for the ledger's projection writer (`ledger::manifest`): the
@@ -1670,42 +1688,182 @@ pub fn create_folder(vault: &Path, rel: &str) -> Result<(), String> {
     std::fs::create_dir_all(&abs).map_err(|e| e.to_string())
 }
 
-/// Move a note — or a whole folder — within the vault. Refuses to clobber an
-/// existing target. Both paths register as own-writes so the watcher doesn't
-/// bounce our move back as external changes.
+/// Move a note — or a whole folder — within the vault, and its comments with
+/// it (M70.2). Refuses to clobber an existing target. Every path registers
+/// as an own-write so the watcher doesn't bounce our move back as external
+/// changes.
 ///
-/// Both ends are locked in one `lock_paths` call (M55.1), so the target is
-/// judged free under its lock. A folder move holds only the folder's keys,
-/// not those of the files inside it.
+/// Both ends and both comment sidecars (a page's `.comments/<page>.json`, or
+/// a folder's mirrored `.comments/<folder>`) are locked in one `lock_paths`
+/// call (M55.1), so the target is judged free under its lock. A folder move
+/// holds only the folder's keys, not those of the files inside it.
 pub fn rename_note(vault: &Path, from: &str, to: &str) -> Result<(), String> {
+    rename_note_with(vault, from, to, |path| {
+        trash::delete(path).map_err(|e| e.to_string())
+    })
+}
+
+/// `rename_note` with the step that clears an orphan sidecar already at the
+/// target passed in, so tests never reach the OS Trash.
+///
+/// In order, under the lock: the target must be free; an orphan sidecar at
+/// the target goes to `remove` (a page created where a page was moved or
+/// deleted outside Cerebro would otherwise inherit its threads); the sidecar
+/// moves; the page moves, and if that fails the sidecar moves back. A refused
+/// or failed rename leaves every file where it was.
+pub(crate) fn rename_note_with(
+    vault: &Path,
+    from: &str,
+    to: &str,
+    remove: impl Fn(&Path) -> Result<(), String>,
+) -> Result<(), String> {
     let src = safe_join(vault, from)?;
     let dst = safe_join(vault, to)?;
-    let _lock = lock_paths(vault, &[from, to])?;
+    let is_dir = src.is_dir();
+    let carried =
+        super::comments::carried_rel(from, is_dir).zip(super::comments::carried_rel(to, is_dir));
+    let mut keys = vec![from, to];
+    if let Some((side_from, side_to)) = &carried {
+        keys.extend([side_from.as_str(), side_to.as_str()]);
+    }
+    let _lock = lock_paths(vault, &keys)?;
     if dst.exists() {
         return Err(format!("target already exists: {to}"));
     }
-    if let Some(parent) = dst.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    // A missing source fails in the words the rename itself would use,
+    // before any sidecar moves.
+    std::fs::symlink_metadata(&src).map_err(|e| format!("{from}: {e}"))?;
+    let mut moved = None;
+    if let Some((side_from, side_to)) = &carried {
+        let old_side = safe_join(vault, side_from)?;
+        let new_side = safe_join(vault, side_to)?;
+        if new_side.exists() {
+            log::warn!("comments: an orphan sidecar at {side_to} goes to the Trash first");
+            remove(&new_side).map_err(|e| {
+                format!("{to}: the comments already filed there could not be cleared ({e})")
+            })?;
+            super::watcher::note_own_write(&new_side);
+            crate::runtime::vault_writes::record(vault, "vault.delete", side_to, None, None, None);
+        }
+        if old_side.exists() {
+            if let Some(parent) = new_side.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            std::fs::rename(&old_side, &new_side)
+                .map_err(|e| format!("{from}: its comments could not move ({e})"))?;
+            moved = Some((old_side, new_side));
+        }
     }
-    std::fs::rename(&src, &dst).map_err(|e| format!("{from}: {e}"))?;
+    let renamed = dst
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| std::fs::rename(&src, &dst));
+    if let Err(e) = renamed {
+        if let Some((old_side, new_side)) = &moved {
+            if let Err(back) = std::fs::rename(new_side, old_side) {
+                log::warn!(
+                    "comments: the sidecar of {from} stayed at {} after the rename failed: {back}",
+                    new_side.display()
+                );
+            }
+        }
+        prune_empty_comment_folders(vault);
+        return Err(format!("{from}: {e}"));
+    }
     super::watcher::note_own_write(&src);
     super::watcher::note_own_write(&dst);
     crate::runtime::vault_writes::record(vault, "vault.rename", from, Some(to), None, None);
+    if let (Some((old_side, new_side)), Some((side_from, side_to))) = (&moved, &carried) {
+        super::watcher::note_own_write(old_side);
+        super::watcher::note_own_write(new_side);
+        crate::runtime::vault_writes::record(
+            vault,
+            "vault.rename",
+            side_from,
+            Some(side_to),
+            None,
+            None,
+        );
+    }
+    prune_empty_comment_folders(vault);
     Ok(())
 }
 
 /// Move a note or folder to the OS trash — user markdown is never
-/// hard-deleted.
+/// hard-deleted — and its comments after it (M70.2, Q4: to the Trash, so no
+/// orphan waits for a new page at that path).
 pub fn delete_note(vault: &Path, rel: &str) -> Result<(), String> {
+    delete_note_with(vault, rel, |path| {
+        trash::delete(path).map_err(|e| e.to_string())
+    })
+}
+
+/// `delete_note` with the step that moves a file to the Trash passed in, so
+/// tests never reach the OS Trash. The page goes first; its sidecar, or a
+/// folder's mirrored sidecar folder, follows. A sidecar that fails to go is
+/// logged and the delete stands.
+pub(crate) fn delete_note_with(
+    vault: &Path,
+    rel: &str,
+    remove: impl Fn(&Path) -> Result<(), String>,
+) -> Result<(), String> {
     let abs = safe_join(vault, rel)?;
-    let _lock = lock_paths(vault, &[rel])?;
+    let carried = super::comments::carried_rel(rel, abs.is_dir());
+    let mut keys = vec![rel];
+    if let Some(side) = &carried {
+        keys.push(side.as_str());
+    }
+    let _lock = lock_paths(vault, &keys)?;
     if !abs.exists() {
         return Err(format!("not found: {rel}"));
     }
-    trash::delete(&abs).map_err(|e| e.to_string())?;
+    remove(&abs)?;
     super::watcher::note_own_write(&abs);
     crate::runtime::vault_writes::record(vault, "vault.delete", rel, None, None, None);
+    if let Some(side) = &carried {
+        match safe_join(vault, side) {
+            Ok(side_abs) if side_abs.exists() => match remove(&side_abs) {
+                Ok(()) => {
+                    super::watcher::note_own_write(&side_abs);
+                    crate::runtime::vault_writes::record(
+                        vault,
+                        "vault.delete",
+                        side,
+                        None,
+                        None,
+                        None,
+                    );
+                }
+                Err(e) => log::warn!("comments: {side} stayed after {rel} was deleted: {e}"),
+            },
+            Ok(_) => {}
+            Err(e) => log::warn!("comments: {side} was not looked for: {e}"),
+        }
+        prune_empty_comment_folders(vault);
+    }
     Ok(())
+}
+
+/// Remove every empty folder under `.comments/`, and `.comments/` itself
+/// when nothing is left, so a carry leaves no empty folder behind. Never
+/// follows a link: only real, empty directories go.
+fn prune_empty_comment_folders(vault: &Path) {
+    let root = vault.join(super::comments::COMMENTS_DIR);
+    let is_real_dir = std::fs::symlink_metadata(&root).is_ok_and(|m| m.is_dir());
+    if !is_real_dir {
+        return;
+    }
+    let dirs: Vec<PathBuf> = walkdir::WalkDir::new(&root)
+        .contents_first(true)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_dir())
+        .map(|e| e.into_path())
+        .collect();
+    for dir in dirs {
+        // Fails, and is left alone, unless the folder is empty.
+        let _ = std::fs::remove_dir(dir);
+    }
 }
 
 #[cfg(test)]
@@ -1745,6 +1903,43 @@ mod tests {
         assert_eq!(
             read(&vault, "items/atl-1.md"),
             "---\ntype: Work item\nkey: ATL-1\nstatus: done\ncustom_field: kept\n---\n\n# Ship the scanner\n\nBody stays.\n"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M55.11: a page's icon and cover are frontmatter like any other key, so
+    // a patch to another key reserializes their lines: an emoji (a ZWJ one
+    // too), a quoted hex colour and an attachment path must come back
+    // byte-identical, and a null icon removes that line alone.
+    #[test]
+    fn a_page_icon_and_cover_survive_another_keys_patch_byte_for_byte() {
+        let vault = testutil::temp_vault("wfm-page-chrome");
+        let colour = "---\nicon: \u{1F680}\nbadge: \u{1F9D1}\u{200D}\u{1F680}\ncover: '#3D8BE8'\nstatus: todo\n---\n\n# Launch\n";
+        let file = "---\nicon: \u{1F9D1}\u{200D}\u{1F680}\ncover: attachments/c.png\nstatus: todo\n---\n\n# Crew\n";
+        testutil::write(&vault, "notes/launch.md", colour);
+        testutil::write(&vault, "notes/crew.md", file);
+        let done = patch(&[("status", serde_json::json!("done"))]);
+        update_frontmatter(&vault, "notes/launch.md", &done).unwrap();
+        update_frontmatter(&vault, "notes/crew.md", &done).unwrap();
+        assert_eq!(
+            read(&vault, "notes/launch.md"),
+            colour.replace("status: todo", "status: done")
+        );
+        assert_eq!(
+            read(&vault, "notes/crew.md"),
+            file.replace("status: todo", "status: done")
+        );
+        update_frontmatter(
+            &vault,
+            "notes/launch.md",
+            &patch(&[("icon", serde_json::Value::Null)]),
+        )
+        .unwrap();
+        assert_eq!(
+            read(&vault, "notes/launch.md"),
+            colour
+                .replace("icon: \u{1F680}\n", "")
+                .replace("status: todo", "status: done")
         );
         let _ = std::fs::remove_dir_all(&vault);
     }
@@ -3322,9 +3517,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&vault);
     }
 
-    // delete_note's happy path routes through the OS trash (trash::delete) —
-    // exercised manually in the tauri-dev shakeout rather than polluting the
-    // developer's Trash on every test run. Guards are covered here.
+    // delete_note's happy path is tested through delete_note_with's seam
+    // below, so no test run fills the developer's Trash. Guards are covered
+    // here.
     #[test]
     fn v2_ops_reject_escapes_and_missing_paths() {
         let vault = vault_with_note("wfm-v2-escape");
@@ -3640,6 +3835,186 @@ mod tests {
         assert_eq!(read(&vault, "attachments/report-2.pdf"), "second");
         let _ = std::fs::remove_dir_all(&vault);
         let _ = std::fs::remove_dir_all(src.parent().unwrap());
+    }
+
+    // --- Comment sidecars follow their page (M70.2) -----------------------
+
+    /// A `remove` that records what it was handed and deletes it outright,
+    /// so no test reaches the OS Trash.
+    type Removed = std::sync::Arc<Mutex<Vec<PathBuf>>>;
+
+    fn recording_remove() -> (Removed, impl Fn(&Path) -> Result<(), String>) {
+        let seen = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let log = seen.clone();
+        let remove = move |path: &Path| {
+            log.lock().unwrap().push(path.to_path_buf());
+            if path.is_dir() {
+                std::fs::remove_dir_all(path)
+            } else {
+                std::fs::remove_file(path)
+            }
+            .map_err(|e| e.to_string())
+        };
+        (seen, remove)
+    }
+
+    const SIDECAR: &str = "{\"format\":1,\"threads\":[]}\n";
+
+    fn page_with_comments(label: &str) -> PathBuf {
+        let vault = vault_with_note(label);
+        testutil::write(&vault, ".comments/items/atl-1.md.json", SIDECAR);
+        vault
+    }
+
+    #[test]
+    fn renaming_a_page_carries_its_comments() {
+        let vault = page_with_comments("wfm-carry-page");
+        let (removed, remove) = recording_remove();
+        rename_note_with(&vault, "items/atl-1.md", "archive/atl-1.md", remove).unwrap();
+        assert_eq!(read(&vault, "archive/atl-1.md"), NOTE);
+        assert_eq!(read(&vault, ".comments/archive/atl-1.md.json"), SIDECAR);
+        assert!(!vault.join(".comments/items").exists());
+        assert!(removed.lock().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn renaming_a_folder_carries_every_sidecar_beneath_it() {
+        let vault = page_with_comments("wfm-carry-folder");
+        testutil::write(&vault, "items/deep/b.md", "# B\n");
+        testutil::write(&vault, ".comments/items/deep/b.md.json", SIDECAR);
+        let (_, remove) = recording_remove();
+        rename_note_with(&vault, "items", "archive", remove).unwrap();
+        assert_eq!(read(&vault, ".comments/archive/atl-1.md.json"), SIDECAR);
+        assert_eq!(read(&vault, ".comments/archive/deep/b.md.json"), SIDECAR);
+        assert!(!vault.join(".comments/items").exists());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_refused_rename_moves_no_sidecar() {
+        let vault = page_with_comments("wfm-carry-refused");
+        testutil::write(&vault, "items/taken.md", "# Taken\n");
+        let (removed, remove) = recording_remove();
+        let err = rename_note_with(&vault, "items/atl-1.md", "items/taken.md", remove).unwrap_err();
+        assert_eq!(err, "target already exists: items/taken.md");
+        assert_eq!(read(&vault, ".comments/items/atl-1.md.json"), SIDECAR);
+        assert!(!vault.join(".comments/items/taken.md.json").exists());
+        assert!(removed.lock().unwrap().is_empty());
+        // A missing page moves nothing either.
+        let (_, remove) = recording_remove();
+        testutil::write(&vault, ".comments/items/gone.md.json", SIDECAR);
+        assert!(rename_note_with(&vault, "items/gone.md", "items/moved.md", remove).is_err());
+        assert_eq!(read(&vault, ".comments/items/gone.md.json"), SIDECAR);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_failed_page_rename_puts_the_sidecar_back() {
+        let vault = page_with_comments("wfm-carry-failed");
+        // `blocker` is a file, so the page's new folder can't be made.
+        testutil::write(&vault, "blocker", "not a folder");
+        let (_, remove) = recording_remove();
+        assert!(rename_note_with(&vault, "items/atl-1.md", "blocker/atl-1.md", remove).is_err());
+        assert_eq!(read(&vault, "items/atl-1.md"), NOTE);
+        assert_eq!(read(&vault, ".comments/items/atl-1.md.json"), SIDECAR);
+        assert!(
+            !vault.join(".comments/blocker").exists(),
+            "no folder is left behind"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_orphan_sidecar_at_the_target_is_removed_first() {
+        let vault = page_with_comments("wfm-carry-orphan");
+        let orphan = "{\"format\":1,\"threads\":[{\"comments\":[]}]}\n";
+        testutil::write(&vault, ".comments/archive/atl-1.md.json", orphan);
+        let (removed, remove) = recording_remove();
+        rename_note_with(&vault, "items/atl-1.md", "archive/atl-1.md", remove).unwrap();
+        assert_eq!(
+            *removed.lock().unwrap(),
+            vec![vault.join(".comments/archive/atl-1.md.json")]
+        );
+        assert_eq!(read(&vault, ".comments/archive/atl-1.md.json"), SIDECAR);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn deleting_a_page_removes_its_comments() {
+        let vault = page_with_comments("wfm-delete-page");
+        let (removed, remove) = recording_remove();
+        delete_note_with(&vault, "items/atl-1.md", remove).unwrap();
+        assert_eq!(
+            *removed.lock().unwrap(),
+            vec![
+                vault.join("items/atl-1.md"),
+                vault.join(".comments/items/atl-1.md.json")
+            ]
+        );
+        assert!(!vault.join(".comments").exists());
+        // A page with no comments sends only itself.
+        testutil::write(&vault, "items/b.md", "# B\n");
+        let (removed, remove) = recording_remove();
+        delete_note_with(&vault, "items/b.md", remove).unwrap();
+        assert_eq!(*removed.lock().unwrap(), vec![vault.join("items/b.md")]);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn deleting_a_folder_removes_its_comments() {
+        let vault = page_with_comments("wfm-delete-folder");
+        testutil::write(&vault, "other/c.md", "# C\n");
+        testutil::write(&vault, ".comments/other/c.md.json", SIDECAR);
+        let (removed, remove) = recording_remove();
+        delete_note_with(&vault, "items", remove).unwrap();
+        assert_eq!(
+            *removed.lock().unwrap(),
+            vec![vault.join("items"), vault.join(".comments/items")]
+        );
+        assert_eq!(read(&vault, ".comments/other/c.md.json"), SIDECAR);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_carry_leaves_no_empty_comment_folder() {
+        let vault = page_with_comments("wfm-carry-prune");
+        testutil::write(&vault, "items/deep/er/b.md", "# B\n");
+        testutil::write(&vault, ".comments/items/deep/er/b.md.json", SIDECAR);
+        let (_, remove) = recording_remove();
+        rename_note_with(&vault, "items/deep/er/b.md", "b.md", &remove).unwrap();
+        assert!(!vault.join(".comments/items/deep").exists());
+        assert!(vault.join(".comments/items/atl-1.md.json").exists());
+        delete_note_with(&vault, "b.md", &remove).unwrap();
+        delete_note_with(&vault, "items/atl-1.md", &remove).unwrap();
+        assert!(
+            !vault.join(".comments").exists(),
+            "nothing is left to keep it"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn orphan_temps_under_comments_are_reaped() {
+        let vault = page_with_comments("wfm-orphans-comments");
+        let stale = vault.join(format!(
+            ".comments/items/.atl-1.md.json{TEMP_MARKER}00000000deadbeef"
+        ));
+        std::fs::write(&stale, "half a sidecar").unwrap();
+        backdate(&stale, 120);
+        // Other dot-folders stay out of the walk.
+        let foreign = vault.join(format!(".git/.config{TEMP_MARKER}00000000deadbeef"));
+        testutil::write(
+            &vault,
+            &format!(".git/.config{TEMP_MARKER}00000000deadbeef"),
+            "x",
+        );
+        backdate(&foreign, 120);
+        clean_orphan_temps(&vault);
+        assert!(!stale.exists());
+        assert!(foreign.exists());
+        assert_eq!(read(&vault, ".comments/items/atl-1.md.json"), SIDECAR);
+        let _ = std::fs::remove_dir_all(&vault);
     }
 
     #[test]

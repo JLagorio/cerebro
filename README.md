@@ -64,6 +64,11 @@ the app at your own folder with **Choose folder…** instead. macOS may ask for
 permission to use your Documents folder the first time; declining is fine, the
 demo lands in the app's own data directory instead.
 
+**Saving.** A page saves itself as you type. ⌘Q, the close button and ⌘W save
+every pending edit first. Dock Quit, logout, restart and shutdown can't be
+intercepted, so give a page a moment after the last keystroke before you quit
+that way.
+
 ## The assistant
 
 `Cmd+J` opens the assistant panel. It runs the `claude` binary on your machine

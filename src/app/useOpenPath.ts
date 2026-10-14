@@ -1,4 +1,6 @@
 import { isCollectionPage } from '@/engine/collections';
+import { pageOfSidecar } from '@/engine/comments';
+import { isKnowledgePath } from '@/engine/okf';
 import { libraryKind } from '@/engine/library';
 import { isRecordEntry } from '@/engine/typeCatalog';
 import { useNavStore } from '@/stores/navStore';
@@ -51,6 +53,21 @@ export function useOpenPath(mode: OpenMode = 'navigate'): (path: string) => void
     // never fall through to the doc canvas, which would edit it as markdown.
     if (path.endsWith('.mmd')) {
       navigate({ kind: 'diagram', path });
+      return;
+    }
+    // M70.2b: a page's comment sidecar (`.comments/<page>.json`, which
+    // Changes' Open passes) opens its page, full, on the Comments tab:
+    // comments live on the full page, never in the peek (Q6).
+    const page = pageOfSidecar(path);
+    if (page !== null) {
+      // Both tab slots, since a page under knowledge/ may or may not be a
+      // concept; the open flag is the one its panel keeps.
+      const ui = useUiStore.getState();
+      ui.setDocPanelTab('comments');
+      ui.setConceptPanelTab('comments');
+      if (isKnowledgePath(page)) ui.setConceptPanelOpen(true);
+      else ui.setDocPanelOpen(true);
+      navigate({ kind: 'doc', path: page });
       return;
     }
     const entry = entries.find((e) => e.path === path);

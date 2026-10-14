@@ -1,5 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
-import { runMockAgent } from './mockAgent';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { MOCK_FAILURES, runMockAgent } from './mockAgent';
 import type { AgentStreamEvent, UiAction } from './types';
 
 /**
@@ -16,6 +18,7 @@ import type { AgentStreamEvent, UiAction } from './types';
 function drain(
   message: string,
   systemPrompt?: string,
+  model?: string | null,
 ): Promise<{ events: AgentStreamEvent[]; actions: UiAction[] }> {
   const events: AgentStreamEvent[] = [];
   const actions: UiAction[] = [];
@@ -26,7 +29,7 @@ function drain(
         events.push(event);
         if (event.kind === 'Done') resolve({ events, actions });
       },
-      { delayMs: 0, onUiAction: (action) => actions.push(action), systemPrompt },
+      { delayMs: 0, onUiAction: (action) => actions.push(action), systemPrompt, model },
     );
   });
 }
@@ -69,6 +72,61 @@ const note = (path: string, title: string, extra: Record<string, unknown> = {}) 
   ...extra,
 });
 
+/** Rust's failure golden (M56.4): each failure fixture's notice. */
+const NOTICES = (
+  JSON.parse(readFileSync(join(__dirname, '../../conformance/failure/notices.json'), 'utf8')) as {
+    notices: Record<string, unknown>;
+  }
+).notices;
+
+describe('the model a mock run reports (M56.5)', () => {
+  it('reports mock-<model> right after Init, once', async () => {
+    const { events } = await drain('hello', undefined, 'opus');
+    expect(events.slice(0, 2)).toEqual([
+      { kind: 'Init', session_id: expect.any(String) },
+      { kind: 'ModelChanged', model: 'mock-opus' },
+    ]);
+    expect(events.filter((e) => e.kind === 'ModelChanged')).toHaveLength(1);
+  });
+
+  it('reports mock-default when no model was asked for', async () => {
+    const { events } = await drain('hello');
+    expect(events.find((e) => e.kind === 'ModelChanged')).toEqual({
+      kind: 'ModelChanged',
+      model: 'mock-default',
+    });
+  });
+});
+
+describe('the failure scripts (M56.4)', () => {
+  it.each([
+    ['fail: not-signed-in', 'real/spike-not-signed-in.stream.jsonl'],
+    ['fail: usage-limit', 'usage-limit-stream.json'],
+  ])('%s emits exactly the notice Rust gives %s', async (message, fixture) => {
+    expect(NOTICES[fixture]).toBeTruthy();
+    const { events } = await drain(message);
+    expect(events.map((e) => e.kind)).toEqual(['Init', 'Error', 'TurnEnded', 'Done']);
+    const error = events.find((e) => e.kind === 'Error');
+    expect(error?.kind === 'Error' && error.notice).toEqual(NOTICES[fixture]);
+    expect(MOCK_FAILURES[message].notice).toEqual(NOTICES[fixture]);
+  });
+
+  it('fail: unknown fails with its raw words and no notice', async () => {
+    const { events } = await drain('fail: unknown');
+    const error = events.find((e) => e.kind === 'Error');
+    expect(error).toEqual({
+      kind: 'Error',
+      message: MOCK_FAILURES['fail: unknown'].message,
+      code: 'invalid_request',
+    });
+  });
+
+  it('matches only the message as typed', async () => {
+    const { events } = await drain('what happens if I fail: not-signed-in');
+    expect(events.some((e) => e.kind === 'Error')).toBe(false);
+  });
+});
+
 describe('runMockAgent', () => {
   it('emits the proposal its inbox reply says it made', async () => {
     const { events, actions } = await drain('Help me clear the Inbox');
@@ -98,6 +156,27 @@ describe('runMockAgent', () => {
       );
     });
     expect(order).toEqual(['tool-done', 'tool-done', 'ui-action']);
+  });
+
+  it("'read five notes' calls get_note five times, on demo-vault notes (M56.8)", async () => {
+    const { events, actions } = await drain('read five notes');
+    expect(toolNames(events)).toEqual(Array.from({ length: 5 }, () => 'get_note'));
+    const paths = toolInputs(events).map((input) => (JSON.parse(input) as { path: string }).path);
+    expect(new Set(paths).size).toBe(5);
+    for (const path of paths) {
+      expect(
+        () => readFileSync(join(__dirname, '../../demo-vault', path), 'utf8'),
+        path,
+      ).not.toThrow();
+    }
+    const done = events.flatMap((e) => (e.kind === 'ToolDone' ? [e] : []));
+    expect(done).toHaveLength(5);
+    expect(done.every((e) => typeof e.output === 'string' && e.output !== '' && !e.is_error)).toBe(
+      true,
+    );
+    const reply = events.find((e) => e.kind === 'Text');
+    expect(reply?.kind === 'Text' && reply.text).toBe('I read the five open risks.');
+    expect(actions).toEqual([]);
   });
 
   it('drives no ui action for scripts that do not claim one', async () => {
@@ -388,6 +467,78 @@ describe('runMockAgent', () => {
       expect(actions).toEqual([]);
       expect(replyOf(events)).toBe(`I could not edit ${PAGE}: edit_note is not available here`);
     });
+
+    it('matches only the exact shape', async () => {
+      const onEdit = vi.fn(async () => REPORT);
+      for (const ask of [
+        `please edit "a" to "b" in ${PAGE}`,
+        `edit "a" to "b" in ${PAGE} now`,
+        `edit "a" into "b" in ${PAGE}`,
+      ]) {
+        const { events } = await runEdit(ask, onEdit);
+        expect(toolNames(events)).not.toContain('edit_note');
+      }
+      expect(onEdit).not.toHaveBeenCalled();
+    });
+  });
+
+  // M55.6 — a browser-mode seam: a spec holds the agent's write while it
+  // types into the open page, then lets it land.
+  describe('the write gate', () => {
+    const PAGE = 'delivery/how-we-schedule.md';
+    const gated = globalThis as { __cerebroAgentWriteGate?: Promise<void> };
+    const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    function hold(): () => void {
+      let open = () => {};
+      gated.__cerebroAgentWriteGate = new Promise<void>((resolve) => {
+        open = resolve;
+      });
+      return open;
+    }
+
+    afterEach(() => {
+      delete gated.__cerebroAgentWriteGate;
+    });
+
+    it('holds a write until the gate opens', async () => {
+      const open = hold();
+      const onEdit = vi.fn(async () => 'Edited.');
+      const actions: UiAction[] = [];
+      const done = new Promise<void>((resolve) => {
+        runMockAgent(
+          `edit "a" to "b" in ${PAGE}`,
+          (event) => {
+            if (event.kind === 'Done') resolve();
+          },
+          { delayMs: 0, onEdit, onUiAction: (action) => void actions.push(action) },
+        );
+      });
+      await pause(30);
+      expect(onEdit).not.toHaveBeenCalled();
+      expect(actions).toEqual([]);
+      open();
+      await done;
+      expect(onEdit).toHaveBeenCalledOnce();
+      expect(actions).toEqual([{ action: 'vault_changed', paths: [PAGE] }]);
+    });
+
+    it('writes nothing for a run cancelled while held', async () => {
+      const open = hold();
+      const onAppend = vi.fn(async () => undefined);
+      const actions: UiAction[] = [];
+      const run = runMockAgent(`append "x" to ${PAGE}`, () => undefined, {
+        delayMs: 0,
+        onAppend,
+        onUiAction: (action) => void actions.push(action),
+      });
+      await pause(30);
+      run.cancel();
+      open();
+      await pause(30);
+      expect(onAppend).not.toHaveBeenCalled();
+      expect(actions).toEqual([]);
+    });
   });
 
   it('cancelling before the run finishes suppresses the proposal', async () => {
@@ -398,5 +549,51 @@ describe('runMockAgent', () => {
     // A cancelled run is the mock's kill-the-child-process equivalent; it must
     // not land a proposal the user stopped.
     expect(onUiAction).not.toHaveBeenCalled();
+  });
+});
+
+describe('the mock names its session and ends its turn as the fold does (M56.3)', () => {
+  const SESSION = '00000000-0000-4000-8000-0000000000ab';
+  const run = (sessionId?: string): Promise<AgentStreamEvent[]> =>
+    new Promise((resolve) => {
+      const events: AgentStreamEvent[] = [];
+      runMockAgent(
+        'What is at risk right now?',
+        (event) => {
+          events.push(event);
+          if (event.kind === 'Done') resolve(events);
+        },
+        { delayMs: 0, sessionId },
+      );
+    });
+
+  it('echoes the run’s session id in Init and Result', async () => {
+    const events = await run(SESSION);
+    expect(events[0]).toEqual({ kind: 'Init', session_id: SESSION });
+    expect(events.find((e) => e.kind === 'Result')).toMatchObject({ session_id: SESSION });
+    // Unnamed, it still reports a UUID, never a word Rust would refuse.
+    const unnamed = await run();
+    expect(unnamed[0]).toMatchObject({ kind: 'Init' });
+    expect((unnamed[0] as { session_id: string }).session_id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
+  });
+
+  it('emits Text and TurnEnded before Result', async () => {
+    const kinds = (await run(SESSION)).map((e) => e.kind);
+    expect(kinds.slice(-4)).toEqual(['Text', 'TurnEnded', 'Result', 'Done']);
+    const events = await run(SESSION);
+    const text = events.find((e) => e.kind === 'Text');
+    expect(text).toMatchObject({ message_id: 'msg_mock', text: replyOf(events) });
+  });
+
+  it('still emits only Done when cancelled', async () => {
+    const events: AgentStreamEvent[] = [];
+    const mock = runMockAgent('What is at risk right now?', (e) => events.push(e), {
+      delayMs: 50,
+      sessionId: SESSION,
+    });
+    mock.cancel();
+    expect(events.map((e) => e.kind)).toEqual(['Done']);
   });
 });

@@ -1,4 +1,5 @@
 import { expect, type Page } from '@playwright/test';
+import { VAULT_TODAY } from '../src/lib/vaultToday';
 
 /**
  * Booting the app into the demo vault, the same way in every spec (M26.3e).
@@ -9,25 +10,9 @@ import { expect, type Page } from '@playwright/test';
  * six files had to learn it, and in practice one of them wouldn't.
  */
 
-/**
- * The day the demo vault was written to be read on.
- *
- * The corpus is a story with absolute dates in it: knowledge stamps run from
- * 2026-07-19 to 2026-07-28, and the work it describes is dated 2026-07-29
- * onward. Read on any other day the story drifts — and read far enough after
- * it, parts of it expire. That is not hypothetical: `recentlyLearned` offers
- * concepts written in the last fortnight, so on 2026-08-11 the Home card the
- * augment spec asserts on stopped rendering at all, and the spec had been
- * failing on every tree including a clean one.
- *
- * So the clock is pinned rather than the fixtures bumped. Bumping the stamps
- * moves the expiry by a fortnight and leaves the class of failure in place;
- * pinning removes it. Midday so that no plausible offset can roll the local
- * date either way, and the browser timezone is fixed to UTC in
- * `playwright.config.ts` so `todayIso()` — which reads LOCAL date parts —
- * cannot disagree with it.
- */
-export const VAULT_TODAY = '2026-07-28T12:00:00Z';
+/** The day the demo vault was written to be read on; its reasons live in
+ * `src/lib/vaultToday.ts`, which the state lab's clock pins too (M64.1). */
+export { VAULT_TODAY };
 
 export async function boot(page: Page): Promise<void> {
   // `setFixedTime` and not `install`: this freezes what the clock READS
@@ -122,9 +107,38 @@ export async function readMockFile(page: Page, path: string): Promise<string> {
   return text;
 }
 
+/**
+ * Open the state lab on one section's preset (M64.1): the same pinned clock
+ * `boot` uses, then `/state-lab.html?section=&state=`, then wait until the
+ * preset has been applied and its section mounted.
+ *
+ * No `cerebro.*` storage is seeded: the lab reads none and writes none, and
+ * its theme toggle touches only this document.
+ */
+export async function openStateLab(page: Page, section: string, state: string): Promise<void> {
+  await page.clock.setFixedTime(new Date(VAULT_TODAY));
+  const query = new URLSearchParams({ section, state }).toString();
+  await page.goto(`/state-lab.html?${query}`);
+  await expect(page.locator('[data-testid="lab-stage"][data-ready]')).toBeVisible({
+    timeout: 10_000,
+  });
+}
+
+/** One lab preset as `window.__cerebroLabPresets` lists it (M64.1). */
+export interface E2eLabPreset {
+  section: string;
+  state: string;
+  url: string;
+  expect: { present: string[]; absent?: string[]; text?: string };
+}
+
 declare global {
   interface Window {
     __cerebroMockFs: Map<string, string>;
+    /** The M64.1 fault seam: the next read of this command fails once. */
+    __cerebroFailNext: (command: string) => void;
+    /** Every state-lab preset, set by the lab page in dev (M64.1). */
+    __cerebroLabPresets: E2eLabPreset[];
     /** The M27.5 chip seam. The browser has no ledger, so a spec that wants
      * axes on screen stages the rows it wants to see. */
     __cerebroSeedChips: (rows: unknown[]) => void;
@@ -140,5 +154,36 @@ declare global {
     /** The M24.9 review seam. The browser has no ledger, so a spec stages the
      * cards `policy/review.rs` would have returned. */
     __cerebroSeedReview: (fixture: unknown) => void;
+    /** The M55.6 write gate. While it holds a promise, the mock agent's write
+     * steps wait for it, so a spec can type into the open page between the
+     * ask and the write. */
+    __cerebroAgentWriteGate?: Promise<void>;
+    /** The M55.10 quit seam: ask to quit, as ⌘Q, the close button and ⌘W
+     * do in the app, with the deadline Rust would name (5000 by default). */
+    __cerebroMockQuit: (deadlineMs?: number) => void;
+    /** What the webview answered each quit: `finished` or `cancelled`. */
+    __cerebroMockQuitLog: string[];
+    /** The M70.1 comment probe, on the last mounted editor in browser mode
+     * (`CommentProbe` in src/editor/commentHighlights.ts): the selection as
+     * an anchor, threads to draw, and how each one resolved. */
+    __cerebroCommentProbe?: {
+      anchor: () =>
+        | { ok: true; anchor: E2eCommentAnchor; start: number; end: number }
+        | { ok: false; reason: string };
+      show: (threads: { id: string; anchor: E2eCommentAnchor }[]) => void;
+      resolutions: () => Record<
+        string,
+        | { kind: 'attached'; start: number; end: number; moved: boolean }
+        | { kind: 'detached'; reason: 'gone' | 'ambiguous'; count: number }
+      >;
+    };
   }
+}
+
+/** A comment anchor as the probe hands it over (`CommentAnchor`, M70.1). */
+export interface E2eCommentAnchor {
+  quote: string;
+  occurrence: number;
+  before: string;
+  after: string;
 }

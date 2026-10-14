@@ -44,6 +44,47 @@ describe('the mermaid block as it leaves the app', () => {
 });
 
 /**
+ * The child-page list (M55.13) leaves the app as the empty fence the disk
+ * holds, never the titles it renders: those are derived, and pasting them
+ * elsewhere would paste a list that no longer follows its pages.
+ */
+describe('the child-page list as it leaves the app', () => {
+  it('exports the empty fence, not the rendered list', async () => {
+    const editor = BlockNoteEditor.create({ schema: cerebroSchema });
+    const html = await editor.blocksToHTMLLossy([{ type: 'subPages' }] as never);
+    const text = new DOMParser().parseFromString(html, 'text/html').body.textContent;
+    expect(text).toBe('```cerebro-subpages\n```');
+    for (const chrome of ['Sub-pages show', 'No sub-pages yet']) {
+      expect(html).not.toContain(chrome);
+    }
+  });
+});
+
+/**
+ * The page card (M55.14) leaves the app as the fence the disk holds — its
+ * pointer — never the face it renders ("How we schedule", "Open").
+ */
+describe('the page card as it leaves the app', () => {
+  const copied = async (props: { target: string; alias: string }) => {
+    const editor = BlockNoteEditor.create({ schema: cerebroSchema });
+    const html = await editor.blocksToHTMLLossy([{ type: 'pageCard', props }] as never);
+    return { html, text: new DOMParser().parseFromString(html, 'text/html').body.textContent };
+  };
+
+  it('exports the fence with its one link, not the card', async () => {
+    const { html, text } = await copied({ target: 'how-we-schedule', alias: 'Scheduling' });
+    expect(text).toBe('```cerebro-page\n[[how-we-schedule|Scheduling]]\n```');
+    for (const chrome of ['Open', 'No page named', 'Find a page']) {
+      expect(html).not.toContain(chrome);
+    }
+  });
+
+  it('exports an unset card as the empty fence', async () => {
+    expect((await copied({ target: '', alias: '' })).text).toBe('```cerebro-page\n```');
+  });
+});
+
+/**
  * The observation the whole column feature rests on (M48.1).
  *
  * `@blocknote/xl-multi-column` is licensed `GPL-3.0 OR PROPRIETARY` and this

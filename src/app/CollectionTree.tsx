@@ -1,3 +1,4 @@
+import { EntryIcon } from '@/components/PageIcon';
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { Icon } from '@/components/ui/Icon';
 import { rowClass } from '@/app/sidebarChrome';
@@ -141,7 +142,16 @@ function CollectionRow({
           onClick={open}
           className="flex min-w-0 flex-1 items-center gap-2 border-0 bg-transparent p-0 text-left text-inherit"
         >
-          <Icon name={node.icon} size={15} color={node.color ?? 'var(--n-500)'} />
+          {node.kind === 'doc' && node.path !== undefined ? (
+            // A doc row wears its page's own icon when it has one (M55.11).
+            <EntryIcon
+              path={node.path}
+              size={15}
+              fallback={{ name: node.icon, color: node.color ?? 'var(--n-500)' }}
+            />
+          ) : (
+            <Icon name={node.icon} size={15} color={node.color ?? 'var(--n-500)'} />
+          )}
           <span className="overflow-hidden text-ellipsis whitespace-nowrap">{node.label}</span>
         </button>
         {/* M15: revealed by OPACITY, not `display:none`. Hidden it was out of

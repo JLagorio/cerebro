@@ -5,7 +5,7 @@ import { QuickOpen } from '@/app/QuickOpen';
 import { useVaultStore } from '@/stores/vaultStore';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
-import { fixtureVault } from '@/test/factories';
+import { fixtureVault, makeEntry } from '@/test/factories';
 
 afterEach(cleanup);
 
@@ -15,6 +15,44 @@ describe('QuickOpen', () => {
   beforeEach(() => {
     useVaultStore.setState({ entries: fixtureVault() });
     useUiStore.setState({ quickOpenVisible: true });
+  });
+
+  // M55.11 — a page's own icon in ⌘K: an emoji page, and a Collection page
+  // whose `icon:` has always been a lucide name.
+  it("draws a page's own icon: an emoji, and the Delivery page's lucide rocket", async () => {
+    const ROCKET = '\u{1F680}';
+    useVaultStore.setState({
+      entries: [
+        ...fixtureVault(),
+        makeEntry({
+          path: 'inbox/launch-plan.md',
+          title: 'Launch plan',
+          properties: { icon: ROCKET },
+        }),
+        makeEntry({
+          path: 'delivery/delivery.md',
+          title: 'Delivery',
+          type: 'Collection',
+          properties: { icon: 'rocket', color: '#3D8BE8' },
+        }),
+      ],
+    });
+    const user = userEvent.setup();
+    render(<QuickOpen />);
+    const input = screen.getByPlaceholderText(PLACEHOLDER);
+    await user.type(input, 'launch plan');
+    const launch = screen
+      .getAllByTestId('quick-open-result')
+      .find((r) => r.textContent?.includes('Launch plan'));
+    expect(launch?.querySelector('[role="img"]')?.textContent).toBe(ROCKET);
+    await user.clear(input);
+    await user.type(input, 'delivery');
+    const delivery = screen
+      .getAllByTestId('quick-open-result')
+      .find((r) => r.textContent?.includes('Delivery'));
+    const glyph = delivery?.querySelector('[data-icon="rocket"]') as SVGElement | null;
+    expect(glyph).not.toBe(null);
+    expect(glyph?.style.color).toBe('rgb(61, 139, 232)');
   });
 
   it('ranks an exact title prefix above a mid-title match', async () => {

@@ -473,6 +473,10 @@ pub fn record_from_assembly(
     Ok(())
 }
 
+/// The surface `log_tool_call_breakdown` files its row under: telemetry, not
+/// a refusal, so the run detail's Refused section leaves it out (M56.9).
+pub(crate) const TOOL_CALLS_SURFACE: &str = "assembly.tool_calls";
+
 /// The per-name breakdown, filed operationally (M31.6). The component row
 /// holds the SUM; per name is gap 3's actual question — which tools the run
 /// reached for — and no table has a column for it, so it rides the
@@ -503,7 +507,7 @@ fn log_tool_call_breakdown(
             crate::policy::rejection::OperationalRefusal::new(
                 &table,
                 "capability_unavailable",
-                "assembly.tool_calls",
+                TOOL_CALLS_SURFACE,
                 &detail,
             )
             .ok()

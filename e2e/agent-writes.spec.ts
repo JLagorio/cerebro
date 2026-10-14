@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { boot, readMockFile, VAULT_TODAY } from './boot';
 
 /**
- * Agent writes reach the open page (M53.6).
+ * Agent writes reach the open page (M53.6), in place (M55.6).
  *
  * The agent writes straight to disk through its MCP tools, and the app's own
  * `write_file` registers every write as the app's, so the watcher drops the
@@ -16,9 +16,8 @@ import { boot, readMockFile, VAULT_TODAY } from './boot';
  * (src/agent/mockAgent.ts): `append "…" to <note>`, whose append goes through
  * `agentAppend` on the mock disk, and `edit "…" to "…" in <note>` (M55.5),
  * whose edit goes through `agentEdit`. The second append matters as much as
- * the first: `boot` pins the clock, so the file's modifiedAt cannot move after
- * the first save, and only the per-path announcement can tell the page that
- * the file changed.
+ * the first: `boot` pins the clock, so every write after the first lands on
+ * the same modifiedAt, and the page still takes it.
  */
 
 const PAGE = 'delivery/how-we-schedule.md';
@@ -96,7 +95,7 @@ test('an agent append during a turn shows on the open page and survives the next
 
   await expect(editor.getByText('Agent line one.')).toBeVisible({ timeout: 10_000 });
   await expect(editor.getByText('Typed before asking.')).toBeVisible();
-  await expect(page.getByTestId('external-change-banner')).toHaveCount(0);
+  await expect(page.getByTestId('merge-choices')).toHaveCount(0);
   await expect.poll(() => readMockFile(page, PAGE)).toContain('Typed before asking.');
   await expect.poll(() => readMockFile(page, PAGE)).toContain('Agent line one.');
 
@@ -109,7 +108,7 @@ test('an agent append during a turn shows on the open page and survives the next
   // A second append, on a stamp that can no longer move.
   await askToAppend(page, 'Agent line two.', 2);
   await expect(editor.getByText('Agent line two.')).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByTestId('external-change-banner')).toHaveCount(0);
+  await expect(page.getByTestId('merge-choices')).toHaveCount(0);
   await typeAfter(page, 'Agent line two.', 'Last words.');
   await expect.poll(() => readMockFile(page, PAGE)).toContain('Last words.');
   const saved = await readMockFile(page, PAGE);
@@ -146,7 +145,7 @@ test('an agent edit replaces only the quoted text on the open page, and an ambig
   await expect(editor.getByText('We ship on Thursdays, after the Wednesday freeze.')).toBeVisible({
     timeout: 10_000,
   });
-  await expect(page.getByTestId('external-change-banner')).toHaveCount(0);
+  await expect(page.getByTestId('merge-choices')).toHaveCount(0);
   await expect
     .poll(() => readMockFile(page, PAGE))
     .toContain('We ship on Thursdays, after the Wednesday freeze.');

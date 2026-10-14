@@ -47,6 +47,14 @@ const RAILS = {
     message:
       "Only src/mermaid/render.ts and *.mermaid.test.ts load mermaid: render through renderMermaid, and mock '@/mermaid/render' with a fixture svg in a test.",
   },
+  comments: {
+    // M70.1: BlockNote's comments keep threads in the document as marks, which
+    // reach the undo history, the save and the clipboard. Comments are drawn
+    // by src/editor/commentHighlights.ts as decorations instead.
+    pattern: /^@blocknote\/core\/comments(?:\/|$)/,
+    message:
+      "Only src/editor/commentSpike.test.ts loads '@blocknote/core/comments', to measure it: draw comments with CommentHighlights (src/editor/commentHighlights.ts).",
+  },
   mockParse: {
     pattern: /(?:^|\/)mockParse$/,
     message:
@@ -159,28 +167,34 @@ export default tseslint.config(
     },
   },
   // The rails' file classes. Each later object replaces the rail rules of the
-  // ones before it, and the four after the first never overlap.
+  // ones before it, and the five after the first never overlap.
   {
     files: ['src/**/*.{ts,tsx}'],
-    rules: rails('tauri', 'mermaid', 'mockParse'),
+    rules: rails('tauri', 'mermaid', 'mockParse', 'comments'),
   },
   {
     files: ADAPTERS,
-    rules: rails('mermaid', 'mockParse'),
+    rules: rails('mermaid', 'mockParse', 'comments'),
   },
   {
     files: ['src/mermaid/render.ts', 'src/**/*.mermaid.test.ts'],
-    rules: rails('tauri', 'mockParse'),
+    rules: rails('tauri', 'mockParse', 'comments'),
   },
   {
     // The mock backend and the two tests that hold its parser to Rust.
     files: ['src/lib/mockIpc.ts', 'src/lib/mockParse.test.ts', 'src/lib/scanGolden.test.ts'],
-    rules: rails('tauri', 'mermaid'),
+    rules: rails('tauri', 'mermaid', 'comments'),
   },
   {
     // Engine tests may import a fixture or a store; the engine itself may not.
     files: ['src/engine/**/*.{ts,tsx}'],
     ignores: ['src/engine/**/*.test.{ts,tsx}'],
-    rules: rails('tauri', 'mermaid', 'mockParse', 'engine'),
+    rules: rails('tauri', 'mermaid', 'mockParse', 'comments', 'engine'),
+  },
+  {
+    // The M70.1 spike measures BlockNote's comments extension; nothing else
+    // loads it.
+    files: ['src/editor/commentSpike.test.ts'],
+    rules: rails('tauri', 'mermaid', 'mockParse'),
   },
 );

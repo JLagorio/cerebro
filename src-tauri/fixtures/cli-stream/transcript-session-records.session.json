@@ -1,0 +1,705 @@
+[
+  {
+    "type": "queue-operation",
+    "operation": "enqueue",
+    "timestamp": "2026-07-28T12:00:01.000Z",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "content": "Open a pull request for the meeting notes."
+  },
+  {
+    "type": "queue-operation",
+    "operation": "dequeue",
+    "timestamp": "2026-07-28T12:00:02.000Z",
+    "sessionId": "00000000-0000-4000-8000-000000000004"
+  },
+  {
+    "parentUuid": null,
+    "isSidechain": false,
+    "promptId": "00000000-0000-4000-8000-000000000901",
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": "Open a pull request for the meeting notes."
+    },
+    "permissionMode": "acceptEdits",
+    "promptSource": "sdk",
+    "uuid": "00000000-0000-4000-8000-000000000401",
+    "timestamp": "2026-07-28T12:00:03.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000401",
+    "isSidechain": false,
+    "type": "attachment",
+    "attachment": {
+      "type": "deferred_tools_delta",
+      "addedNames": ["WebFetch"],
+      "addedLines": ["WebFetch"],
+      "removedNames": []
+    },
+    "uuid": "00000000-0000-4000-8000-000000000402",
+    "timestamp": "2026-07-28T12:00:04.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "version": "2.1.250"
+  },
+  {
+    "type": "mode",
+    "mode": "acceptEdits",
+    "sessionId": "00000000-0000-4000-8000-000000000004"
+  },
+  {
+    "type": "atis-latch",
+    "latched": true,
+    "sessionId": "00000000-0000-4000-8000-000000000004"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000402",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000000041",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "(thinking)",
+          "signature": ""
+        }
+      ],
+      "stop_reason": "end_turn",
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 6100,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 12,
+        "service_tier": "standard"
+      }
+    },
+    "requestId": "req_000000000000000000000041",
+    "uuid": "00000000-0000-4000-8000-000000000403",
+    "timestamp": "2026-07-28T12:00:05.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000403",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000000041",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Opened pull request 7."
+        }
+      ],
+      "stop_reason": "end_turn",
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 6100,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 12,
+        "service_tier": "standard"
+      }
+    },
+    "requestId": "req_000000000000000000000041",
+    "uuid": "00000000-0000-4000-8000-000000000404",
+    "timestamp": "2026-07-28T12:00:06.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000403",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000000041",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Opened pull request 7."
+        }
+      ],
+      "stop_reason": "end_turn",
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 6100,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 12,
+        "service_tier": "standard"
+      }
+    },
+    "requestId": "req_000000000000000000000041",
+    "uuid": "00000000-0000-4000-8000-000000000404",
+    "timestamp": "2026-07-28T12:00:07.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "version": "2.1.250"
+  },
+  {
+    "type": "pr-link",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "prNumber": 7,
+    "prUrl": "https://github.com/example/notes/pull/7",
+    "prRepository": "example/notes",
+    "timestamp": "2026-07-28T12:00:08.000Z"
+  },
+  {
+    "type": "pr-link",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "prNumber": 0,
+    "prUrl": "file:///vault/x",
+    "prRepository": "notes",
+    "timestamp": "2026-07-28T12:00:09.000Z"
+  },
+  {
+    "type": "ai-title",
+    "aiTitle": "Meeting notes pull request",
+    "sessionId": "00000000-0000-4000-8000-000000000004"
+  },
+  {
+    "type": "custom-title",
+    "customTitle": "PR for notes",
+    "sessionId": "00000000-0000-4000-8000-000000000004"
+  },
+  {
+    "type": "file-history-snapshot",
+    "messageId": "00000000-0000-4000-8000-000000000404",
+    "snapshot": {
+      "messageId": "00000000-0000-4000-8000-000000000404",
+      "trackedFileBackups": {},
+      "timestamp": "2026-07-28T12:00:10.000Z"
+    },
+    "isSnapshotUpdate": false
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000404",
+    "isSidechain": false,
+    "type": "system",
+    "subtype": "stop_hook_summary",
+    "hookCount": 1,
+    "hookInfos": [
+      {
+        "command": "true"
+      }
+    ],
+    "hookErrors": [],
+    "preventedContinuation": false,
+    "level": "suggestion",
+    "uuid": "00000000-0000-4000-8000-000000000405",
+    "timestamp": "2026-07-28T12:00:11.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000405",
+    "isSidechain": true,
+    "agentId": "a1",
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000000042",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "A subagent's aside."
+        }
+      ],
+      "stop_reason": "end_turn",
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 6100,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 12,
+        "service_tier": "standard"
+      }
+    },
+    "uuid": "00000000-0000-4000-8000-000000000406",
+    "timestamp": "2026-07-28T12:00:12.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "version": "2.1.250"
+  },
+  {
+    "type": "last-prompt",
+    "lastPrompt": "Open a pull request for the meeting notes.",
+    "leafUuid": "00000000-0000-4000-8000-000000000404",
+    "sessionId": "00000000-0000-4000-8000-000000000004"
+  },
+  {
+    "type": "queue-operation",
+    "operation": "enqueue",
+    "timestamp": "2026-07-28T12:00:13.000Z",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "content": "Thanks. Now tidy the inbox."
+  },
+  {
+    "type": "queue-operation",
+    "operation": "dequeue",
+    "timestamp": "2026-07-28T12:00:14.000Z",
+    "sessionId": "00000000-0000-4000-8000-000000000004"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000404",
+    "isSidechain": false,
+    "promptId": "00000000-0000-4000-8000-000000000910",
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": "Thanks. Now tidy the inbox."
+    },
+    "permissionMode": "acceptEdits",
+    "promptSource": "sdk",
+    "uuid": "00000000-0000-4000-8000-000000000410",
+    "timestamp": "2026-07-28T12:00:15.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000410",
+    "isSidechain": false,
+    "type": "user",
+    "isMeta": true,
+    "message": {
+      "role": "user",
+      "content": "Caveat: the messages below were generated by the user while running local commands."
+    },
+    "uuid": "00000000-0000-4000-8000-000000000411",
+    "timestamp": "2026-07-28T12:00:16.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000411",
+    "isSidechain": false,
+    "type": "system",
+    "subtype": "local_command",
+    "content": "<command-name>/status</command-name>",
+    "level": "info",
+    "uuid": "00000000-0000-4000-8000-000000000412",
+    "timestamp": "2026-07-28T12:00:17.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000412",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000000043",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000000041",
+          "name": "mcp__cerebro__list_inbox",
+          "input": {}
+        }
+      ],
+      "stop_reason": "tool_use",
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 6100,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 12,
+        "service_tier": "standard"
+      }
+    },
+    "requestId": "req_000000000000000000000043",
+    "uuid": "00000000-0000-4000-8000-000000000413",
+    "timestamp": "2026-07-28T12:00:18.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000413",
+    "isSidechain": false,
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "tool_use_id": "toolu_000000000000000000000041",
+          "type": "tool_result",
+          "content": "Two captures."
+        }
+      ]
+    },
+    "sourceToolAssistantUUID": "00000000-0000-4000-8000-000000000413",
+    "uuid": "00000000-0000-4000-8000-000000000414",
+    "timestamp": "2026-07-28T12:00:19.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000414",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000000044",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000000042",
+          "name": "mcp__cerebro__get_note",
+          "input": {
+            "path": "inbox/one.md"
+          }
+        }
+      ],
+      "stop_reason": "tool_use",
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 6100,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 12,
+        "service_tier": "standard"
+      }
+    },
+    "requestId": "req_000000000000000000000044",
+    "uuid": "00000000-0000-4000-8000-000000000415",
+    "timestamp": "2026-07-28T12:00:20.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000415",
+    "isSidechain": false,
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "[Request interrupted by user for tool use]"
+        }
+      ]
+    },
+    "uuid": "00000000-0000-4000-8000-000000000416",
+    "timestamp": "2026-07-28T12:00:21.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000416",
+    "isSidechain": false,
+    "type": "system",
+    "subtype": "compact_boundary",
+    "content": "Conversation compacted",
+    "level": "info",
+    "compactMetadata": {
+      "trigger": "manual",
+      "preTokens": 9000
+    },
+    "logicalParentUuid": "00000000-0000-4000-8000-000000000416",
+    "uuid": "00000000-0000-4000-8000-000000000417",
+    "timestamp": "2026-07-28T12:00:22.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000417",
+    "isSidechain": false,
+    "type": "user",
+    "isCompactSummary": true,
+    "isVisibleInTranscriptOnly": true,
+    "message": {
+      "role": "user",
+      "content": "This session is being continued from a previous conversation. Summary: a pull request and the inbox."
+    },
+    "uuid": "00000000-0000-4000-8000-000000000418",
+    "timestamp": "2026-07-28T12:00:23.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "version": "2.1.250"
+  },
+  {
+    "type": "queue-operation",
+    "operation": "enqueue",
+    "timestamp": "2026-07-28T12:00:24.000Z",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "content": "Check the build."
+  },
+  {
+    "type": "queue-operation",
+    "operation": "dequeue",
+    "timestamp": "2026-07-28T12:00:25.000Z",
+    "sessionId": "00000000-0000-4000-8000-000000000004"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000418",
+    "isSidechain": false,
+    "promptId": "00000000-0000-4000-8000-000000000920",
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": "Check the build."
+    },
+    "permissionMode": "acceptEdits",
+    "promptSource": "sdk",
+    "uuid": "00000000-0000-4000-8000-000000000420",
+    "timestamp": "2026-07-28T12:00:26.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000420",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000000045",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "The build is green."
+        }
+      ],
+      "stop_reason": null,
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 6100,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 12,
+        "service_tier": "standard"
+      }
+    },
+    "requestId": "req_000000000000000000000045",
+    "uuid": "00000000-0000-4000-8000-000000000421",
+    "timestamp": "2026-07-28T12:00:27.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000418",
+    "isSidechain": false,
+    "promptId": "00000000-0000-4000-8000-000000000920",
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": "Check the build."
+    },
+    "permissionMode": "acceptEdits",
+    "promptSource": "sdk",
+    "uuid": "00000000-0000-4000-8000-000000000420",
+    "timestamp": "2026-07-28T12:00:28.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000421",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "id": "00000000-0000-4000-8000-000000000422",
+      "model": "<synthetic>",
+      "role": "assistant",
+      "stop_reason": "stop_sequence",
+      "stop_sequence": "",
+      "type": "message",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "No response requested."
+        }
+      ]
+    },
+    "uuid": "00000000-0000-4000-8000-000000000423",
+    "timestamp": "2026-07-28T12:00:29.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "version": "2.1.250"
+  },
+  {
+    "type": "queue-operation",
+    "operation": "enqueue",
+    "timestamp": "2026-07-28T12:00:30.000Z",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "content": "And the release notes?"
+  },
+  {
+    "type": "queue-operation",
+    "operation": "dequeue",
+    "timestamp": "2026-07-28T12:00:31.000Z",
+    "sessionId": "00000000-0000-4000-8000-000000000004"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000423",
+    "isSidechain": false,
+    "promptId": "00000000-0000-4000-8000-000000000930",
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": "And the release notes?"
+    },
+    "permissionMode": "acceptEdits",
+    "promptSource": "sdk",
+    "uuid": "00000000-0000-4000-8000-000000000430",
+    "timestamp": "2026-07-28T12:00:32.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000430",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "model": "claude-haiku-4-5-20251001",
+      "id": "msg_000000000000000000000046",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000000043",
+          "name": "Read",
+          "input": {
+            "file_path": "/vault/release.md"
+          }
+        }
+      ],
+      "stop_reason": "tool_use",
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 6100,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 12,
+        "service_tier": "standard"
+      }
+    },
+    "requestId": "req_000000000000000000000046",
+    "uuid": "00000000-0000-4000-8000-000000000431",
+    "timestamp": "2026-07-28T12:00:33.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000004",
+    "version": "2.1.250"
+  },
+  {
+    "type": "last-prompt",
+    "lastPrompt": "And the release notes?",
+    "leafUuid": "00000000-0000-4000-8000-000000000431",
+    "sessionId": "00000000-0000-4000-8000-000000000004"
+  }
+]

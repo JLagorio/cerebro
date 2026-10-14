@@ -1,0 +1,114 @@
+[
+  {
+    "type": "queue-operation",
+    "operation": "enqueue",
+    "timestamp": "2026-07-28T12:00:01.000Z",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "content": "What changed in the vault this week?"
+  },
+  {
+    "type": "queue-operation",
+    "operation": "dequeue",
+    "timestamp": "2026-07-28T12:00:02.000Z",
+    "sessionId": "00000000-0000-4000-8000-000000000003"
+  },
+  {
+    "parentUuid": null,
+    "isSidechain": false,
+    "promptId": "00000000-0000-4000-8000-000000000810",
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": "What changed in the vault this week?"
+    },
+    "permissionMode": "acceptEdits",
+    "promptSource": "sdk",
+    "uuid": "00000000-0000-4000-8000-000000000310",
+    "timestamp": "2026-07-28T12:00:03.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000310",
+    "isSidechain": false,
+    "type": "attachment",
+    "attachment": {
+      "type": "deferred_tools_delta",
+      "addedNames": ["WebFetch"],
+      "addedLines": ["WebFetch"],
+      "removedNames": []
+    },
+    "uuid": "00000000-0000-4000-8000-000000000311",
+    "timestamp": "2026-07-28T12:00:04.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000311",
+    "isSidechain": false,
+    "type": "system",
+    "subtype": "api_error",
+    "level": "error",
+    "error": {
+      "status": 429,
+      "type": "rate_limit"
+    },
+    "retryInMs": 600,
+    "retryAttempt": 1,
+    "maxRetries": 10,
+    "uuid": "00000000-0000-4000-8000-000000000312",
+    "timestamp": "2026-07-28T12:00:05.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "version": "2.1.250"
+  },
+  {
+    "parentUuid": "00000000-0000-4000-8000-000000000312",
+    "isSidechain": false,
+    "type": "assistant",
+    "message": {
+      "id": "00000000-0000-4000-8000-000000000303",
+      "model": "<synthetic>",
+      "role": "assistant",
+      "stop_reason": "stop_sequence",
+      "stop_sequence": "",
+      "type": "message",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "API Error: Claude AI usage limit reached. Your limit resets at 3pm."
+        }
+      ]
+    },
+    "error": "rate_limit",
+    "apiErrorStatus": 429,
+    "isApiErrorMessage": true,
+    "uuid": "00000000-0000-4000-8000-000000000304",
+    "timestamp": "2026-07-28T12:00:06.000Z",
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/vault",
+    "sessionId": "00000000-0000-4000-8000-000000000003",
+    "version": "2.1.250"
+  },
+  {
+    "type": "last-prompt",
+    "lastPrompt": "What changed in the vault this week?",
+    "leafUuid": "00000000-0000-4000-8000-000000000304",
+    "sessionId": "00000000-0000-4000-8000-000000000003"
+  }
+]

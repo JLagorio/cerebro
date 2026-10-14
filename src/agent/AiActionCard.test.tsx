@@ -3,7 +3,10 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   AiActionCard,
+  DEFERRED,
+  formatSize,
   historyOf,
+  INTERRUPTED,
   isWrite,
   NO_REVERT,
   toolIcon,
@@ -24,6 +27,12 @@ describe('toolLabel', () => {
   it('leaves native CLI tool names alone', () => {
     expect(toolLabel('Bash')).toBe('Bash');
     expect(toolLabel('WebFetch')).toBe('WebFetch');
+  });
+
+  it('names a connector tool by its server (M56.8)', () => {
+    expect(toolLabel('mcp__gmail__search_threads')).toBe('gmail · search threads');
+    expect(toolLabel('mcp__claude-ai-drive__read_file')).toBe('claude-ai-drive · read file');
+    expect(toolLabel('mcp__cerebro__get_note')).toBe('get note');
   });
 });
 
@@ -175,5 +184,111 @@ describe('a write card and the vault’s history (M55.5)', () => {
     expect(isWrite('mcp__cerebro__edit_note')).toBe(true);
     expect(toolIcon('mcp__cerebro__edit_note')).toBe('replace');
     expect(resolveIcon('replace').Comp).not.toBeNull();
+  });
+});
+
+describe('a card’s status and its whole payload (M56.8)', () => {
+  afterEach(cleanup);
+
+  const call = (over: Partial<ToolCall> = {}): ToolCall => ({
+    id: 't-1',
+    name: 'mcp__cerebro__get_note',
+    input: JSON.stringify({ path: 'notes/plan.md' }),
+    output: 'the first part…',
+    done: true,
+    failed: false,
+    ...over,
+  });
+
+  const card = () => screen.getByTestId('action-card');
+  const open = () => fireEvent.click(screen.getByRole('button', { name: /notes\/plan\.md/ }));
+
+  it('reads an unfinished call on a stopped turn as interrupted, and stops spinning', () => {
+    render(
+      <AiActionCard
+        tool={call({ done: false, output: null })}
+        status="interrupted"
+        onOpenPath={() => undefined}
+      />,
+    );
+    expect(card().getAttribute('data-status')).toBe('interrupted');
+    expect(screen.getByTestId('action-interrupted').textContent).toBe(INTERRUPTED);
+    expect(INTERRUPTED).toBe('Interrupted, may have completed');
+    expect(card().querySelector('.animate-spin')).toBeNull();
+  });
+
+  it('spins only while the call runs', () => {
+    render(
+      <AiActionCard
+        tool={call({ done: false, output: null })}
+        status="running"
+        onOpenPath={() => undefined}
+      />,
+    );
+    expect(card().getAttribute('data-status')).toBe('running');
+    expect(card().querySelector('.animate-spin')).not.toBeNull();
+    expect(screen.queryByTestId('action-interrupted')).toBeNull();
+  });
+
+  it('leaves a held call to its deferred words, never interrupted (M57.1)', () => {
+    const held = call({ done: false, output: null, deferred: true });
+    // Read off the call alone, a held call is not run, never interrupted.
+    render(<AiActionCard tool={held} onOpenPath={() => undefined} />);
+    expect(card().getAttribute('data-status')).toBe('not_run');
+    expect(screen.getByTestId('action-deferred').textContent).toBe(DEFERRED.not_run);
+    expect(screen.queryByTestId('action-interrupted')).toBeNull();
+    cleanup();
+    render(<AiActionCard tool={held} status="waiting" onOpenPath={() => undefined} />);
+    expect(screen.getByTestId('action-deferred').textContent).toBe('Waiting for your answer');
+    expect(card().querySelector('.animate-spin')).toBeNull();
+  });
+
+  it('reads its status off the call when no row gives one', () => {
+    render(<AiActionCard tool={call({ failed: true })} onOpenPath={() => undefined} />);
+    expect(card().getAttribute('data-status')).toBe('failed');
+    expect(card().getAttribute('data-renderer')).toBe('step');
+  });
+
+  it('shows the whole payload in place of the preview', () => {
+    const whole = 'the whole result, every line of it';
+    render(
+      <AiActionCard
+        tool={call({
+          payload: { output: whole, outputBytes: whole.length, outputTruncated: false },
+        })}
+        onOpenPath={() => undefined}
+      />,
+    );
+    open();
+    expect(screen.getByTestId('action-output').textContent).toBe(whole);
+    expect(screen.queryByTestId('action-cut')).toBeNull();
+  });
+
+  it('says how much the 256 KB cap left out', () => {
+    render(
+      <AiActionCard
+        tool={call({
+          payload: {
+            input: '{"path":"notes/plan.md","body":"cut',
+            inputBytes: 3 * 1024 * 1024,
+            inputTruncated: true,
+          },
+        })}
+        onOpenPath={() => undefined}
+      />,
+    );
+    open();
+    expect(screen.getByTestId('action-input').textContent).toBe(
+      '{"path":"notes/plan.md","body":"cut',
+    );
+    expect(screen.getByTestId('action-cut').textContent).toBe('Showing the first 256 KB of 3 MB.');
+    // The output had no payload: its preview stands.
+    expect(screen.getByTestId('action-output').textContent).toBe('the first part…');
+  });
+
+  it('words a size the way the cut note does', () => {
+    expect(formatSize(900)).toBe('900 bytes');
+    expect(formatSize(300 * 1024)).toBe('300 KB');
+    expect(formatSize(1.5 * 1024 * 1024)).toBe('1.5 MB');
   });
 });

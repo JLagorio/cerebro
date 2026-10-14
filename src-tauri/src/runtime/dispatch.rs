@@ -955,11 +955,13 @@ pub fn meter_attended(
     Ok(())
 }
 
-/// Record the Claude Code session a run ran as (M56.7), from its stream.
+/// Record the Claude Code session a run ran as (M56.7): the id it was spawned
+/// with (M56.3, `meter::record_spawned_session`), then its stream's.
 ///
 /// An id that is not session-shaped (`cause::is_cli_session_id`) is refused
 /// before it reaches the column's CHECK. Otherwise the row takes it, whatever
-/// it held: the stream's own id is the one a transcript is filed under.
+/// it held: the stream's own id, written last, is the one a transcript is
+/// filed under.
 pub fn record_cli_session(conn: &Connection, run_id: &str, id: &str) -> Result<(), String> {
     if !is_cli_session_id(id) {
         return Err(format!(

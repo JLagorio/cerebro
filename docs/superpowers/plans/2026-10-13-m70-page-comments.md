@@ -235,6 +235,7 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M70 (D18 moved it up: it builds 
   - a Rust reader-text projection, so agents could quote across formatting (Q2);
   - cards inside a thread (Q12), per-thread sessions (Q13), stop-on-delete (Q14), comments in the record peek (Q6).
 - **Never:** inferred follow-ups. The roadmap rules them out.
+- **Kept plain, on purpose:** anchor refusals stay plain sentences, with no refusal code (M55.5's quote refusals are the precedent), and the thread turn is a Tauri command (`start_thread_turn`), not a tool any run holds.
 - **Beyond the roadmap, on purpose:** the per-run comment cap (Q9); settling orphaned placeholders at vault open; the browser-mode probe seam.
 
 ## Owner questions

@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import type { ToolCall } from '@/agent/types';
-import { bareToolName, showsAsChange, toolIconName } from '@/engine/tools';
+import { toolStatus, type ToolStatus } from '@/agent/transcriptRows';
+import { bareToolName, showsAsChange, toolIconName, toolRenderer } from '@/engine/tools';
 
 /**
  * One thing the agent did (M9.5).
@@ -10,7 +11,8 @@ import { bareToolName, showsAsChange, toolIconName } from '@/engine/tools';
  * panel's job is to make that legible — `create note · knowledge/x.md` in a
  * pill tells you something happened, not what.
  *
- * Read tools collapse to one line; WRITE tools keep their path visible while
+ * Consecutive reads fold into one row before they reach a card
+ * (transcriptRows.ts, M56.8); a WRITE card keeps its path visible while
  * collapsed, because that is the thing you might want to undo. Undo needs git
  * history: a turn that wrote becomes its own commit (M9.4), which View diff
  * reads. A vault with no git history has no revert for an agent's write, and
@@ -31,12 +33,55 @@ export function historyOf(ready: boolean, isRepo: boolean): GitHistory | undefin
   return isRepo ? 'git' : 'none';
 }
 
-/** Tool names arrive namespaced by the CLI (`mcp__cerebro__get_note`). */
+/** Tool names arrive namespaced by the CLI (`mcp__cerebro__get_note`).
+ * Cerebro's own read bare; a connector's name its server (M56.8). */
 export function toolLabel(name: string): string {
   const bare = bareToolName(name);
+  const connector = /^mcp__(.+?)__(.+)$/.exec(bare);
+  if (connector !== null) return `${connector[1]} · ${connector[2].replace(/_/g, ' ')}`;
   // Native CLI tools are already capitalized and read fine as-is.
   if (/^[A-Z]/.test(bare)) return bare;
   return bare.replace(/_/g, ' ');
+}
+
+/** What an unfinished call on a stopped turn says (M56.8): the turn ended
+ * before its result came back, so it may have run all the same. A call a
+ * hook deferred (M57.1) is never that: it did not run, and says why
+ * (`DEFERRED`). */
+export const INTERRUPTED = 'Interrupted, may have completed';
+
+/** What a deferred call says, by its status (M57.1). */
+export const DEFERRED: Readonly<Record<'waiting' | 'cancelled' | 'not_run' | 'paused', string>> =
+  {
+    waiting: 'Waiting for your answer',
+    cancelled: 'Cancelled: it did not run',
+    not_run: 'Not run: it waited for an answer that never came',
+    paused: 'Paused by a hook outside Cerebro; your next message refuses it',
+  };
+
+/** A whole payload's size, as the cut note names it. */
+export function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} bytes`;
+  const [value, unit] = bytes < 1024 * 1024 ? [bytes / 1024, 'KB'] : [bytes / 1024 / 1024, 'MB'];
+  return `${Number(value.toFixed(1))} ${unit}`;
+}
+
+/** What a card shows of one part: the whole when a payload carried it, else
+ * the preview; and the note when the 256 KiB cap cut even the whole. */
+function partOf(
+  preview: string | null,
+  whole: string | undefined,
+  truncated: boolean | undefined,
+  bytes: number | undefined,
+): { text: string | null; cut: string | null } {
+  if (whole === undefined) return { text: preview, cut: null };
+  return {
+    text: whole,
+    cut:
+      truncated === true && bytes !== undefined
+        ? `Showing the first 256 KB of ${formatSize(bytes)}.`
+        : null,
+  };
 }
 
 /** The icon the tool manifest gives a call, in either vocabulary the CLI
@@ -44,8 +89,8 @@ export function toolLabel(name: string): string {
  * know. */
 export const toolIcon = toolIconName;
 
-/** A write card: the manifest draws this call as a change, so its path stays
- * visible while collapsed and it offers a diff. */
+/** A write card: the manifest draws this call as a change or a concept, so
+ * its path stays visible while collapsed and it offers a diff. */
 export const isWrite = showsAsChange;
 
 /** The path a tool touched, for the collapsed line. */
@@ -74,11 +119,25 @@ function formatInput(input: string): string {
   }
 }
 
+const STATUS_ICON: Record<ToolStatus, { name: string; color: string }> = {
+  running: { name: 'loader', color: 'var(--n-400)' },
+  done: { name: 'circle-check', color: 'var(--success-600)' },
+  failed: { name: 'circle-x', color: 'var(--danger-500)' },
+  interrupted: { name: 'circle-alert', color: 'var(--warn-600)' },
+  waiting: { name: 'clock', color: 'var(--cortex-600)' },
+  cancelled: { name: 'circle-x', color: 'var(--n-400)' },
+  not_run: { name: 'circle-minus', color: 'var(--n-400)' },
+  paused: { name: 'circle-alert', color: 'var(--warn-600)' },
+};
+
 export function AiActionCard({
   tool,
   onOpenPath,
   onViewDiff,
   history,
+  status,
+  summary,
+  children,
 }: {
   tool: ToolCall;
   onOpenPath: (path: string) => void;
@@ -86,19 +145,30 @@ export function AiActionCard({
   onViewDiff?: (path: string) => void;
   /** Whether the vault keeps git history; unknown says nothing (M55.5). */
   history?: GitHistory;
+  /** The row's status (M56.8, transcriptRows.ts). Absent, it is read off the
+   * call alone, which cannot tell a running call from an interrupted one. */
+  status?: ToolStatus;
+  /** What the collapsed line says in place of the tool's name and path: a
+   * renderer's own words ("Handed to release-scout"). */
+  summary?: ReactNode;
+  /** A renderer's own line under the card's, shown collapsed too. */
+  children?: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
   const path = toolPath(tool.input);
   const write = isWrite(tool.name);
-  const hasDetail = tool.input !== null || tool.output !== null;
+  const state = status ?? toolStatus(tool, !tool.done);
+  const payload = tool.payload;
+  const input = partOf(tool.input, payload?.input, payload?.inputTruncated, payload?.inputBytes);
+  const output = partOf(
+    tool.output,
+    payload?.output,
+    payload?.outputTruncated,
+    payload?.outputBytes,
+  );
+  const hasDetail = input.text !== null || output.text !== null;
   const noRevert = write && history === 'none' && !tool.failed;
-
-  const statusIcon = !tool.done ? 'loader' : tool.failed ? 'circle-x' : 'circle-check';
-  const statusColor = !tool.done
-    ? 'var(--n-400)'
-    : tool.failed
-      ? 'var(--danger-500)'
-      : 'var(--success-600)';
+  const icon = STATUS_ICON[state];
 
   return (
     <div
@@ -106,6 +176,8 @@ export function AiActionCard({
       data-tool={tool.name}
       data-write={write ? 'true' : 'false'}
       data-failed={tool.failed ? 'true' : 'false'}
+      data-renderer={toolRenderer(tool.name)}
+      data-status={state}
       className={[
         'overflow-hidden rounded-lg border text-xs',
         tool.failed
@@ -122,15 +194,22 @@ export function AiActionCard({
         className="flex w-full items-center gap-1.5 border-0 bg-transparent px-2 py-1.5 text-left disabled:cursor-default"
       >
         {/* M15: the loader actually turns. A static partial circle made a
-            running tool indistinguishable from a hung one. */}
-        <span className={tool.done ? 'inline-flex' : 'inline-flex animate-spin'}>
-          <Icon name={statusIcon} size={11} color={statusColor} />
+            running tool indistinguishable from a hung one. M56.8: only while
+            its turn runs; an unfinished call on a stopped turn reads
+            interrupted and stops spinning, live after a stop and after a
+            reload alike. */}
+        <span className={state === 'running' ? 'inline-flex animate-spin' : 'inline-flex'}>
+          <Icon name={icon.name} size={11} color={icon.color} />
         </span>
         <Icon name={toolIcon(tool.name)} size={11} color="var(--n-500)" />
-        <span className="flex-none font-medium text-n-700">{toolLabel(tool.name)}</span>
+        {summary !== undefined ? (
+          <span className="min-w-0 truncate font-medium text-n-700">{summary}</span>
+        ) : (
+          <span className="flex-none font-medium text-n-700">{toolLabel(tool.name)}</span>
+        )}
         {/* A write keeps its path visible collapsed — it is the thing you
             might want to undo. */}
-        {path !== null && (
+        {summary === undefined && path !== null && (
           <span
             className={[
               'min-w-0 truncate [font-family:var(--font-mono)] text-2xs',
@@ -140,32 +219,63 @@ export function AiActionCard({
             {path}
           </span>
         )}
+        {state === 'interrupted' && (
+          <span data-testid="action-interrupted" className="flex-none text-2xs text-n-500">
+            {INTERRUPTED}
+          </span>
+        )}
+        {(state === 'waiting' ||
+          state === 'cancelled' ||
+          state === 'not_run' ||
+          state === 'paused') && (
+          <span data-testid="action-deferred" className="flex-none text-2xs text-n-500">
+            {DEFERRED[state]}
+          </span>
+        )}
         <span className="flex-1" />
         {hasDetail && (
           <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={11} color="var(--n-400)" />
         )}
       </button>
 
+      {children}
+
       {expanded && (
         <div className="border-t border-n-200 px-2 py-1.5">
-          {tool.input !== null && (
+          {input.text !== null && (
             <>
               <div className="pb-0.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
                 Input
               </div>
-              <pre className="m-0 max-h-[160px] overflow-auto whitespace-pre-wrap break-words [font-family:var(--font-mono)] text-2xs leading-[15px] text-n-600">
-                {formatInput(tool.input)}
+              <pre
+                data-testid="action-input"
+                className="m-0 max-h-[160px] overflow-auto whitespace-pre-wrap break-words [font-family:var(--font-mono)] text-2xs leading-[15px] text-n-600"
+              >
+                {formatInput(input.text)}
               </pre>
+              {input.cut !== null && (
+                <div data-testid="action-cut" className="pt-0.5 text-2xs text-n-500">
+                  {input.cut}
+                </div>
+              )}
             </>
           )}
-          {tool.output !== null && (
+          {output.text !== null && (
             <>
               <div className="pb-0.5 pt-1.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
                 {tool.failed ? 'Error' : 'Result'}
               </div>
-              <pre className="m-0 max-h-[200px] overflow-auto whitespace-pre-wrap break-words [font-family:var(--font-mono)] text-2xs leading-[15px] text-n-700">
-                {tool.output}
+              <pre
+                data-testid="action-output"
+                className="m-0 max-h-[200px] overflow-auto whitespace-pre-wrap break-words [font-family:var(--font-mono)] text-2xs leading-[15px] text-n-700"
+              >
+                {output.text}
               </pre>
+              {output.cut !== null && (
+                <div data-testid="action-cut" className="pt-0.5 text-2xs text-n-500">
+                  {output.cut}
+                </div>
+              )}
             </>
           )}
           {noRevert && (

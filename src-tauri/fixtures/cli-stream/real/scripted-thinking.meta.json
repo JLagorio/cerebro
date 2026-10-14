@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "cli_version": "2.1.250",
+  "source": "scripted",
+  "recorded": "derived",
+  "derived_from": [
+    "--help on --effort",
+    "the 2.1.250 bundle (thinking and signature deltas)",
+    "the 2.1.250 bundle (stream_event, assistant and result schemas)",
+    "real/spike-not-signed-in (the 2.1.250 init and session-file framing)"
+  ],
+  "transport": "per-turn",
+  "scenario": "thinking step 0",
+  "proves": "A sonnet turn at effort high streams thinking deltas and a signature before its reply.",
+  "ends": "result",
+  "session": "00000000-0000-4000-8000-000000000001.jsonl",
+  "sanitizer": 1
+}

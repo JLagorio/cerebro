@@ -173,6 +173,25 @@ describe('agentPatch by key (M55.12)', () => {
     expect(agentPatch(d, [])).toEqual({});
   });
 
+  it('writes model and effort each alone, and blank removes the key (M56.5)', () => {
+    const picked = { ...d, model: 'sonnet', effort: 'high' };
+    expect(agentPatch(picked, ['model'])).toEqual({ model: 'sonnet' });
+    expect(agentPatch(picked, ['effort'])).toEqual({ effort: 'high' });
+    expect(agentPatch({ ...picked, model: '  ' }, ['model'])).toEqual({ model: null });
+    expect(agentPatch({ ...picked, effort: '' }, ['effort'])).toEqual({ effort: null });
+    expect(AGENT_KEYS).toEqual(expect.arrayContaining(['model', 'effort']));
+    // Read trimmed, '' when unset.
+    const read = agentDraft(
+      makeEntry({
+        path: 'records/agents/a.md',
+        type: 'Agent',
+        properties: { model: ' opus ', effort: 3 } as never,
+      }),
+      '',
+    );
+    expect([read.model, read.effort]).toEqual(['opus', '']);
+  });
+
   it('slugifies a typed handle, and an emptied one removes the key', () => {
     expect(agentPatch({ ...d, slug: 'Release Scout' }, ['slug'])).toEqual({
       slug: 'release-scout',

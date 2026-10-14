@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { asThemeMode, useUiStore } from './uiStore';
+import * as ipc from '@/lib/ipc';
+import { resetMockFs } from '@/lib/mockIpc';
 
 function reset() {
   useUiStore.setState({
@@ -80,6 +82,16 @@ describe('uiStore', () => {
       subject: null,
       label: null,
     });
+  });
+
+  // M56.4: a failure card's Open Settings names the row to bring into view.
+  it('settingsFocus sets and clears, and is not persisted', () => {
+    const before = { ...window.localStorage };
+    useUiStore.getState().setSettingsFocus('claude-code');
+    expect(useUiStore.getState().settingsFocus).toBe('claude-code');
+    useUiStore.getState().setSettingsFocus(null);
+    expect(useUiStore.getState().settingsFocus).toBeNull();
+    expect({ ...window.localStorage }).toEqual(before);
   });
 
   it('setQuickOpen toggles quickOpenVisible', () => {
@@ -218,6 +230,34 @@ describe('uiStore', () => {
     });
   });
 
+  // M70.2b — Comments is a panel tab like the rest: chosen, stored as the
+  // bare word, and back on the next launch. A word no build knows reads as
+  // Outline.
+  describe('the side panel tab', () => {
+    beforeEach(() => window.localStorage.removeItem('cerebro.docPanelTab'));
+
+    it('stores comments and restores it on the next launch', async () => {
+      useUiStore.getState().setDocPanelTab('comments');
+      expect(window.localStorage.getItem('cerebro.docPanelTab')).toBe('comments');
+      vi.resetModules();
+      const fresh = (await import('./uiStore')).useUiStore;
+      expect(fresh.getState().docPanelTab).toBe('comments');
+    });
+
+    it('reads an unknown value as outline', async () => {
+      window.localStorage.setItem('cerebro.docPanelTab', 'threads');
+      vi.resetModules();
+      const fresh = (await import('./uiStore')).useUiStore;
+      expect(fresh.getState().docPanelTab).toBe('outline');
+    });
+
+    it("a concept's panel takes comments too", () => {
+      useUiStore.getState().setConceptPanelTab('comments');
+      expect(useUiStore.getState().conceptPanelTab).toBe('comments');
+      useUiStore.getState().setConceptPanelTab('details');
+    });
+  });
+
   it('dismissToast removes only the matching toast', () => {
     const { toast } = useUiStore.getState();
     toast('First');
@@ -302,6 +342,24 @@ describe('favorites', () => {
       [VAULT]: ['a.md'],
     });
   });
+
+  // M55.13 — growing a page renames it; its pin follows, in place, and so do
+  // pins on pages under a folder that moved. Other vaults are left alone.
+  it('follows a page that moved, keeping its place in the order', () => {
+    useUiStore.getState().toggleFavorite(VAULT, 'first.md');
+    useUiStore.getState().toggleFavorite(VAULT, 'notes/plan.md');
+    useUiStore.getState().toggleFavorite(VAULT, 'notes/doc/child.md');
+    useUiStore.getState().toggleFavorite(OTHER, 'notes/plan.md');
+    useUiStore.getState().replaceFavoritePath(VAULT, 'notes/plan.md', 'notes/plan/plan.md');
+    useUiStore.getState().replaceFavoritePath(VAULT, 'notes/doc', 'notes/plan/doc');
+    expect(useUiStore.getState().favorites[VAULT]).toEqual([
+      'first.md',
+      'notes/plan/plan.md',
+      'notes/plan/doc/child.md',
+    ]);
+    expect(useUiStore.getState().favorites[OTHER]).toEqual(['notes/plan.md']);
+    expect(window.localStorage.getItem('cerebro.favorites')).toContain('notes/plan/plan.md');
+  });
 });
 
 // M45.2 — one mount, one signal: three menus open the layout editor by
@@ -378,5 +436,45 @@ describe('forgetJobRecord', () => {
     expect(stored('cerebro.skillRuns')).toEqual({
       '/vault': { 'records/skills/digest.md': '2026-08-01 09:00' },
     });
+  });
+});
+
+// M56.6 — the panel's binding lives in config.json; the store mirrors it.
+describe('panel agent binding', () => {
+  beforeEach(() => {
+    resetMockFs();
+    useUiStore.setState({ panelAgents: {}, toasts: [] });
+  });
+
+  it('loads per vault: null is unbound, a handle is bound', async () => {
+    await useUiStore.getState().loadPanelAgent('/demo-vault');
+    expect(useUiStore.getState().panelAgents).toEqual({ '/demo-vault': null });
+    expect(await useUiStore.getState().setPanelAgent('/demo-vault', 'release-scout')).toBe(true);
+    expect(useUiStore.getState().panelAgents['/demo-vault']).toBe('release-scout');
+    expect(await ipc.getPanelAgent('/demo-vault')).toBe('release-scout');
+    useUiStore.setState({ panelAgents: {} });
+    await useUiStore.getState().loadPanelAgent('/demo-vault');
+    expect(useUiStore.getState().panelAgents['/demo-vault']).toBe('release-scout');
+    expect(await useUiStore.getState().setPanelAgent('/demo-vault', null)).toBe(true);
+    expect(useUiStore.getState().panelAgents['/demo-vault']).toBeNull();
+    expect(useUiStore.getState().toasts).toEqual([]);
+  });
+
+  it('a refused set toasts once, answers false and keeps the binding', async () => {
+    await useUiStore.getState().setPanelAgent('/demo-vault', 'scout');
+    expect(await useUiStore.getState().setPanelAgent('/demo-vault', 'Release Scout')).toBe(false);
+    expect(useUiStore.getState().toasts.map((t) => t.message)).toEqual([
+      'Couldn\'t change who answers in the assistant panel: "Release Scout" is not an agent handle',
+    ]);
+    expect(useUiStore.getState().panelAgents['/demo-vault']).toBe('scout');
+  });
+
+  it('a failed read toasts and leaves state as it was', async () => {
+    const spy = vi.spyOn(ipc, 'getPanelAgent').mockRejectedValueOnce(new Error('disk gone'));
+    useUiStore.setState({ panelAgents: { '/demo-vault': 'scout' } });
+    await useUiStore.getState().loadPanelAgent('/demo-vault');
+    expect(useUiStore.getState().panelAgents).toEqual({ '/demo-vault': 'scout' });
+    expect(useUiStore.getState().toasts).toHaveLength(1);
+    spy.mockRestore();
   });
 });

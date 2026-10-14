@@ -120,4 +120,16 @@ describe('AgentRunHistory', () => {
     expect(await screen.findByTestId('run-detail')).toBeTruthy();
     expect(screen.getByTestId('agent-run').getAttribute('aria-expanded')).toBe('true');
   });
+
+  it("release-scout's run opens with its model and what it was refused (M56.9)", async () => {
+    render(<AgentRunHistory actor="process:release-scout" />);
+    fireEvent.click(await screen.findByTestId('agent-run'));
+    const refused = await screen.findByTestId('run-detail-refused');
+    expect(
+      within(refused)
+        .getAllByTestId('run-detail-refusal')
+        .map((row) => row.getAttribute('data-code')),
+    ).toEqual(['write_outside_scope', 'capability_unavailable']);
+    expect(screen.getByTestId('run-detail-model').textContent).toBe('claude-opus-5');
+  });
 });

@@ -1,10 +1,10 @@
 //! Wikilink target → vault entry (M33a.5).
 //!
-//! Mirrors `resolveTarget` in src/engine/wikilink.ts, which is the rule the
-//! whole app resolves `about:`, `project:` and every other wikilink field by.
-//! The two have to agree: a tool that answered "nothing is anchored to this"
-//! where the surface beside it lists three concepts would be worse than no
-//! tool at all.
+//! Twins `resolveLink` in src/engine/wikilink.ts, which is the rule the whole
+//! app resolves `about:`, `project:` and every other wikilink field by. The
+//! two have to agree: a tool that answered "nothing is anchored to this" where
+//! the surface beside it lists three concepts would be worse than no tool at
+//! all. Both replay src-tauri/fixtures/wikilink-targets.json (M55.8).
 //!
 //! It lives here rather than in `knowledge.rs` because it is not a knowledge
 //! rule — it is what a wikilink MEANS in this vault, and the bundle is only
@@ -16,9 +16,10 @@ use super::entry::Entry;
 
 /// The resolution rule, prepared once for a corpus.
 ///
-/// The rule is three ordered passes and each takes the FIRST entry that
+/// A name is three ordered passes and each takes the FIRST entry that
 /// matches, so three first-wins maps tried in the same order answer
-/// identically — and answer in constant time. That matters because the
+/// identically — and answer in constant time. A target is that rule run on
+/// the whole target, then on the page before its first `#` (see `resolve`). That matters because the
 /// callers resolve MANY targets against one vault: every `about:` anchor of
 /// every concept, plus every relation either end of the graph declared. Done
 /// as a scan per target that is quadratic in the vault.
@@ -53,11 +54,25 @@ impl<'a> TargetIndex<'a> {
         }
     }
 
-    /// Filename-stem match first, then project folder, then exact title; all
-    /// case-insensitive (the Tolaria rule). The folder pass sits above the
-    /// title pass because a folder name is an identifier and a title is prose.
+    /// The entry a wikilink target names (M55.8): the whole target first,
+    /// then, when that names nothing, the page before its first `#`, so
+    /// `[[notes#Risks]]` reaches `notes`. The whole target goes first so that
+    /// nothing that resolved before section links changes (`C# notes` stays
+    /// a title link). The section itself is only the editor's business, so
+    /// nothing here returns it.
     pub fn resolve(&self, target: &str) -> Option<&'a Entry> {
-        let needle = target.trim().to_lowercase();
+        self.resolve_name(target).or_else(|| {
+            let (page, _section) = target.split_once('#')?;
+            self.resolve_name(page)
+        })
+    }
+
+    /// One name: filename-stem match first, then project folder, then exact
+    /// title; all case-insensitive (the Tolaria rule). The folder pass sits
+    /// above the title pass because a folder name is an identifier and a
+    /// title is prose. An empty name resolves nothing.
+    fn resolve_name(&self, name: &str) -> Option<&'a Entry> {
+        let needle = name.trim().to_lowercase();
         if needle.is_empty() {
             return None;
         }
@@ -133,6 +148,55 @@ mod tests {
         assert!(resolve_target("mpm-410", &entries).is_none());
         assert!(resolve_target("   ", &entries).is_none());
         assert!(resolve_target("", &entries).is_none());
+    }
+
+    #[test]
+    fn a_section_link_resolves_the_page_before_its_first_hash() {
+        let entries = corpus();
+        let at = |target: &str| resolve_target(target, &entries).map(|e| e.path.as_str());
+        assert_eq!(at("notes#Risks"), Some("docs/notes.md"));
+        assert_eq!(at("atlas#Timeline"), Some("projects/atlas/project.md"));
+        assert_eq!(at("notes#A#B"), Some("docs/notes.md"));
+        // No page half is no page: only the page holding the link can answer.
+        assert_eq!(at("#Risks"), None);
+        assert_eq!(at("mpm-410#Risks"), None);
+    }
+
+    #[test]
+    fn a_whole_target_that_names_a_page_wins_over_its_hash() {
+        let mut entries = corpus();
+        entries.push(entry("docs/c-sharp.md", "C# notes"));
+        entries.push(entry("docs/c.md", "C"));
+        assert_eq!(
+            resolve_target("C# notes", &entries).map(|e| e.path.as_str()),
+            Some("docs/c-sharp.md")
+        );
+    }
+
+    /// The cases src/engine/wikilink.test.ts replays through `resolveLink`.
+    const TARGET_CASES: &str = include_str!("../../fixtures/wikilink-targets.json");
+
+    #[test]
+    fn replays_the_shared_target_cases() {
+        let fixture: serde_json::Value = serde_json::from_str(TARGET_CASES).unwrap();
+        assert_eq!(fixture["format"], 1);
+        let entries: Vec<Entry> = fixture["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| entry(e["path"].as_str().unwrap(), e["title"].as_str().unwrap()))
+            .collect();
+        let index = TargetIndex::build(&entries);
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(!cases.is_empty());
+        for case in cases {
+            let target = case["target"].as_str().unwrap();
+            assert_eq!(
+                index.resolve(target).map(|e| e.path.as_str()),
+                case["path"].as_str(),
+                "{target:?}"
+            );
+        }
     }
 
     #[test]

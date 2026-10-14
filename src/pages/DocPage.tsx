@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { pageAsides } from '@/app/shellLayout';
 import { MoveDialog } from '@/components/MoveDialog';
+import { EntryIcon } from '@/components/PageIcon';
 import { Button } from '@/components/ui/Button';
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { Dialog } from '@/components/ui/Dialog';
@@ -8,24 +9,39 @@ import { DrawerScrim } from '@/components/ui/DrawerScrim';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { FavoriteStar } from '@/app/FavoriteStar';
+import { OpenWithMenu } from '@/app/OpenWithMenu';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { DocPagesFloatingButton, DocPagesPanel } from '@/detail/DocPagesPanel';
 import { DocSidePanel } from '@/detail/DocSidePanel';
+import { usePageComments } from '@/detail/usePageComments';
+import { PageCoverBand, PageIconHeader } from '@/detail/PageChrome';
 import type { CerebroEditor, EditorReadyInfo } from '@/editor/MarkdownEditor';
 import { hasTitleBlock, spliceTitleIntoBlocks } from '@/editor/markdown';
 import { NoteBodyEditor, type SaveState } from '@/editor/NoteBodyEditor';
+import { PageCommentsContext } from '@/editor/PageCommentsContext';
 import { GitHistoryPanel } from '@/git/GitHistoryPanel';
 import { InlineDiff } from '@/git/InlineDiff';
 import { HeadingProperties, stripCells } from '@/detail/HeadingProperties';
 import { RecordProperties } from '@/detail/RecordProperties';
 import { RecordTabs, recordTabSet } from '@/detail/RecordTabs';
 import { TabSections } from '@/detail/TabSections';
+import { addSubPage } from '@/app/pageActions';
 import { setTypeTabs } from '@/app/typeActions';
 import { isAgentEntry } from '@/engine/agents';
-import { docFolderPathFor, docPagesFor } from '@/engine/docPages';
+import { isCollectionPage } from '@/engine/collections';
+import { isCommentPage } from '@/engine/comments';
+import {
+  canHaveSubPages,
+  crumbTrail,
+  descendantPageCount,
+  docPagesFor,
+  isFolderNote,
+  type Crumb,
+} from '@/engine/docPages';
 import { resolveLayout } from '@/engine/layout';
 import { isKnowledgePath } from '@/engine/okf';
+import { pageIconOf } from '@/engine/pageChrome';
 import { isRecordEntry } from '@/engine/typeCatalog';
 import { resolveViewTab } from '@/engine/viewTab';
 import type { Entry, Selection } from '@/engine/types';
@@ -37,7 +53,7 @@ import { KnowledgeStrip } from '@/knowledge/KnowledgeStrip';
 import { ReviewPager } from '@/knowledge/ReviewQueue';
 import { useConcept } from '@/knowledge/useConcepts';
 import { askedAbout, conceptAsk } from '@/lib/prompts';
-import { createFolder, deleteNote, readNote, renameNote, saveNote, setNoteTitle } from '@/lib/ipc';
+import { createFolder, deleteNote, readNote, saveNote, setNoteTitle } from '@/lib/ipc';
 import { humanizeSlug, slugify } from '@/lib/slug';
 import {
   applyTemplateBody,
@@ -228,13 +244,14 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   const createItem = useVaultStore((s) => s.createItem);
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
   const navigate = useNavStore((s) => s.navigate);
-  const replacePath = useNavStore((s) => s.replacePath);
   const schema = useSchema();
   const toast = useUiStore((s) => s.toast);
   const docPanelOpen = useUiStore((s) => s.docPanelOpen);
   const setDocPanelOpen = useUiStore((s) => s.setDocPanelOpen);
   const conceptPanelOpen = useUiStore((s) => s.conceptPanelOpen);
   const setConceptPanelOpen = useUiStore((s) => s.setConceptPanelOpen);
+  const setDocPanelTab = useUiStore((s) => s.setDocPanelTab);
+  const setConceptPanelTab = useUiStore((s) => s.setConceptPanelTab);
   const pagesOpen = useUiStore((s) => s.docPagesOpen);
   const openLayoutEditor = useUiStore((s) => s.openLayoutEditor);
   const askAgent = useUiStore((s) => s.askAgent);
@@ -345,12 +362,26 @@ export function DocPage({ selection }: { selection: DocSelection }) {
 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [moving, setMoving] = useState(false);
-  const [addingPage, setAddingPage] = useState(false);
+  // The page the Add sub-page dialog adds to (M55.13): this page from its
+  // menu, the listed page from the Pages panel.
+  const [subPageOf, setSubPageOf] = useState<Entry | null>(null);
   const [pageName, setPageName] = useState('');
   const [renaming, setRenaming] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
   const menuButtonRef = useRef<HTMLDivElement | null>(null);
+
+  // M70.2b — the page's comments, on every .md page this opens: docs,
+  // records, agents and concepts alike (CV-08; Q5). A hook, so before the
+  // early return; the panel it opens is laid out below it, so it reaches
+  // `openSide` through a ref set each render. No editor while a diff stands
+  // in for it: its highlights are not on screen to draw or focus.
+  const openSideRef = useRef<(tab: 'comments') => void>(() => undefined);
+  const comments = usePageComments(
+    entry !== null && isCommentPage(entry.path) ? entry.path : null,
+    diffOpen ? null : editor,
+    { openPanel: () => openSideRef.current('comments'), deepLink: selection.thread ?? null },
+  );
 
   if (entry === null) {
     return (
@@ -389,14 +420,23 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   // that is the user's word; a fold never does. Showing a panel with no room
   // beside the column opens it as a drawer rather than into a fold nobody
   // can see.
+  const showSide = () => {
+    if (!panelOpen) setPanelOpen(true);
+    if (!asides.sideFits) setSideDrawerFor(entry.path);
+  };
   const toggleSide = () => {
     if (sideDrawn) {
       setPanelOpen(false);
       setSideDrawerFor(null);
       return;
     }
-    if (!panelOpen) setPanelOpen(true);
-    if (!asides.sideFits) setSideDrawerFor(entry.path);
+    showSide();
+  };
+  // Open the panel on `tab`, as a drawer when it does not fit (M70.2b).
+  openSideRef.current = (tab) => {
+    if (concept !== null) setConceptPanelTab(tab);
+    else setDocPanelTab(tab);
+    if (!sideDrawn) showSide();
   };
   const fullWidth = entry.properties.full_width === true;
   // Everything under knowledge/ is written through the ledger. A concept is
@@ -430,17 +470,19 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   if (details !== null && details.path !== entry.path) setDetails(null);
   const detailsShown = details?.path === entry.path ? details.shown : !stripShows;
 
-  // Breadcrumb: Docs root, then folders; a multi-page doc's folder segment
-  // becomes the doc crumb (its pages are tabs, not tree entries).
-  const folderSegments = entry.folder === '' ? [] : entry.folder.split('/');
-  // An agent's place is the Agents surface, not the folder its file sits in.
-  const crumbFolders = agent
+  // Breadcrumb (M55.13): the way up the page tree. Each ancestor folder is the
+  // page it is when it has a folder note, and a plain label otherwise; a
+  // concept's crumbs are its Knowledge sections, and an agent's place is the
+  // Agents surface, not the folder its file sits in.
+  const trail: (Crumb | { kind: 'folder'; label: string; section: string })[] = agent
     ? []
     : knowledgeFile
-      ? folderSegments.slice(1)
-      : docPages !== null
-        ? folderSegments.slice(0, -1)
-        : folderSegments;
+      ? (entry.folder === '' ? [] : entry.folder.split('/').slice(1)).map((seg) => ({
+          kind: 'folder' as const,
+          label: humanizeSlug(seg),
+          section: seg,
+        }))
+      : crumbTrail(entry, entries);
 
   // A record's crumb root is its backdrop — the Collection it lives in when
   // it has one, its type screen otherwise: the same rule useOpenPath applies
@@ -450,42 +492,25 @@ export function DocPage({ selection }: { selection: DocSelection }) {
       ? entry.project.slice(0, entry.project.lastIndexOf('/'))
       : null;
 
-  const moveSubject: { path: string; label: string } =
-    docPages !== null
-      ? { path: docPages.folder, label: `doc "${docPages.main.title}"` }
-      : { path: entry.path, label: `page "${entry.title}"` };
+  // Move takes the page with its sub-pages: the folder for a folder note, the
+  // file alone for any other page (M55.13) — a sub-page used to take the whole
+  // doc it sat in along with it.
+  const moveSubject: { path: string; label: string } = {
+    path: isFolderNote(entry) ? entry.folder : entry.path,
+    label: `page "${entry.title}"`,
+  };
 
-  const submitAddPage = async () => {
+  // addSubPage never throws: it toasts its own refusal or failure (M55.13).
+  const submitSubPage = async () => {
     const trimmed = pageName.trim();
-    if (trimmed === '' || vaultPath === null || busy) return;
+    if (trimmed === '' || subPageOf === null || busy) return;
     setBusy(true);
     try {
-      let folder: string;
-      if (docPages !== null) {
-        folder = docPages.folder;
-      } else {
-        // First extra page: grow the file into a doc folder (folder-note).
-        folder = docFolderPathFor(entry);
-        await createFolder(vaultPath, folder);
-        const moved = `${folder}/${entry.filename}`;
-        await renameNote(vaultPath, entry.path, moved);
-        // The page you were just reading now lives inside the new folder, and
-        // its old path is still sitting in history — Back would land on the
-        // "This page no longer exists" empty state for a file nobody deleted.
-        replacePath(entry.path, moved);
-      }
-      const slug = slugify(trimmed) || 'page';
-      const path = await createItem({
-        folder,
-        slug,
-        frontmatter: {},
-        body: `# ${trimmed}\n`,
-      });
-      setAddingPage(false);
+      const child = await addSubPage(subPageOf.path, trimmed);
+      if (child === null) return;
+      setSubPageOf(null);
       setPageName('');
-      navigate({ kind: 'doc', path });
-    } catch {
-      toast("Couldn't add page");
+      navigate({ kind: 'doc', path: child });
     } finally {
       setBusy(false);
     }
@@ -495,12 +520,13 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   // used to delete only that file, which removed the folder note and
   // dissolved the doc — its other pages stranded in a plain folder with no
   // header, no Pages panel, and no dialog copy warning about any of it.
+  // Every page under it counts, grandchildren included: they all go.
   const isDocMain = docPages !== null && entry.path === docPages.main.path;
   const deleteSubject: { path: string; title: string; extraPages: number } = isDocMain
     ? {
         path: docPages.folder,
         title: docPages.main.title,
-        extraPages: docPages.pages.length - 1,
+        extraPages: descendantPageCount(docPages.folder, entries),
       }
     : { path: entry.path, title: entry.title, extraPages: 0 };
 
@@ -682,14 +708,17 @@ export function DocPage({ selection }: { selection: DocSelection }) {
             ]
           : []),
         { icon: 'pencil', label: 'Rename…', onSelect: () => setRenaming(entry.title) },
-        // Not on an agent page (M55.12): growing an agent into a doc folder
-        // moves its file, which changes an un-slugged agent's identity and
-        // costs it a catch-up run, and a template copied from it would carry
-        // `type: Agent` and its grants into every page made from it.
+        // Not on an agent page (M55.12): growing an agent into a folder of
+        // its own moves its file, which changes an un-slugged agent's
+        // identity and costs it a catch-up run — canHaveSubPages refuses it —
+        // and a template copied from it would carry `type: Agent` and its
+        // grants into every page made from it.
+        ...(canHaveSubPages(entry)
+          ? [{ icon: 'file-plus', label: 'Add sub-page', onSelect: () => setSubPageOf(entry) }]
+          : []),
         ...(agent
           ? []
           : [
-              { icon: 'file-plus', label: 'Add page', onSelect: () => setAddingPage(true) },
               {
                 icon: 'layout-template',
                 label: 'Save as template',
@@ -709,14 +738,18 @@ export function DocPage({ selection }: { selection: DocSelection }) {
         },
       ];
 
-  const crumb = (label: string, opts: { icon?: string; onClick?: () => void; strong?: boolean }) =>
+  // `glyph` is a page's own icon (M55.11), drawn in place of the lucide one.
+  const crumb = (
+    label: string,
+    opts: { icon?: string; glyph?: ReactNode; onClick?: () => void; strong?: boolean },
+  ) =>
     opts.onClick !== undefined ? (
       <button
         type="button"
         onClick={opts.onClick}
         className="inline-flex min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-0.5 text-sm text-n-500 hover:bg-n-50 hover:text-n-800"
       >
-        {opts.icon !== undefined && <Icon name={opts.icon} size={13} />}
+        {opts.glyph ?? (opts.icon !== undefined && <Icon name={opts.icon} size={13} />)}
         <span className="truncate">{label}</span>
       </button>
     ) : (
@@ -726,9 +759,16 @@ export function DocPage({ selection }: { selection: DocSelection }) {
           opts.strong === true ? 'font-medium text-n-900' : 'text-n-500',
         ].join(' ')}
       >
-        {opts.icon !== undefined && <Icon name={opts.icon} size={13} color="var(--n-500)" />}
+        {opts.glyph ??
+          (opts.icon !== undefined && <Icon name={opts.icon} size={13} color="var(--n-500)" />)}
         <span className="truncate">{label}</span>
       </span>
+    );
+  // A crumb draws the page's own icon only when it has one; otherwise the
+  // lucide icon the crumb always drew.
+  const pageGlyph = (page: Entry): ReactNode =>
+    pageIconOf(page) === null ? undefined : (
+      <EntryIcon entry={page} fallback={{ name: 'file-text' }} size={13} />
     );
 
   const separator = <Icon name="chevron-right" size={12} color="var(--n-300)" />;
@@ -736,8 +776,13 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   // The body editor + this document's history (M9.4 — silent when it has
   // none): ONE block, shared by the untyped page and a record's Overview tab
   // so an edit to one cannot silently miss the other.
+  //
+  // M70.2b: the selection toolbar's Comment button reads PageCommentsContext,
+  // provided here and nowhere else, and not on a read-only page.
   const editorBlock = (
-    <>
+    <PageCommentsContext.Provider
+      value={readOnlyFile || comments.path === null ? null : { start: comments.start }}
+    >
       <NoteBodyEditor
         key={`${entry.path}#${reloadGen}`}
         path={entry.path}
@@ -751,7 +796,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
         onBodyLoaded={concept !== null ? (path, body) => setViewed({ path, body }) : undefined}
       />
       <GitHistoryPanel path={entry.path} />
-    </>
+    </PageCommentsContext.Provider>
   );
 
   return (
@@ -780,50 +825,46 @@ export function DocPage({ selection }: { selection: DocSelection }) {
               : // M38.3: no Docs surface to root at — a doc's crumb is its
                 // folder path, and the Pages tree in the nav is the way up.
                 crumb('Pages', { icon: 'library' })}
-        {crumbFolders.map((seg, i) => (
+        {trail.map((step, i) => (
           <span key={i} className="flex min-w-0 items-center gap-0.5">
             {separator}
-            {crumb(
-              humanizeSlug(seg),
-              // A concept's folder is a Knowledge section, and a place.
-              knowledgeFile && i === 0
-                ? {
-                    onClick: () =>
-                      navigate({ kind: 'knowledge', nav: { tab: 'section', folder: seg } }),
-                  }
-                : {},
-            )}
+            {step.kind === 'page'
+              ? // An ancestor page (M55.13): a crumb that opens it, wearing its
+                // icon (M55.11). A Collection page opens as its collection.
+                crumb(step.entry.title, {
+                  glyph: (
+                    <EntryIcon entry={step.entry} fallback={{ name: 'file-text' }} size={13} />
+                  ),
+                  onClick: () =>
+                    navigate(
+                      isCollectionPage(step.entry)
+                        ? { kind: 'collection', folder: step.entry.folder }
+                        : { kind: 'doc', path: step.entry.path },
+                    ),
+                })
+              : crumb(
+                  step.label,
+                  // A concept's folder is a Knowledge section, and a place.
+                  'section' in step && i === 0
+                    ? {
+                        onClick: () =>
+                          navigate({
+                            kind: 'knowledge',
+                            nav: { tab: 'section', folder: step.section },
+                          }),
+                      }
+                    : {},
+                )}
           </span>
         ))}
-        {docPages !== null && (
-          <span className="flex min-w-0 items-center gap-0.5">
-            {separator}
-            {crumb(docPages.main.title, {
-              icon: 'file-stack',
-              onClick:
-                entry.path === docPages.main.path
-                  ? undefined
-                  : () => navigate({ kind: 'doc', path: docPages.main.path }),
-              strong: entry.path === docPages.main.path,
-            })}
-          </span>
-        )}
-        {(docPages === null || entry.path !== docPages.main.path) && (
-          <span className="flex min-w-0 items-center gap-0.5" data-testid="doc-title">
-            {separator}
-            {crumb(entry.title, {
-              icon:
-                concept !== null
-                  ? 'lightbulb'
-                  : agent
-                    ? 'bot'
-                    : docPages === null
-                      ? 'file-text'
-                      : undefined,
-              strong: true,
-            })}
-          </span>
-        )}
+        <span className="flex min-w-0 items-center gap-0.5" data-testid="doc-title">
+          {separator}
+          {crumb(entry.title, {
+            glyph: pageGlyph(entry),
+            icon: concept !== null ? 'lightbulb' : agent ? 'bot' : 'file-text',
+            strong: true,
+          })}
+        </span>
         <span className="flex-1" />
         {/* Autosave used to be entirely invisible: no dirty marker, no saved
             state, and ⌘S did nothing. This is the trust signal — ⌘S now
@@ -849,9 +890,13 @@ export function DocPage({ selection }: { selection: DocSelection }) {
           </span>
         )}
         <FavoriteStar path={entry.path} />
-        {/* 'Add page' and 'Move to folder' are BOTH in the overflow menu
-            below — the toolbar's only labelled control was a duplicate of the
-            action users need least. The toolbar is now menu + panel toggle. */}
+        {/* M55.9 — copy as a prompt or a path, reveal, open elsewhere, or
+            hand the page to an agent app. */}
+        <OpenWithMenu entry={entry} knowledgeFile={knowledgeFile} />
+        {/* The toolbar is the star, Open with, the overflow menu and the
+            panel toggle. 'Add sub-page' and 'Move to folder' are BOTH in the
+            overflow menu — a labelled toolbar button for either duplicated
+            the action users need least. */}
         <div ref={menuButtonRef} className="inline-flex">
           <IconButton
             icon="ellipsis"
@@ -896,7 +941,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
           <DocPagesPanel
             pages={docPages}
             activePath={entry.path}
-            onAddPage={() => setAddingPage(true)}
+            onAddSubPage={() => setSubPageOf(docPages.main)}
             onHide={pagesDrawer ? () => setPagesDrawerFor(null) : undefined}
           />
         )}
@@ -918,11 +963,17 @@ export function DocPage({ selection }: { selection: DocSelection }) {
               onOpen={pagesOpen ? () => setPagesDrawerFor(entry.path) : undefined}
             />
           )}
-          <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pb-10 pt-6">
+          <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pb-10">
+            {/* M55.11 — the cover, full-bleed above the column; the top
+                padding sits below it. */}
+            <PageCoverBand entry={entry} editable={!knowledgeFile} />
             <div
               data-testid="doc-content"
-              className={fullWidth ? 'px-6' : 'mx-auto w-full max-w-[820px] px-6'}
+              className={fullWidth ? 'px-6 pt-6' : 'mx-auto w-full max-w-[820px] px-6 pt-6'}
             >
+              {/* M55.11 — the page's icon above its title, and the hover row
+                  that adds one; outside the diff lens, so both show there. */}
+              <PageIconHeader entry={entry} editable={!knowledgeFile} />
               {/* M9.7: reading a diff replaces the editor here rather than
                   opening over it — same page, different lens. */}
               {diffOpen ? (
@@ -1099,6 +1150,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
             editor={editor}
             scrollRef={scrollRef}
             concept={concept}
+            comments={comments}
           />
         )}
       </div>
@@ -1112,30 +1164,29 @@ export function DocPage({ selection }: { selection: DocSelection }) {
           label={moveSubject.label}
           onClose={() => setMoving(false)}
           onMoved={(dest) => {
-            const newPath =
-              docPages !== null ? `${dest}/${entry.path.slice(docPages.folder.length + 1)}` : dest;
+            const newPath = isFolderNote(entry) ? `${dest}/${entry.filename}` : dest;
             setMoving(false);
             navigate({ kind: 'doc', path: newPath });
           }}
         />
       )}
-      {addingPage && (
+      {subPageOf !== null && (
         <Dialog
           open
-          onClose={() => setAddingPage(false)}
-          title="Add page"
+          onClose={() => setSubPageOf(null)}
+          title="Add sub-page"
           width={420}
           primaryAction={{
             label: 'Add',
-            onClick: () => void submitAddPage(),
+            onClick: () => void submitSubPage(),
             disabled: pageName.trim() === '' || busy,
           }}
-          secondaryAction={{ label: 'Cancel', onClick: () => setAddingPage(false) }}
+          secondaryAction={{ label: 'Cancel', onClick: () => setSubPageOf(null) }}
         >
           <p className="m-0 mb-2 text-sm text-n-500">
-            {docPages === null
-              ? 'This turns the page into a multi-page doc — its pages show as tabs.'
-              : `Adds a page to "${docPages.main.title}".`}
+            {isFolderNote(subPageOf)
+              ? `Adds a page inside "${subPageOf.title}".`
+              : `"${subPageOf.title}" moves into a folder of its own. Its text does not change.`}
           </p>
           <Input
             autoFocus
@@ -1143,7 +1194,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
             value={pageName}
             onChange={(e) => setPageName(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') void submitAddPage();
+              if (e.key === 'Enter') void submitSubPage();
             }}
             width="100%"
           />

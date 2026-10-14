@@ -8,6 +8,17 @@ import { agentHandle } from '@/engine/agents';
 import { parseConnectors, type ConnectorSpec } from '@/engine/connectors';
 import { agentDraft, agentPatch, type AgentDraft, type AgentKey } from '@/engine/libraryDraft';
 import {
+  CLAUDE_CODE_DEFAULT,
+  EFFORT_LEVELS,
+  effortLabel,
+  effortRefusal,
+  isEffort,
+  isModelName,
+  MODEL_SUGGESTIONS,
+  modelLabel,
+  modelRefusal,
+} from '@/engine/runOptions';
+import {
   holdsProposalTools,
   matchedToolset,
   proposalConsequence,
@@ -50,6 +61,8 @@ const CONNECTOR_GROUP = 'Connectors';
  *   run reaches one only once it is also approved on this machine, and is
  *   granted its tools by the name the CLI hears (M54.9).
  * - **Triggers** — events, folders and field values from the vault's schema.
+ * - **Model and Effort** — `run-options.v1.json`'s aliases and levels, the
+ *   vocabulary Rust refuses a run outside of (M56.5).
  *
  * The boundaries live beside the instructions rather than in a settings page,
  * and that is deliberate: `scope:` is not a preference. It is the answer to
@@ -124,6 +137,7 @@ export function AgentProperties({ entry }: { entry: Entry }) {
     keys: readonly AgentKey[],
     closed: React.ReactNode,
     editor: (d: AgentDraft, set: (next: AgentDraft) => void) => React.ReactNode,
+    blocked?: (d: AgentDraft) => boolean,
   ) => (
     <div data-testid={`agent-prop-${key}`}>
       <PropertyRow kind="text" name={name} icon={icon}>
@@ -145,6 +159,7 @@ export function AgentProperties({ entry }: { entry: Entry }) {
           write={write}
           onClose={() => hide(key)}
           render={editor}
+          blocked={blocked}
         />
       )}
     </div>
@@ -297,6 +312,42 @@ export function AgentProperties({ entry }: { entry: Entry }) {
         ),
       )}
 
+      {/* M56.5 — what its runs ask Claude Code for. Rust refuses a value
+          outside run-options.v1.json before a run starts, so the closed row
+          says so rather than letting a schedule fail quietly. */}
+      {boundary(
+        'model',
+        'Model',
+        'cpu',
+        ['model'],
+        modelWords(draft.model),
+        (d, set) => (
+          <ModelEditor value={d.model} onChange={(model) => set({ ...d, model })} />
+        ),
+        (d) => modelRefusal(d.model) !== null,
+      )}
+
+      {boundary(
+        'effort',
+        'Effort',
+        'gauge',
+        ['effort'],
+        effortWords(draft.effort),
+        (d, set) => (
+          <ChoiceList
+            name="agent-effort"
+            ariaLabel="Effort"
+            value={d.effort}
+            options={[
+              { value: '', label: CLAUDE_CODE_DEFAULT },
+              ...EFFORT_LEVELS.map((level) => ({ value: level.id, label: level.label })),
+            ]}
+            onChange={(effort) => set({ ...d, effort })}
+          />
+        ),
+        (d) => effortRefusal(d.effort) !== null,
+      )}
+
       {boundary(
         'connectors',
         'Connectors',
@@ -382,6 +433,106 @@ export function AgentProperties({ entry }: { entry: Entry }) {
   );
 }
 
+/** What a stored value Rust would refuse reads as (M56.5). */
+function refusedWords(value: string): string {
+  return `${value} — Claude Code won't take this; runs are refused until you change it.`;
+}
+
+function modelWords(model: string): string {
+  if (model === '') return CLAUDE_CODE_DEFAULT;
+  return isModelName(model) ? modelLabel(model) : refusedWords(model);
+}
+
+function effortWords(effort: string): string {
+  if (effort === '') return CLAUDE_CODE_DEFAULT;
+  return isEffort(effort) ? effortLabel(effort) : refusedWords(effort);
+}
+
+/** One choice of a few, as radio buttons: the closed set a row offers. */
+function ChoiceList({
+  name,
+  ariaLabel,
+  value,
+  options,
+  onChange,
+}: {
+  name: string;
+  ariaLabel: string;
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (next: string) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label={ariaLabel} className="flex flex-col gap-0.5">
+      {options.map((option) => (
+        <label
+          key={option.value}
+          className="flex items-center gap-2 rounded-sm px-1.5 py-1 text-sm text-n-800 hover:bg-n-50"
+        >
+          <input
+            type="radio"
+            name={name}
+            value={option.value}
+            checked={value === option.value}
+            onChange={() => onChange(option.value)}
+          />
+          {option.label}
+        </label>
+      ))}
+    </div>
+  );
+}
+
+/** The Model editor: Claude Code's default, the aliases, or Other — any full
+ * model name, which Done refuses while it is not one (M56.5). */
+function ModelEditor({ value, onChange }: { value: string; onChange: (next: string) => void }) {
+  const suggested = (v: string) => v === '' || MODEL_SUGGESTIONS.some((m) => m.id === v);
+  const [other, setOther] = useState(!suggested(value));
+  const [typed, setTyped] = useState(suggested(value) ? '' : value);
+  // Never a stored value: a draft read from the file is trimmed.
+  const OTHER = ' other';
+  return (
+    <div className="flex flex-col gap-1.5">
+      <ChoiceList
+        name="agent-model"
+        ariaLabel="Model"
+        value={other ? OTHER : value}
+        options={[
+          { value: '', label: CLAUDE_CODE_DEFAULT },
+          ...MODEL_SUGGESTIONS.map((m) => ({ value: m.id, label: m.label })),
+          { value: OTHER, label: 'Other' },
+        ]}
+        onChange={(next) => {
+          if (next === OTHER) {
+            setOther(true);
+            onChange(typed);
+          } else {
+            setOther(false);
+            onChange(next);
+          }
+        }}
+      />
+      {other && (
+        <>
+          <TextField
+            testId="agent-model-other"
+            ariaLabel="Model name"
+            value={typed}
+            onChange={(v) => {
+              setTyped(v);
+              onChange(v);
+            }}
+            placeholder="claude-sonnet-5"
+          />
+          <p className="m-0 text-2xs leading-[15px] text-n-500">
+            {modelRefusal(typed) ?? 'A full model name, passed to Claude Code as it is written.'}
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 function scopeWords(scope: string[] | null, anywhere: string, nowhere: string): string {
   if (scope === null) return anywhere;
   if (scope.length === 0) return nowhere;
@@ -452,6 +603,7 @@ function GrantEditor({
   write,
   onClose,
   render,
+  blocked,
 }: {
   testId: string;
   seed: AgentDraft;
@@ -459,6 +611,8 @@ function GrantEditor({
   write: (next: AgentDraft, keys: readonly AgentKey[]) => Promise<boolean>;
   onClose: () => void;
   render: (d: AgentDraft, set: (next: AgentDraft) => void) => React.ReactNode;
+  /** True while the draft holds a value Done must not write (M56.5). */
+  blocked?: (d: AgentDraft) => boolean;
 }) {
   const [draft, setDraft] = useState(seed);
   const [start] = useState(seed);
@@ -467,8 +621,9 @@ function GrantEditor({
   // Escape discards — after an open picker inside has taken its own Escape.
   useEscapeLayer(onClose, { contains: (node) => shell.current?.contains(node) === true });
 
+  const refused = blocked?.(draft) ?? false;
   const done = () => {
-    if (busy) return;
+    if (busy || refused) return;
     if (deepEqual(agentPatch(draft, keys), agentPatch(start, keys))) {
       onClose();
       return;
@@ -482,7 +637,13 @@ function GrantEditor({
   };
 
   return (
-    <EditorShell shellRef={shell} testId={testId} busy={busy} onDone={done} onCancel={onClose}>
+    <EditorShell
+      shellRef={shell}
+      testId={testId}
+      busy={busy || refused}
+      onDone={done}
+      onCancel={onClose}
+    >
       {render(draft, setDraft)}
     </EditorShell>
   );

@@ -20,7 +20,9 @@ export interface OutlineSourceBlock {
 const REBUILD_DEBOUNCE_MS = 200;
 const ACTIVE_OFFSET_PX = 90;
 
-function inlineText(node: unknown): string {
+/** The text of an inline node, chips read as nothing: what the outline lists a
+ * heading by, and what a section link matches it by (M55.8). */
+export function inlineText(node: unknown): string {
   if (typeof node !== 'object' || node === null) return '';
   const n = node as { type?: string; text?: string; content?: unknown[] };
   if (typeof n.text === 'string') return n.text;

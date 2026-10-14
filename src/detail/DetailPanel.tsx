@@ -4,6 +4,7 @@ import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { ResizeHandle } from '@/components/ui/ResizeHandle';
 import { DetailHeaderActions } from '@/detail/DetailHeaderActions';
+import { PageCoverBand, PageIconHeader } from '@/detail/PageChrome';
 import { HeadingProperties, stripCells } from '@/detail/HeadingProperties';
 import { RecordProperties } from '@/detail/RecordProperties';
 import { RecordTabs, recordTabSet } from '@/detail/RecordTabs';
@@ -20,7 +21,7 @@ import { resolveViewTab } from '@/engine/viewTab';
 import { DISPLAY_DEFAULTS, type Entry } from '@/engine/types';
 import { ViewTabEmbed } from '@/views/ViewTabEmbed';
 import { PageKnowledge } from '@/knowledge/PageKnowledge';
-import { conceptsAbout, conceptsFrom } from '@/engine/okf';
+import { conceptsAbout, conceptsFrom, isKnowledgePath } from '@/engine/okf';
 import { useConcepts } from '@/knowledge/useConcepts';
 import { setNoteTitle } from '@/lib/ipc';
 import { todayIso } from '@/lib/templates';
@@ -419,23 +420,35 @@ export function DetailPanel({
         </span>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5 pt-3.5">
-        <input
-          data-testid="detail-title"
-          aria-label="Title"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onBlur={() => void commitTitle()}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-            if (e.key === 'Escape') {
-              e.stopPropagation();
-              setTitle(entry.title);
-            }
-          }}
-          // focus-visible + the shared --ring token: every other control in
-          // the app uses that halo and suppresses it on plain mouse clicks.
-          className="-ml-2 mb-3.5 w-full rounded-lg border border-transparent px-2 py-1 text-lg font-semibold leading-[22px] tracking-[-0.01em] text-n-900 outline-none hover:border-n-200 focus-visible:border-cortex-500 focus-visible:shadow-[var(--ring)]"
-        />
+        {/* M55.11 — the page's cover and icon, the peek twin of the page's
+            (M45.6). The header's type glyph above stays: it names the type. */}
+        <div className="-mx-4 -mt-3.5 mb-3.5 empty:hidden">
+          <PageCoverBand entry={entry} editable={!isKnowledgePath(entry.path)} variant="peek" />
+        </div>
+        <PageIconHeader
+          entry={entry}
+          editable={!isKnowledgePath(entry.path)}
+          variant="peek"
+          className="mb-3.5"
+        >
+          <input
+            data-testid="detail-title"
+            aria-label="Title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={() => void commitTitle()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+              if (e.key === 'Escape') {
+                e.stopPropagation();
+                setTitle(entry.title);
+              }
+            }}
+            // focus-visible + the shared --ring token: every other control in
+            // the app uses that halo and suppresses it on plain mouse clicks.
+            className="-ml-2 min-w-0 flex-1 rounded-lg border border-transparent px-2 py-1 text-lg font-semibold leading-[22px] tracking-[-0.01em] text-n-900 outline-none hover:border-n-200 focus-visible:border-cortex-500 focus-visible:shadow-[var(--ring)]"
+          />
+        </PageIconHeader>
         {/* M45.1 — the key-property strip, with the expander that opens the
             full stack. Keyed per record like the stack below, so field
             popovers close on switch. */}

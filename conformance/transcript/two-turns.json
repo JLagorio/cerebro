@@ -1,0 +1,263 @@
+{
+  "case": "two-turns",
+  "cli_version": "2.1.250",
+  "streams": [
+    {
+      "file": "transcript-two-turns.turn1.stream.json",
+      "events": [
+        {
+          "kind": "Init",
+          "session_id": "00000000-0000-4000-8000-000000000001"
+        },
+        {
+          "kind": "ModelChanged",
+          "model": "claude-haiku-4-5-20251001"
+        },
+        {
+          "kind": "TextDelta",
+          "text": "Reading both "
+        },
+        {
+          "kind": "TextDelta",
+          "text": "notes."
+        },
+        {
+          "kind": "Text",
+          "message_id": "msg_000000000000000000000001",
+          "text": "Reading both notes."
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "Read",
+          "tool_id": "toolu_000000000000000000000001",
+          "input": "{\"file_path\":\"/vault/a.md\"}"
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "Read",
+          "tool_id": "toolu_000000000000000000000002",
+          "input": "{\"file_path\":\"/vault/b.md\"}"
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000000001",
+          "output": "1\t# A\n2\talpha",
+          "is_error": false
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000000002",
+          "output": "1\t# B\n2\tbeta",
+          "is_error": false
+        },
+        {
+          "kind": "TextDelta",
+          "text": "done"
+        },
+        {
+          "kind": "Text",
+          "message_id": "msg_000000000000000000000002",
+          "text": "done"
+        },
+        {
+          "kind": "Result",
+          "text": "done",
+          "session_id": "00000000-0000-4000-8000-000000000001"
+        },
+        {
+          "kind": "TurnEnded",
+          "stop_reason": "end_turn"
+        }
+      ],
+      "classes": {
+        "translated": 11,
+        "ignored": {
+          "a block closing, with nothing new in it": 4,
+          "a block opening; its content follows as deltas, or whole on the assistant line": 4,
+          "a progress word such as requesting; the panel shows its own": 2,
+          "a tool call's input in pieces; the assistant line carries it whole": 2,
+          "the turn's end, with nothing new in it": 2,
+          "the turn's model and opening usage; the assistant line and the result carry both": 2,
+          "the turn's stop reason and running usage; the assistant line and the result carry both": 2
+        },
+        "unclassified": {}
+      }
+    },
+    {
+      "file": "transcript-two-turns.turn2.stream.json",
+      "events": [
+        {
+          "kind": "Init",
+          "session_id": "00000000-0000-4000-8000-000000000001"
+        },
+        {
+          "kind": "ModelChanged",
+          "model": "claude-haiku-4-5-20251001"
+        },
+        {
+          "kind": "TextDelta",
+          "text": "all "
+        },
+        {
+          "kind": "TextDelta",
+          "text": "done"
+        },
+        {
+          "kind": "Text",
+          "message_id": "msg_000000000000000000000003",
+          "text": "all done"
+        },
+        {
+          "kind": "Result",
+          "text": "all done",
+          "session_id": "00000000-0000-4000-8000-000000000001"
+        },
+        {
+          "kind": "TurnEnded",
+          "stop_reason": "end_turn"
+        }
+      ],
+      "classes": {
+        "translated": 5,
+        "ignored": {
+          "a block closing, with nothing new in it": 1,
+          "a block opening; its content follows as deltas, or whole on the assistant line": 1,
+          "a progress word such as requesting; the panel shows its own": 1,
+          "the turn's end, with nothing new in it": 1,
+          "the turn's model and opening usage; the assistant line and the result carry both": 1,
+          "the turn's stop reason and running usage; the assistant line and the result carry both": 1
+        },
+        "unclassified": {}
+      }
+    }
+  ],
+  "session": {
+    "file": "transcript-two-turns.session.json",
+    "events": [
+      {
+        "kind": "UserPrompt",
+        "text": "Read a.md and b.md with the Read tool, then answer with the single word done."
+      },
+      {
+        "kind": "ModelChanged",
+        "model": "claude-haiku-4-5-20251001"
+      },
+      {
+        "kind": "Text",
+        "message_id": "msg_000000000000000000000001",
+        "text": "Reading both notes."
+      },
+      {
+        "kind": "ToolStart",
+        "tool_name": "Read",
+        "tool_id": "toolu_000000000000000000000001",
+        "input": "{\"file_path\":\"/vault/a.md\"}"
+      },
+      {
+        "kind": "ToolStart",
+        "tool_name": "Read",
+        "tool_id": "toolu_000000000000000000000002",
+        "input": "{\"file_path\":\"/vault/b.md\"}"
+      },
+      {
+        "kind": "ToolDone",
+        "tool_id": "toolu_000000000000000000000001",
+        "output": "1\t# A\n2\talpha",
+        "is_error": false
+      },
+      {
+        "kind": "ToolDone",
+        "tool_id": "toolu_000000000000000000000002",
+        "output": "1\t# B\n2\tbeta",
+        "is_error": false
+      },
+      {
+        "kind": "Text",
+        "message_id": "msg_000000000000000000000002",
+        "text": "done"
+      },
+      {
+        "kind": "TurnEnded"
+      },
+      {
+        "kind": "UserPrompt",
+        "text": "Now answer with the two words all done."
+      },
+      {
+        "kind": "ModelChanged",
+        "model": "claude-haiku-4-5-20251001"
+      },
+      {
+        "kind": "Text",
+        "message_id": "msg_000000000000000000000003",
+        "text": "all done"
+      },
+      {
+        "kind": "TurnEnded"
+      }
+    ],
+    "classes": {
+      "translated": 9,
+      "ignored": {
+        "a prompt entering or leaving the CLI's queue; the prompt line follows": 4,
+        "context the CLI attached for the model, such as tool and skill listings, other than a deferral": 2,
+        "the last prompt again, for the CLI's own resume picker": 2
+      },
+      "unclassified": {}
+    }
+  },
+  "content": [
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "events": [
+        {
+          "kind": "Text",
+          "text": "Reading both notes."
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "Read",
+          "tool_id": "toolu_000000000000000000000001",
+          "input": "{\"file_path\":\"/vault/a.md\"}"
+        },
+        {
+          "kind": "ToolStart",
+          "tool_name": "Read",
+          "tool_id": "toolu_000000000000000000000002",
+          "input": "{\"file_path\":\"/vault/b.md\"}"
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000000001",
+          "output": "1\t# A\n2\talpha",
+          "is_error": false
+        },
+        {
+          "kind": "ToolDone",
+          "tool_id": "toolu_000000000000000000000002",
+          "output": "1\t# B\n2\tbeta",
+          "is_error": false
+        },
+        {
+          "kind": "Text",
+          "text": "done"
+        },
+        {
+          "kind": "TurnEnded"
+        }
+      ]
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "events": [
+        {
+          "kind": "Text",
+          "text": "all done"
+        },
+        {
+          "kind": "TurnEnded"
+        }
+      ]
+    }
+  ]
+}

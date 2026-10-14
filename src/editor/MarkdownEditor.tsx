@@ -17,6 +17,7 @@ import {
   type DefaultSuggestionItem,
 } from '@blocknote/core/extensions';
 import { BlockGrip } from './BlockDragLayer';
+import { CommentHighlights } from './commentHighlights';
 import { canInsertColumnsAt, COLUMN_COUNTS, newColumnList } from './columnCommands';
 import { codeBlockOptions } from '@blocknote/code-block';
 import { onAgentEvent, runAgent, startedOrThrow } from '@/agent/agentIpc';
@@ -39,11 +40,12 @@ import {
 import { Dropdown } from '@/components/ui/Dropdown';
 import { Icon } from '@/components/ui/Icon';
 import { parseSources } from '@/engine/okf';
+import { isLinkablePage, linkTargetOf } from '@/engine/pageCard';
 import { peopleTypes } from '@/engine/properties';
 import type { Entry } from '@/engine/types';
 import { resolveTarget } from '@/engine/wikilink';
 import { readNote } from '@/lib/ipc';
-import { isTemplate, listTemplates, templateDisplayName, todayIso } from '@/lib/templates';
+import { listTemplates, templateDisplayName, todayIso } from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import {
@@ -54,9 +56,11 @@ import {
   DatabaseBlock,
   leaveAiAnswer,
   MermaidBlock,
+  PageCardBlock,
+  SubPagesBlock,
 } from './blocks';
 import { AssigneeChip, CitationChip, DueChip, WikilinkChip } from './chips';
-import { citationPasteHandler, citationTextInput, insertCitation } from './citationInput';
+import { citationTextInput, insertCitation } from './citationInput';
 import { citationChoices, citationIndexOf } from './citations';
 import { buildOutline } from './DocOutline';
 import {
@@ -65,9 +69,11 @@ import {
   mentionAtWordStart,
   readLinkQuery,
   stemOfPath,
+  type SectionQuery,
 } from './linkMenu';
 import {
   blocksToMarkdown,
+  blocksToMarkdownNow,
   escapeMarkerLines,
   lossyImportCause,
   markdownToBlocks,
@@ -75,6 +81,15 @@ import {
   unwrapReplyFence,
 } from './markdown';
 import { NotePathContext } from './notePath';
+import { pageLinkPasteHandler } from './pageCardInput';
+import { SectionFlash } from './SectionFlash';
+import {
+  findSectionBlock,
+  revealBlock,
+  watchSections,
+  type SectionSourceBlock,
+} from './sectionLinks';
+import { applySteps, inPlace, planExternal, settleChoice, type OpenChoice } from './reconcile';
 
 /**
  * The fully-featured code block (shiki highlighting, the full language list),
@@ -101,9 +116,9 @@ export const TABLE_SETTINGS = {
 } as const;
 
 // Default schema with that code block swapped in, plus the Cerebro custom
-// blocks (AI block, callout, columns, database, mermaid) and inline chips:
-// wikilinks, assignees, dates, and footnote citations (M2.x, M47.2, M48.1,
-// M51.5).
+// blocks (AI block, callout, columns, database, mermaid, the child-page list,
+// the page card) and inline chips: wikilinks, assignees, dates, and footnote
+// citations (M2.x, M47.2, M48.1, M51.5, M55.13, M55.14).
 export const cerebroSchema = BlockNoteSchema.create({
   blockSpecs: {
     ...defaultBlockSpecs,
@@ -114,6 +129,8 @@ export const cerebroSchema = BlockNoteSchema.create({
     columnList: ColumnListBlock(),
     database: DatabaseBlock(),
     mermaid: MermaidBlock(),
+    pageCard: PageCardBlock(),
+    subPages: SubPagesBlock(),
   },
   inlineContentSpecs: {
     ...defaultInlineContentSpecs,
@@ -176,11 +193,12 @@ export function slashMenuItems(
   ];
 }
 
-const stem = (e: Entry): string => e.filename.replace(/\.md$/, '');
-
 // M12.1: anything that is content can be linked — docs AND records. Only the
-// schema itself and stationery stay out of the `[[` picker.
-const isLinkableDoc = (e: Entry): boolean => e.type !== 'Type' && !isTemplate(e);
+// schema itself and stationery stay out of the `[[` picker, which offers what
+// the page card's picker offers (`isLinkablePage`, M55.14) and links each page
+// by its stem (`linkTargetOf`).
+const stem = linkTargetOf;
+const isLinkableDoc = isLinkablePage;
 
 /** Case-insensitive title/subtext/alias filter (filterSuggestionItems isn't
  * exported by @blocknote/core 0.46). */
@@ -319,7 +337,8 @@ function isoAfterDays(days: number): string {
 export interface MarkdownEditorProps {
   /**
    * Initial markdown BODY — never frontmatter. Uncontrolled after mount:
-   * remount with a `key` to load a different document.
+   * remount with a `key` to load a different document. A later version of
+   * the same document lands in place through `applyExternal` (M55.6).
    */
   markdown: string;
   /**
@@ -340,8 +359,11 @@ export interface MarkdownEditorProps {
    * starts (M53.6): it emits a pending edit, and its promise settles once
    * `onChange`'s has, including a save the debounce had already started. It
    * never rejects. Cancel before the file is written out of band (template
-   * apply) or the buffer is discarded for the disk's version, so the stale
-   * in-editor body can't be written back over it.
+   * apply), so the stale in-editor body can't be written back over it.
+   *
+   * `applyExternal` takes an outside write in place (M55.6), as its own undo
+   * step, and never calls `onChange` or `onDirty` for it: the owner decides
+   * what to save, with `serialize` and `markSaved`.
    */
   onReady?: (info: EditorReadyInfo) => void;
   debounceMs?: number;
@@ -356,11 +378,44 @@ export interface MarkdownEditorProps {
   onDirty?: () => void;
 }
 
+/** One place an outside write and the page's unsaved typing disagree. */
+export interface ChoiceView {
+  id: string;
+  /** Mine and theirs as markdown; empty for a side that deleted the span. */
+  mine: string;
+  theirs: string;
+  /** The block to show it at, or null when neither side has one on the page. */
+  firstBlockId: string | null;
+}
+
+/** What `applyExternal` did with an outside write. */
+export type ExternalResult =
+  /** It reads as the base: nothing changed. */
+  | { kind: 'same' }
+  /** It landed. `after` is the page's text now; it equals `next`, the write's
+   *  canonical text, unless unsaved typing was merged in. */
+  | { kind: 'applied'; next: string; after: string }
+  /** It landed except where the page's typing overlaps it; mine stays there. */
+  | { kind: 'choices'; next: string; choices: ChoiceView[] }
+  /** The editor cannot show it without changing its text; nothing changed. */
+  | { kind: 'unrepresentable'; dirty: boolean };
+
 export interface EditorReadyInfo {
   editor: CerebroEditor;
   lossyCause: LossyCause | null;
+  /** The loaded markdown's round trip: the canonical text the page opened as. */
+  loadedAs: string;
   flushPendingSave: () => Promise<void>;
   cancelPendingSave: () => void;
+  /** The page as markdown, now. */
+  serialize: () => string;
+  /** Record `md` as saved, so an emit of the same text writes nothing. */
+  markSaved: (md: string) => void;
+  /** Apply `next`, the file's body as read, against `base`, the canonical text
+   *  the page last read or saved (M55.6). */
+  applyExternal: (next: string, base: string, opts?: { allowLoss?: boolean }) => ExternalResult;
+  /** Settle an open choice; the choices still open. */
+  choose: (id: string, pick: 'mine' | 'theirs') => ChoiceView[];
 }
 
 export function MarkdownEditor({
@@ -393,8 +448,11 @@ export function MarkdownEditor({
         handleKeyDown: (view, event) => event.target === view.dom && leaveAnswer.current(event),
       },
     },
-    // M52.4: pasted markdown keeps its footnotes as the markers they are.
-    pasteHandler: citationPasteHandler,
+    // M55.14: a lone page link pasted on an empty line becomes a page card;
+    // every other paste goes on to the citation half (M52.4).
+    pasteHandler: pageLinkPasteHandler,
+    // M70.1: comment highlights, drawn as decorations outside the document.
+    extensions: [CommentHighlights()],
   });
   closeLinkMenu.current = () => editor.getExtension(SuggestionMenu)?.closeMenu();
   leaveAnswer.current = (event) => leaveAiAnswer(editor, event);
@@ -456,6 +514,11 @@ export function MarkdownEditor({
   const [dueDate, setDueDate] = useState('');
   const lastSaved = useRef<string | null>(null);
   const timer = useRef<number | null>(null);
+  // Up while an outside write is applied (M55.6): its change events are not
+  // the person's edits, so they neither mark the page dirty nor save.
+  const applying = useRef(false);
+  // The choices an outside write left open, by id.
+  const openChoices = useRef(new Map<string, OpenChoice>());
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const onReadyRef = useRef(onReady);
@@ -508,6 +571,59 @@ export function MarkdownEditor({
     return lastEmit.current;
   }).current;
 
+  /** `fn`, with its change events kept from the save path. */
+  const quietly = (fn: () => void) => {
+    applying.current = true;
+    try {
+      fn();
+    } finally {
+      applying.current = false;
+    }
+  };
+
+  const viewOf = (choice: OpenChoice): ChoiceView => ({
+    id: choice.id,
+    mine: choice.minePreview,
+    theirs: choice.theirsPreview,
+    firstBlockId:
+      choice.mine.find((id) => editor.getBlock(id) !== undefined) ??
+      (choice.after !== null && editor.getBlock(choice.after) !== undefined
+        ? choice.after
+        : choice.parent),
+  });
+  const openViews = () => [...openChoices.current.values()].map(viewOf);
+
+  const applyExternal: EditorReadyInfo['applyExternal'] = (next, base, opts = {}) => {
+    const plan = planExternal(editor, {
+      next,
+      base,
+      open: [...openChoices.current.values()],
+      allowLoss: opts.allowLoss ?? false,
+    });
+    if (plan.kind !== 'plan') return plan;
+    quietly(() => inPlace(editor, () => applySteps(editor, plan.steps)));
+    // The page now stands on the write: undoing it differs from this, so the
+    // undo is saved like any edit.
+    lastSaved.current = plan.next;
+    openChoices.current = new Map(plan.choices.map((choice) => [choice.id, choice]));
+    if (plan.choices.length > 0) return { kind: 'choices', next: plan.next, choices: openViews() };
+    return { kind: 'applied', next: plan.next, after: blocksToMarkdownNow(editor) };
+  };
+
+  const choose: EditorReadyInfo['choose'] = (id, pick) => {
+    const choice = openChoices.current.get(id);
+    if (choice !== undefined) {
+      openChoices.current.delete(id);
+      quietly(() => settleChoice(editor, choice, pick));
+    }
+    return openViews();
+  };
+
+  // Identity-stable for the owner, like the save controls: they read the
+  // latest closures through this ref.
+  const external = useRef({ applyExternal, choose });
+  external.current = { applyExternal, choose };
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -523,8 +639,15 @@ export function MarkdownEditor({
       onReadyRef.current?.({
         editor,
         lossyCause: lossyImportCause(markdown, roundTripped),
+        loadedAs: roundTripped,
         flushPendingSave,
         cancelPendingSave,
+        serialize: () => blocksToMarkdownNow(editor),
+        markSaved: (md) => {
+          lastSaved.current = md;
+        },
+        applyExternal: (next, base, opts) => external.current.applyExternal(next, base, opts),
+        choose: (id, pick) => external.current.choose(id, pick),
       });
     })();
     return () => {
@@ -536,6 +659,8 @@ export function MarkdownEditor({
   }, [editor]);
 
   const scheduleEmit = () => {
+    // An outside write being applied is not an edit (M55.6).
+    if (applying.current) return;
     // A read-only document must not be able to schedule a write at all — the
     // editable flag alone would still let a programmatic change through.
     if (readOnlyRef.current) return;
@@ -562,6 +687,25 @@ export function MarkdownEditor({
   useEffect(() => {
     if (loaded && autoFocus) editor.focus();
   }, [loaded, autoFocus, editor]);
+
+  // --- Section links (M55.8) ------------------------------------------------
+  // A `[[page#Heading]]` click asks the page for its heading (sectionLinks.ts).
+  // Once the blocks are in, this editor takes the requests for its note: one
+  // made before it mounted, then each as it is made. A heading it holds is
+  // scrolled to and lit; one it does not is said, and the page stays put.
+  const [flash, setFlash] = useState<{ id: string; n: number } | null>(null);
+  useEffect(() => {
+    if (!loaded || notePath === null) return;
+    return watchSections(notePath, (section) => {
+      const id = findSectionBlock(editor.document as SectionSourceBlock[], section);
+      if (id === null) {
+        toast(`No heading named "${section}" on this page`);
+        return;
+      }
+      if (host.current !== null) revealBlock(host.current, id);
+      setFlash((prev) => ({ id, n: (prev?.n ?? 0) + 1 }));
+    });
+  }, [loaded, notePath, editor, toast]);
 
   // --- Mention menus (M2.x docs polish) -----------------------------------
   // `[[` links a page (Obsidian habit); `@` links pages/people and sets due
@@ -611,6 +755,43 @@ export function MarkdownEditor({
         icon: <Icon name="file-text" size={14} />,
         onItemClick: () => insertChip({ type: 'wikilink', props: { target: stem(e), alias: '' } }),
       }));
+
+  /**
+   * The `[` menu's rows for a section query (M55.8). With a page half, every
+   * page it matches, each linking `<stem>#<heading>`. With none, after `[[`,
+   * one row for this note's own heading, linking `#<heading>`. No Create row:
+   * a name with a `#` cannot be a page title (`creatableTitle`).
+   */
+  const sectionItems = ({ page, heading }: SectionQuery, double: boolean) => {
+    const fragment = heading === null ? '' : `#${heading}`;
+    if (page === '') {
+      if (!double || heading === null || notePath === null) return [];
+      const title = noteEntry?.title ?? stemOfPath(notePath);
+      return [
+        {
+          title: `${title} \u203A ${heading}`,
+          subtext: `${notePath}${fragment}`,
+          group: 'Link section',
+          icon: <Icon name="hash" size={14} />,
+          onItemClick: () =>
+            insertChip({ type: 'wikilink', props: { target: fragment, alias: '' } }),
+        },
+      ];
+    }
+    const pages = entries.filter(isLinkableDoc).map((e): DefaultReactSuggestionItem => ({
+      title: e.title,
+      subtext: e.path,
+      group: 'Link page',
+      icon: <Icon name="file-text" size={14} />,
+      onItemClick: () =>
+        insertChip({ type: 'wikilink', props: { target: `${stem(e)}${fragment}`, alias: '' } }),
+    }));
+    // Matched on the page half alone, then shown with the heading it links.
+    return filterItems(pages, page).map((item) => ({
+      ...item,
+      subtext: `${item.subtext}${fragment}`,
+    }));
+  };
 
   /**
    * The `[^` menu (M52.1): cite one of the note's sources, or an id the page
@@ -728,34 +909,35 @@ export function MarkdownEditor({
   });
 
   /**
-   * Focus a just-inserted AI block's question field (M53.9).
+   * Focus a just-inserted block's own field: an AI block's question (M53.9),
+   * a page card's "Find a page" (M55.14).
    *
-   * The block asks its question first, so the field takes the caret rather
-   * than the editor — `editor.focus()` here used to blur the field the moment
-   * it had focus, and the blur closed it, leaving nothing to type into. The
-   * node view mounts through a React portal, so the field may not exist on the
-   * first try; it is looked for again on the next few frames.
+   * The block asks first, so the field takes the caret rather than the
+   * editor — `editor.focus()` here used to blur the AI block's field the
+   * moment it had focus, and the blur closed it, leaving nothing to type into.
+   * The node view mounts through a React portal, so the field may not exist on
+   * the first try; it is looked for again on the next few frames.
    *
-   * The field is the one in the block's OWN content, not one in an answer
-   * nested under it — and both depths are named because the browser wraps a
-   * React block in an extra element that jsdom does not.
+   * The field is the one in the block's OWN content, not one in a block nested
+   * under it — and both depths are named because the browser wraps a React
+   * block in an extra element that jsdom does not (DOM trap 1).
    */
-  const focusAiPrompt = (id: string, tries = 10) => {
-    const escaped =
-      typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(id) : id;
+  const focusBlockField = (id: string, type: string, tries = 10) => {
+    const escape = (s: string) =>
+      typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(s) : s;
+    const content = `[data-content-type="${escape(type)}"] input`;
     const field = host.current
-      ?.querySelector(`.bn-block[data-id="${escaped}"]`)
-      ?.querySelector<HTMLInputElement>(
-        ':scope > [data-content-type="ai"] input, :scope > * > [data-content-type="ai"] input',
-      );
+      ?.querySelector(`.bn-block[data-id="${escape(id)}"]`)
+      ?.querySelector<HTMLInputElement>(`:scope > ${content}, :scope > * > ${content}`);
     if (field != null) {
       field.focus();
       return;
     }
-    if (tries > 0) window.requestAnimationFrame(() => focusAiPrompt(id, tries - 1));
+    if (tries > 0) window.requestAnimationFrame(() => focusBlockField(id, type, tries - 1));
   };
 
-  // Custom blocks (M2.x): AI block, callout, mermaid diagram, database.
+  // Custom blocks (M2.x): AI block, callout, mermaid diagram, database, the
+  // child-page list (M55.13) and the page card (M55.14).
   const insertBlockAtCursor = (block: { type: string; props?: Record<string, string> }) => {
     const cursor = editor.getTextCursorPosition().block;
     const inserted = editor.insertBlocks([block as never], cursor, 'after');
@@ -765,8 +947,8 @@ export function MarkdownEditor({
     // is still placed on the next tick, once that close has finished handing
     // focus back, or typing continues in the old block.
     window.setTimeout(() => {
-      if (target !== undefined && block.type === 'ai') {
-        focusAiPrompt(target.id);
+      if (target !== undefined && (block.type === 'ai' || block.type === 'pageCard')) {
+        focusBlockField(target.id, block.type);
         return;
       }
       if (target !== undefined && block.type === 'callout') {
@@ -813,6 +995,27 @@ export function MarkdownEditor({
       icon: <Icon name="table-2" size={14} />,
       onItemClick: () =>
         insertBlockAtCursor({ type: 'database', props: { database: '', view: '' } }),
+    },
+    {
+      // M55.13 — the page's sub-pages, listed live. It lists; it never
+      // creates one, which is the page menu's "Add sub-page".
+      title: 'Sub-pages',
+      subtext: 'List the pages inside this one',
+      group: 'Advanced blocks',
+      aliases: ['subpages', 'children', 'child pages', 'contents'],
+      icon: <Icon name="list-tree" size={14} />,
+      onItemClick: () => insertBlockAtCursor({ type: 'subPages' }),
+    },
+    {
+      // M55.14 — a card for a page that already exists. It links; it never
+      // creates one (Q28), which is the page menu's "Add sub-page".
+      title: 'Page',
+      subtext: 'Show another page here, live — open it from the card',
+      group: 'Advanced blocks',
+      aliases: ['page', 'link to page', 'embed page', 'card'],
+      icon: <Icon name="file-symlink" size={14} />,
+      onItemClick: () =>
+        insertBlockAtCursor({ type: 'pageCard', props: { target: '', alias: '' } }),
     },
   ];
 
@@ -1180,9 +1383,15 @@ export function MarkdownEditor({
               }
               // Create only after `[[`; a lone `[` is a bracket. Every row,
               // Create included, strips the first bracket before it inserts, so
-              // Create tracks the caret with the bracket already gone.
-              const create = asked.double ? createRow(asked.text, '[') : null;
-              return withCreate(filterItems(docItems(), asked.text), create).map((item) => ({
+              // Create tracks the caret with the bracket already gone. A `#`
+              // asks for a section, which offers no Create row (M55.8).
+              const create =
+                asked.double && asked.section === null ? createRow(asked.text, '[') : null;
+              const rows =
+                asked.section === null
+                  ? filterItems(docItems(), asked.text)
+                  : sectionItems(asked.section, asked.double);
+              return withCreate(rows, create).map((item) => ({
                 ...item,
                 onItemClick: () => {
                   stripDanglingBracket();
@@ -1228,6 +1437,14 @@ export function MarkdownEditor({
             )}
           />
         </BlockNoteView>
+      )}
+      {flash !== null && (
+        <SectionFlash
+          key={flash.n}
+          hostRef={host}
+          blockId={flash.id}
+          onDone={() => setFlash(null)}
+        />
       )}
       {asking !== null && (
         <div

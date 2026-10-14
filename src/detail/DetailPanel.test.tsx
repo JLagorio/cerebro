@@ -109,6 +109,32 @@ describe('DetailPanel', () => {
     });
   });
 
+  // M55.11 — the peek wears the page's chrome too: its icon beside the
+  // title, its cover as a compact band, and neither as a property row.
+  it("a record's icon shows beside the title, and its cover draws the compact band", () => {
+    const vault = fixtureVault().map((e) =>
+      e.path === FLD_1
+        ? { ...e, properties: { ...e.properties, icon: '\u{1F680}', cover: 'green' } }
+        : e,
+    );
+    useVaultStore.setState({ entries: vault });
+    render(<DetailPanel />);
+    const chrome = screen.getByTestId('page-chrome');
+    expect(chrome.contains(screen.getByTestId('detail-title'))).toBe(true);
+    expect(screen.getByTestId('page-icon').textContent).toBe('\u{1F680}');
+    const band = screen.getByTestId('page-cover');
+    expect(band.className).toContain('h-[72px]');
+    expect(band.style.background).toBe('var(--opt-green)');
+    expect(screen.queryByText('Icon')).toBeNull();
+    expect(screen.queryByText('Cover')).toBeNull();
+  });
+
+  it('a record with no icon or cover draws neither in the peek', () => {
+    render(<DetailPanel />);
+    expect(screen.queryByTestId('page-icon')).toBeNull();
+    expect(screen.queryByTestId('page-cover')).toBeNull();
+  });
+
   it('shows undeclared frontmatter keys as advisory text', () => {
     render(<DetailPanel />);
     expect(screen.getByText('Channel')).toBeTruthy();

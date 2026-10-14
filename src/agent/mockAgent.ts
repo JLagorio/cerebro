@@ -1,4 +1,11 @@
-import type { AgentStreamEvent, UiAction } from './types';
+import { declinedText } from './mockInteractions';
+import type {
+  AgentStreamEvent,
+  FailureNotice,
+  PendingInteraction,
+  PersonAnswer,
+  UiAction,
+} from './types';
 import type { QuoteEdit } from '@/engine/quote';
 
 /**
@@ -16,7 +23,9 @@ import type { QuoteEdit } from '@/engine/quote';
 
 interface Script {
   thinking?: string;
-  tools?: { name: string; input: string }[];
+  /** Each call, and what it returns when the script says (a write's report
+   * comes from its own step). */
+  tools?: { name: string; input: string; output?: string }[];
   /**
    * A UI action the run drives, fired after its tools report done. The mock
    * has to actually DO what its reply claims — a script that says "I have
@@ -46,6 +55,17 @@ const EDIT = /^edit "([^"]+)" to "([^"]*)" in (\S+\.md)$/;
 
 /** A quoted script argument, its `\n`s made line breaks. */
 const unquote = (text: string): string => text.replace(/\\n/g, '\n');
+
+/** What the read script reads (M56.8): five demo-vault notes, one get_note
+ * each, so the panel folds them into one row. */
+const READ_FIVE = /\bread five notes\b/;
+const FIVE_NOTES = [
+  'records/risks/risk-console-splits-the-team.md',
+  'records/risks/risk-messaging-unvalidated.md',
+  'records/risks/risk-rollback-unrehearsed.md',
+  'records/risks/risk-scanner-delivery.md',
+  'records/risks/risk-single-pilot-customer.md',
+];
 
 /** A capture that exists in the demo vault, so the proposal has a real target. */
 const DEMO_CAPTURE = 'inbox/warehouse-cutover-thought.md';
@@ -257,6 +277,18 @@ function scriptFor(message: string, systemPrompt?: string): Script {
   }
   const prompt = message.toLowerCase();
 
+  // Five reads in a row (M56.8): the panel's folded row has a browser path.
+  if (READ_FIVE.test(prompt)) {
+    return {
+      tools: FIVE_NOTES.map((path) => ({
+        name: 'get_note',
+        input: JSON.stringify({ path }),
+        output: `Read ${path}.`,
+      })),
+      text: 'I read the five open risks.',
+    };
+  }
+
   // Checked before the Inbox branch: these prompts name the note they are
   // about, and a path containing `inbox/` would otherwise answer a question
   // about Knowledge with a filing proposal.
@@ -291,7 +323,106 @@ function scriptFor(message: string, systemPrompt?: string): Script {
   };
 }
 
-const SESSION = 'mock-session';
+/**
+ * The failure scripts (M56.4): a message of exactly `fail: <name>` fails the
+ * way Claude Code does, so the panel's failure card has a browser path. Each
+ * notice is the one Rust's classifier gives the matching fixture, copied
+ * from conformance/failure/notices.json; mockAgent.test holds them equal.
+ * `fail: unknown` is a failure Rust cannot type, so it carries none.
+ */
+export const MOCK_FAILURES: Readonly<
+  Record<string, { message: string; code: string | null; notice: FailureNotice | null }>
+> = {
+  'fail: not-signed-in': {
+    message: 'Not logged in · Please run /login',
+    code: 'authentication_failed',
+    notice: {
+      kind: 'not_signed_in',
+      title: "Claude Code isn't signed in",
+      body: 'Cerebro runs your own Claude Code, and it has no sign-in on this Mac. Open Terminal, run claude, and type /login. Then try again.',
+      action: 'open_settings',
+      resets_at: null,
+      window: null,
+      cli_version: '2.1.250',
+    },
+  },
+  'fail: usage-limit': {
+    message: "You've hit your weekly limit · resets Thu, Jan 1, 12am (UTC)",
+    code: 'rate_limit',
+    notice: {
+      kind: 'usage_limit',
+      title: "You've reached your Claude usage limit",
+      body: 'Claude Code stopped because your weekly limit is used up. Background work waits until then.',
+      action: null,
+      resets_at: '2026-01-01T00:00:00Z',
+      window: 'weekly',
+      cli_version: '2.1.250',
+    },
+  },
+  'fail: unknown': {
+    message: 'API Error: 400 the request was not one Claude could take',
+    code: 'invalid_request',
+    notice: null,
+  },
+};
+
+/** Play a failure script: the init, the error (with its notice when Rust
+ * types one), the turn's end and Done, as the fold reads a failed run. */
+function runFailure(
+  failure: (typeof MOCK_FAILURES)[string],
+  emit: (event: AgentStreamEvent) => void,
+  sessionId: string,
+  delayMs: number,
+): MockRun {
+  let cancelled = false;
+  const error: AgentStreamEvent = {
+    kind: 'Error',
+    message: failure.message,
+    ...(failure.code === null ? {} : { code: failure.code }),
+    ...(failure.notice === null ? {} : { notice: failure.notice }),
+  };
+  const steps: AgentStreamEvent[] = [
+    { kind: 'Init', session_id: sessionId },
+    error,
+    { kind: 'TurnEnded', stop_reason: 'stop_sequence' },
+    { kind: 'Done' },
+  ];
+  const timers = steps.map((event, at) =>
+    setTimeout(() => {
+      if (!cancelled) emit(event);
+    }, at * delayMs),
+  );
+  return {
+    cancel: () => {
+      if (cancelled) return;
+      cancelled = true;
+      for (const timer of timers) clearTimeout(timer);
+      emit({ kind: 'Done' });
+    },
+  };
+}
+
+/** What a mock run reports answering (M56.5): the model it was asked for,
+ * marked as the mock's. */
+export function mockModel(model: string | null | undefined): string {
+  const asked = model?.trim() ?? '';
+  return `mock-${asked === '' ? 'default' : asked}`;
+}
+
+/** The session a mock run reports when its caller named none: a UUID, as
+ * every session id is (M56.3). `agentIpc.runAgent` always names one. */
+const UNNAMED_SESSION = '00000000-0000-4000-8000-000000000000';
+
+/**
+ * A browser-mode test seam (M55.6): while `globalThis.__cerebroAgentWriteGate`
+ * holds a promise, every write step waits for it before writing, so a spec can
+ * type into the open page between the agent's ask and its write and then let
+ * the write land inside the page's debounce. Unset, writes go at once.
+ */
+async function writeGate(): Promise<void> {
+  const gate = (globalThis as { __cerebroAgentWriteGate?: unknown }).__cerebroAgentWriteGate;
+  if (gate instanceof Promise) await gate;
+}
 
 /** Split into small chunks so the UI genuinely streams rather than snapping. */
 function chunk(text: string): string[] {
@@ -300,6 +431,13 @@ function chunk(text: string): string[] {
 
 export interface MockRun {
   cancel: () => void;
+}
+
+/** A call the mock's gate holds for the person (M57.1). */
+export interface MockDeferral {
+  toolId: string;
+  toolName: string;
+  input: string;
 }
 
 /**
@@ -319,6 +457,11 @@ export function runMockAgent(
     onAppend,
     onEdit,
     systemPrompt,
+    sessionId = UNNAMED_SESSION,
+    model = null,
+    asks,
+    onDefer,
+    resume,
   }: {
     delayMs?: number;
     onUiAction?: (action: UiAction) => void;
@@ -332,14 +475,39 @@ export function runMockAgent(
     /** The turn's system prompt, whose context snapshot says what the page
      * in front of the user holds (M52.3) — the mock reads Knowledge there. */
     systemPrompt?: string;
+    /** The Claude Code session the run goes to (M56.3), minted or resumed by
+     * the caller; echoed in Init and Result as the real CLI does. */
+    sessionId?: string;
+    /** The model the run asked for (M56.5). The mock answers as
+     * `mock-<model>`, or `mock-default` when none was asked for, so a spec
+     * can see which one the footer names. */
+    model?: string | null;
+    /** Does the gate ask for this tool (M57.1, `mockInteractions.mockAsks`)?
+     * A call it asks for is held: its card, its deferral and Done, and the
+     * turn stops there. */
+    asks?: (toolName: string) => boolean;
+    /** Registers a held call with the book and gives its card, or null for
+     * a deferral the book did not register. The caller resumes the turn
+     * with `resume` below once the person answers. */
+    onDefer?: (call: MockDeferral) => PendingInteraction | null;
+    /** This run resumes a held call with the person's answer: it starts
+     * after that call, which runs on allow and is refused on deny. */
+    resume?: { toolId: string; answer: PersonAnswer };
   } = {},
 ): MockRun {
+  // Matched first, on the message as typed (M56.4).
+  const failure = MOCK_FAILURES[message.trim()];
+  if (failure !== undefined) return runFailure(failure, emit, sessionId, delayMs);
   const script = scriptFor(message, systemPrompt);
   let cancelled = false;
+  // Held on a call (M57.1): the turn stops at its Done, mid-script.
+  let suspended = false;
   const timers: ReturnType<typeof setTimeout>[] = [];
   // What the run says once its tools are done; a refused write rewrites it,
   // so the transcript never claims a write that did not happen.
   let reply = script.text;
+
+  type Step = () => void | Promise<void>;
 
   /** A write script's tool call: `write` it, then report as the server
    * does. A refusal rewrites the reply as `failed` words it. */
@@ -349,6 +517,9 @@ export function runMockAgent(
     write: () => Promise<string>,
     failed: (refusal: string) => string,
   ) => {
+    await writeGate();
+    // Stopped while held: the write never happens, so nothing is announced.
+    if (cancelled) return;
     let output: string;
     try {
       output = await write();
@@ -387,24 +558,57 @@ export function runMockAgent(
       (refusal) => `I could not edit ${target.path}: ${refusal}`,
     );
 
-  type Step = () => void | Promise<void>;
   const acting: Step[] = [];
-  acting.push(() => emit({ kind: 'Init', session_id: SESSION }));
-  if (script.thinking !== undefined) {
+  acting.push(() => emit({ kind: 'Init', session_id: sessionId }));
+  // The model answering, as the fold reports it once per turn (M56.3).
+  acting.push(() => emit({ kind: 'ModelChanged', model: mockModel(model) }));
+  if (script.thinking !== undefined && resume === undefined) {
     acting.push(() => emit({ kind: 'ThinkingDelta', text: script.thinking as string }));
   }
-  (script.tools ?? []).forEach(({ name, input }, i) => {
+  const tools = script.tools ?? [];
+  // A resume starts after the held call, so its earlier calls are not run again.
+  const resumeAt = resume === undefined ? -1 : tools.findIndex((_, i) => `t-${i + 1}` === resume.toolId);
+  tools.forEach(({ name, input, output }, i) => {
     const id = `t-${i + 1}`;
-    acting.push(() => emit({ kind: 'ToolStart', tool_name: name, tool_id: id, input }));
+    if (i < resumeAt) return;
     const appended = name === 'append_to_note' ? script.append : undefined;
     const edited = name === 'edit_note' ? script.edit : undefined;
-    acting.push(
+    const completion: Step =
       appended !== undefined
         ? () => append(id, appended)
         : edited !== undefined
           ? () => edit(id, edited)
-          : () => emit({ kind: 'ToolDone', tool_id: id }),
-    );
+          : () =>
+              emit(
+                output === undefined
+                  ? { kind: 'ToolDone', tool_id: id }
+                  : { kind: 'ToolDone', tool_id: id, output },
+              );
+    if (i === resumeAt && resume !== undefined) {
+      // The held call, answered: allow runs it; deny refuses it in Rust's
+      // words, and the reply says so rather than claim the write.
+      acting.push(
+        resume.answer.kind === 'allow'
+          ? completion
+          : () => {
+              const refusal = declinedText(resume.answer);
+              reply = `I did not run ${name}: you declined it.`;
+              emit({ kind: 'ToolDone', tool_id: id, output: refusal, is_error: true });
+            },
+      );
+      return;
+    }
+    acting.push(() => emit({ kind: 'ToolStart', tool_name: name, tool_id: id, input }));
+    if (asks?.(name) === true) {
+      acting.push(() => {
+        const card = onDefer?.({ toolId: id, toolName: name, input }) ?? null;
+        if (card !== null) emit({ kind: 'Interaction', interaction: card });
+        emit({ kind: 'ToolDeferred', tool_id: id, tool_name: name });
+        suspended = true;
+        emit({ kind: 'Done' });
+      });
+    }
+    acting.push(completion);
   });
   if (script.uiAction !== undefined) {
     const action = script.uiAction;
@@ -423,6 +627,7 @@ export function runMockAgent(
       first = false;
       if (cancelled) return false;
       await step();
+      if (suspended) return false;
     }
     return true;
   };
@@ -436,13 +641,19 @@ export function runMockAgent(
           () =>
             emit({ kind: 'TextDelta', text: piece }),
       ),
-      () => emit({ kind: 'Result', text: reply, session_id: SESSION }),
+      // The whole message and the turn's end, as the fold reads them off the
+      // CLI's assistant line and result (M56.3), before the result itself.
+      () => emit({ kind: 'Text', message_id: 'msg_mock', text: reply }),
+      () => emit({ kind: 'TurnEnded', stop_reason: 'end_turn' }),
+      () => emit({ kind: 'Result', text: reply, session_id: sessionId }),
       () => emit({ kind: 'Done' }),
     ]);
   })();
 
   return {
     cancel: () => {
+      // A held run already sent its Done.
+      if (cancelled || suspended) return;
       cancelled = true;
       for (const timer of timers) clearTimeout(timer);
       emit({ kind: 'Done' });

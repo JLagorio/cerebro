@@ -68,9 +68,9 @@ export interface DiagramFile {
  *
  * Content is RAW end-to-end: readNote/saveNote pass `.mmd` bytes through
  * verbatim, so mermaid's own `---` config header survives every save. No
- * external live-reload (DocPage's M17.4 reconcile problem, consciously
- * deferred): the file is read once per mount, and an outside edit wins or
- * loses on last-write like any plain editor.
+ * external live-reload: markdown pages merge an outside write in place
+ * (M55.6), but a `.mmd` file is still read once per mount, and an outside
+ * edit wins or loses on last-write like any plain editor.
  */
 export function useDiagramFile(path: string): DiagramFile {
   const vaultPath = useVaultStore((s) => s.vaultPath);

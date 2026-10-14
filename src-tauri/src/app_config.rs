@@ -1,8 +1,10 @@
-//! Persisted app configuration (last opened vault), stored as JSON in the
+//! Persisted app configuration (the last opened vault, the proposal switch,
+//! and who answers in each vault's assistant panel), stored as JSON in the
 //! Tauri app-config directory — and where that directory is (`app_dir`).
 
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// Set to opt a dev build back into the installed app's shared data
@@ -78,6 +80,67 @@ pub struct AppConfig {
     /// M26.3c registers the tools and proves the gates; this is what M26.9
     /// flips. Registration is not activation.
     pub agent_proposals_enabled: bool,
+    /// **Who answers in the assistant panel** (M56.6, AI-8): vault path, as
+    /// `last_vault` spells it, to the handle of the Agent record a panel turn
+    /// goes to. Here and never in a vault file, so a vault can never choose
+    /// who the panel answers as. A vault with no key answers as the plain
+    /// assistant, and so does every config written before this field.
+    pub panel_agents: BTreeMap<String, String>,
+}
+
+/// The longest handle a binding takes, in characters.
+const HANDLE_MAX: usize = 64;
+
+/// The slug grammar a handle has (M56.6): lowercase ASCII letters and digits
+/// in runs joined by single dashes, at most [`HANDLE_MAX`] characters — what
+/// the app's `slugify` makes of a title or a `slug:`.
+fn is_handle(value: &str) -> bool {
+    value.len() <= HANDLE_MAX
+        && value.split('-').all(|run| {
+            !run.is_empty()
+                && run
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        })
+}
+
+/// The refusal for a value that is not a handle, in the words the browser
+/// mock gives (`src/lib/mockIpc.ts`). The value is cut at 64 characters.
+fn not_a_handle(value: &str) -> String {
+    let shown: String = value.chars().take(HANDLE_MAX).collect();
+    let cut = if value.chars().count() > HANDLE_MAX {
+        "…"
+    } else {
+        ""
+    };
+    format!("\"{shown}{cut}\" is not an agent handle")
+}
+
+/// The handle this vault's panel is bound to, or None when it answers as the
+/// plain assistant.
+pub fn panel_agent(dir: &Path, vault: &str) -> Option<String> {
+    load(dir).panel_agents.get(vault).cloned()
+}
+
+/// Bind this vault's panel to an agent handle, or unbind it with None or a
+/// blank. A value outside the slug grammar is refused and nothing is written.
+pub fn set_panel_agent(dir: &Path, vault: &str, handle: Option<&str>) -> Result<(), String> {
+    let handle = handle.map(str::trim).filter(|h| !h.is_empty());
+    if let Some(h) = handle {
+        if !is_handle(h) {
+            return Err(not_a_handle(h));
+        }
+    }
+    let mut config = load(dir);
+    match handle {
+        Some(h) => {
+            config.panel_agents.insert(vault.to_string(), h.to_string());
+        }
+        None => {
+            config.panel_agents.remove(vault);
+        }
+    }
+    save(dir, &config)
 }
 
 fn config_path(dir: &Path) -> PathBuf {
@@ -175,6 +238,7 @@ mod tests {
         let config = AppConfig {
             last_vault: Some("/Users/me/vault".to_string()),
             agent_proposals_enabled: false,
+            panel_agents: BTreeMap::from([("/Users/me/vault".to_string(), "scout".to_string())]),
         };
         save(&dir, &config).unwrap();
         assert_eq!(load(&dir), config);
@@ -194,6 +258,7 @@ mod tests {
         let raw = serde_json::to_string(&AppConfig {
             last_vault: Some("/v".into()),
             agent_proposals_enabled: false,
+            panel_agents: BTreeMap::new(),
         })
         .unwrap();
         assert!(raw.contains("\"lastVault\""));
@@ -212,6 +277,7 @@ mod tests {
             &AppConfig {
                 last_vault: None,
                 agent_proposals_enabled: false,
+                panel_agents: BTreeMap::new(),
             },
         )
         .unwrap();
@@ -224,6 +290,105 @@ mod tests {
 
         std::fs::write(dir.join("config.json"), r#"{"agentProposalsEnabled":true}"#).unwrap();
         assert!(load(&dir).agent_proposals_enabled, "explicitly on");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn a_panel_binding_round_trips_per_vault() {
+        let dir = testutil::temp_vault("config-panel-binding");
+        set_panel_agent(&dir, "/vaults/a", Some("release-scout")).unwrap();
+        set_panel_agent(&dir, "/vaults/b", Some("digest2")).unwrap();
+        assert_eq!(
+            panel_agent(&dir, "/vaults/a").as_deref(),
+            Some("release-scout")
+        );
+        assert_eq!(panel_agent(&dir, "/vaults/b").as_deref(), Some("digest2"));
+        assert_eq!(panel_agent(&dir, "/vaults/c"), None, "an unbound vault");
+        let raw = std::fs::read_to_string(dir.join("config.json")).unwrap();
+        assert!(raw.contains("\"panelAgents\""), "{raw}");
+        // Binding one vault keeps what else the config holds.
+        let mut config = load(&dir);
+        config.last_vault = Some("/vaults/a".into());
+        save(&dir, &config).unwrap();
+        set_panel_agent(&dir, "/vaults/a", Some(" scout ")).unwrap();
+        let config = load(&dir);
+        assert_eq!(config.last_vault.as_deref(), Some("/vaults/a"));
+        assert_eq!(
+            config.panel_agents.get("/vaults/a").map(String::as_str),
+            Some("scout")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_older_config_reads_no_binding() {
+        let dir = testutil::temp_vault("config-panel-older");
+        std::fs::write(
+            dir.join("config.json"),
+            r#"{"lastVault":"/v","agentProposalsEnabled":true}"#,
+        )
+        .unwrap();
+        let config = load(&dir);
+        assert!(config.panel_agents.is_empty());
+        assert!(config.agent_proposals_enabled, "the rest still reads");
+        assert_eq!(panel_agent(&dir, "/v"), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_malformed_handle_is_refused_and_nothing_is_written() {
+        let dir = testutil::temp_vault("config-panel-malformed");
+        set_panel_agent(&dir, "/v", Some("scout")).unwrap();
+        let before = std::fs::read(dir.join("config.json")).unwrap();
+        let long = "a".repeat(65);
+        for bad in [
+            "Scout",
+            "release scout",
+            "release--scout",
+            "-scout",
+            "scout-",
+            "scout_2",
+            "@scout",
+            "scöut",
+            "../scout",
+            long.as_str(),
+        ] {
+            let refused = set_panel_agent(&dir, "/v", Some(bad)).unwrap_err();
+            assert!(
+                refused.ends_with("\" is not an agent handle"),
+                "{bad}: {refused}"
+            );
+            assert_eq!(
+                std::fs::read(dir.join("config.json")).unwrap(),
+                before,
+                "{bad}"
+            );
+        }
+        assert_eq!(
+            set_panel_agent(&dir, "/v", Some("Release Scout")).unwrap_err(),
+            "\"Release Scout\" is not an agent handle"
+        );
+        assert_eq!(
+            set_panel_agent(&dir, "/v", Some(&long)).unwrap_err(),
+            format!("\"{}…\" is not an agent handle", "a".repeat(64))
+        );
+        // 64 is the limit, not past it.
+        set_panel_agent(&dir, "/v", Some(&"a".repeat(64))).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn clearing_a_binding_removes_its_key() {
+        let dir = testutil::temp_vault("config-panel-clear");
+        set_panel_agent(&dir, "/a", Some("scout")).unwrap();
+        set_panel_agent(&dir, "/b", Some("digest")).unwrap();
+        set_panel_agent(&dir, "/a", None).unwrap();
+        assert_eq!(panel_agent(&dir, "/a"), None);
+        set_panel_agent(&dir, "/b", Some("  ")).unwrap();
+        assert_eq!(panel_agent(&dir, "/b"), None, "a blank clears too");
+        let raw = std::fs::read_to_string(dir.join("config.json")).unwrap();
+        assert!(!raw.contains("scout") && !raw.contains("digest"), "{raw}");
+        // Clearing a vault that was never bound is not an error.
+        set_panel_agent(&dir, "/never", None).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -1,9 +1,11 @@
 // The transport spike's driver (M56.1): it records Claude Code 2.1.250 in an
 // isolated config folder against the toy `probe` server, and reduces each
-// recording into src-tauri/fixtures/cli-stream/spike/<scenario>.json.
+// recording into src-tauri/fixtures/cli-stream/spike/<scenario>.json. Its
+// SCRIPTED scenarios (M56.2) are recorded for the real/ corpus only, which
+// sanitize.ts writes; they are never reduced.
 //
 //   pnpm tsx scripts/cli-record/spike.ts setup
-//   pnpm tsx scripts/cli-record/spike.ts run <scenario|all>
+//   pnpm tsx scripts/cli-record/spike.ts run <scenario|scripted|all>
 //   pnpm tsx scripts/cli-record/spike.ts reduce <scenario|all>
 //
 // Everything live sits in one record folder outside the repo
@@ -409,6 +411,55 @@ export type ScenarioName = keyof typeof SCENARIOS;
 export const SCENARIO_NAMES = Object.keys(SCENARIOS) as ScenarioName[];
 
 /**
+ * M56.2's scripted scenarios: kinds the spike's own runs never show, recorded
+ * for sanitize.ts's corpus (scripted-<name>) and never reduced, so they answer
+ * no fact.
+ */
+export const SCRIPTED = {
+  thinking: {
+    facts: [],
+    turns: [
+      {
+        ...acceptEdits,
+        prompt: 'Think it through, then reply with one word: which of 17 and 21 is prime?',
+        session: { mint: 'a' },
+        model: 'sonnet',
+        extra: ['--effort', 'high'],
+      },
+    ],
+  },
+  bash: {
+    facts: [],
+    turns: [
+      {
+        mode: 'acceptEdits',
+        allowed: ['Bash'],
+        prompt: 'Use the Bash tool to run ls notes, then reply with the file names it printed.',
+        session: { mint: 'a' },
+      },
+    ],
+  },
+  'max-turns': {
+    facts: [],
+    turns: [
+      {
+        ...acceptEdits,
+        prompt:
+          "Call slow_echo with text 'one' and seconds 0, then call it again with text 'two' and seconds 0, then reply done.",
+        session: { mint: 'a' },
+        extra: ['--max-turns', '1'],
+      },
+    ],
+  },
+} satisfies Record<string, Scenario>;
+
+export type ScriptedName = keyof typeof SCRIPTED;
+export const SCRIPTED_NAMES = Object.keys(SCRIPTED) as ScriptedName[];
+/** Everything `run` records: the spike's scenarios, then the scripted ones. */
+export type RunName = ScenarioName | ScriptedName;
+const RUNNABLE: Record<RunName, Scenario> = { ...SCENARIOS, ...SCRIPTED };
+
+/**
  * One turn's argv: build_args' shared flags at M55's tip on haiku, then the
  * scenario's own. `sessionId` is the minted id for `--session-id`, or the
  * one `--resume` continues.
@@ -484,6 +535,15 @@ export function setup(at: Layout, node: string = process.execPath): void {
     '# Alpha\n\nA toy note for recording Claude Code. It mentions Beta.\n',
   );
   writeFileSync(join(at.vault, 'notes/beta.md'), '# Beta\n\nThe second toy note.\n');
+  // M56.2's app recordings: an agent whose run is refused a write outside its
+  // scope, and the note it is asked to change.
+  mkdirSync(join(at.vault, 'records/agents'), { recursive: true });
+  mkdirSync(join(at.vault, 'outside'), { recursive: true });
+  writeFileSync(join(at.vault, 'records/agents/scout.md'), SCOUT);
+  writeFileSync(
+    join(at.vault, 'outside/secret.md'),
+    '# Outside\n\nA note outside the scout scope.\n',
+  );
   const server = { type: 'stdio', command: node, args: [PROBE, 'server', '--dir', at.probe] };
   writeJson(at.mcpConfig, { mcpServers: { probe: server } });
   const hook = {
@@ -506,6 +566,27 @@ export function setup(at: Layout, node: string = process.execPath): void {
   writeJson(join(at.probe, 'decisions.json'), {});
   writeJson(join(at.probe, 'hook-decisions.json'), {});
 }
+
+/**
+ * The toy agent app-agent-refused records: scoped to notes/, asked to append
+ * outside it. Its schedule is a placeholder the owner moves a few minutes
+ * ahead before recording.
+ */
+export const SCOUT = `---
+type: Agent
+slug: scout
+description: A toy agent for recording a refused write.
+tools: safe
+scope:
+  - notes
+schedule: daily 09:00
+---
+
+# Scout
+
+Append the line "scouted" to outside/secret.md with append_to_note, then reply
+with what happened.
+`;
 
 function writeJson(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
@@ -808,12 +889,8 @@ function signedOut(stdout: string[]): boolean {
 }
 
 /** Record one scenario into raw/<name>/, replacing what was there. */
-export async function runScenario(
-  name: ScenarioName,
-  at: Layout,
-  options: RunOptions,
-): Promise<void> {
-  const scenario: Scenario = SCENARIOS[name];
+export async function runScenario(name: RunName, at: Layout, options: RunOptions): Promise<void> {
+  const scenario: Scenario = RUNNABLE[name];
   const raw = join(at.raw, name);
   rmSync(raw, { recursive: true, force: true });
   mkdirSync(raw, { recursive: true });
@@ -953,6 +1030,15 @@ export function pick(arg: string | undefined): ScenarioName[] {
   throw new Error(`Name a scenario or all: ${SCENARIO_NAMES.join(', ')}.`);
 }
 
+/** What `run` records: one scenario or scripted run by name, or all of both. */
+export function pickRun(arg: string | undefined): RunName[] {
+  const names: RunName[] = [...SCENARIO_NAMES, ...SCRIPTED_NAMES];
+  if (arg === 'all') return names;
+  const named = names.find((name) => name === arg);
+  if (named) return [named];
+  throw new Error(`Name a scenario, a scripted run or all: ${names.join(', ')}.`);
+}
+
 async function main(argv: string[]): Promise<void> {
   const at = layout(recordRoot(process.env, tmpdir()));
   // A symlink must not carry the record folder into the repo either.
@@ -973,7 +1059,7 @@ async function main(argv: string[]): Promise<void> {
   if (command === 'run') {
     checkVersion(execFileSync('claude', ['--version'], { encoding: 'utf8' }));
     if (!existsSync(at.mcpConfig)) setup(at);
-    for (const name of pick(arg)) {
+    for (const name of pickRun(arg)) {
       await runScenario(name, at, {
         program: 'claude',
         holdMs: 120_000,
@@ -995,7 +1081,7 @@ async function main(argv: string[]): Promise<void> {
     }
     return;
   }
-  throw new Error('usage: spike.ts setup | run <scenario|all> | reduce <scenario|all>');
+  throw new Error('usage: spike.ts setup | run <scenario|scripted|all> | reduce <scenario|all>');
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -14,6 +14,7 @@ import {
 import { Icon } from '@/components/ui/Icon';
 import { MenuItem, MenuSurface } from '@/components/ui/Menu';
 import { Popover } from '@/components/ui/Popover';
+import { usePageCommentsContext } from './PageCommentsContext';
 
 /**
  * The AI controls you can actually see (M18).
@@ -168,8 +169,10 @@ export function AiFormattingToolbar({ onAsk }: { onAsk: (preset?: Preset) => voi
   );
 }
 
-function AiToolbarButtons({ onAsk }: { onAsk: (preset?: Preset) => void }) {
+/** The AI group, then Comment where a page provides it. Exported for its test. */
+export function AiToolbarButtons({ onAsk }: { onAsk: (preset?: Preset) => void }) {
   const Components = useComponentsContext();
+  const comments = usePageCommentsContext();
   const [more, setMore] = useState(false);
   const moreRef = useRef<HTMLSpanElement>(null);
   if (Components === undefined) return null;
@@ -245,6 +248,29 @@ function AiToolbarButtons({ onAsk }: { onAsk: (preset?: Preset) => void }) {
         </Popover>
       )}
       <span className="mx-1 h-4 w-px flex-none self-center bg-n-200" aria-hidden="true" />
+      {/* M70.2b — comment on the selection. Only where a page provides
+          PageCommentsContext: DocPage does, the record peek and read-only
+          pages do not. The span keeps the selection: mousedown is where a
+          click would move it. */}
+      {comments !== null && (
+        <>
+          <span className="inline-flex" onMouseDown={(e) => e.preventDefault()}>
+            <Button
+              className="bn-button"
+              data-testid="selection-comment"
+              label="Comment"
+              mainTooltip="Comment on the selection"
+              onClick={() => comments.start()}
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <Icon name="message-square-plus" size={14} />
+                Comment
+              </span>
+            </Button>
+          </span>
+          <span className="mx-1 h-4 w-px flex-none self-center bg-n-200" aria-hidden="true" />
+        </>
+      )}
     </>
   );
 }

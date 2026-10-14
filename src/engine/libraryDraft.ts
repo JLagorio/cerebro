@@ -98,6 +98,10 @@ export interface AgentDraft {
   /** `tools: shell` — the host tools, still capped by the Settings ceiling
    * and withdrawn in Rust by a read limit (M53.5). */
   shell: boolean;
+  /** `model:` and `effort:` (M56.5), trimmed; '' is unset, Claude Code's
+   * default, and writes no key. */
+  model: string;
+  effort: string;
   schedule: string;
   triggers: Trigger[];
   /** What the human corrected. The agent may read it and never write it. */
@@ -118,6 +122,8 @@ export function agentDraft(entry: Entry, body: string): AgentDraft {
     disallowedTools: parseAllowedTools(entry.properties['disallowed-tools']),
     connectors: parseAllowedTools(entry.properties.connectors),
     shell: entry.properties.tools === 'shell',
+    model: text(entry.properties.model),
+    effort: text(entry.properties.effort),
     schedule: text(entry.properties.schedule),
     triggers: parseTriggers(entry.properties.when),
     preferences: memory.preferences,
@@ -142,6 +148,8 @@ export type AgentKey =
   | 'allowedTools'
   | 'connectors'
   | 'shell'
+  | 'model'
+  | 'effort'
   | 'schedule'
   | 'triggers'
   | 'preferences';
@@ -154,6 +162,8 @@ export const AGENT_KEYS: readonly AgentKey[] = [
   'allowedTools',
   'connectors',
   'shell',
+  'model',
+  'effort',
   'schedule',
   'triggers',
   'preferences',
@@ -191,6 +201,12 @@ export function agentPatch(draft: AgentDraft, keys: readonly AgentKey[]): Record
         // either way, but a record that says so out loud is one you can read
         // the policy off without knowing what the default is.
         out.tools = draft.shell ? 'shell' : 'safe';
+        break;
+      case 'model':
+        out.model = blank(draft.model);
+        break;
+      case 'effort':
+        out.effort = blank(draft.effort);
         break;
       case 'schedule':
         out.schedule = blank(draft.schedule);

@@ -68,6 +68,8 @@ export function placeOf(selection: Selection): Place {
       }
       return { kind: 'knowledge' };
     }
+    // `tab` and `thread` dropped (M44.5, M70.2b): a record tab and a focused
+    // comment thread are lenses on one page.
     case 'doc':
       return { kind: 'doc', path: selection.path };
     // A standalone diagram is a subject the same way a doc is (M29.21).

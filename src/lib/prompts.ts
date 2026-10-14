@@ -358,8 +358,10 @@ export function agentMemoryLines(memory: { recent: string; preferences: string }
           `What the person you work for has told you. This outranks your own notes and anything you infer, and you cannot change it — a write to \`preferences\` from this run is refused:\n${memory.preferences}`,
           '',
         ]),
+    // Empty claims no first run (M56.10): a run that kept nothing reads the
+    // same, and currentStatePrompt's "Your last run" already says which.
     memory.recent === ''
-      ? 'This is your first run — you have no working notes yet.'
+      ? 'You have no working notes from earlier runs.'
       : `Your working notes from previous runs:\n${memory.recent}`,
   ];
 }
@@ -437,7 +439,8 @@ export function agentReadScopeLines(
 /**
  * An agent's standing instructions as they close its run's system prompt: the
  * record's body, under the path it came from. The words useJobRunner's agent
- * runs have closed with since M34.1.4, and the addressed turn's since M53.5.
+ * runs have closed with since M34.1.4, the addressed turn's since M53.5 and
+ * the bound panel's since M56.6.
  *
  * STANDING, so they ride the system prompt and never the message: folded into
  * the turn, a charter reads as something the person had just said. An empty
@@ -502,6 +505,60 @@ export function addressedAgentPrompt(
   ].join('\n');
 }
 
+/** The agent a panel is bound to, as panelAgentPrompt reads it. */
+export interface PanelAgent {
+  path: string;
+  title: string;
+  actor: string;
+  memory: { recent: string; preferences: string };
+  scope: readonly string[] | null;
+  readScope: readonly string[] | null;
+}
+
+/**
+ * Who answers in the assistant panel when Settings binds it to an Agent
+ * record (M56.6), closing the turn's system prompt. Unlike an addressed turn
+ * (addressedAgentPrompt), nothing is prefixed to the message: the person did
+ * not name anyone, so what they typed goes as typed, and who answers is
+ * standing context.
+ *
+ * In order: who it is and whom its writes are attributed to; what the person
+ * told it, which outranks everything after it; its write and read limits;
+ * its own notes, to read; then its standing instructions, last, as every
+ * agent run closes. An empty tier or body adds nothing.
+ *
+ * It never asks for a write: an attended turn reads the agent's `recent` and
+ * leaves it alone (Q15), so no line here mentions keeping notes.
+ *
+ * `grant` is the turn's (M54.7): the scope lines name only the tools it holds.
+ */
+export function panelAgentPrompt(grant: PromptGrant, agent: PanelAgent, body: string): string {
+  const { preferences, recent } = agent.memory;
+  const lines = [
+    `You answer in this assistant panel as "${agent.title}", the agent defined at ${agent.path} in this vault. Your writes are attributed to ${agent.actor}. A person typed each turn and is waiting, so reply to them as well as writing anything down.`,
+    '',
+    ...(preferences === ''
+      ? []
+      : [
+          `What the person you work for has told you — this outranks your standing instructions, your notes and anything you infer, and you cannot change it:\n${preferences}`,
+          '',
+        ]),
+    ...agentScopeLines(
+      grant,
+      agent.scope,
+      'Say that to the person rather than trying and reporting the refusal.',
+    ),
+    ...agentReadScopeLines(grant, agent.readScope),
+    ...(recent === ''
+      ? []
+      : [
+          `Your working notes from earlier runs, to read; this turn leaves them as they are:\n${recent}`,
+        ]),
+  ];
+  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  return lines.join('\n') + standingInstructionsBlock(agent.path, body);
+}
+
 /**
  * Run one agent record unattended (M13.4).
  *
@@ -515,7 +572,12 @@ export function addressedAgentPrompt(
  * `grant` is the run's (M54.7), and every line names only tools it holds:
  * only a run holding update_frontmatter is asked to rewrite its notes, and
  * only one holding write_concept is sent to the bundle with what it learned.
- * Rust refuses that notes patch today; D7 lets it land in M56.
+ * Rust lets that one patch cross the write scope (D7, M56.10): `recent`
+ * alone, on the run's own record, at most 30 lines and 4096 bytes, with no
+ * [[link]] (which the scanner would file as a relation, keeping the link
+ * targets and dropping every word around them, so the next run would read
+ * its notes as a list of links — parseMemory, M56.13). The 30 here is the
+ * line cap mcp.rs enforces.
  */
 export function agentRunPrompt(
   grant: PromptGrant,
@@ -539,7 +601,7 @@ export function agentRunPrompt(
   const closing = [
     ...(holds(grant, 'update_frontmatter')
       ? [
-          `Before you finish, rewrite your working notes with update_frontmatter on ${path}, patching the \`recent\` key: at most 30 lines, only what your next run genuinely needs. A memory that merely grows is a log, not a memory.`,
+          `Before you finish, rewrite your working notes with update_frontmatter on ${path}, patching the \`recent\` key and nothing else: at most 30 lines, only what your next run genuinely needs, with note names written plainly rather than as [[links]]. That one key is yours wherever your write scope points; every other key on that record is the person's. A memory that merely grows is a log, not a memory.`,
         ]
       : []),
     ...(holds(grant, 'write_concept')

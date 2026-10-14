@@ -68,8 +68,8 @@ pub enum Mode {
     /// finalize it itself — M26.4's ingest driver, which lands items by
     /// ROUTE rather than by success or failure.
     ///
-    /// `finish` records the unknown-fields row and the run's Claude Code
-    /// session (M56.7), and stops short of `dispatch::finalize`, because the
+    /// `finish` records the unknown-fields and unclassified-kinds rows and
+    /// the run's Claude Code session (M56.7), and stops short of `dispatch::finalize`, because the
     /// run's outcome is not the item's destiny: a window that ran cleanly and concluded "nothing material"
     /// consumes its items, and one that was BLOCKED holds them visibly.
     /// Finalizing here as well would be refused outright — the second call
@@ -129,13 +129,22 @@ pub struct Tally {
     /// summing them would over-count badly.
     usage: Option<Usage>,
     /// The non-count facts (M31.5), accumulated across the whole stream:
-    /// each assistant turn overwrites `model_id`/`stop_reason` (last wins —
-    /// the final turn's stop reason is the run's), the terminal event fills
-    /// the rest once.
+    /// each assistant turn overwrites `model_id`/`stop_reason` (last wins),
+    /// the terminal event fills the rest once, and a deferred result's stop
+    /// reason wins over the last turn's (M57.1).
     facts: RunFacts,
+    /// The call a hook deferred, by tool name, when the terminal result
+    /// carried `deferred_tool_use` (M57.1): the run is suspended on it, not
+    /// finished.
+    deferred: Option<String>,
     failed: bool,
+    /// The run died for want of quota, as the fold typed it (M56.4,
+    /// `super::failure`): set by the reader, never from the result's words.
     quota: bool,
     unknown_fields: Vec<String>,
+    /// The stream kinds this build has no row for (M56.2, `super::kinds`),
+    /// once each, in the order they first came.
+    unclassified: Vec<String>,
     saw_terminal: bool,
     /// The run was stopped at its `system/init` because cerebro's tools did
     /// not load (M54.5, `agent::InitGate`).
@@ -169,6 +178,11 @@ impl Tally {
                 self.unknown_fields.push(field);
             }
         }
+        for kind in super::kinds::unclassified(event) {
+            if !self.unclassified.contains(&kind) {
+                self.unclassified.push(kind);
+            }
+        }
         if let Some(turn) = RunFacts::from_assistant(event) {
             self.facts.merge(turn);
         }
@@ -176,12 +190,27 @@ impl Tally {
             return;
         }
         self.saw_terminal = true;
+        self.deferred = event
+            .get("deferred_tool_use")
+            .filter(|call| call.is_object())
+            .map(|call| {
+                call.get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("a tool")
+                    .to_string()
+            });
         self.usage = usage::parse(event);
         if let Some(terminal) = RunFacts::parse(event) {
             self.facts.merge(terminal);
         }
         self.failed = usage::is_failure(event);
-        self.quota = usage::is_quota_failure(event);
+    }
+
+    /// Record whether the run's failure was a quota one: the usage limit, a
+    /// throttle after the CLI's own retries, or no usage left (M56.4). The
+    /// reader passes the fold's verdict once the stream has ended.
+    pub(crate) fn record_quota(&mut self, quota: bool) {
+        self.quota = quota;
     }
 
     /// The Claude Code session this run ran as, as its stream named it:
@@ -204,6 +233,12 @@ impl Tally {
     /// error event already told the person why.
     pub(crate) fn refuse_init(&mut self) {
         self.init_refused = true;
+    }
+
+    /// The tool of the call a hook deferred, when the run ended suspended on
+    /// one (M57.1).
+    pub fn deferred(&self) -> Option<&str> {
+        self.deferred.as_deref()
     }
 
     /// Was the run stopped at init? Its error event was its report, so the
@@ -281,6 +316,23 @@ pub fn begin(meter: &Meter) {
     }
 }
 
+/// Record the Claude Code session a run's child was spawned into (M56.3),
+/// every mode: the row is open by now (`begin`, or the claim), and the id is
+/// the one Cerebro minted or resumed, so a run killed before its stream named
+/// a session is still findable by it. [`finish`] writes the stream's own id
+/// after this, and that write wins. Never fails a run.
+pub fn record_spawned_session(meter: &Meter, session: &str) {
+    let Ok(conn) = runtime::open_existing(&meter.data_dir) else {
+        return;
+    };
+    if let Err(detail) = dispatch::record_cli_session(&conn, &meter.run_id, session) {
+        log::warn!(
+            "runtime meter: run {}'s session could not be recorded at spawn: {detail}",
+            meter.run_id
+        );
+    }
+}
+
 /// Take back what [`begin`] opened for a child that never spawned.
 pub fn discard(meter: &Meter) {
     if meter.mode != Mode::Attended {
@@ -309,6 +361,41 @@ pub fn recover_orphaned(data_dir: &std::path::Path, started_before: DateTime<Utc
     }
 }
 
+/// The surface of a run's row for usage fields this build does not read.
+pub(crate) const USAGE_SURFACE: &str = "agent.usage";
+/// The surface of a run's row for stream kinds `super::kinds` has no row for
+/// (M56.2).
+pub(crate) const STREAM_SURFACE: &str = "agent.stream";
+/// The surface of an unattended run's row for a call a hook deferred (M57.1).
+pub(crate) const DEFERRED_SURFACE: &str = "agent.deferred";
+/// How many unclassified kinds one row names; the rest are counted.
+const UNCLASSIFIED_NAMED: usize = 20;
+
+/// One `capability_unavailable` row under `surface`, with the run's id: what
+/// this build met in a run's stream and could not read. Never fails a run.
+fn record_unread(conn: &rusqlite::Connection, meter: &Meter, surface: &str, detail: &str) {
+    let refusal = crate::policy::table::PolicyTable::load()
+        .ok()
+        .and_then(|table| {
+            crate::policy::rejection::OperationalRefusal::new(
+                &table,
+                "capability_unavailable",
+                surface,
+                detail,
+            )
+            .ok()
+        });
+    if let Some(refusal) = refusal {
+        let entry = LogEntry {
+            store_uuid: meter.store_uuid.clone(),
+            proposal_id: None,
+            run_id: Some(meter.run_id.clone()),
+            rule: None,
+        };
+        runtime::operational::record_or_warn(conn, &refusal, &entry);
+    }
+}
+
 /// Close a run's books. Never fails a run: metering records what happened and
 /// must not become a second way for the run to go wrong. `aborted` and
 /// `cancelled` mean what they mean to [`Tally::ended`].
@@ -319,34 +406,39 @@ pub fn finish(meter: &Meter, tally: &Tally, aborted: bool, cancelled: bool, now:
         return;
     };
     let (outcome, counted) = tally.ended(aborted, cancelled);
+    let outcome = booked_outcome(meter.mode, tally, outcome);
 
-    // A field this build has never seen is worth exactly one operational row
-    // per run: enough to notice a CLI upgrade, not enough to drown the log.
+    // A usage field or a stream kind this build has never seen is worth
+    // exactly one operational row per run, each: enough to notice a CLI
+    // upgrade, not enough to drown the log.
     if !tally.unknown_fields.is_empty() {
         let detail = format!(
             "the CLI reported usage fields this build does not read: {}",
             tally.unknown_fields.join(", ")
         );
-        let refusal = crate::policy::table::PolicyTable::load()
-            .ok()
-            .and_then(|table| {
-                crate::policy::rejection::OperationalRefusal::new(
-                    &table,
-                    "capability_unavailable",
-                    "agent.usage",
-                    &detail,
-                )
-                .ok()
-            });
-        if let Some(refusal) = refusal {
-            let entry = LogEntry {
-                store_uuid: meter.store_uuid.clone(),
-                proposal_id: None,
-                run_id: Some(meter.run_id.clone()),
-                rule: None,
-            };
-            runtime::operational::record_or_warn(&conn, &refusal, &entry);
+        record_unread(&conn, meter, USAGE_SURFACE, &detail);
+    }
+    if !tally.unclassified.is_empty() {
+        let named = &tally.unclassified[..tally.unclassified.len().min(UNCLASSIFIED_NAMED)];
+        let mut detail = format!(
+            "the CLI sent stream kinds this build does not classify: {}",
+            named.join(", ")
+        );
+        if tally.unclassified.len() > named.len() {
+            detail.push_str(&format!(
+                ", and {} more",
+                tally.unclassified.len() - named.len()
+            ));
         }
+        record_unread(&conn, meter, STREAM_SURFACE, &detail);
+    }
+    // M57.1 (Q1): nobody can answer an unattended run's deferred call, and
+    // only a hook outside Cerebro defers one, so the run says so once.
+    if let (Mode::Ambient, Some(tool)) = (meter.mode, tally.deferred()) {
+        let detail = format!(
+            "a hook outside Cerebro deferred a call to {tool}, and nobody is watching this run to answer it, so the run stopped there and its items go back in the queue"
+        );
+        record_unread(&conn, meter, DEFERRED_SURFACE, &detail);
     }
 
     let result = match meter.mode {
@@ -372,14 +464,7 @@ pub fn finish(meter: &Meter, tally: &Tally, aborted: bool, cancelled: bool, now:
             outcome,
             counted,
             Some(&tally.facts),
-            // M25.2 has no route matrix yet: a clean run consumes its items,
-            // anything else returns them. M25.3 replaces this argument with
-            // the receipt route, which is why it is an argument.
-            if matches!(outcome, RunOutcome::Succeeded) {
-                ItemOutcome::Consume
-            } else {
-                ItemOutcome::Requeue
-            },
+            items_for(outcome),
             now,
         ),
     };
@@ -399,6 +484,30 @@ pub fn finish(meter: &Meter, tally: &Tally, aborted: bool, cancelled: bool, now:
                 meter.run_id
             );
         }
+    }
+}
+
+/// What a run is booked as, by its mode (M57.1): an unattended run that ended
+/// suspended on a deferred call did not finish, so it books Failed and the
+/// gate backs off; an attended one keeps what the stream said (a deferral
+/// is an outcome there, with its stop reason recorded); a supervised run's
+/// supervisor decides.
+fn booked_outcome(mode: Mode, tally: &Tally, outcome: RunOutcome) -> RunOutcome {
+    if mode == Mode::Ambient && tally.deferred().is_some() && outcome == RunOutcome::Succeeded {
+        RunOutcome::Failed
+    } else {
+        outcome
+    }
+}
+
+/// Where an ambient run's items go: a clean run consumes them, and anything
+/// else, a deferred run among them (M57.1), returns them. M25.3 replaces this
+/// with the receipt route, which is why it is an argument to `finalize`.
+fn items_for(outcome: RunOutcome) -> ItemOutcome {
+    if matches!(outcome, RunOutcome::Succeeded) {
+        ItemOutcome::Consume
+    } else {
+        ItemOutcome::Requeue
     }
 }
 
@@ -504,17 +613,86 @@ mod tests {
         assert_eq!(usage, None, "unknown, and never zero");
     }
 
+    /// A stream read as the reader reads it (M56.4): every line metered and
+    /// folded, and the fold's quota verdict handed to the tally at the end.
+    fn tally_of(lines: &[Value]) -> Tally {
+        let mut fold = super::super::fold::TranscriptFold::default();
+        let mut tally = Tally::default();
+        for line in lines {
+            tally.observe(line);
+            fold.entry(line);
+        }
+        fold.finish();
+        tally.record_quota(fold.is_quota());
+        tally
+    }
+
+    /// The hand-built usage-limit stream (cli-stream/usage-limit-stream.json).
+    fn usage_limit_stream() -> Vec<Value> {
+        let wrapper: Value = serde_json::from_str(include_str!(
+            "../../fixtures/cli-stream/usage-limit-stream.json"
+        ))
+        .unwrap();
+        wrapper["events"].as_array().unwrap().clone()
+    }
+
+    fn api_error_reply(code: &str) -> Value {
+        json!({ "type": "assistant", "error": code, "is_api_error_message": true,
+            "message": { "model": "<synthetic>", "content": [{ "type": "text", "text": "x" }] } })
+    }
+
     #[test]
     fn a_quota_death_is_its_own_outcome_and_keeps_its_usage() {
-        let mut tally = Tally::default();
-        tally.observe(&result(
-            json!({ "input_tokens": 2, "output_tokens": 17 }),
-            true,
-            "API Error: Claude AI usage limit reached.",
-        ));
+        let tally = tally_of(&usage_limit_stream());
         let (outcome, usage) = tally.ended(false, false);
         assert_eq!(outcome, RunOutcome::QuotaFailed);
+        // A refused first request spends nothing, and says so: reported, not
+        // unknown.
+        assert!(usage.is_some(), "a quota death still reports its usage");
+    }
+
+    #[test]
+    fn a_limit_phrase_without_a_typed_field_books_failed() {
+        let tally = tally_of(&[result(
+            json!({ "input_tokens": 2, "output_tokens": 17 }),
+            true,
+            "API Error: Claude AI usage limit reached. Rate limit, quota.",
+        )]);
+        let (outcome, usage) = tally.ended(false, false);
+        assert_eq!(outcome, RunOutcome::Failed, "words are not a typed field");
         assert_eq!(usage.unwrap().total(), 19, "a failed run is not a free run");
+    }
+
+    #[test]
+    fn rate_limited_and_out_of_credits_book_quota_failed() {
+        for code in ["rate_limit", "billing_error"] {
+            let tally = tally_of(&[
+                api_error_reply(code),
+                result(json!({ "output_tokens": 0 }), true, "x"),
+            ]);
+            assert_eq!(
+                tally.ended(false, false).0,
+                RunOutcome::QuotaFailed,
+                "{code}"
+            );
+        }
+        for code in ["overloaded", "authentication_failed", "unknown"] {
+            let tally = tally_of(&[
+                api_error_reply(code),
+                result(json!({ "output_tokens": 0 }), true, "x"),
+            ]);
+            assert_eq!(tally.ended(false, false).0, RunOutcome::Failed, "{code}");
+        }
+    }
+
+    #[test]
+    fn an_allowed_limit_event_on_a_good_run_books_succeeded() {
+        let tally = tally_of(&[
+            json!({ "type": "rate_limit_event", "rate_limit_info": { "status": "allowed",
+                "resetsAt": 1767225600, "rateLimitType": "five_hour" } }),
+            result(json!({ "output_tokens": 5 }), false, "done"),
+        ]);
+        assert_eq!(tally.ended(false, false).0, RunOutcome::Succeeded);
     }
 
     #[test]
@@ -1046,6 +1224,62 @@ mod tests {
     }
 
     #[test]
+    fn the_spawned_session_is_recorded_and_the_streams_wins_at_finish() {
+        let dir = crate::vault::testutil::temp_vault("meter-spawned-session");
+        let _lock = crate::runtime::status::test_lock();
+        crate::runtime::status::clear();
+        let conn = crate::runtime::open(&dir).unwrap();
+        let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
+        drop(conn);
+        let meter = |run_id: &str| Meter {
+            data_dir: dir.clone(),
+            run_id: run_id.into(),
+            mode: Mode::Attended,
+            vault_id: Some(vault.clone()),
+            store_uuid: Some("store".into()),
+            started_at: Utc::now(),
+            elapsed_limit_seconds: None,
+            actor: None,
+            parent_run_id: None,
+            cause: None,
+        };
+        let read = |run_id: &str| -> Option<String> {
+            let conn = crate::runtime::open_existing(&dir).unwrap();
+            conn.query_row(
+                "SELECT cli_session_id FROM runs WHERE run_id = ?1",
+                [run_id],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        let minted = "00000000-0000-4000-8000-000000000005";
+
+        // Killed before its stream said a word: the minted id stays.
+        let quiet = meter("quiet-run");
+        begin(&quiet);
+        record_spawned_session(&quiet, minted);
+        assert_eq!(read("quiet-run").as_deref(), Some(minted), "named at spawn");
+        finish(&quiet, &Tally::default(), false, true, Utc::now());
+        assert_eq!(read("quiet-run").as_deref(), Some(minted));
+
+        // A stream that names its session wins at finish.
+        let talking = meter("talking-run");
+        begin(&talking);
+        record_spawned_session(&talking, minted);
+        let mut tally = Tally::default();
+        tally.observe(&json!({
+            "type": "system", "subtype": "init",
+            "session_id": "00000000-0000-4000-8000-000000000006"
+        }));
+        finish(&talking, &tally, false, false, Utc::now());
+        assert_eq!(
+            read("talking-run").as_deref(),
+            Some("00000000-0000-4000-8000-000000000006")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn unknown_fields_are_collected_once_across_the_whole_stream() {
         let mut tally = Tally::default();
         for _ in 0..3 {
@@ -1055,6 +1289,91 @@ mod tests {
             }));
         }
         assert_eq!(tally.unknown_fields, vec!["zeta_tokens".to_string()]);
+    }
+
+    #[test]
+    fn unclassified_kinds_are_collected_once_across_the_whole_stream() {
+        let mut tally = Tally::default();
+        for _ in 0..3 {
+            tally.observe(&json!({ "type": "teleport", "subtype": "begin" }));
+            tally.observe(&json!({
+                "type": "assistant",
+                "message": { "content": [{ "type": "hologram" }, { "type": "tool_use" }] }
+            }));
+            tally.observe(&json!({ "type": "system", "subtype": "init", "session_id": "s" }));
+        }
+        assert_eq!(
+            tally.unclassified,
+            vec![
+                "teleport/begin".to_string(),
+                "assistant/hologram".to_string()
+            ],
+            "once each, in the order they came, and no classified kind"
+        );
+    }
+
+    #[test]
+    fn an_unclassified_kind_routes_one_operational_row_with_its_run() {
+        let dir = crate::vault::testutil::temp_vault("meter-unclassified");
+        let _lock = crate::runtime::status::test_lock();
+        crate::runtime::status::clear();
+        let conn = crate::runtime::open(&dir).unwrap();
+        let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
+        drop(conn);
+        let meter = |run: &str| Meter {
+            data_dir: dir.clone(),
+            run_id: run.into(),
+            mode: Mode::Attended,
+            vault_id: Some(vault.clone()),
+            store_uuid: Some("store".into()),
+            started_at: Utc::now(),
+            elapsed_limit_seconds: None,
+            actor: None,
+            parent_run_id: None,
+            cause: None,
+        };
+
+        let mut drifted = Tally::default();
+        for n in 0..25 {
+            drifted.observe(&json!({ "type": format!("kind{n:02}") }));
+        }
+        let success = json!({
+            "type": "result", "subtype": "success", "is_error": false, "result": "ok",
+            "usage": { "output_tokens": 3 }
+        });
+        drifted.observe(&success);
+        finish(&meter("drifted"), &drifted, false, false, Utc::now());
+
+        let mut clean = Tally::default();
+        clean.observe(&json!({ "type": "system", "subtype": "init", "session_id": "s" }));
+        clean.observe(&success);
+        finish(&meter("clean"), &clean, false, false, Utc::now());
+
+        let conn = crate::runtime::open_existing(&dir).unwrap();
+        let rows: Vec<(String, String, Option<String>)> = conn
+            .prepare(
+                "SELECT code, detail, run_id FROM operational_log WHERE surface = ?1 ORDER BY id",
+            )
+            .unwrap()
+            .query_map([STREAM_SURFACE], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let named: Vec<String> = (0..20).map(|n| format!("kind{n:02}")).collect();
+        assert_eq!(
+            rows,
+            [(
+                "capability_unavailable".to_string(),
+                format!(
+                    "the CLI sent stream kinds this build does not classify: {}, and 5 more",
+                    named.join(", ")
+                ),
+                Some("drifted".to_string())
+            )],
+            "one row for the run that drifted, naming twenty, and none for the clean run"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1443,6 +1762,144 @@ mod tests {
             ..meter
         };
         record_connectors(&elsewhere, &[seen]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- A deferred run (M57.1) ----------------------------------------------
+
+    /// The synthetic deferred stream (cli-stream/transcript-deferred.stream.json).
+    fn deferred_stream() -> Vec<Value> {
+        serde_json::from_str(include_str!(
+            "../../fixtures/cli-stream/transcript-deferred.stream.json"
+        ))
+        .unwrap()
+    }
+
+    fn rows_under(conn: &rusqlite::Connection, surface: &str) -> Vec<(String, String, String)> {
+        conn.prepare(
+            "SELECT code, detail, run_id FROM operational_log WHERE surface = ?1 ORDER BY id",
+        )
+        .unwrap()
+        .query_map([surface], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+    }
+
+    #[test]
+    fn a_deferred_ambient_run_books_failed_requeues_and_says_why() {
+        let dir = crate::vault::testutil::temp_vault("meter-deferred-ambient");
+        let _lock = crate::runtime::status::test_lock();
+        crate::runtime::status::clear();
+        let conn = crate::runtime::open(&dir).unwrap();
+        let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
+        let dispatch::Dispatched::Started(lease) = dispatch::claim(
+            &conn,
+            &vault,
+            "store",
+            "scheduled",
+            crate::runtime::budget::Reservation {
+                total_tokens: 20_000,
+                output_tokens: 4_000,
+            },
+            &[],
+            Some("process:scout"),
+            None,
+            Utc::now(),
+        )
+        .unwrap() else {
+            panic!("an empty item list still claims");
+        };
+        drop(conn);
+
+        let tally = tally_of(&deferred_stream());
+        assert_eq!(tally.deferred(), Some("mcp__cerebro__append_to_note"));
+        // The stream alone says it succeeded; unattended, it did not finish.
+        let (said, _) = tally.ended(false, false);
+        assert_eq!(said, RunOutcome::Succeeded);
+        let booked = booked_outcome(Mode::Ambient, &tally, said);
+        assert_eq!(booked, RunOutcome::Failed);
+        assert_eq!(items_for(booked), ItemOutcome::Requeue, "its items go back");
+        let meter = Meter {
+            data_dir: dir.clone(),
+            run_id: lease.run_id.clone(),
+            mode: Mode::Ambient,
+            vault_id: Some(vault.clone()),
+            store_uuid: Some("store".into()),
+            started_at: Utc::now(),
+            elapsed_limit_seconds: Some(lease.elapsed_limit_seconds),
+            actor: None,
+            parent_run_id: None,
+            cause: None,
+        };
+        finish(&meter, &tally, false, false, Utc::now());
+
+        let conn = crate::runtime::open_existing(&dir).unwrap();
+        let (outcome, stop, output): (String, Option<String>, i64) = conn
+            .query_row(
+                "SELECT outcome, stop_reason, output_tokens FROM runs WHERE run_id = ?1",
+                [&lease.run_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(outcome, "failed");
+        assert_eq!(stop.as_deref(), Some("tool_deferred"));
+        assert_eq!(output, 48, "what it spent is still what it spent");
+        let rows = rows_under(&conn, DEFERRED_SURFACE);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].0, "capability_unavailable");
+        assert!(
+            rows[0].1.contains("mcp__cerebro__append_to_note"),
+            "{}",
+            rows[0].1
+        );
+        assert_eq!(rows[0].2, lease.run_id);
+        let day = crate::runtime::budget::read_day(&conn, &lease.window_start_utc).unwrap();
+        assert_eq!(day.reserved_total_tokens, 0, "the reservation was released");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_deferred_attended_run_keeps_its_usage_and_stop_reason() {
+        let dir = crate::vault::testutil::temp_vault("meter-deferred-attended");
+        let _lock = crate::runtime::status::test_lock();
+        crate::runtime::status::clear();
+        let conn = crate::runtime::open(&dir).unwrap();
+        let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
+        drop(conn);
+        let tally = tally_of(&deferred_stream());
+        let meter = Meter {
+            data_dir: dir.clone(),
+            run_id: "attended-deferred".into(),
+            mode: Mode::Attended,
+            vault_id: Some(vault.clone()),
+            store_uuid: Some("store".into()),
+            started_at: Utc::now(),
+            elapsed_limit_seconds: None,
+            actor: None,
+            parent_run_id: None,
+            cause: None,
+        };
+        finish(&meter, &tally, false, false, Utc::now());
+        let conn = crate::runtime::open_existing(&dir).unwrap();
+        let (outcome, stop, output): (String, Option<String>, i64) = conn
+            .query_row(
+                "SELECT outcome, stop_reason, output_tokens FROM runs WHERE run_id = 'attended-deferred'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(outcome, "succeeded", "a person is there to answer it");
+        assert_eq!(stop.as_deref(), Some("tool_deferred"));
+        assert_eq!(output, 48);
+        assert!(rows_under(&conn, DEFERRED_SURFACE).is_empty());
+        // A supervised run's supervisor decides, deferral or not.
+        assert_eq!(
+            booked_outcome(Mode::Supervised, &tally, RunOutcome::Succeeded),
+            RunOutcome::Succeeded
+        );
+        drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

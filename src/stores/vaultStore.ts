@@ -5,6 +5,7 @@ import { collectionsFromPages, parseCollectionYaml } from '@/engine/collections'
 import type { CollectionFile, Entry, Scalar, Schema, ListFile } from '@/engine/types';
 import { parseListYaml } from '@/engine/views';
 import * as ipc from '@/lib/ipc';
+import { coalescedRefresh, writeFence, type PassOutcome } from '@/lib/trailingRefresh';
 import { parseWikilinks } from '@/engine/wikilink';
 import { useUiStore } from '@/stores/uiStore';
 
@@ -39,6 +40,16 @@ export interface VaultState {
   status: 'idle' | 'scanning' | 'ready' | 'error';
   error: string | null;
   openVault(path: string): Promise<void>;
+  /**
+   * Reread the open vault (M58.2). One scan runs at a time, plus at most one
+   * trailing behind it, however many callers ask. Resolves once a scan that
+   * started after the call has landed, failed or found the vault moved, so
+   * `await rescan()` after a write always sees that write. Never rejects: a
+   * failed cycle toasts once and keeps the last good snapshot.
+   *
+   * Never gated on window visibility or focus: triggers ride on rescans, and
+   * a hidden window still runs its automations.
+   */
   rescan(): Promise<void>;
   /**
    * Writes a frontmatter patch, or `false` when it was refused or failed —
@@ -108,8 +119,11 @@ function applyPatch(entry: Entry, patch: Record<string, unknown>): Entry {
  *
  * null passes. No scan has landed yet, so the app holds no entries to take a
  * path from, and tests seed `entries` without it.
+ *
+ * Exported for the page actions that move files (app/pageActions.ts, M55.13),
+ * which refuse by the same rule.
  */
-function refusedAcrossVaults({ vaultPath, entriesVault, status }: VaultState): boolean {
+export function refusedAcrossVaults({ vaultPath, entriesVault, status }: VaultState): boolean {
   if (entriesVault === null || entriesVault === vaultPath) return false;
   const message =
     status === 'error'
@@ -155,6 +169,19 @@ async function loadCollections(
   };
 }
 
+/** One read of a vault: everything a scan lands, shared by openVault and rescan. */
+async function readVault(vault: string): Promise<{
+  entries: Entry[];
+  views: ListFile[];
+  collections: CollectionFile[];
+  folders: string[];
+}> {
+  const entries = await ipc.scanVault(vault);
+  const { views, collections } = await loadCollections(vault, entries);
+  const folders = await ipc.listFolders(vault);
+  return { entries, views, collections, folders };
+}
+
 let watcherBound = false;
 
 /**
@@ -181,14 +208,95 @@ let watcherQueue: Promise<unknown> = Promise.resolve();
  * finishing, a watcher event, an edit — lands the new vault's entries first,
  * and the open's scan, taken before it, used to land over them. The store
  * went back in time, and the trigger diff read the difference as fresh edits,
- * or a file deleted in between as created. Two rescans can cross the same way.
+ * or a file deleted in between as created. Rescans never overlap (they run
+ * one at a time, `refresh`), so only an open's scan and a rescan can cross.
  *
- * Scans only. An optimistic inline edit (`patchFrontmatter`, `setTitle`)
- * writes `entries` without taking a ticket, so a rescan that started before
- * the edit can still land over it and put back the entry it replaced.
+ * An optimistic inline edit (`patchFrontmatter`, `setTitle`) writes `entries`
+ * without a ticket, so the write fence guards it instead (M58.2): a rescan
+ * waits for pending writes before it reads, and one that read while a write
+ * began or ended is discarded and read again. A scan read before an inline
+ * edit never lands over it.
  */
 let scanTicket = 0;
 let landedScan = 0;
+
+/**
+ * How long a rescan waits on a pending inline write before it reads anyway:
+ * the open pages' flush budget. An IPC write slower than that has hung, and
+ * the store shows disk truth until it answers; its late answer scans again.
+ */
+export const WRITE_WAIT_MS = 5_000;
+
+/** The inline writes in flight (M58.2). A scan that lands while one is still
+ *  pending is owed another once it settles. */
+const newFence = () => writeFence(() => void useVaultStore.getState().rescan());
+let writes = newFence();
+
+/**
+ * The one rescan: one pass at a time plus one trailing (M58.2). Store-layer
+ * invariant (M14.8): actions never throw. Before it, a scan failure was
+ * toasted, swallowed, or an unhandled rejection depending on which of a dozen
+ * call sites you arrived through. The cycle catches every pass, keeps the
+ * last good snapshot, and toasts once per failed cycle, from here.
+ */
+const newRefresh = () =>
+  coalescedRefresh(scanPass, () => useUiStore.getState().toast("Couldn't refresh vault"));
+let refresh = newRefresh();
+
+/** One rescan pass: wait out pending writes, read, and land only what is
+ *  newer than the store and read after every write it could have missed. */
+async function scanPass(): Promise<PassOutcome> {
+  await writes.settled(WRITE_WAIT_MS);
+  const vault = useVaultStore.getState().vaultPath;
+  if (vault === null) return 'done';
+  // After the wait: a ticket or mark taken before it would let a write that
+  // landed during the wait look older than this read.
+  const scan = ++scanTicket;
+  const mark = writes.mark();
+  let read: Awaited<ReturnType<typeof readVault>>;
+  try {
+    read = await readVault(vault);
+  } catch {
+    // The store keeps its last good snapshot; disk truth returns on the next
+    // successful scan (watcher event, write, or vault reopen).
+    return 'failed';
+  }
+  // A switch mid-scan: this is the old vault's snapshot, and the open in
+  // flight sets the new one's. A newer scan already landed: this one would
+  // roll it back (see `landedScan`).
+  if (useVaultStore.getState().vaultPath !== vault || scan < landedScan) return 'done';
+  // A write began or settled while this read: it may predate the write.
+  if (writes.moved(mark)) return 'again';
+  landedScan = scan;
+  useVaultStore.setState({ ...read, entriesVault: vault, status: 'ready' });
+  // It read past a write that outlived WRITE_WAIT_MS: that write's settle
+  // scans once more.
+  if (mark.pending > 0) writes.owe();
+  return 'done';
+}
+
+/**
+ * An optimistic edit and its disk write, inside the write fence: no rescan
+ * reads while it is pending, and one that read across it is read again. The
+ * fence ends before the caller's own rescan, which would otherwise wait out
+ * WRITE_WAIT_MS on its own write. The one way to fence a write; M60's batch
+ * writer and undo reuse it.
+ */
+async function fencedWrite<T>(apply: () => void, write: () => Promise<T>): Promise<T> {
+  const end = writes.begin();
+  try {
+    apply();
+    return await write();
+  } finally {
+    end();
+  }
+}
+
+/** Test isolation: forget every pending write and any rescan in flight. */
+export function __resetRescans(): void {
+  writes = newFence();
+  refresh = newRefresh();
+}
 
 export const useVaultStore = create<VaultState>()((set, get) => ({
   vaultPath: null,
@@ -204,11 +312,13 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     const ticket = ++openTicket;
     const superseded = () => ticket !== openTicket;
     set({ vaultPath: path, status: 'scanning', error: null });
+    // Its own scan, not a rescan pass: it lands only after its watcher
+    // starts (M49), while rescans inside that window land early (M53.8). It
+    // still obeys the ticket order and the write fence.
     const scan = ++scanTicket;
+    const mark = writes.mark();
     try {
-      const entries = await ipc.scanVault(path);
-      const { views, collections } = await loadCollections(path, entries);
-      const folders = await ipc.listFolders(path);
+      const { entries, views, collections, folders } = await readVault(path);
       if (superseded()) return;
       const started = watcherQueue.then(() => ipc.startWatcher(path));
       watcherQueue = started.catch(() => undefined);
@@ -216,9 +326,10 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
       if (superseded()) return;
       if (inTauri() && !watcherBound) {
         await ipc.listenVaultChanged(() => {
-          // rescan() contains its own failures (toast + keep the last good
-          // snapshot, M14.8) — a transient scan error on a watcher event must
-          // not flip the whole app into the dead error shell.
+          // rescan() contains its own failures (one toast per failed cycle,
+          // the last good snapshot kept) — a transient scan error on a
+          // watcher event must not flip the whole app into the dead error
+          // shell.
           void get().rescan();
         });
         // Only latch after listen resolves: a failed bind must leave the
@@ -229,6 +340,13 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
       // A rescan inside the window already landed a newer snapshot of this
       // vault, and `status: 'ready'` with it (see `landedScan`).
       if (scan < landedScan) return;
+      // An inline edit was pending or settled while this read (a Reopen
+      // racing an edit): the read may predate it, so a rescan pass, which
+      // waits for the write, lands the vault and sets 'ready' instead.
+      if (mark.pending > 0 || writes.moved(mark)) {
+        await get().rescan();
+        return;
+      }
       landedScan = scan;
       set({ entries, entriesVault: path, views, collections, folders, status: 'ready' });
     } catch (err) {
@@ -243,30 +361,9 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     }
   },
 
-  async rescan() {
-    const vault = get().vaultPath;
-    if (vault === null) return;
-    const scan = ++scanTicket;
-    // Store-layer invariant (M14.8): actions never throw. Before this, a
-    // scan failure was toasted, swallowed, or an unhandled rejection
-    // depending on which of a dozen call sites you arrived through — and a
-    // rescan inside another action's catch block could throw OUT of it.
-    try {
-      const entries = await ipc.scanVault(vault);
-      const { views, collections } = await loadCollections(vault, entries);
-      const folders = await ipc.listFolders(vault);
-      // A switch mid-scan: this is the old vault's snapshot, and the open in
-      // flight sets the new one's. A newer scan already landed: this one
-      // would roll it back (see `landedScan`).
-      if (get().vaultPath !== vault || scan < landedScan) return;
-      landedScan = scan;
-      set({ entries, entriesVault: vault, views, collections, folders, status: 'ready' });
-    } catch {
-      // The store keeps its last good snapshot; disk truth returns on the
-      // next successful scan (watcher event, write, or vault reopen).
-      useUiStore.getState().toast("Couldn't refresh vault");
-    }
-  },
+  // A stable identity: tests that stub `rescan` through setState still
+  // intercept every internal caller, which all go through get().rescan().
+  rescan: () => refresh(),
 
   async patchFrontmatter(path, patch) {
     const state = get();
@@ -292,16 +389,22 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
         return false;
       }
     }
-    // Optimistic: local state updates synchronously, before the disk write.
+    // Optimistic: local state updates synchronously, before the disk write,
+    // inside the write fence, so no scan read before the write lands over it.
     const optimistic = target === undefined ? null : applyPatch(target, normalized);
-    if (optimistic !== null) {
-      set({ entries: get().entries.map((e) => (e.path === path ? optimistic : e)) });
-    }
     try {
-      const hash = await ipc.updateFrontmatter(vault, path, normalized);
+      const hash = await fencedWrite(
+        () => {
+          if (optimistic !== null) {
+            set({ entries: get().entries.map((e) => (e.path === path ? optimistic : e)) });
+          }
+        },
+        () => ipc.updateFrontmatter(vault, path, normalized),
+      );
       // The write names the bytes it landed (M55.2). The optimistic entry
-      // takes that hash only while it still stands: a scan that landed first
-      // read the disk itself, and wins.
+      // takes that hash only while it still stands: only a scan that read
+      // after the write can land first, and it read the disk itself, so it
+      // wins. (A second edit on the same path also replaced it.)
       if (hash !== null && optimistic !== null && get().entries.includes(optimistic)) {
         set({
           entries: get().entries.map((e) => (e === optimistic ? { ...optimistic, hash } : e)),
@@ -339,16 +442,19 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     // After those, unlike patchFrontmatter: a title cell commits on every
     // blur, so one clicked and left unchanged mid-open must not toast.
     if (refusedAcrossVaults(state)) return false;
-    // Optimistic, like patchFrontmatter: `title` is a top-level Entry field
-    // rather than frontmatter, so applyPatch is not involved. The new bytes'
-    // hash is not known until the rescan below reads them (M55.2).
-    set({
-      entries: get().entries.map((e) =>
-        e.path === path ? { ...e, title: trimmed, hash: null } : e,
-      ),
-    });
+    // Optimistic and fenced, like patchFrontmatter: `title` is a top-level
+    // Entry field rather than frontmatter, so applyPatch is not involved. The
+    // new bytes' hash is not known until the rescan below reads them (M55.2).
     try {
-      await ipc.setNoteTitle(vault, path, trimmed);
+      await fencedWrite(
+        () =>
+          set({
+            entries: get().entries.map((e) =>
+              e.path === path ? { ...e, title: trimmed, hash: null } : e,
+            ),
+          }),
+        () => ipc.setNoteTitle(vault, path, trimmed),
+      );
     } catch {
       useUiStore.getState().toast("Couldn't rename record");
       await get().rescan(); // disk truth wins: revert the optimistic update

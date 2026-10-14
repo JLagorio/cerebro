@@ -328,22 +328,15 @@ describe('ProposalCard on the real store over the mock disk (M53.18)', () => {
   });
 
   /**
-   * The capture is open in the editor beside the card (InboxPage). Rust stamps
-   * modifiedAt to the second, so the editor cannot learn of a write in the
-   * same second as its own last save from the stamp. Holding the clock still
-   * puts every write here in one second, as the mock otherwise stamps in
-   * milliseconds.
+   * The capture is open in the editor beside the card (InboxPage). The
+   * rename's announcement brings the new H1 into that editor in place
+   * (M55.6): one mount, the typing it landed first still on screen.
    */
-  it('the editor beside the card lands its edit first, then reloads to the new H1', async () => {
+  it('the editor beside the card lands its edit first, then takes the new H1 in place', async () => {
     // Waits on a debounce, a mock-disk write, a scan of the mock disk and a
     // lazy editor mount; `waitFor`'s 1s default has no margin for that.
     const DISK_ROUND_TRIP = { timeout: 5_000 };
-    const SECOND = '2026-10-13T09:00:00.000Z';
-    const stamp = () =>
-      useVaultStore.getState().entries.find((e) => e.path === CAPTURE)?.modifiedAt;
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date(SECOND));
-    // Every mount, newest last: a reload is a remount.
+    // Every mount: the page never remounts, so there is one.
     const seen: EditorReadyInfo[] = [];
     const states: SaveState[] = [];
     // A debounce long enough that only a flush lands an edit.
@@ -355,41 +348,40 @@ describe('ProposalCard on the real store over the mock disk (M53.18)', () => {
         onSaveState={(state) => void states.push(state)}
       />,
     );
-    /** Mount `n`, once its view is up: it hears edits a render after onReady. */
-    const mounted = async (n: number): Promise<EditorReadyInfo> => {
-      await waitFor(() => expect(seen).toHaveLength(n), DISK_ROUND_TRIP);
-      await waitFor(() => expect(container.querySelector('[contenteditable="true"]')).toBeTruthy());
-      await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
-      return seen[n - 1];
-    };
+    await waitFor(() => expect(seen).toHaveLength(1), DISK_ROUND_TRIP);
+    // The view is up a render after onReady, and only then hears edits.
+    await waitFor(() => expect(container.querySelector('[contenteditable="true"]')).toBeTruthy());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    const [page] = seen;
     /** An edit, still on its debounce. */
-    const edit = (info: EditorReadyInfo, text: string) => {
-      const last = info.editor.document[info.editor.document.length - 1];
-      info.editor.insertBlocks([{ type: 'paragraph', content: text }], last, 'after');
+    const edit = (text: string) => {
+      const last = page.editor.document[page.editor.document.length - 1];
+      page.editor.insertBlocks([{ type: 'paragraph', content: text }], last, 'after');
       expect(states.at(-1)).toBe('dirty');
     };
 
-    // An autosave lands in this second, and the editor takes its stamp...
-    edit(await mounted(1), 'saved a moment ago');
+    // An autosave lands...
+    edit('saved a moment ago');
     await act(() => flushOpenPages());
-    await waitFor(() => expect(stamp()).toBe(SECOND));
     await act(() => new Promise((resolve) => setTimeout(resolve, 120)));
-    expect(seen).toHaveLength(1);
     // ...and the next edit is still on its debounce when Apply is clicked.
-    edit(seen[0], 'typed just before Apply');
+    edit('typed just before Apply');
     fireEvent.click(propose(FILING));
     await waitFor(() => expect(held(CAPTURE)).toBeUndefined(), DISK_ROUND_TRIP);
 
-    // Reloaded by the announcement, since the stamp never moved.
-    const reloaded = await mounted(2);
-    expect(stamp()).toBe(SECOND);
-    const body = JSON.stringify(reloaded.editor.document);
-    expect(body).toContain(NEW_TITLE);
+    // The new H1 lands in the page on screen, which never remounted.
+    await waitFor(
+      () => expect(JSON.stringify(page.editor.document)).toContain(NEW_TITLE),
+      DISK_ROUND_TRIP,
+    );
+    expect(seen).toHaveLength(1);
+    const body = JSON.stringify(page.editor.document);
+    expect(body).not.toContain(OLD_H1.slice(2));
     expect(body).toContain('typed just before Apply');
-    expect(screen.queryByTestId('external-change-banner')).toBeNull();
+    expect(screen.queryByTestId('merge-choices')).toBeNull();
 
     // The editor's next save carries the new H1 rather than the old one back.
-    edit(reloaded, 'and after');
+    edit('and after');
     await act(() => flushOpenPages());
     const raw = disk().get(CAPTURE) ?? '';
     expect(raw).toContain('type: Work item');

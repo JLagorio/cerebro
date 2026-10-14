@@ -13,19 +13,21 @@ import {
 } from '@/engine/dates';
 import { parseSources } from '@/engine/okf';
 import { dueBucket } from '@/engine/tasks';
-import { resolveTarget } from '@/engine/wikilink';
+import { parseLinkTarget, resolveLink, resolveTarget } from '@/engine/wikilink';
 import { todayIso } from '@/lib/templates';
 import { typeStyle } from '@/engine/typeCatalog';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { citationIndexOf, citationName, citationNumber, sourceTarget } from './citations';
 import { assigneeText, citationText, dueText, wikilinkText } from './markdown';
 import { NotePathContext } from './notePath';
+import { requestSection } from './sectionLinks';
 
 /**
  * Inline chips (M2.x docs polish). Custom inline nodes that keep the file
  * plain markdown while rendering rich in the editor:
  *
  *   wikilink  `[[target]]` / `[[target|alias]]`  — doc-to-doc link
+ *             `[[target#section]]`, `[[#section]]` — to a heading (M55.8)
  *   assignee  `@[[person]]`                      — task assignee
  *   due       `📅 YYYY-MM-DD`                    — task due date
  *   citation  `[^id]` / `[^id]:`                 — footnote reference / definition (M51.5)
@@ -70,12 +72,47 @@ function deleteInlineNodeAt(editor: unknown, dom: HTMLElement | null): void {
 const CHIP_BASE =
   'inline-flex select-none items-center gap-1 rounded-md px-1 py-px align-baseline text-[0.92em] leading-[1.35]';
 
+/**
+ * A page link, or a section link (M55.8): `[[page#Heading]]` reaches its page
+ * through `resolveLink` and reads `Title › Heading`, and `[[#Heading]]` is a
+ * heading of the note the chip sits in. A click asks the page for the heading
+ * before it opens the page, so the editor that shows it can land there; a
+ * link into this same note only asks, since navigating would rebuild the
+ * page for nothing. The target is never rewritten, so the fragment stays on
+ * disk.
+ */
 function WikilinkRender({ target, alias }: { target: string; alias: string }) {
   const entries = useVaultStore((s) => s.entries);
   const schema = useSchema();
   const open = useOpenPath();
-  const resolved = resolveTarget(target, entries);
-  const label = alias !== '' ? alias : (resolved?.title ?? target);
+  const notePath = useContext(NotePathContext);
+  const { page, section } = parseLinkTarget(target);
+  const dest = useMemo(() => {
+    if (page === '' && section !== null) {
+      if (notePath === null) return null;
+      const own = entries.find((e) => e.path === notePath);
+      return {
+        path: notePath,
+        title: own?.title ?? notePath.slice(notePath.lastIndexOf('/') + 1).replace(/\.md$/i, ''),
+        type: own?.type ?? null,
+        section,
+      };
+    }
+    // Null section when the whole target names a page by itself (`C# notes`).
+    const link = resolveLink(target, entries);
+    if (link === null) return null;
+    const { path, title, type } = link.entry;
+    return { path, title, type, section: link.section };
+  }, [entries, notePath, page, section, target]);
+  const heading = dest?.section ?? null;
+  const label =
+    alias !== ''
+      ? alias
+      : dest === null
+        ? target
+        : heading !== null
+          ? `${dest.title} \u203A ${heading}`
+          : dest.title;
 
   return (
     <button
@@ -83,17 +120,26 @@ function WikilinkRender({ target, alias }: { target: string; alias: string }) {
       data-chip="wikilink"
       tabIndex={-1}
       onClick={() => {
-        if (resolved !== null) open(resolved.path);
+        if (dest === null) return;
+        if (heading !== null) requestSection(dest.path, heading);
+        if (heading !== null && dest.path === notePath) return;
+        open(dest.path);
       }}
       className={
-        resolved !== null
+        dest !== null
           ? `${CHIP_BASE} cursor-pointer border-0 bg-cortex-50 font-medium text-cortex-600 hover:underline`
           : `${CHIP_BASE} cursor-default border-0 bg-n-50 text-n-500 [text-decoration:underline] [text-decoration-style:dashed] [text-underline-offset:2px]`
       }
-      title={resolved !== null ? resolved.path : `No page named "${target}"`}
+      title={
+        dest === null
+          ? `No page named "${page === '' ? target : page}"`
+          : heading !== null
+            ? `${dest.path}#${heading}`
+            : dest.path
+      }
     >
       {/* M9.6: the target's own type, so a linked Risk reads as a Risk. */}
-      <Icon name={typeStyle(resolved?.type ?? null, schema).icon} size={12} />
+      <Icon name={typeStyle(dest?.type ?? null, schema).icon} size={12} />
       {label}
     </button>
   );

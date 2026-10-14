@@ -121,3 +121,62 @@ describe('useOpenPath library records (M55.12)', () => {
     });
   });
 });
+
+// M70.2b — Changes' Open passes a sidecar's path: it opens the page the
+// comments are on, full, on its Comments tab, even when the page is a record
+// (comments are not in the peek, Q6).
+describe('useOpenPath comment sidecars (M70.2b)', () => {
+  beforeEach(() => {
+    useNavStore.setState({
+      selection: { kind: 'home' },
+      history: [{ kind: 'home' }],
+      historyIndex: 0,
+    });
+    useUiStore.setState({
+      detailPath: null,
+      docPanelOpen: false,
+      docPanelTab: 'outline',
+      conceptPanelOpen: false,
+      conceptPanelTab: 'details',
+    });
+    useVaultStore.setState({
+      entries: [
+        makeEntry({
+          path: 'records/decisions/dec.md',
+          type: 'Decision',
+          project: 'records/decisions/dec.md',
+        }),
+      ],
+    });
+  });
+
+  it("opens a record's sidecar as its full page on Comments", () => {
+    const { result } = renderHook(() => useOpenPath());
+    act(() => result.current('.comments/records/decisions/dec.md.json'));
+    expect(useNavStore.getState().selection).toEqual({
+      kind: 'doc',
+      path: 'records/decisions/dec.md',
+    });
+    const ui = useUiStore.getState();
+    expect(ui.detailPath).toBeNull();
+    expect(ui.docPanelOpen).toBe(true);
+    expect(ui.docPanelTab).toBe('comments');
+  });
+
+  it("opens a concept's sidecar on its own panel's Comments", () => {
+    const { result } = renderHook(() => useOpenPath());
+    act(() => result.current('.comments/knowledge/concepts/a.md.json'));
+    expect(useNavStore.getState().selection).toEqual({
+      kind: 'doc',
+      path: 'knowledge/concepts/a.md',
+    });
+    expect(useUiStore.getState().conceptPanelOpen).toBe(true);
+    expect(useUiStore.getState().conceptPanelTab).toBe('comments');
+  });
+
+  it('leaves a path that is no sidecar to the usual rules', () => {
+    const { result } = renderHook(() => useOpenPath());
+    act(() => result.current('.comments/notes.txt'));
+    expect(useUiStore.getState().docPanelTab).toBe('outline');
+  });
+});

@@ -18,6 +18,7 @@ vi.mock('@/lib/ipc', async (importOriginal) => {
 import RETIRED from '../shared/prompt/retired-terms.json';
 import App, { SHELL_TWO_PANEL_MIN } from '@/App';
 import { SHELL_BARE_TWO_PANEL_MIN, SHELL_RAIL_TWO_PANEL_MIN } from '@/app/shellLayout';
+import { __resetQuit, beginLeaving } from '@/app/quit';
 import * as ipc from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -628,5 +629,25 @@ describe('App boot flow', () => {
     expect(within(page).getByText('Product')).toBeTruthy();
     // A container opens empty and says so, rather than showing a record canvas.
     expect(within(page).getByText(/Nothing in here yet/)).toBeTruthy();
+  });
+
+  // M55.10: quit is a leave. NoteBodyEditor's own leave test shows a held
+  // save is written on unmount; this one shows quitting unmounts the shell.
+  it('leaving for a quit shows the quit screen and unmounts the shell', async () => {
+    render(<App />);
+    await screen.findByRole('navigation', { name: 'Sidebar' });
+    let left = false;
+    try {
+      await act(async () => {
+        await beginLeaving(60_000).then(() => (left = true));
+      });
+      expect(left, 'resolved by the screen mounting, long before the budget').toBe(true);
+      expect(screen.getByTestId('quit-screen').textContent).toBe('Saving…');
+      expect(screen.getByRole('status')).toBe(screen.getByTestId('quit-screen'));
+      expect(screen.queryByRole('navigation', { name: 'Sidebar' })).toBeNull();
+    } finally {
+      act(() => __resetQuit());
+    }
+    expect(await screen.findByRole('navigation', { name: 'Sidebar' })).toBeTruthy();
   });
 });

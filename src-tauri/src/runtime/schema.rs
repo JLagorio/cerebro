@@ -1290,10 +1290,12 @@ pub const SCHEMA_V19: &str = "
 /// the meter's fallback insert (`dispatch`). Nullable and never backfilled —
 /// a row from before this step holds NULL, read as "why not recorded".
 ///
-/// `runs.cli_session_id` is the session id the CLI's stream reported, 8 to
+/// `runs.cli_session_id` is the Claude Code session the run ran as, 8 to
 /// 64 characters of `[0-9A-Za-z-]` and never a leading `-`, so neither a path
-/// nor a flag fits. Written by the meter when a run finishes
-/// (`dispatch::record_cli_session`). Nullable and never backfilled too.
+/// nor a flag fits. Written by the meter when the child spawns, with the id
+/// Cerebro minted or resumed (M56.3), and again when the run finishes, with
+/// the one its stream reported (`dispatch::record_cli_session`). Nullable and
+/// never backfilled too.
 pub const SCHEMA_V20: &str = "
     ALTER TABLE runs ADD COLUMN cause TEXT CHECK (cause IS NULL OR (
         json_valid(cause) AND json_type(cause) = 'object'
@@ -1303,4 +1305,18 @@ pub const SCHEMA_V20: &str = "
         length(cli_session_id) BETWEEN 8 AND 64
         AND NOT cli_session_id GLOB '*[^0-9A-Za-z-]*'
         AND NOT cli_session_id GLOB '-*'));
+";
+
+/// The M56.9 schema — the two indexes a run's detail reads by.
+///
+/// `operational_log_by_run` is the index M54 left for this step: refusals
+/// have carried their run's id since M54.9, and the run detail lists them in
+/// id order. `runs_by_cli_session` finds the runs that share one Claude Code
+/// session, so a transcript can say how many it holds. Both are partial: a
+/// row with no run, or a run with no session, is never looked up this way.
+pub const SCHEMA_V21: &str = "
+    CREATE INDEX operational_log_by_run ON operational_log (run_id, id)
+        WHERE run_id IS NOT NULL;
+    CREATE INDEX runs_by_cli_session ON runs (cli_session_id)
+        WHERE cli_session_id IS NOT NULL;
 ";

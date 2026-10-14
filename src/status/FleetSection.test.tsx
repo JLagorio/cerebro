@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeEntry } from '@/engine/testHelpers';
 import { localStamp } from '@/engine/whenText';
@@ -59,6 +59,10 @@ function run(over: Partial<FleetRun> = {}): FleetRun {
   };
 }
 
+/** A detail's M56.9 fields for a run with no model recorded and nothing
+ * refused. */
+const MEASURED = { model_id: null, refusals: [], refusals_total: 0 };
+
 /** An agent record answering to `process:weekly-digest`. */
 const digestAgent = makeEntry({
   path: 'records/agents/weekly-digest.md',
@@ -78,6 +82,7 @@ describe('FleetSection', () => {
       run: run(),
       cost_components: null,
       assembly: null,
+      ...MEASURED,
     });
   });
 
@@ -114,7 +119,12 @@ describe('FleetSection', () => {
       rejected: null,
     });
     fleetRuns.mockResolvedValue([legacy]);
-    fleetRunDetail.mockResolvedValue({ run: legacy, cost_components: null, assembly: null });
+    fleetRunDetail.mockResolvedValue({
+      run: legacy,
+      cost_components: null,
+      assembly: null,
+      ...MEASURED,
+    });
     render(<FleetSection />);
 
     const row = await screen.findByTestId('fleet-row');
@@ -130,7 +140,12 @@ describe('FleetSection', () => {
   it('counts a booked run, and what is left over is still waiting', async () => {
     const booked = run({ proposals_submitted: 3, applied: 1, rejected: 1 });
     fleetRuns.mockResolvedValue([booked]);
-    fleetRunDetail.mockResolvedValue({ run: booked, cost_components: null, assembly: null });
+    fleetRunDetail.mockResolvedValue({
+      run: booked,
+      cost_components: null,
+      assembly: null,
+      ...MEASURED,
+    });
     render(<FleetSection />);
 
     const row = await screen.findByTestId('fleet-row');
@@ -201,6 +216,7 @@ describe('FleetSection', () => {
         },
       ],
       assembly: null,
+      ...MEASURED,
     });
     render(<FleetSection />);
     fireEvent.click(await screen.findByTestId('fleet-row'));
@@ -337,6 +353,33 @@ describe('FleetSection', () => {
       kind: 'agents',
       actor: 'process:weekly-digest',
     });
+  });
+
+  it('an opened run lists what it was refused, each code in words', async () => {
+    fleetRunDetail.mockResolvedValue({
+      run: run(),
+      cost_components: null,
+      assembly: null,
+      model_id: 'claude-opus-5',
+      refusals: [
+        {
+          code: 'write_outside_scope',
+          surface: 'create_note',
+          detail: 'This run is scoped to records/risks and cannot write to records/work.',
+          rule: null,
+          recorded_at: '2026-07-28T10:00:30.000Z',
+        },
+      ],
+      refusals_total: 1,
+    });
+    render(<FleetSection />);
+    fireEvent.click(await screen.findByTestId('fleet-row'));
+
+    const refused = await screen.findByTestId('run-detail-refused');
+    const row = within(refused).getByTestId('run-detail-refusal');
+    expect(row.getAttribute('data-code')).toBe('write_outside_scope');
+    expect(row.textContent).toContain('create_note · write outside scope — This run is scoped');
+    expect(screen.getByTestId('run-detail-model').textContent).toBe('claude-opus-5');
   });
 
   it("says when a run started and ended on the reader's clock, the ISO a hover away", async () => {

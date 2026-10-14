@@ -1,0 +1,103 @@
+{
+  "cli_version": "2.1.250",
+  "rule": "NFC, then every UTF-16 unit outside [A-Za-z0-9] becomes \"-\"; over 200 units, the first 200, \"-\" and base36 of the absolute 32-bit Java string hash of the NFC path",
+  "keys": [
+    {
+      "name": "plain",
+      "path": "/vault/notes",
+      "units": 12,
+      "key": "-vault-notes"
+    },
+    {
+      "name": "a space",
+      "path": "/vault/My Notes",
+      "units": 15,
+      "key": "-vault-My-Notes"
+    },
+    {
+      "name": "a dot folder",
+      "path": "/vault/.hidden/notes",
+      "units": 20,
+      "key": "-vault--hidden-notes"
+    },
+    {
+      "name": "an emoji (two units, two dashes)",
+      "path": "/vault/\ud83e\udde0 brain",
+      "units": 15,
+      "key": "-vault----brain"
+    },
+    {
+      "name": "\u00e9 composed (one unit)",
+      "path": "/vault/caf\u00e9",
+      "units": 11,
+      "key": "-vault-caf-"
+    },
+    {
+      "name": "\u00e9 decomposed, read as NFC",
+      "path": "/vault/cafe\u0301",
+      "units": 11,
+      "key": "-vault-caf-"
+    },
+    {
+      "name": "CJK",
+      "path": "/vault/\u7b14\u8bb0",
+      "units": 9,
+      "key": "-vault---"
+    },
+    {
+      "name": "exactly 200 units",
+      "path": "/vault/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "units": 200,
+      "key": "-vault-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+      "name": "260 units",
+      "path": "/vault/notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-x",
+      "units": 260,
+      "key": "-vault-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-notes-n-v4yxg4"
+    },
+    {
+      "name": "the most negative hash",
+      "path": "/vault/deep-folder/deep-folder/deep-folder/deep-folder/deep-folder/deep-folder/deep-folder/deep-folder/deep-folder/deep-folder/deep-folder/deep-folder/deep-folder/deep-folder/deep-folder/deep-folder/deep-folder/deep-folder/AO[HI^\\",
+      "units": 230,
+      "key": "-vault-deep-folder-deep-folder-deep-folder-deep-folder-deep-folder-deep-folder-deep-folder-deep-folder-deep-folder-deep-folder-deep-folder-deep-folder-deep-folder-deep-folder-deep-folder-deep-folder-d-zik0zk"
+    }
+  ],
+  "retention": [
+    {
+      "name": "no settings file",
+      "settings": null,
+      "days": 30
+    },
+    {
+      "name": "no cleanupPeriodDays",
+      "settings": "{}",
+      "days": 30
+    },
+    {
+      "name": "seven",
+      "settings": "{\"cleanupPeriodDays\":7}",
+      "days": 7
+    },
+    {
+      "name": "zero never sweeps",
+      "settings": "{\"cleanupPeriodDays\":0}",
+      "days": null
+    },
+    {
+      "name": "negative never sweeps",
+      "settings": "{\"cleanupPeriodDays\":-1}",
+      "days": null
+    },
+    {
+      "name": "not a number never sweeps",
+      "settings": "{\"cleanupPeriodDays\":\"x\"}",
+      "days": null
+    },
+    {
+      "name": "unparseable never sweeps",
+      "settings": "{\"cleanupPeriodDays\":",
+      "days": null
+    }
+  ]
+}

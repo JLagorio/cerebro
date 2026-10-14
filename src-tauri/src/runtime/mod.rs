@@ -49,6 +49,7 @@ pub mod normalize;
 pub mod operational;
 pub mod parked;
 pub mod projection;
+pub mod read_only;
 pub mod recovery;
 pub mod scheduler;
 pub mod schema;
@@ -63,6 +64,8 @@ pub mod surface;
 pub mod taint;
 pub mod triggers;
 pub mod vault_writes;
+
+pub use read_only::ReadOnly;
 
 use std::path::{Path, PathBuf};
 
@@ -99,8 +102,10 @@ pub const OPEN_MARKER: &str = "runtime.db.open";
 /// booking, so its zeros read as not recorded — at 18. M54.11 adds
 /// `connector_status` — the last status each connector was seen in, per
 /// vault — at 19. M56.7 adds `runs.cause` and `runs.cli_session_id`, both
-/// nullable and never backfilled, each under a CHECK, at 20.
-pub const USER_VERSION: i64 = 20;
+/// nullable and never backfilled, each under a CHECK, at 20. M56.9 adds the
+/// two indexes a run's detail reads by — `operational_log` by run, and `runs`
+/// by Claude Code session — at 21.
+pub const USER_VERSION: i64 = 21;
 
 pub fn runtime_db_path(data_dir: &Path) -> PathBuf {
     data_dir.join(RUNTIME_DB)
@@ -288,7 +293,34 @@ const MIGRATIONS: &[Migration] = &[
         sql: schema::SCHEMA_V20,
         validate: validate_v20,
     },
+    Migration {
+        to: 21,
+        sql: schema::SCHEMA_V21,
+        validate: validate_v21,
+    },
 ];
+
+/// v21's promise: both indexes a run's detail reads by exist (M56.9). A step
+/// that built one of the two would leave the refusals read scanning the log.
+fn validate_v21(conn: &Connection) -> Result<(), String> {
+    for (index, table) in [
+        ("operational_log_by_run", "operational_log"),
+        ("runs_by_cli_session", "runs"),
+    ] {
+        let found: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = ?1 \
+                 AND tbl_name = ?2",
+                [index, table],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("validating {index}: {e}"))?;
+        if found != 1 {
+            return Err(format!("index {index} on {table} is missing"));
+        }
+    }
+    Ok(())
+}
 
 /// v20's promise: both run columns read, and the cause column carries its
 /// CHECK. A column added without it would take any text, so the runs table's
@@ -944,6 +976,7 @@ mod tests {
                 .unwrap_or_else(|e| panic!("{table} missing after upgrade from {from}: {e}"));
             }
             validate_v20(&conn).unwrap_or_else(|e| panic!("upgrade from {from}: {e}"));
+            validate_v21(&conn).unwrap_or_else(|e| panic!("upgrade from {from}: {e}"));
             drop(conn);
             let _ = std::fs::remove_dir_all(&dir);
         }
@@ -1066,6 +1099,68 @@ mod tests {
         assert_eq!(count, 1, "the step keeps every run it found");
         assert_eq!((cause, session), (None, None), "and backfills nothing");
         drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// v21 (M56.9): a database at 20 keeps its runs and its log, and comes
+    /// back with both indexes a run's detail reads by.
+    #[test]
+    fn a_v20_database_gains_the_run_indexes_and_keeps_its_rows() {
+        let (dir, _vault) = at_version_with_a_run("runtime-upgrade-20", 20);
+        let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+        conn.execute(
+            "INSERT INTO operational_log (recorded_at, surface, code, detail, run_id) \
+             VALUES ('2026-10-14T00:00:00.000Z', 'create_note', 'write_outside_scope', 'x', \
+             'before-causes')",
+            [],
+        )
+        .unwrap();
+        assert!(validate_v21(&conn).is_err(), "no indexes before v21");
+        drop(conn);
+
+        let conn = open(&dir).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), USER_VERSION);
+        assert!(validate_v21(&conn).is_ok());
+        let (runs, logged): (i64, i64) = conn
+            .query_row(
+                "SELECT (SELECT count(*) FROM runs), (SELECT count(*) FROM operational_log)",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((runs, logged), (1, 1), "the step keeps every row it found");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The refusals read is served by its index rather than a scan of the
+    /// whole log, and the session read by its own.
+    #[test]
+    fn the_refusals_read_uses_its_index() {
+        let dir = testutil::temp_vault("runtime-refusals-plan");
+        drop(open(&dir).unwrap());
+        let ro = ReadOnly::open(&dir).unwrap();
+        let plan = |sql: &str, bound: &[&dyn rusqlite::ToSql]| -> String {
+            let mut statement = ro.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            let rows = statement
+                .query_map(bound, |row| row.get::<_, String>(3))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            rows.join(" | ")
+        };
+        let [usage, stream, tool_calls, costs] = fleet::TELEMETRY_SURFACES;
+        let refusals = plan(
+            fleet::REFUSALS_SQL,
+            rusqlite::params!["r1", usage, stream, tool_calls, costs],
+        );
+        assert!(refusals.contains("operational_log_by_run"), "{refusals}");
+        let sessions = plan(
+            "SELECT count(*) FROM runs WHERE cli_session_id = ?1",
+            rusqlite::params!["00000000-0000-4000-8000-000000000001"],
+        );
+        assert!(sessions.contains("runs_by_cli_session"), "{sessions}");
+        drop(ro);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

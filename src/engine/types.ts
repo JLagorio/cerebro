@@ -311,6 +311,10 @@ export type Selection =
        * button returns to — the same contract `list.view` follows. Absent =
        * the type's first tab. */
       tab?: string;
+      /** The comment thread in focus (M70.2b), by its id: the page opens on
+       * its Comments tab with that thread focused, so a thread is a place the
+       * back button returns to. A lens, like `tab`: `placeOf` drops it. */
+      thread?: string;
     }
   // M29.21 — a standalone .mmd file. Raw diagram source has no frontmatter
   // and no record shape, so it gets its own full-page editor surface rather

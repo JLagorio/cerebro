@@ -1,7 +1,7 @@
 //! Token usage off the CLI wire (M25.2).
 //!
-//! Until now every `usage` object the CLI emitted was discarded: `translate`
-//! reads `session_id`, `is_error`, and `result` off a `result` event and
+//! Until then every `usage` object the CLI emitted was discarded: the stream
+//! reader read `session_id`, `is_error`, and `result` off a `result` event and
 //! nothing else (and the normalized `AgentEvent` vocabulary has no member
 //! that could carry a token count anyway). The app therefore could not
 //! measure its own spend, which is why nothing ambient could be turned on.
@@ -65,6 +65,10 @@ const FACTS_CONSUMED: [&str; 4] = [
     "server_tool_use",
 ];
 
+/// The result stop reasons that say a hook deferred the run's last call
+/// (M57.1, CLI 2.1.250): the call was held, or its tool was gone on resume.
+pub const DEFERRED_STOPS: [&str; 2] = ["tool_deferred", "tool_deferred_unavailable"];
+
 /// Keys seen and deliberately not stored. Emptied by M31.5 — everything we
 /// used to shrug at is now consumed by RunFacts. The const and this doc
 /// stay so the logger's contract (report what is in NEITHER list) remains
@@ -80,10 +84,14 @@ const KNOWN_UNCOUNTED: [&str; 0] = [];
 /// field to absent — and absent is never zero.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RunFacts {
-    /// From the last `assistant` turn: the model that actually answered.
+    /// From the last `assistant` turn that names a model. A `<synthetic>`
+    /// line, the CLI's own reply after an API error, never counts (M56.5): no
+    /// model wrote it.
     pub model_id: Option<String>,
-    /// From the last `assistant` turn — the final turn's stop reason is the
-    /// run's.
+    /// From the last `assistant` turn, unless the result names a deferral
+    /// (M57.1): `tool_deferred` or `tool_deferred_unavailable` on the result
+    /// is the run's stop reason, since its last turn only asked for the call
+    /// a hook then held.
     pub stop_reason: Option<String>,
     pub service_tier: Option<String>,
     /// `total_cost_usd` × 1e6, rounded. Only a finite, non-negative number
@@ -120,7 +128,11 @@ impl RunFacts {
         let usage = usage_object(event).and_then(Value::as_object);
         Some(RunFacts {
             model_id: None,
-            stop_reason: None,
+            stop_reason: event
+                .get("stop_reason")
+                .and_then(Value::as_str)
+                .filter(|stop| DEFERRED_STOPS.contains(stop))
+                .map(str::to_string),
             service_tier: usage
                 .and_then(|u| u.get("service_tier"))
                 .and_then(Value::as_str)
@@ -171,9 +183,11 @@ impl RunFacts {
         }
         let message = event.get("message")?;
         Some(RunFacts {
+            // A value in angle brackets is a placeholder, not a model.
             model_id: message
                 .get("model")
                 .and_then(Value::as_str)
+                .filter(|m| !m.trim().is_empty() && !m.starts_with('<'))
                 .map(str::to_string),
             stop_reason: message
                 .get("stop_reason")
@@ -185,7 +199,8 @@ impl RunFacts {
 
     /// Fold a later reading over this one, field-wise: a present field wins,
     /// an absent one never erases what an earlier event said. Fed every
-    /// turn, this is what makes the FINAL turn's `stop_reason` the run's.
+    /// turn, this is what makes the FINAL turn's `stop_reason` the run's,
+    /// and a deferred result's stop reason win over it.
     pub fn merge(&mut self, newer: RunFacts) {
         self.model_id = newer.model_id.or_else(|| self.model_id.take());
         self.stop_reason = newer.stop_reason.or_else(|| self.stop_reason.take());
@@ -282,32 +297,69 @@ pub fn is_failure(event: &Value) -> bool {
     )
 }
 
-/// Does this terminal event describe a quota or rate-limit refusal?
-///
-/// The CLI has no typed code for it, so this reads the message — and the
-/// consequence of a false negative is a run recorded as an ordinary failure
-/// rather than one that sets a window backoff, which is the safe direction.
-/// A false POSITIVE would pause ambient work for hours over a typo, so the
-/// match is narrow and anchored on the two phrases the CLI actually uses.
-pub fn is_quota_failure(event: &Value) -> bool {
-    let text = event
-        .get("result")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_lowercase();
-    text.contains("rate limit") || text.contains("usage limit") || text.contains("quota")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
 
-    /// Recorded, sanitized CLI output. Never live CLI output in CI: the wire
-    /// format is somebody else's and would make the suite fail on their
-    /// release schedule.
+    #[test]
+    fn a_deferred_result_names_its_stop_reason() {
+        let lines: Vec<Value> = serde_json::from_str(include_str!(
+            "../../fixtures/cli-stream/transcript-deferred.stream.json"
+        ))
+        .unwrap();
+        let mut facts = RunFacts::default();
+        for line in &lines {
+            if let Some(turn) = RunFacts::from_assistant(line) {
+                facts.merge(turn);
+            }
+            if let Some(terminal) = RunFacts::parse(line) {
+                facts.merge(terminal);
+            }
+        }
+        assert_eq!(facts.stop_reason.as_deref(), Some("tool_deferred"));
+        let gone = json!({ "type": "result", "subtype": "success", "is_error": true,
+            "stop_reason": "tool_deferred_unavailable" });
+        assert_eq!(
+            RunFacts::parse(&gone).unwrap().stop_reason.as_deref(),
+            Some("tool_deferred_unavailable")
+        );
+        // Any other result stop reason leaves the last turn's in place.
+        let mut facts = RunFacts::from_assistant(&json!({ "type": "assistant",
+            "message": { "stop_reason": "end_turn" } }))
+        .unwrap();
+        facts.merge(
+            RunFacts::parse(&json!({ "type": "result", "stop_reason": "end_turn" })).unwrap(),
+        );
+        facts.merge(RunFacts::parse(&json!({ "type": "result" })).unwrap());
+        assert_eq!(facts.stop_reason.as_deref(), Some("end_turn"));
+    }
+
+    #[test]
+    fn a_synthetic_error_line_never_names_the_runs_model() {
+        let answered = json!({ "type": "assistant", "message": {
+            "model": "claude-sonnet-5", "stop_reason": "end_turn" } });
+        let synthetic = json!({ "type": "assistant", "message": {
+            "model": "<synthetic>", "stop_reason": "stop_sequence" } });
+        let mut facts = RunFacts::from_assistant(&answered).unwrap();
+        let after = RunFacts::from_assistant(&synthetic).unwrap();
+        assert_eq!(after.model_id, None);
+        facts.merge(after);
+        assert_eq!(facts.model_id.as_deref(), Some("claude-sonnet-5"));
+        // A run whose only line was the error names no model at all.
+        assert_eq!(RunFacts::from_assistant(&synthetic).unwrap().model_id, None);
+    }
+
+    /// CLI output shaped by hand from real runs and reduced to the fields
+    /// these tests read (the top of cli-stream/), except where a fixture says
+    /// it was recorded. Never live CLI output in CI: the wire format is
+    /// somebody else's and would make the suite fail on their release
+    /// schedule.
     const RESULT_SUCCESS: &str = include_str!("../../fixtures/cli-stream/result-success.json");
-    const RESULT_QUOTA: &str = include_str!("../../fixtures/cli-stream/result-quota.json");
+    /// Hand-built in 2.1.250's shape until a recording exists (M56.4): a
+    /// weekly limit refused the first request.
+    const USAGE_LIMIT_STREAM: &str =
+        include_str!("../../fixtures/cli-stream/usage-limit-stream.json");
     const ASSISTANT_TURN: &str = include_str!("../../fixtures/cli-stream/assistant-turn.json");
     const RESULT_FUTURE: &str = include_str!("../../fixtures/cli-stream/result-future-fields.json");
     const RESULT_CACHE_TTL: &str = include_str!("../../fixtures/cli-stream/result-cache-ttl.json");
@@ -336,7 +388,6 @@ mod tests {
         );
         assert_eq!(usage.total(), 4 + 271 + 14_678 + 1_205);
         assert!(!is_failure(&event));
-        assert!(!is_quota_failure(&event));
         assert!(
             unknown_fields(&event).is_empty(),
             "{:?}",
@@ -345,15 +396,24 @@ mod tests {
     }
 
     #[test]
-    fn a_quota_death_still_reports_exact_usage() {
-        // The whole point of the honest-failure path: a run that died on
-        // quota SPENT tokens, and recording it as zero would let the next
-        // dispatch spend them again.
-        let event = fixture(RESULT_QUOTA);
+    fn a_quota_death_still_reports_its_usage() {
+        // The honest-failure path: a run that died on quota reports what it
+        // spent, so the books never read it as unknown. A first request the
+        // limit refused spent nothing, and the result says so: reported, not
+        // above zero. Whether it was quota is the fold's call (M56.4).
+        let stream: Value = fixture(USAGE_LIMIT_STREAM);
+        let event = stream["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|line| is_result(line))
+            .expect("the stream ends in its result")
+            .clone();
         assert!(is_failure(&event));
-        assert!(is_quota_failure(&event));
-        let usage = parse(&event).expect("a quota failure still carries usage");
-        assert!(usage.total() > 0, "a failed run is not a free run");
+        assert!(
+            parse(&event).is_some(),
+            "a quota failure still carries usage"
+        );
     }
 
     #[test]

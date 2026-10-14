@@ -489,3 +489,63 @@
   > .bn-block-outer::before {
   content: none;
 }
+
+/*
+ * Comment highlights (M70.1). Decorations, not marks: commentHighlights.ts
+ * draws them over the text and they never reach the document or the file.
+ * Tokens only, so the dark palette repaints them with the rest.
+ */
+.cerebro-editor .cb-comment {
+  background: var(--warn-50);
+  text-decoration: underline;
+  text-decoration-color: var(--warn-300);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.cerebro-editor .cb-comment-active {
+  background: var(--warn-300);
+  text-decoration-color: var(--warn-500);
+}
+
+/* The text a comment is being written on, before it has a thread. */
+.cerebro-editor .cb-comment-pending {
+  background: var(--surface-selected);
+  text-decoration: underline dashed;
+  text-decoration-color: var(--cortex-300);
+  text-underline-offset: 3px;
+}
+
+/*
+ * A section link's landing (M55.8): SectionFlash draws this box over the
+ * heading from document.body, so it is not scoped under .cerebro-editor, and
+ * it is never written onto the editor's own DOM (ProseMirror wipes what it
+ * did not write). Below the editor's popovers (z-40), above its blocks.
+ */
+.cb-section-flash {
+  position: fixed;
+  z-index: 30;
+  border-radius: 6px;
+  background: var(--surface-selected);
+  pointer-events: none;
+  animation: cb-section-flash 2s ease-out forwards;
+}
+
+@keyframes cb-section-flash {
+  from {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* No fade for a reader who asked for less motion: the box holds still until
+   SectionFlash removes it. */
+@media (prefers-reduced-motion: reduce) {
+  .cb-section-flash {
+    animation: none;
+    opacity: 0.55;
+  }
+}
