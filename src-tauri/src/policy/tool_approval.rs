@@ -2080,7 +2080,10 @@ mod tests {
         assert!(cut.ends_with('\u{2026}'));
         assert!(subject_is_cut(&cut));
         let whole = "é".repeat(SUBJECT_CHARS);
-        assert!(!subject_is_cut(&subject_of("Bash", &json!({ "command": whole }))));
+        assert!(!subject_is_cut(&subject_of(
+            "Bash",
+            &json!({ "command": whole })
+        )));
     }
 
     #[test]

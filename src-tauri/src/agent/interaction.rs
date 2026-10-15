@@ -2489,12 +2489,11 @@ mod tests {
         // A command past SUBJECT_CHARS shows only its prefix: a grant on that
         // text would cover any command sharing it, so only Allow once goes.
         let book = Interactions::with_asks(Vec::new());
-        let long = format!(
-            "{}; echo benign",
-            "x".repeat(tool_approval::SUBJECT_CHARS)
-        );
+        let long = format!("{}; echo benign", "x".repeat(tool_approval::SUBJECT_CHARS));
         let card = asked(&book, "run-1", "s-1", "t1", &long);
-        assert!(tool_approval::subject_is_cut(card.subject.as_deref().unwrap()));
+        assert!(tool_approval::subject_is_cut(
+            card.subject.as_deref().unwrap()
+        ));
         let refused = book
             .begin_answer(Path::new("/v"), &card.id, conversation())
             .unwrap_err();
