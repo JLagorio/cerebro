@@ -14,6 +14,14 @@ describe('inferKind', () => {
     expect(inferKind('due', ['2026-01-02', '2026-03-04T10:00:00Z'])).toBe('date');
   });
 
+  // M60.3: date text by the shared grammar, not a `YYYY-MM-DD` prefix.
+  it('does not read prose that starts with a day as a date', () => {
+    expect(
+      inferKind('kickoff', ['2026-01-02 kickoff', '2026-03-04 retro', '2026-05-06 demo']),
+    ).toBe('text');
+    expect(inferKind('due', ['2026-02-30', '2026-02-31'])).not.toBe('date');
+  });
+
   it('reads a small repeated vocabulary as select', () => {
     expect(inferKind('severity', ['high', 'low', 'high', 'medium'])).toBe('select');
   });

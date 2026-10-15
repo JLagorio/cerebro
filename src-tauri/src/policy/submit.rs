@@ -522,7 +522,7 @@ mod tests {
     fn the_surface_is_off_until_it_is_switched_on() {
         // REGISTRATION IS NOT ACTIVATION. The switch defaults off, so a
         // fresh install serves only the base catalog, and M26.9 has something
-        // real to flip. Twenty-two: M26.4h added `report_window_outcome` and
+        // real to flip. Twenty-three: M26.4h added `report_window_outcome` and
         // M26.5e added `submit_answer` — neither is a proposal tool nor gated
         // by the switch, because a run must be able to say a window concluded
         // nothing, or to answer the question it was given, whether or not it
@@ -540,9 +540,10 @@ mod tests {
         // `append_to_note`. M70.3 added `comment_on_note`, `reply_to_comment`
         // and `resolve_comment`, which post beside a page and write none.
         // M59.5 added `list_notes`, a plain read like `knowledge_about`.
+        // M60.4 added `set_fields`, a note writer like `update_frontmatter`.
         let base = served(false);
         let table = PolicyTable::load().unwrap();
-        assert_eq!(base.len(), 22, "{base:?}");
+        assert_eq!(base.len(), 23, "{base:?}");
         assert!(base.contains("report_window_outcome"));
         assert!(base.contains(crate::assembly::prompt::SUBMIT_TOOL));
         assert!(base.is_disjoint(&expected(&table)));

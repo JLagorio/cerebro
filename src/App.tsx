@@ -28,6 +28,8 @@ import { useQuitHost, useQuitting } from '@/app/quit';
 import { WindowTitle } from '@/app/WindowTitle';
 import { QuitScreen } from '@/app/QuitScreen';
 import { ToastHost } from '@/app/ToastHost';
+import { useAppCommands } from '@/app/useAppCommands';
+import { useUndoShortcuts } from '@/app/useUndoShortcuts';
 import { DetailPanel } from '@/detail/DetailPanel';
 import { LayoutEditorDialog } from '@/detail/LayoutEditorDialog';
 import { AgentsPage } from '@/pages/AgentsPage';
@@ -50,9 +52,9 @@ import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { useMeasuredWidth } from '@/hooks/useMeasuredWidth';
 import { RemindersHost } from '@/hooks/useReminders';
-import { DARK_QUERY, resolveTheme, useTheme } from '@/hooks/useTheme';
-import { captureNote } from '@/lib/capture';
+import { useTheme } from '@/hooks/useTheme';
 import { getLastVault, openDemoVault, pickVault } from '@/lib/ipc';
+import { useKeyRoot, useKeyScope } from '@/lib/keys/useKeys';
 import { useNavStore } from '@/stores/navStore';
 import { CANVAS_MIN_WIDTH, RIGHT_PANEL_MIN_WIDTH, useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -214,6 +216,16 @@ function App() {
   // M55.10: ⌘Q, the close button and ⌘W save first. Above every early
   // return too, so the vault chooser answers a quit as well.
   useQuitHost();
+  // M65.1: the one capture-phase key listener, and the General commands it
+  // dispatches. Above every early return, so ⌘⇧L answers at the chooser too.
+  useKeyRoot();
+  useAppCommands();
+  // M60.7: ⌘Z and ⇧⌘Z undo and redo the person's own changes, outside text
+  // editors and layers; a diagram's own binding shadows them.
+  useUndoShortcuts();
+  // The canvas is the page key scope (M65.1): the scope a key falls back to
+  // when focus and the last click are nowhere scoped.
+  const pageScope = useKeyScope('page', { page: true });
   const quitting = useQuitting();
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const openVault = useVaultStore((s) => s.openVault);
@@ -298,74 +310,6 @@ function App() {
     shellWidth,
     mainColumnFloorPx(parked ? parkedFloor : drawnFloor),
   );
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        useUiStore.getState().setQuickOpen(true);
-      }
-      // Cmd+J toggles the assistant (M6) — the panel is a companion to
-      // whatever surface you are on, not a surface of its own.
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
-        e.preventDefault();
-        const ui = useUiStore.getState();
-        ui.setAiPanelOpen(!ui.aiPanelOpen);
-      }
-      // Quick capture (M4): writes an untyped note and opens the Inbox ON IT.
-      // M15: the resolved path is now SELECTED — throwing it away landed you
-      // on whichever capture the persisted `inboxSelectedPath` still pointed
-      // at, so the first thing you typed went into someone else's note.
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'n') {
-        e.preventDefault();
-        void captureNote()
-          .then((path) => {
-            useUiStore.getState().setInboxSelectedPath(path);
-            useNavStore.getState().navigate({ kind: 'inbox' });
-          })
-          .catch((err: unknown) => {
-            useUiStore
-              .getState()
-              .toast(`Couldn't capture: ${err instanceof Error ? err.message : String(err)}`);
-          });
-      }
-      // Cmd+Shift+L flips the theme — the binding Notion uses for the same job,
-      // and M16's whole point is that Notion is the thing muscle memory arrives
-      // from. Not routed through QuickOpen: QuickOpen.tsx keeps its navigate
-      // mode deliberately, and one shortcut is cheaper than a command mode.
-      //
-      // Toggles against what is ON SCREEN, not against the stored mode. From
-      // 'system' the user means "the opposite of what I am looking at", and
-      // resolving first is the only way to know what that is — a naive
-      // mode === 'dark' ? 'light' : 'dark' sends a system-dark user to dark.
-      // Landing on an explicit mode is the intent: asking for the other one is
-      // asking to stop following the OS.
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'l') {
-        e.preventDefault();
-        const ui = useUiStore.getState();
-        const systemDark =
-          typeof window.matchMedia === 'function' && window.matchMedia(DARK_QUERY).matches;
-        ui.setThemeMode(resolveTheme(ui.themeMode, systemDark) === 'dark' ? 'light' : 'dark');
-      }
-      // M15: nav history existed in the store with no way to reach it. Not
-      // bound while typing — ⌘[ / ⌘] are outdent/indent inside an editor, and
-      // losing the page you are writing on is worse than having no shortcut.
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && (e.key === '[' || e.key === ']')) {
-        const target = e.target;
-        const editing =
-          target instanceof HTMLElement &&
-          (target.isContentEditable ||
-            target instanceof HTMLInputElement ||
-            target instanceof HTMLTextAreaElement);
-        if (editing) return;
-        e.preventDefault();
-        if (e.key === '[') useNavStore.getState().back();
-        else useNavStore.getState().forward();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -461,8 +405,11 @@ function App() {
             // The floor itself. NOT `min-w-0` — that is exactly what made
             // content absorb 100% of any shortfall.
             style={{ minWidth: CANVAS_MIN_WIDTH }}
+            {...pageScope.props}
           >
-            <CanvasOutlet />
+            <pageScope.Provider>
+              <CanvasOutlet />
+            </pageScope.Provider>
           </main>
           {/* Capped against the CANVAS ROW rather than the viewport — a vw cap
               resolves against a box the panel does not live in, so it never

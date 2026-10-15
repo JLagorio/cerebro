@@ -1,5 +1,12 @@
 import { slugify } from '@/lib/slug';
-import { askFirstOf, parseMemory, parseReadScope, parseScope, type AgentMemory } from './agents';
+import {
+  askFirstOf,
+  hostGrants,
+  parseMemory,
+  parseReadScope,
+  parseScope,
+  type AgentMemory,
+} from './agents';
 import { parseAllowedTools, parseArguments, type SkillArgument } from './skills';
 import { parseTriggers, type Trigger } from './triggers';
 import type { Entry } from './types';
@@ -95,9 +102,12 @@ export interface AgentDraft {
    * enabled and approved one in a turn you address it in (M54.9); [] =
    * none. */
   connectors: string[] | null;
-  /** `tools: shell` — the host tools, still capped by the Settings ceiling
-   * and withdrawn in Rust by a read limit (M53.5). */
+  /** `tools:` declares `shell` — the host tools, still capped by the Settings
+   * ceiling and withdrawn in Rust by a read limit (M53.5). */
   shell: boolean;
+  /** `tools:` declares `web` (M57.7) — Claude Code's WebFetch and WebSearch,
+   * still capped by Web access in Settings. */
+  web: boolean;
   /** `ask-first:` (M57.4): true asks before every page write, false writes
    * without asking, and null is a value the file holds that is neither,
    * which runs read as on until the person chooses. */
@@ -125,7 +135,7 @@ export function agentDraft(entry: Entry, body: string): AgentDraft {
     allowedTools: parseAllowedTools(entry.properties['allowed-tools']),
     disallowedTools: parseAllowedTools(entry.properties['disallowed-tools']),
     connectors: parseAllowedTools(entry.properties.connectors),
-    shell: entry.properties.tools === 'shell',
+    ...hostGrants(entry.properties.tools),
     askFirst: askFirstOf(entry).warning === null ? askFirstOf(entry).on : null,
     model: text(entry.properties.model),
     effort: text(entry.properties.effort),
@@ -142,7 +152,10 @@ export function agentDraft(entry: Entry, body: string): AgentDraft {
  * one or two of these and writes only those on Done: a grant written whole is
  * a grant some other row's half-built draft could overwrite.
  *
- * `askFirst` is `ask-first:` (M57.4), written `true` or removed. Never keys:
+ * `askFirst` is `ask-first:` (M57.4), written `true` or removed. `shell` and
+ * `web` (M57.7) are two rows that share one key, `tools:`: each writes the
+ * whole of it from its own draft, which holds the other's value as the file
+ * has it. Never keys:
  * `recent` (the agent's own notes), `disallowedTools` (shown, edited in the
  * file — M54.9) and the body, which the page editor saves.
  */
@@ -154,6 +167,7 @@ export type AgentKey =
   | 'allowedTools'
   | 'connectors'
   | 'shell'
+  | 'web'
   | 'askFirst'
   | 'model'
   | 'effort'
@@ -169,6 +183,7 @@ export const AGENT_KEYS: readonly AgentKey[] = [
   'allowedTools',
   'connectors',
   'shell',
+  'web',
   'askFirst',
   'model',
   'effort',
@@ -205,10 +220,8 @@ export function agentPatch(draft: AgentDraft, keys: readonly AgentKey[]): Record
         out.connectors = draft.connectors;
         break;
       case 'shell':
-        // `tools: safe` is written rather than removed: the default is safe
-        // either way, but a record that says so out loud is one you can read
-        // the policy off without knowing what the default is.
-        out.tools = draft.shell ? 'shell' : 'safe';
+      case 'web':
+        out.tools = toolsValue(draft);
         break;
       case 'askFirst':
         // On is written out loud; off removes the key, the default. A draft
@@ -234,6 +247,19 @@ export function agentPatch(draft: AgentDraft, keys: readonly AgentKey[]): Record
     }
   }
   return out;
+}
+
+/**
+ * `tools:` as the agent page writes it (M57.7): one word for one grant, a
+ * list for both, and `safe` for neither. Safe is written rather than removed:
+ * the default is safe either way, but a record that says so out loud is one
+ * you can read the policy off without knowing what the default is.
+ */
+function toolsValue(draft: AgentDraft): string | string[] {
+  if (draft.shell && draft.web) return ['shell', 'web'];
+  if (draft.shell) return 'shell';
+  if (draft.web) return 'web';
+  return 'safe';
 }
 
 function triggerToYaml(trigger: Trigger): Record<string, unknown> {

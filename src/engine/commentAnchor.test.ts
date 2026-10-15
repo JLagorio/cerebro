@@ -167,10 +167,71 @@ describe('resolveAnchor', () => {
     });
   });
 
-  it('is ambiguous when three equal copies lose the stored one and two tie', () => {
+  it('is gone when the stored copy of three is deleted and the rest share too little', () => {
     const anchor = anchorOn(spansOf('a sign b', 'c sign d', 'e sign f'), 'sign', 3);
     expect(anchor.occurrence).toBe(3);
     expect(resolveAnchor(spansOf('a sign b', 'c sign d'), anchor)).toEqual({
+      kind: 'detached',
+      reason: 'gone',
+      count: 0,
+    });
+    const middle = anchorOn(spansOf('a sign b', 'c sign d', 'e sign f'), 'sign', 2);
+    expect(resolveAnchor(spansOf('a sign b', 'e sign f'), middle)).toMatchObject({
+      kind: 'detached',
+      reason: 'gone',
+    });
+  });
+
+  it('is gone when its sentence is deleted and another copy of the quote is left', () => {
+    const anchor = anchorOn(
+      spansOf('Ana reviews the plan on Monday.', 'Nobody liked the plan at all.'),
+      'the plan',
+    );
+    expect(resolveAnchor(spansOf('Nobody liked the plan at all.'), anchor)).toEqual({
+      kind: 'detached',
+      reason: 'gone',
+      count: 0,
+    });
+  });
+
+  it('is gone when its line is deleted and an earlier line holds the same word', () => {
+    const anchor = anchorOn(spansOf('Owner: TBD.', 'Deadline: TBD.'), 'TBD', 2);
+    expect(resolveAnchor(spansOf('Owner: TBD.'), anchor)).toEqual({
+      kind: 'detached',
+      reason: 'gone',
+      count: 0,
+    });
+  });
+
+  it('a limit: a copy that inherits the deleted quote context after attaches', () => {
+    // The block after the deleted line now follows Owner's TBD, so that copy
+    // shares the whole context after: 22 of 42 code points, over half.
+    const anchor = anchorOn(
+      spansOf('Owner: TBD.', 'Deadline: TBD.', 'Notes follow here.'),
+      'TBD',
+      2,
+    );
+    const now = spansOf('Owner: TBD.', 'Notes follow here.');
+    expect(resolveAnchor(now, anchor)).toEqual({
+      kind: 'attached',
+      start: now.text.indexOf('TBD'),
+      end: now.text.indexOf('TBD') + 3,
+      moved: true,
+    });
+  });
+
+  it('attaches a lone copy whose context changed on one side only', () => {
+    const anchor = anchorOn(spansOf('We ship on Thursdays, after the freeze.'), 'after the freeze');
+    const now = spansOf('We ship on Thursdays, after the freeze ends.');
+    expect(resolveAnchor(now, anchor)).toMatchObject({ kind: 'attached', moved: false });
+  });
+
+  // Two copies agreeing equally, each on one side: 6 of 10 code points.
+  const halves: CommentAnchor = { quote: 'sign', occurrence: 3, before: 'aaaa ', after: ' bbbb' };
+  const split = spansOf('aaaa sign z', 'z sign bbbb');
+
+  it('is ambiguous when two copies tie on enough context and neither is stored', () => {
+    expect(resolveAnchor(split, halves)).toEqual({
       kind: 'detached',
       reason: 'ambiguous',
       count: 2,
@@ -178,10 +239,10 @@ describe('resolveAnchor', () => {
   });
 
   it('keeps the stored occurrence when it is among the tied best', () => {
-    const anchor = anchorOn(spansOf('a sign b', 'c sign d', 'e sign f'), 'sign', 2);
-    expect(resolveAnchor(spansOf('a sign b', 'e sign f'), anchor)).toMatchObject({
+    expect(resolveAnchor(split, { ...halves, occurrence: 2 })).toEqual({
       kind: 'attached',
-      start: 'a sign b\ne '.length,
+      start: split.text.lastIndexOf('sign'),
+      end: split.text.lastIndexOf('sign') + 4,
       moved: false,
     });
   });
@@ -211,10 +272,8 @@ describe('resolveAnchor', () => {
   });
 
   it('breaks ties the same way on every run', () => {
-    const anchor = anchorOn(spansOf('a sign b', 'c sign d', 'e sign f'), 'sign', 2);
-    const now = spansOf('a sign b', 'e sign f', 'g sign h');
-    const first = resolveAnchor(now, anchor);
-    for (let i = 0; i < 20; i++) expect(resolveAnchor(now, anchor)).toEqual(first);
+    const first = resolveAnchor(split, halves);
+    for (let i = 0; i < 20; i++) expect(resolveAnchor(split, halves)).toEqual(first);
   });
 
   it('is gone for an empty quote', () => {

@@ -1,17 +1,28 @@
 /**
  * Properties engine (M2.x): the write-side of the YAML schema. Type notes
- * declare fields (`fields:` frontmatter on `type: Type` docs); this module
- * is the single source for
+ * declare fields (`fields:` frontmatter on `type: Type` docs).
  *
- *   - the property-kind catalog the UI offers (Notion's set),
- *   - shape validation enforced before any frontmatter write,
- *   - computed kinds (created/last-edited time, rollups).
+ * The facts about each kind and the shapes a value may take are data since
+ * M60.3: shared/schema/field-kinds.v1.json (read through fieldKindTable.ts),
+ * which Rust's vault/schema.rs reads too, and dates by
+ * shared/calendar/dates.v1.json. This module keeps the UI half (each kind's
+ * label, icon and seed, in "+ Add property" catalog order), interprets the
+ * table in `validateValue`, and computes the computed kinds (created and
+ * last-edited time, rollups).
  *
  * Enforcement philosophy: SHAPE is strict (a number field never stores
  * "abc"), option membership stays advisory — unknown select values render
  * as ghosts rather than being rejected (locked M1 decision).
  */
 
+import { DATE_GRAMMAR, dateRangeFault, isDateText, parseDateText } from './dateGrammar';
+import {
+  kindFacts,
+  ROLLUP_RESULTS,
+  URL_PREFIXES,
+  type Atom,
+  type MessageKey,
+} from './fieldKindTable';
 import { isPageChromeKey } from './pageChrome';
 import { childrenOf, rollupSpec, type RelationIndex } from './relations';
 import { resolveTarget } from './wikilink';
@@ -57,20 +68,35 @@ export interface RollupCalcMeta {
   /** Only meaningful over numeric properties. */
   numeric: boolean;
   /** The result is a number a view compares and sums as one (M60.1); the
-   * others yield text (a date string, or a list of values). */
+   * others yield text (a date string, or a list of values). The table's
+   * `rollup_calcs[].result` says which. */
   yieldsNumber: boolean;
 }
 
-/** Every aggregation the engine can compute, with what it needs configured. */
+const rollupCalc = (
+  calc: RollupCalc,
+  label: string,
+  needsProperty: boolean,
+  numeric: boolean,
+): RollupCalcMeta => ({
+  calc,
+  label,
+  needsProperty,
+  numeric,
+  yieldsNumber: ROLLUP_RESULTS.get(calc) === 'number',
+});
+
+/** Every aggregation the engine can compute, with what it needs configured,
+ * in the table's menu order. */
 export const ROLLUP_CALCS: RollupCalcMeta[] = [
-  { calc: 'count', label: 'Count', needsProperty: false, numeric: false, yieldsNumber: true },
-  { calc: 'sum', label: 'Sum', needsProperty: true, numeric: true, yieldsNumber: true },
-  { calc: 'avg', label: 'Average', needsProperty: true, numeric: true, yieldsNumber: true },
-  { calc: 'min', label: 'Min', needsProperty: true, numeric: true, yieldsNumber: true },
-  { calc: 'max', label: 'Max', needsProperty: true, numeric: true, yieldsNumber: true },
-  { calc: 'earliest', label: 'Earliest', needsProperty: true, numeric: false, yieldsNumber: false },
-  { calc: 'latest', label: 'Latest', needsProperty: true, numeric: false, yieldsNumber: false },
-  { calc: 'show', label: 'Show values', needsProperty: true, numeric: false, yieldsNumber: false },
+  rollupCalc('count', 'Count', false, false),
+  rollupCalc('sum', 'Sum', true, true),
+  rollupCalc('avg', 'Average', true, true),
+  rollupCalc('min', 'Min', true, true),
+  rollupCalc('max', 'Max', true, true),
+  rollupCalc('earliest', 'Earliest', true, false),
+  rollupCalc('latest', 'Latest', true, false),
+  rollupCalc('show', 'Show values', true, false),
 ];
 
 export const rollupCalcMeta = (calc: RollupCalc | undefined): RollupCalcMeta =>
@@ -134,6 +160,8 @@ export function progressRatio(display: string): number | null {
   return Math.max(0, Math.min(100, n));
 }
 
+/** One kind as the UI reads it: its facts (field-kinds.v1.json's `kinds`,
+ * through `kindFacts`) merged with its label, icon and seed (`KIND_UI`). */
 export interface PropertyKindMeta {
   kind: FieldKind;
   label: string;
@@ -182,216 +210,64 @@ export interface PropertyKindMeta {
   statusSet?: boolean;
 }
 
+/** A kind's UI half: what the catalog and every property row draw. */
+interface KindUi {
+  label: string;
+  icon: string;
+  /** Initial frontmatter value seeded when the property is added untyped. */
+  seed: unknown;
+}
+
 /**
- * Every kind's metadata, in "+ Add property" catalog order (M16.4).
+ * Every kind's label, icon and seed, in "+ Add property" catalog order
+ * (M16.4). The facts (computed, groupable, numeric, the filter family, …)
+ * are field-kinds.v1.json's, merged in below; only what a screen draws lives
+ * here, because Rust never draws anything.
  *
- * `satisfies Record<FieldKind, ...>` is the enforcement: this was a bare
- * array, so a kind added to the union but forgotten here fell through
+ * `satisfies Record<FieldKind, …>` keeps every kind drawn: this was a bare
+ * array once, and a kind added to the union but forgotten here fell through
  * `kindMeta`'s `?? PROPERTY_KINDS[0]` and silently rendered as Text — with a
  * Text icon, in every surface, forever. Declaration order is catalog order,
  * because object key order is insertion order for string keys.
  */
-const KIND_META = {
-  text: {
-    label: 'Text',
-    icon: 'type',
-    computed: false,
-    seed: '',
-    groupable: false,
-    orderable: true,
-    media: false,
-    numeric: false,
-    filters: 'text',
-  },
-  number: {
-    label: 'Number',
-    icon: 'hash',
-    computed: false,
-    seed: '',
-    groupable: false,
-    orderable: true,
-    media: false,
-    numeric: true,
-    filters: 'number',
-  },
-  select: {
-    label: 'Select',
-    icon: 'circle-chevron-down',
-    computed: false,
-    seed: '',
-    groupable: true,
-    orderable: true,
-    media: false,
-    numeric: false,
-    filters: 'choice',
-  },
-  multiselect: {
-    label: 'Multi-select',
-    icon: 'list-checks',
-    computed: false,
-    seed: '',
-    multi: true,
-    groupable: true,
-    orderable: false,
-    media: false,
-    numeric: false,
-    filters: 'multi',
-  },
-  status: {
-    label: 'Status',
-    icon: 'loader',
-    computed: false,
-    seed: '',
-    groupable: true,
-    orderable: true,
-    media: false,
-    numeric: false,
-    filters: 'choice',
-    statusSet: true,
-  },
-  date: {
-    label: 'Date',
-    icon: 'calendar',
-    computed: false,
-    seed: '',
-    groupable: false,
-    orderable: true,
-    media: false,
-    numeric: false,
-    filters: 'date',
-  },
-  daterange: {
-    label: 'Date range',
-    icon: 'calendar-range',
-    computed: false,
-    seed: '',
-    legacy: true,
-    groupable: false,
-    orderable: true,
-    media: false,
-    numeric: false,
-    filters: 'date',
-  },
-  person: {
-    label: 'Person',
-    icon: 'circle-user',
-    computed: false,
-    seed: '',
-    multi: true,
-    groupable: true,
-    orderable: false,
-    media: false,
-    numeric: false,
-    filters: 'multi',
-  },
-  files: {
-    label: 'Files & media',
-    icon: 'paperclip',
-    computed: false,
-    seed: '',
-    multi: true,
-    groupable: false,
-    orderable: false,
-    media: true,
-    numeric: false,
-    filters: 'multi',
-  },
-  checkbox: {
-    label: 'Checkbox',
-    icon: 'square-check',
-    computed: false,
-    seed: false,
-    groupable: true,
-    orderable: true,
-    media: false,
-    numeric: false,
-    filters: 'boolean',
-  },
-  url: {
-    label: 'URL',
-    icon: 'link',
-    computed: false,
-    seed: '',
-    groupable: false,
-    orderable: true,
-    media: false,
-    numeric: false,
-    filters: 'text',
-  },
-  email: {
-    label: 'Email',
-    icon: 'mail',
-    computed: false,
-    seed: '',
-    groupable: false,
-    orderable: true,
-    media: false,
-    numeric: false,
-    filters: 'text',
-  },
-  phone: {
-    label: 'Phone',
-    icon: 'phone',
-    computed: false,
-    seed: '',
-    groupable: false,
-    orderable: true,
-    media: false,
-    numeric: false,
-    filters: 'text',
-  },
-  relation: {
-    label: 'Relation',
-    icon: 'arrow-up-right',
-    computed: false,
-    seed: '',
-    multi: true,
-    groupable: true,
-    orderable: false,
-    media: false,
-    numeric: false,
-    filters: 'multi',
-  },
-  rollup: {
-    label: 'Rollup',
-    icon: 'sigma',
-    computed: true,
-    seed: null,
-    groupable: false,
-    orderable: true,
-    // Most rollup calculations produce a number (`yieldsNumber` on the calc
-    // catalog says which), and one that does not, asked for a Sum, answers
-    // with nothing — which is the truth about a column holding no numbers.
-    media: false,
-    numeric: true,
-    filters: 'any',
-  },
-  created_time: {
-    label: 'Created time',
-    icon: 'clock',
-    computed: true,
-    seed: null,
-    groupable: false,
-    orderable: true,
-    media: false,
-    numeric: false,
-    filters: 'date',
-  },
-  last_edited_time: {
-    label: 'Last edited time',
-    icon: 'history',
-    computed: true,
-    seed: null,
-    groupable: false,
-    orderable: true,
-    media: false,
-    numeric: false,
-    filters: 'date',
-  },
-} satisfies Record<FieldKind, Omit<PropertyKindMeta, 'kind'>>;
+const KIND_UI = {
+  text: { label: 'Text', icon: 'type', seed: '' },
+  number: { label: 'Number', icon: 'hash', seed: '' },
+  select: { label: 'Select', icon: 'circle-chevron-down', seed: '' },
+  multiselect: { label: 'Multi-select', icon: 'list-checks', seed: '' },
+  status: { label: 'Status', icon: 'loader', seed: '' },
+  date: { label: 'Date', icon: 'calendar', seed: '' },
+  daterange: { label: 'Date range', icon: 'calendar-range', seed: '' },
+  person: { label: 'Person', icon: 'circle-user', seed: '' },
+  files: { label: 'Files & media', icon: 'paperclip', seed: '' },
+  checkbox: { label: 'Checkbox', icon: 'square-check', seed: false },
+  url: { label: 'URL', icon: 'link', seed: '' },
+  email: { label: 'Email', icon: 'mail', seed: '' },
+  phone: { label: 'Phone', icon: 'phone', seed: '' },
+  relation: { label: 'Relation', icon: 'arrow-up-right', seed: '' },
+  rollup: { label: 'Rollup', icon: 'sigma', seed: null },
+  created_time: { label: 'Created time', icon: 'clock', seed: null },
+  last_edited_time: { label: 'Last edited time', icon: 'history', seed: null },
+} satisfies Record<FieldKind, KindUi>;
 
-export const PROPERTY_KINDS: PropertyKindMeta[] = (Object.keys(KIND_META) as FieldKind[]).map(
-  (kind) => ({ kind, ...KIND_META[kind] }),
+export const PROPERTY_KINDS: PropertyKindMeta[] = (Object.keys(KIND_UI) as FieldKind[]).map(
+  (kind) => {
+    const facts = kindFacts(kind);
+    const meta: PropertyKindMeta = {
+      kind,
+      ...KIND_UI[kind],
+      computed: facts.computed,
+      groupable: facts.groupable,
+      orderable: facts.orderable,
+      media: facts.media,
+      numeric: facts.numeric,
+      filters: facts.filters,
+    };
+    if (facts.legacy) meta.legacy = true;
+    if (facts.multi) meta.multi = true;
+    if (facts.status_set) meta.statusSet = true;
+    return meta;
+  },
 );
 
 /** The kinds offered in "+ Add property" — legacy kinds stay resolvable but
@@ -408,8 +284,8 @@ export const kindMeta = (kind: FieldKind): PropertyKindMeta =>
  * one and `ViewSettingsPanel` kept a verbatim copy — so adding a kind meant
  * remembering both, deleting from one produced no compile error and no
  * failing test, and the settings panel could offer a sort on a kind the
- * toolbar did not. They are flags on KIND_META now, which `satisfies
- * Record<FieldKind, …>` forces every new kind to answer.
+ * toolbar did not. They are facts in field-kinds.v1.json now, whose loader
+ * refuses a table that leaves a kind out.
  */
 export const GROUPABLE_KINDS: ReadonlySet<FieldKind> = new Set(
   PROPERTY_KINDS.filter((k) => k.groupable).map((k) => k.kind),
@@ -683,28 +559,32 @@ export function visibilityDelta(
 }
 
 /**
- * A stored date endpoint: the ISO day, optionally followed by a 24h time
- * (M16.14). Validation had only `ISO_DATE`, so the first date given a time of
- * day was rejected by the very write that set it.
- */
-const ISO_DATETIME = /^\d{4}-\d{2}-\d{2}(?:[ T](?:[01]\d|2[0-3]):[0-5]\d)?$/;
-/**
- * One stored endpoint out of arbitrary text, normalized to `YYYY-MM-DD` or
- * `YYYY-MM-DD HH:MM`.
+ * One stored endpoint out of arbitrary text, read by the shared grammar
+ * (dates.v1.json) and spelled the way a write stores it.
  *
- * The time is kept only when the WHOLE value is one of those two shapes.
- * `2026-07-30T10:00:00Z` is a UTC instant, and lifting `10:00` out of it and
- * storing it as a local wall-clock time would shift the value by the user's
- * offset — the exact mistake schedule.ts is written to avoid ("a task due the
- * 3rd is due the 3rd in the user's timezone"). Those degrade to the date.
+ * A valid instant is kept verbatim. M16.14 degraded `2026-07-30T10:00:00Z` to
+ * its UTC date, because lifting `10:00` out of it as a local wall time would
+ * shift it by the user's offset; the grammar admits instants now (M60.3), so
+ * the value keeps its zone and reads as local time wherever it is shown. A
+ * floating time is respelled with the written separator; anything else is
+ * not a date and reads as null.
  */
 function readEndpoint(text: string): string | null {
   const v = text.trim();
-  if (ISO_DATETIME.test(v)) return v.replace('T', ' ');
-  const m = /^(\d{4}-\d{2}-\d{2})/.exec(v);
-  return m === null ? null : m[1];
+  const read = parseDateText(v);
+  if (read === null) return null;
+  if (read.instant) return v;
+  return read.time === null
+    ? read.date
+    : `${read.date}${DATE_GRAMMAR.written_separator}${read.time}`;
 }
-const URL_SHAPE = /^(https?:\/\/|mailto:|www\.)/i;
+
+/** The table's `url_prefixes`, matched ignoring ASCII case. */
+function hasUrlPrefix(text: string): boolean {
+  return URL_PREFIXES.some(
+    (p) => text.length >= p.length && text.slice(0, p.length).toLowerCase() === p.toLowerCase(),
+  );
+}
 /** A scheme, per RFC 3986's `scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )`. */
 const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
 /** Something with a dot in it and no spaces — `example.com`, `a.b.co/x?y`. */
@@ -749,11 +629,11 @@ export function inferKindFromValue(value: unknown): FieldKind {
   if (typeof value === 'number') return 'number';
   if (Array.isArray(value)) return 'multiselect';
   if (typeof value === 'string') {
-    if (ISO_DATETIME.test(value)) return 'date';
-    // Before the url check: `mailto:` matches URL_SHAPE too, and an address
+    if (isDateText(value)) return 'date';
+    // Before the url check: `mailto:` is a URL prefix too, and an address
     // is more specific than "some link".
     if (EMAIL_SHAPE.test(value)) return 'email';
-    if (URL_SHAPE.test(value)) return 'url';
+    if (hasUrlPrefix(value)) return 'url';
     return 'text';
   }
   // A leftover from a field dropped off its type: the daterange mapping
@@ -765,100 +645,56 @@ export function inferKindFromValue(value: unknown): FieldKind {
   return 'text';
 }
 
-const isScalarString = (v: unknown): v is string => typeof v === 'string';
-const isStringArray = (v: unknown): v is string[] =>
-  Array.isArray(v) && v.every((x) => typeof x === 'string');
+function atomHolds(atom: Atom, value: unknown): boolean {
+  switch (atom) {
+    case 'string':
+      return typeof value === 'string';
+    case 'number':
+      return typeof value === 'number' && Number.isFinite(value);
+    case 'boolean':
+      return typeof value === 'boolean';
+    case 'string_list':
+      return Array.isArray(value) && value.every((x) => typeof x === 'string');
+    case 'date_text':
+      return isDateText(value);
+    case 'date_range':
+      return value !== null && typeof value === 'object' && !Array.isArray(value);
+    case 'url_text':
+      return typeof value === 'string' && (value === '' || hasUrlPrefix(value));
+  }
+}
 
 /**
- * Shape-validate one value against its declared kind. `null` (delete) is
- * always allowed. Returns an error message, or null when valid.
+ * Shape-validate one value against its declared kind. Returns an error
+ * message, or null when valid.
+ *
+ * The table decides (field-kinds.v1.json), in the order its README states and
+ * Rust's `validate_value` follows: `null` (delete) always passes; a computed
+ * kind refuses every write; a derived relation or person (`from`) refuses,
+ * because writing the mirror would store what the owning side immediately
+ * contradicts (M12.4, M16.13b); the value must be one of the kind's atoms; a
+ * range must have a real start, real endpoints and an end that does not come
+ * first; and a `limit: 1` link field holds one link (M20.3). Email and phone
+ * check shape only: Notion validates neither, and refusing a frontmatter
+ * write is a far worse failure than an address that will not linkify.
  */
 export function validateValue(def: FieldDef, value: unknown): string | null {
   if (value === null || value === undefined) return null;
-  const label = def.name;
-  switch (def.kind) {
-    case 'text':
-      return isScalarString(value) || typeof value === 'number' ? null : `${label} must be text`;
-    case 'number':
-      return typeof value === 'number' && Number.isFinite(value)
-        ? null
-        : `${label} must be a number`;
-    case 'checkbox':
-      return typeof value === 'boolean' ? null : `${label} must be on or off`;
-    case 'date':
-      return isScalarString(value) && ISO_DATETIME.test(value)
-        ? null
-        : `${label} must be a date (YYYY-MM-DD, optionally HH:MM)`;
-    case 'daterange': {
-      if (typeof value !== 'object' || Array.isArray(value)) {
-        return `${label} must be a start/end range`;
-      }
-      const r = value as { start?: unknown; end?: unknown };
-      for (const part of [r.start, r.end]) {
-        if (
-          part !== null &&
-          part !== undefined &&
-          !(isScalarString(part) && ISO_DATETIME.test(part))
-        ) {
-          return `${label} dates must be YYYY-MM-DD (optionally HH:MM)`;
-        }
-      }
-      return null;
-    }
-    case 'select':
-    case 'status':
-      return isScalarString(value) ? null : `${label} must be a single option`;
-    case 'multiselect':
-      return isScalarString(value) || isStringArray(value)
-        ? null
-        : `${label} must be a list of options`;
-    case 'person':
-      // M20.3: a person field IS a relation with an avatar renderer (M16.13b),
-      // so it answers cardinality the same way. This case checked the shape and
-      // not the limit, so `limit: 1` was declared, shown in the config editor,
-      // and enforced nowhere — the picker toggled a second person in and the
-      // write went through.
-      if (!(isScalarString(value) || isStringArray(value))) {
-        return `${label} must reference other pages`;
-      }
-      return def.limit === 1 && Array.isArray(value) && value.length > 1
-        ? `${label} names a single person`
-        : null;
-    case 'relation': {
-      // The reciprocal of a two-way pair is derived — writing it here would
-      // store a mirror that the owning side immediately contradicts (M12.4).
-      if (def.from !== undefined) {
-        return `${label} is the other side of a relation — edit it from the linked records`;
-      }
-      if (!(isScalarString(value) || isStringArray(value))) {
-        return `${label} must reference other pages`;
-      }
-      if (def.limit === 1 && Array.isArray(value) && value.length > 1) {
-        return `${label} links a single record`;
-      }
-      return null;
-    }
-    case 'url':
-      return isScalarString(value) && (value === '' || URL_SHAPE.test(value))
-        ? null
-        : `${label} must be a URL (https://…)`;
-    case 'email':
-    case 'phone':
-      // Shape only, no pattern. This module's contract (see the header) is
-      // that SHAPE is strict and semantics stay advisory, Notion does not
-      // validate either, and refusing a frontmatter write is a far worse
-      // failure than an address that will not linkify. The value these kinds
-      // add is a mailto:/tel: link and the right keyboard, not rejection.
-      return isScalarString(value) ? null : `${label} must be text`;
-    case 'files':
-      return isScalarString(value) || isStringArray(value)
-        ? null
-        : `${label} must be a list of files`;
-    case 'rollup':
-    case 'created_time':
-    case 'last_edited_time':
-      return `${label} is computed and can't be edited`;
+  const facts = kindFacts(def.kind);
+  const say = (key: MessageKey): string =>
+    (facts.messages[key] ?? facts.messages.shape).split('{name}').join(def.name);
+  if (facts.computed) return say('shape');
+  if (facts.links && def.from !== undefined) return say('derived');
+  const atom = facts.accepts.find((a) => atomHolds(a, value));
+  if (atom === undefined) return say('shape');
+  if (atom === 'date_range') {
+    const fault = dateRangeFault(value);
+    if (fault !== null) return say(fault);
   }
+  if (facts.links && def.limit === 1 && Array.isArray(value) && value.length > 1) {
+    return say('limit_one');
+  }
+  return null;
 }
 
 /**
@@ -877,14 +713,15 @@ function rangeParts(raw: unknown): string[] | null {
 }
 
 /**
- * Best-effort value conversion when a field changes kind (M12.4b — the
- * header menu's Change type). Returns the value to store, or null when the
- * old value has no honest representation in the new kind (the key is then
- * cleared rather than left holding a shape the schema now rejects).
+ * The adoption wizard's lenient converter (M12.6, engine/adopt.ts): the value
+ * a record would store to fit a kind the wizard proposes, or null when the
+ * old value has no reading in it, and the wizard then clears that key.
  *
- * Deliberately lossy in one direction only: a value is kept whenever a
- * reasonable reading exists (Notion's behavior), and dropped otherwise —
- * never mangled into something that looks authored.
+ * Change type does not use it. Since M60.5 a kind change reads values through
+ * engine/castRules.ts, which reads numbers strictly, never clears a value, and
+ * turns a change some values would not survive into a new property. This
+ * converter stays lenient (it strips digits out of '$1,200') until the wizard
+ * gets the same treatment.
  */
 export function coerceValueToKind(raw: unknown, kind: FieldKind): unknown {
   if (raw === null || raw === undefined || raw === '') return null;
@@ -959,7 +796,7 @@ export function coerceValueToKind(raw: unknown, kind: FieldKind): unknown {
     default: {
       // The return type is `unknown`, and `undefined` is assignable to it —
       // so a kind added to the union and forgotten HERE compiled clean, and
-      // `changeFieldKind` then pushed the undefined through
+      // the caller (Change type, until M60.5) pushed the undefined through
       // `patchFrontmatter`, which spells undefined as "delete". Converting to
       // a forgotten kind wiped the value on every record of the type, in
       // silence. This is the M16.4 guard the one `unknown` return escaped.
@@ -1068,7 +905,14 @@ export function computeRollup(
   }
 }
 
-/** 'YYYY-MM-DDTHH:MM:SSZ…' → 'YYYY-MM-DD HH:MM' (display for computed times). */
+/**
+ * An instant → this machine's wall time as 'YYYY-MM-DD HH:MM' (display for
+ * the created and last-edited cells). Read through the shared grammar
+ * (M61.8), so `2026-07-24T09:30:12Z` prints 02:30 in Los Angeles and 19:30 in
+ * Sydney; text that is not an instant keeps its first sixteen characters.
+ */
 export function formatTimestamp(iso: string): string {
+  const read = parseDateText(iso);
+  if (read !== null && read.instant && read.time !== null) return `${read.date} ${read.time}`;
   return iso.length >= 16 ? `${iso.slice(0, 10)} ${iso.slice(11, 16)}` : iso;
 }

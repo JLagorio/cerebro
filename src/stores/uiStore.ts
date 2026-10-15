@@ -322,6 +322,11 @@ interface UiState {
    * Persisted under `cerebro.agentShell`. */
   agentShell: ShellCeiling;
   setAgentShell(v: ShellCeiling): void;
+  /** The web ceiling (M57.7): may runs hold Claude Code's WebSearch and
+   * WebFetch? Off unless stored as 'true'. Persisted under
+   * `cerebro.agentWebAccess`. */
+  agentWebAccess: boolean;
+  setAgentWebAccess(v: boolean): void;
   /** Let the agent reach the user's own MCP servers (M8.2). Persisted. */
   agentConnectors: boolean;
   setAgentConnectors(v: boolean): void;
@@ -425,11 +430,11 @@ interface UiState {
   learnAttempts: Record<string, string>;
   recordLearnAttempt(path: string, modifiedAt: string): void;
   /**
-   * Vault path → record identity → the schedule fire key last run (M13.2),
-   * and identity + `#event` → the event run key last run (AUTOMATION-2;
-   * engine/jobs.ts `AgentJob.key` says why the two never share a slot).
-   * Persisted; the same loop-stopper discipline as learnAttempts. Scoped by
-   * vault like stdioApprovals (PR #5 review): fire keys are calendar values,
+   * Vault path → record identity → the schedule fire key last run (M13.2).
+   * A woken run keeps no key here: its wake in `runtime.db` is its record
+   * (M63.1; the `#event` rows M53.7 wrote stay inert). Persisted; the same
+   * loop-stopper discipline as learnAttempts. Scoped by vault like
+   * stdioApprovals (PR #5 review): fire keys are calendar values,
    * identical everywhere, so a flat map would let `records/skills/digest.md`
    * in one vault mark the same path in another vault as already run.
    */
@@ -453,9 +458,9 @@ interface UiState {
     runKey: string,
   ): void;
   /**
-   * Vault → agent identity → when it last ran from an EVENT trigger, ISO
-   * (M17.12). Keyed by the bare identity, never the `#event` slot: it is the
-   * event cooldown's clock, read there (engine/jobs.ts TRIGGER_COOLDOWN_MS).
+   * Vault → agent identity → when a wake last ran it, ISO (M17.12, M63.1).
+   * Keyed by the bare identity, never the job's `#wake` slot: it is the event
+   * cooldown's clock, read there (engine/jobs.ts TRIGGER_COOLDOWN_MS).
    * Separate from skillRuns because it answers a different question:
    * skillRuns says "has this exact fire been answered", this says "how long
    * ago did an event last wake this agent". Only the second can break the
@@ -464,6 +469,14 @@ interface UiState {
    */
   triggerRuns: Record<string, Record<string, string>>;
   recordTriggerRun(vault: string, agent: string, at: string): void;
+  /**
+   * Bumped each time the job runner's read of the pending wakes lands
+   * (M63.1b), so the lobby's Waiting to wake list (status/WakesSection.tsx)
+   * reads again when a wake may have been admitted, started, deferred or
+   * cancelled. In memory only: it counts reads, and means nothing on disk.
+   */
+  wakesRevision: number;
+  noteWakesChanged(): void;
   /**
    * Replace this vault's slices of all three ledgers with what the durable
    * table remembers (M34.2.3). The database has been the arbiter since it
@@ -504,9 +517,23 @@ interface UiState {
   proposals: Record<string, OrganizeProposal>;
   addProposal(p: OrganizeProposal): void;
   dismissProposal(path: string): void;
-  toasts: { id: number; message: string }[];
-  toast(message: string): void;
+  toasts: ToastItem[];
+  /** Show `message`. `action` puts one button on it (M60.7: Undo, Redo);
+   * clicking it runs `run` and dismisses the toast. */
+  toast(message: string, options?: { action?: ToastAction }): void;
   dismissToast(id: number): void;
+}
+
+/** A toast's one button (M60.7). */
+export interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
+export interface ToastItem {
+  id: number;
+  message: string;
+  action?: ToastAction;
 }
 
 const EXPANDED_KEY = 'cerebro.expandedFolders';
@@ -531,6 +558,7 @@ const AI_PANEL_KEY = 'cerebro.aiPanelOpen';
 const AGENT_SHELL_KEY = 'cerebro.agentShell';
 /** The boolean M8.1 stored, read once to migrate (M57.2), then removed. */
 const LEGACY_SHELL_KEY = 'cerebro.agentShellAccess';
+const AGENT_WEB_KEY = 'cerebro.agentWebAccess';
 const AGENT_CONNECTORS_KEY = 'cerebro.agentConnectors';
 const ISSUE_PREFIXES_KEY = 'cerebro.issuePrefixes';
 const DISMISSED_INSIGHTS_KEY = 'cerebro.dismissedInsights';
@@ -1088,6 +1116,13 @@ export const useUiStore = create<UiState>((set, get) => ({
     removeKey(LEGACY_SHELL_KEY);
     set({ agentShell: v });
   },
+  // Off unless stored as 'true' (M57.7): a fetch can carry what a run read
+  // to any site, so the web is a choice, and an unknown value reads off.
+  agentWebAccess: loadString(AGENT_WEB_KEY, 'false') === 'true',
+  setAgentWebAccess: (v) => {
+    storeString(AGENT_WEB_KEY, String(v));
+    set({ agentWebAccess: v });
+  },
   // Also off by default: reaching other systems is a choice, never one
   // inherited from opening the panel.
   agentConnectors: loadString(AGENT_CONNECTORS_KEY, 'false') === 'true',
@@ -1186,6 +1221,8 @@ export const useUiStore = create<UiState>((set, get) => ({
       storeString(TRIGGER_RUNS_KEY, JSON.stringify(next));
       return { triggerRuns: next };
     }),
+  wakesRevision: 0,
+  noteWakesChanged: () => set((s) => ({ wakesRevision: s.wakesRevision + 1 })),
   skillRuns: loadNestedStringMap(SKILL_RUNS_KEY),
   recordSkillRun: (vault, path, fireKey) =>
     set((s) => {
@@ -1254,6 +1291,11 @@ export const useUiStore = create<UiState>((set, get) => ({
     }),
 
   toasts: [],
-  toast: (message) => set((s) => ({ toasts: [...s.toasts, { id: nextToastId++, message }] })),
+  toast: (message, options) => {
+    const id = nextToastId++;
+    const item: ToastItem =
+      options?.action === undefined ? { id, message } : { id, message, action: options.action };
+    set((s) => ({ toasts: [...s.toasts, item] }));
+  },
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 }));

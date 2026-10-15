@@ -279,8 +279,15 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   const [pagesDrawerFor, setPagesDrawerFor] = useState<string | null>(null);
   const [sideDrawerFor, setSideDrawerFor] = useState<string | null>(null);
 
-  // The outline needs the live editor and the scroll container (Task 15).
-  const [editor, setEditor] = useState<CerebroEditor | null>(null);
+  // The outline and the comments need the live editor and the scroll
+  // container (Task 15). The editor is held with the mount it came from, set
+  // by onReady below; `editor` is derived further down, once the page knows
+  // whether that mount is still on screen.
+  const [mounted, setMounted] = useState<{
+    path: string;
+    gen: number;
+    editor: CerebroEditor;
+  } | null>(null);
   // Debounce controls, so out-of-editor writes can stop a stale in-editor
   // body from being flushed back over them.
   const editorControls = useRef<EditorReadyInfo | null>(null);
@@ -326,13 +333,22 @@ export function DocPage({ selection }: { selection: DocSelection }) {
     ? agentTab === 'instructions'
     : activeTab === null || activeTab.content === 'overview';
 
-  useEffect(() => {
-    // The keyed editor remounts per doc; wait for onReady. `showsEditor` is a
-    // dependency because a sections or view tab unmounts the editor
-    // entirely — holding the stale instance would keep feeding the outline
-    // (and the blank-page bar) a body the canvas no longer shows.
-    setEditor(null);
-  }, [selection.path, reloadGen, showsEditor]);
+  // The editor is the one on screen, or none. The keyed editor remounts per
+  // doc and per reload, a sections or view tab unmounts it, and a diff stands
+  // in for it (and destroys it); in each case the held instance is dead, so
+  // this render already sees null and the slot is cleared before the next
+  // (the React-sanctioned render-time reset) until the new mount's onReady.
+  // An effect would hand the dead editor on for one more render, and a
+  // comment deep link handled in it would reveal on a detached view and take
+  // the app down (M70.2b review).
+  const mountLive =
+    mounted !== null &&
+    mounted.path === selection.path &&
+    mounted.gen === reloadGen &&
+    showsEditor &&
+    !diffOpen;
+  if (mounted !== null && !mountLive) setMounted(null);
+  const editor = mountLive ? mounted.editor : null;
 
   // Blank-page detection drives the floating template bar. Title detection
   // drives the heading below: a doc whose body has no H1 has its title only in
@@ -376,11 +392,12 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   // records, agents and concepts alike (CV-08; Q5). A hook, so before the
   // early return; the panel it opens is laid out below it, so it reaches
   // `openSide` through a ref set each render. No editor while a diff stands
-  // in for it: its highlights are not on screen to draw or focus.
+  // in for it (`editor` is already null then): its highlights are not on
+  // screen to draw or focus.
   const openSideRef = useRef<(tab: 'comments') => void>(() => undefined);
   const comments = usePageComments(
     entry !== null && isCommentPage(entry.path) ? entry.path : null,
-    diffOpen ? null : editor,
+    editor,
     { openPanel: () => openSideRef.current('comments'), deepLink: selection.thread ?? null },
   );
 
@@ -613,7 +630,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
       // Cancel again: the awaits above gave the editor time to reschedule.
       editorControls.current?.cancelPendingSave();
       editorControls.current = null;
-      setEditor(null);
+      setMounted(null);
       setSaveState('idle');
       setReloadGen((g) => g + 1);
     } catch {
@@ -787,7 +804,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
         onSaveState={setSaveState}
         onReady={(info) => {
           editorControls.current = info;
-          setEditor(info.editor);
+          setMounted({ path: entry.path, gen: reloadGen, editor: info.editor });
         }}
         readOnly={readOnlyFile}
         sections={concept !== null}

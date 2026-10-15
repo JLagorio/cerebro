@@ -8,6 +8,7 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: listenSpy }));
 
 import {
   __resetPageWrites,
+  applyBatch,
   askQuestion,
   cancelQuit,
   canOpenOutside,
@@ -38,6 +39,7 @@ import {
   setNoteTitle,
   settlePageWrites,
   startCommentThread,
+  startWatcher,
   updateFrontmatter,
   writeClipboard,
 } from './ipc';
@@ -103,6 +105,30 @@ describe('listenVaultChanged', () => {
  */
 /** Page comments (M70.2): six commands with literal payloads, and the
  * watcher's second event. */
+/** M60.6: one change is one apply_batch call, its ops passed whole; the
+ * open answers what it put back. */
+describe('batch IPC (M60.6)', () => {
+  it('sends apply_batch and start_watcher their literal payloads inside Tauri', async () => {
+    (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+    const ops = [
+      { op: 'patch' as const, path: 'records/a.md', set: { status: 'done' } },
+      { op: 'delete' as const, path: 'records/b.md', expectHash: 'a'.repeat(64) },
+    ];
+    await applyBatch('/my-vault', ops);
+    await startWatcher('/my-vault');
+    expect(invokeSpy.mock.calls).toEqual([
+      ['apply_batch', { vault: '/my-vault', ops }],
+      ['start_watcher', { vault: '/my-vault' }],
+    ]);
+  });
+
+  it('goes to the mock outside Tauri', async () => {
+    expect(await startWatcher('/demo-vault')).toEqual({ unfinished: 0, restored: 0, kept: 0 });
+    expect(await applyBatch('/demo-vault', [])).toEqual({ batchId: '', files: [] });
+    expect(invokeSpy).not.toHaveBeenCalled();
+  });
+});
+
 describe('page comment IPC', () => {
   it('sends each command its literal payload inside Tauri', async () => {
     (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};

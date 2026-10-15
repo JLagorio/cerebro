@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { makeEntry } from '@/test/factories';
 import {
   isLinkablePage,
-  linkTargetOf,
-  linkTargetsFor,
   PAGE_CARD_FENCE,
   pageLinkOf,
   parsePageRef,
@@ -14,7 +12,6 @@ import {
 } from './pageCard';
 import { buildSchema } from './schema';
 import type { Entry } from './types';
-import { resolveLink, resolveTarget } from './wikilink';
 
 const PLAN = makeEntry({ path: 'delivery/plan.md', title: 'The plan' });
 const TICKET = makeEntry({
@@ -119,69 +116,5 @@ describe('linkability', () => {
     expect(isLinkablePage(TICKET_TYPE)).toBe(false);
     expect(isLinkablePage(makeEntry({ path: 'templates/meeting.md' }))).toBe(false);
     expect(isLinkablePage(makeEntry({ path: 'diagrams/flow.mmd', title: 'flow' }))).toBe(false);
-  });
-
-  it('links a page by its filename stem', () => {
-    expect(linkTargetOf(PLAN, VAULT)).toBe('plan');
-    expect(linkTargetOf(TICKET, VAULT)).toBe('t-1');
-  });
-});
-
-describe('a link that reaches the page it was written for', () => {
-  // The demo vault's shape: four meetings/kickoff.md files share one stem,
-  // and `resolveTarget`'s stem pass gives `[[kickoff]]` to the first.
-  const KICKOFFS = [
-    makeEntry({ path: 'projects/field-app/meetings/kickoff.md', title: 'Field App kickoff' }),
-    makeEntry({ path: 'projects/sync/meetings/kickoff.md', title: 'Offline sync kickoff' }),
-  ];
-  const ATLAS = makeEntry({ path: 'projects/atlas/project.md', title: 'Atlas' });
-  const ORBIT = makeEntry({ path: 'projects/orbit/project.md', title: 'Orbit' });
-  // Shares the stem with the first kickoff AND the title with the second.
-  const IMPOSTOR = makeEntry({ path: 'notes/kickoff.md', title: 'Offline sync kickoff' });
-  const ALL = [...KICKOFFS, ATLAS, ORBIT, PLAN];
-
-  it('writes the stem when it is the page’s own, and the title when another page has it', () => {
-    expect(linkTargetOf(KICKOFFS[0], ALL)).toBe('kickoff');
-    expect(linkTargetOf(KICKOFFS[1], ALL)).toBe('Offline sync kickoff');
-  });
-
-  it('writes a project by its folder, since every project is a project.md', () => {
-    expect(linkTargetOf(ATLAS, ALL)).toBe('atlas');
-    expect(linkTargetOf(ORBIT, ALL)).toBe('orbit');
-    // A stem named like the folder takes it, so the project falls back.
-    const atlasNote = makeEntry({ path: 'notes/atlas.md', title: 'Atlas notes' });
-    expect(linkTargetOf(ATLAS, [atlasNote, ...ALL])).toBe('project');
-  });
-
-  it('gives null when every name the page has reaches another page', () => {
-    expect(linkTargetOf(IMPOSTOR, [...KICKOFFS, IMPOSTOR])).toBeNull();
-  });
-
-  it('refuses a name the scanners would read differently', () => {
-    const piped = makeEntry({ path: 'a/x.md', title: 'A | B' });
-    expect(linkTargetOf(piped, [makeEntry({ path: 'b/x.md' }), piped])).toBeNull();
-  });
-
-  it('points a section link at the page too', () => {
-    const targetOf = linkTargetsFor(ALL);
-    expect(targetOf(KICKOFFS[0], 'Agenda')).toBe('kickoff#Agenda');
-    expect(targetOf(KICKOFFS[1], 'Agenda')).toBe('Offline sync kickoff#Agenda');
-    // A title with a `#` reaches its page whole, but cut at its `#` it would not.
-    const sharp = makeEntry({ path: 'b/plan.md', title: 'C# notes' });
-    const vault = [PLAN, sharp];
-    expect(linkTargetsFor(vault)(sharp)).toBe('C# notes');
-    expect(linkTargetsFor(vault)(sharp, 'Risks')).toBeNull();
-  });
-
-  it('every name it writes resolves back to its page', () => {
-    const vault = [...ALL, IMPOSTOR, makeEntry({ path: 'a/plan.md', title: 'kickoff' })];
-    const targetOf = linkTargetsFor(vault);
-    for (const entry of vault) {
-      const target = targetOf(entry);
-      if (target !== null) expect(resolveTarget(target, vault)).toBe(entry);
-      const section = targetOf(entry, 'Risks');
-      if (section !== null)
-        expect(resolveLink(section, vault)).toEqual({ entry, section: 'Risks' });
-    }
   });
 });

@@ -3,6 +3,7 @@
   "input": {
     "kind": "internal",
     "shell": "on",
+    "web": "off",
     "ask_first": false,
     "read_scoped": false,
     "narrowing": null
@@ -43,6 +44,7 @@
       "ExitPlanMode": "deny",
       "mcp__cerebro__create_note": "deny",
       "mcp__cerebro__update_frontmatter": "deny",
+      "mcp__cerebro__set_fields": "deny",
       "mcp__cerebro__append_to_note": "deny",
       "mcp__cerebro__edit_note": "deny"
     }

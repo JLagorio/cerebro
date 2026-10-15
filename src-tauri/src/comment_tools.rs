@@ -298,9 +298,9 @@ fn locate(
     };
     match (found.len(), occurrence) {
         (0, _) if !quote::occurrences_of(body, quote).is_empty() => Err(format!(
-            "The quoted text appears only inside a fence, a `:::` line, a line's marker or a \
-             link's target, which the page doesn't show as text. Quote words the page shows. \
-             {NOTHING_POSTED}"
+            "The quoted text appears only inside a fence, a `:::` line, a line's marker, a \
+             link's target, an image, a wikilink, a footnote or a date, which the page doesn't \
+             show as text. Quote words the page shows. {NOTHING_POSTED}"
         )),
         (0, _) if prefix.contains(quote) => Err(format!(
             "The quoted text is in the frontmatter; comments anchor to the note's body. \
@@ -667,6 +667,9 @@ mod tests {
         for (i, case) in file["calls"].as_array().unwrap().iter().enumerate() {
             let why = case["why"].as_str().unwrap();
             let (vault, page) = vault_for("comment-tools-case", &case["sidecar"]);
+            if let Some(bytes) = case["bytes"].as_str() {
+                testutil::write(&vault, &page, bytes);
+            }
             let side = vault.join(comments::sidecar_rel(&page));
             let page_before = std::fs::read(vault.join(&page)).unwrap();
             let side_before = std::fs::read(&side).ok();

@@ -6,6 +6,7 @@ import { Tooltip } from '@/components/ui/Tooltip';
 import type { ColumnDef } from '@/engine/columns';
 import { describeFilterRule, filterFieldDefs, seedFilterRule } from '@/engine/viewFilters';
 import type { FieldOption, FilterGroup, FilterRule } from '@/engine/types';
+import { describeViewProblem, type ViewProblem } from '@/engine/viewCheck';
 import { FilterBuilder, FilterRuleRow, filterFieldLabel } from '@/views/FilterBuilder';
 
 /**
@@ -20,6 +21,10 @@ import { FilterBuilder, FilterRuleRow, filterFieldLabel } from '@/views/FilterBu
  * A chip states its rule in words and opens that rule alone. Nested groups
  * stay authorable through the full builder behind "Advanced", which is where
  * the two-level AND/OR nesting we have and Notion does not still lives.
+ *
+ * A chip whose rule, or a rule nested under it, names something the view
+ * can't apply (M60.2b's `checkView`) is marked: `data-problem`, the warn
+ * border, and the problem's sentence as its tooltip.
  */
 
 const isGroup = (node: FilterRule | FilterGroup): node is FilterGroup =>
@@ -40,10 +45,20 @@ export function countRules(group: FilterGroup | null): number {
 /** Stable identity: a `[]` default would rebuild the defs on every render. */
 const NO_STATUSES: FieldOption[] = [];
 
+const NO_PROBLEMS: readonly ViewProblem[] = [];
+
+/** What marks a chip: the first problem whose filter path starts at it. */
+interface ChipProblem {
+  code: ViewProblem['code'];
+  sentence: string;
+}
+
 export function FilterChips({
   filters,
   fields,
   statuses = NO_STATUSES,
+  problems = NO_PROBLEMS,
+  problemSource = null,
   onChange,
 }: {
   filters: FilterGroup | null;
@@ -54,6 +69,10 @@ export function FilterChips({
    * falls back to a text box you have to type the slug into.
    */
   statuses?: FieldOption[];
+  /** The view's problems (M60.2b); those in its own filter mark chips. */
+  problems?: readonly ViewProblem[];
+  /** The view's type, for the problem sentences; null when typeless. */
+  problemSource?: string | null;
   onChange: (next: FilterGroup | null) => void;
 }) {
   const [editing, setEditing] = useState<number | null>(null);
@@ -67,6 +86,13 @@ export function FilterChips({
 
   const group: FilterGroup = filters ?? { all: [] };
   const children = childrenOf(group);
+
+  const problemAt = (i: number): ChipProblem | undefined => {
+    const p = problems.find((q) => q.position === 'filter' && q.filterPath?.[0] === i);
+    return p === undefined
+      ? undefined
+      : { code: p.code, sentence: describeViewProblem(p, problemSource) };
+  };
   const conjunction = 'all' in group ? 'and' : 'or';
 
   /** Empty means "no filters", so an emptied bar leaves nothing in the YAML. */
@@ -120,6 +146,7 @@ export function FilterChips({
             index={i}
             node={node}
             fields={defs}
+            problem={problemAt(i)}
             open={editing === i}
             onOpenChange={(open) => setEditing(open ? i : null)}
             onChange={(next) => replace(i, next)}
@@ -176,6 +203,7 @@ function Chip({
   index,
   node,
   fields,
+  problem,
   open,
   onOpenChange,
   onChange,
@@ -184,6 +212,7 @@ function Chip({
   index: number;
   node: FilterRule | FilterGroup;
   fields: ColumnDef[];
+  problem?: ChipProblem;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onChange: (next: FilterRule | FilterGroup) => void;
@@ -206,19 +235,31 @@ function Chip({
   return (
     <span
       ref={anchor}
-      className="inline-flex h-7 items-center overflow-hidden rounded-md border border-cortex-300 bg-cortex-50"
+      data-problem={problem?.code}
+      className={[
+        'inline-flex h-7 items-center overflow-hidden rounded-md border',
+        problem === undefined ? 'border-cortex-300 bg-cortex-50' : 'border-warn-500 bg-n-0',
+      ].join(' ')}
     >
-      <button
-        type="button"
-        data-testid={`filter-chip-${index}`}
-        aria-expanded={open}
-        onClick={() => onOpenChange(!open)}
-        className="inline-flex h-full max-w-[240px] items-center gap-1 border-0 bg-transparent pl-2 pr-1 text-xs text-cortex-700 hover:bg-cortex-100"
-      >
-        {nested && <Icon name="brackets" size={11} color="var(--cortex-600)" />}
-        <span className="min-w-0 truncate">{label}</span>
-        <Icon name="chevron-down" size={11} color="var(--cortex-600)" />
-      </button>
+      <Tooltip label={problem?.sentence ?? ''} delayMs={0}>
+        <button
+          type="button"
+          data-testid={`filter-chip-${index}`}
+          aria-expanded={open}
+          onClick={() => onOpenChange(!open)}
+          className={[
+            'inline-flex h-full max-w-[240px] items-center gap-1 border-0 bg-transparent pl-2 pr-1 text-xs',
+            problem === undefined
+              ? 'text-cortex-700 hover:bg-cortex-100'
+              : 'text-warn-600 hover:bg-n-50',
+          ].join(' ')}
+        >
+          {problem !== undefined && <Icon name="triangle-alert" size={11} />}
+          {nested && <Icon name="brackets" size={11} color="var(--cortex-600)" />}
+          <span className="min-w-0 truncate">{label}</span>
+          <Icon name="chevron-down" size={11} color="var(--cortex-600)" />
+        </button>
+      </Tooltip>
       <IconButton icon="x" label={`Remove filter: ${label}`} size="sm" onClick={onRemove} />
       {open && (
         <Popover

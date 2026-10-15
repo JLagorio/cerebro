@@ -77,7 +77,7 @@ describe('rankSuggestionItems', () => {
     const ranked = rankSuggestionItems(items, 'know');
     expect(new Set(titles(ranked)).size).toBe(2);
     expect(ranked[0].title).toBe('Knowledge');
-    expect(ranked[1].title).toBe('Knowledge​');
+    expect(ranked[1].title).toBe('Knowledge\u200B');
   });
 });
 
@@ -85,8 +85,8 @@ describe('distinctTitles', () => {
   it('suffixes each repeat by how many came before', () => {
     expect(titles(distinctTitles([row('A', 'g'), row('A', 'g'), row('A', 'g')]))).toEqual([
       'A',
-      'A​',
-      'A​​',
+      'A\u200B',
+      'A\u200B\u200B',
     ]);
   });
 });

@@ -1,5 +1,5 @@
 {
-  "about": "M58.1 (CV-33): one row per write door. Each case runs in a fresh vault holding `seed`, calls the door with `args`, and either is refused with a message containing `refused`, or records exactly the row `records` names (null: no row) in vault_writes. IPC rows are stamped human_actor with no run; agent rows are stamped with their `stamp`. Replayed by src-tauri/src/lib.rs (ipc), src-tauri/src/mcp.rs (agent) and src/lib/mockIpc.test.ts (both). A path under /SOURCE/ is a file outside the vault, made by the replay.",
+  "about": "M58.1 (CV-33): one row per write door. Each case runs in a fresh vault holding `seed`, calls the door with `args`, and either is refused with a message containing `refused`, or records exactly the row `records` names (null: no row), or the rows a list names, in order, in vault_writes. IPC rows are stamped human_actor with no run; agent rows are stamped with their `stamp`. Replayed by src-tauri/src/lib.rs (ipc), src-tauri/src/mcp.rs (agent) and src/lib/mockIpc.test.ts (both). A path under /SOURCE/ is a file outside the vault, made by the replay.",
   "human_actor": "human:me",
   "ipc": [
     {
@@ -189,6 +189,59 @@
       },
       "refused": "read-only",
       "why": "Restore is a person's write (M58.4): its receipt is minted from the bundle guard. Only the refusal replays: a restore that lands needs a repository."
+    },
+    {
+      "door": "apply_batch",
+      "seed": {
+        "door-cases/a.md": "---\nstatus: todo\n---\n\n# A\n",
+        "door-cases/b.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "args": {
+        "ops": [
+          { "op": "patch", "path": "door-cases/a.md", "set": { "status": "done" } },
+          { "op": "patch", "path": "door-cases/b.md", "set": { "status": "done" } }
+        ]
+      },
+      "records": [
+        { "kind": "vault.write", "path": "door-cases/a.md" },
+        { "kind": "vault.write", "path": "door-cases/b.md" }
+      ],
+      "why": "M60.6: one row per page a batch writes, each the person's."
+    },
+    {
+      "door": "apply_batch",
+      "seed": { "door-cases/a.md": "---\nstatus: todo\n---\n\n# A\n" },
+      "args": { "ops": [{ "op": "create", "path": "door-cases/new.md", "content": "# New\n" }] },
+      "records": [{ "kind": "vault.create", "path": "door-cases/new.md" }]
+    },
+    {
+      "door": "apply_batch",
+      "seed": {
+        "door-cases/a.md": "---\nstatus: todo\n---\n\n# A\n",
+        "door-cases/b.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "args": {
+        "ops": [
+          { "op": "delete", "path": "door-cases/a.md" },
+          { "op": "delete", "path": "door-cases/b.md" }
+        ]
+      },
+      "records": [
+        { "kind": "vault.delete", "path": "door-cases/a.md" },
+        { "kind": "vault.delete", "path": "door-cases/b.md" }
+      ]
+    },
+    {
+      "door": "apply_batch",
+      "seed": { "door-cases/a.md": "---\nstatus: todo\n---\n\n# A\n" },
+      "args": {
+        "ops": [
+          { "op": "patch", "path": "door-cases/a.md", "set": { "status": "done" } },
+          { "op": "patch", "path": "knowledge/concepts/a.md", "set": { "status": "done" } }
+        ]
+      },
+      "refused": "read-only",
+      "why": "M60.6: one op into the bundle refuses the whole change."
     }
   ],
   "agent": [
@@ -225,6 +278,22 @@
       "refused": "knowledge/ is written only through write_concept"
     },
     {
+      "door": "set_fields",
+      "seed": {
+        "door-cases/types/task.md": "---\ntype: Type\nfields:\n  status: { kind: status }\n---\n\n# Task\n",
+        "door-cases/a.md": "---\ntype: Task\nstatus: todo\n---\n\n# A\n"
+      },
+      "args": { "path": "door-cases/a.md", "set": { "status": "In Progress" } },
+      "stamp": { "actor": "process:release-scout", "run_id": "run-door-case" },
+      "records": { "kind": "vault.write", "path": "door-cases/a.md" }
+    },
+    {
+      "door": "set_fields",
+      "args": { "path": "knowledge/concepts/a.md", "set": { "verified": true } },
+      "stamp": { "actor": "process:release-scout", "run_id": "run-door-case" },
+      "refused": "knowledge/ is written only through write_concept"
+    },
+    {
       "door": "create_note",
       "args": { "folder": "door-cases", "slug": "fresh", "body": "# Fresh\n" },
       "stamp": { "actor": "process:release-scout", "run_id": "run-door-case" },
@@ -235,6 +304,19 @@
       "args": { "folder": "knowledge", "slug": "fresh", "body": "# Fresh\n" },
       "stamp": { "actor": "process:release-scout", "run_id": "run-door-case" },
       "refused": "knowledge/ is written only through write_concept"
+    },
+    {
+      "door": "create_note",
+      "seed": { "door-cases/fresh.md": "# Fresh\n" },
+      "args": {
+        "folder": "door-cases",
+        "slug": "fresh",
+        "body": "# Fresh\n",
+        "if_exists": "refuse"
+      },
+      "stamp": { "actor": "process:release-scout", "run_id": "run-door-case" },
+      "refused": "note_exists: door-cases/fresh.md already exists",
+      "why": "M61.6b: a create told to refuse a taken name writes nothing and records no row."
     }
   ]
 }

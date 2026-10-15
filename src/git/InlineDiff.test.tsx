@@ -12,6 +12,11 @@ vi.mock('@/lib/gitIpc', async (importOriginal) => {
     commitRuns: vi.fn(async () => [] as CommitRun[]),
     getFileDiff: vi.fn(async () => ''),
     getFileDiffAtCommit: vi.fn(async () => 'diff --git a/x b/x\n+line'),
+    isGitRepo: vi.fn(async () => true),
+    getModifiedFiles: vi.fn(async () => []),
+    getConflictFiles: vi.fn(async () => []),
+    getConflictMode: vi.fn(async () => 'none'),
+    gitRemoteStatus: vi.fn(async () => ({ hasRemote: false })),
     restoreNoteVersion: vi.fn(async (): Promise<RestoreResult> => ({
       unchanged: false,
       before: null,
@@ -42,11 +47,13 @@ vi.mock('@/editor/LazyMarkdownEditor', () => ({
 
 import { announceExternalWrites, flushOpenPages } from '@/editor/openPages';
 import { InlineDiff, VERSION_UNREADABLE } from '@/git/InlineDiff';
+import { refreshGit, resetGitState } from '@/git/useGit';
 import {
   getFileAtCommit,
   getFileDiff,
   getFileDiffAtCommit,
   getFileHistory,
+  getModifiedFiles,
   restoreNoteVersion,
 } from '@/lib/gitIpc';
 import { sha256Hex } from '@/lib/sha256';
@@ -260,6 +267,53 @@ describe('InlineDiff as the version lens (M58.4)', () => {
     expect(screen.getByTestId('lens-notes-hint').textContent).toBe(
       'To leave a note for the agent, open Lines.',
     );
+  });
+
+  it('keeps a note being typed while a later write re-reads the history (M58.5)', async () => {
+    serve(row({ pathAt: 'notes/old-plan.md' }), NEW);
+    vi.mocked(getFileDiffAtCommit).mockResolvedValue(NUMBERED);
+    resetGitState();
+    useVaultStore.setState({
+      vaultPath: '/demo-vault',
+      entries: [makeEntry({ path: PATH, title: 'Plan', hash: sha256Hex(OLD) })],
+    });
+    useUiStore.setState({
+      diffView: { path: PATH, commit: HASH, review: { conversationId: 'c-1', runId: 'run-1' } },
+      toasts: [],
+    });
+    useReviewNotesStore.setState({ notes: [] });
+    render(<InlineDiff path={PATH} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Note on line 3 after the change' }));
+    await waitFor(() => expect(getFileHistory).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByTestId('diff-note-text'), { target: { value: 'Thursday.' } });
+    const linesReads = vi.mocked(getFileDiffAtCommit).mock.calls.length;
+
+    // A later turn writes the page: it joins git's changed files, and the
+    // history is read again, slowly.
+    let answer: (rows: FileCommit[]) => void = () => undefined;
+    vi.mocked(getFileHistory).mockImplementationOnce(
+      () => new Promise<FileCommit[]>((resolve) => (answer = resolve)),
+    );
+    vi.mocked(getModifiedFiles).mockResolvedValueOnce([
+      { path: PATH, status: 'modified', staged: false },
+    ]);
+    await act(async () => {
+      await refreshGit();
+    });
+    await waitFor(() => expect(getFileHistory).toHaveBeenCalledTimes(2));
+    expect((screen.getByTestId('diff-note-text') as HTMLTextAreaElement).value).toBe('Thursday.');
+    await act(async () => {
+      answer([row({ pathAt: 'notes/old-plan.md' })]);
+    });
+    expect((screen.getByTestId('diff-note-text') as HTMLTextAreaElement).value).toBe('Thursday.');
+    expect(getFileDiffAtCommit).toHaveBeenCalledTimes(linesReads);
+    fireEvent.click(screen.getByTestId('diff-note-add'));
+    expect(useReviewNotesStore.getState().notes[0]).toMatchObject({
+      path: 'notes/old-plan.md',
+      start: 3,
+      text: 'Thursday.',
+    });
+    resetGitState();
   });
 
   it('takes no notes on a diff opened without a turn', async () => {

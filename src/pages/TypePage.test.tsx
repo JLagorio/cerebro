@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toIsoDate } from '@/engine/dates';
 import type { Entry } from '@/engine/types';
@@ -9,6 +9,7 @@ import { VIEW_KINDS } from '@/views/viewKinds';
 import { fixtureVault, makeEntry } from '@/test/factories';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import type { BatchOp } from '@/engine/batch';
 
 /**
  * jsdom cannot render mermaid, and the whiteboard tests below are about WHERE
@@ -31,6 +32,12 @@ beforeEach(() => {
     patchFrontmatter: vi.fn(async (path: string, patch: Record<string, unknown>) => {
       patches.push({ path, patch });
       return true;
+    }),
+    // M60.6: a database-wide rewrite lands as one batch; its patch ops are
+    // the writes, in order.
+    applyBatch: vi.fn(async (ops: BatchOp[]) => {
+      for (const op of ops) if (op.op === 'patch') patches.push({ path: op.path, patch: op.set });
+      return { batchId: 'b'.repeat(32), files: [] };
     }),
   });
   useUiStore.setState({ detailPath: null });
@@ -396,6 +403,58 @@ describe('TypePage — property configuration (M12.8: floating, never an aside)'
         patch: { fields: { uses_pronouns: { kind: 'text' } } },
       });
     });
+  });
+});
+
+/**
+ * M60.2: a field rename rewrites every saved view in one batch, under the
+ * open tab. The page re-seeds its local presentation from the stored view,
+ * so the change shows at once and the next toolbar edit cannot write the old
+ * name back; the search box is where you are looking, so it survives.
+ */
+describe('TypePage re-seeds when the stored view changes (M60.2)', () => {
+  const vaultWith = (person: string) =>
+    fixtureVault().map((e) => {
+      if (e.path !== 'types/work-item.md') return e;
+      const props = e.properties as unknown as { fields: Record<string, unknown> };
+      const fields = Object.fromEntries(
+        Object.entries(props.fields).map(([k, v]) => [k === 'assignee' ? person : k, v]),
+      );
+      const all = {
+        id: 'all',
+        name: 'All',
+        icon: null,
+        filters: null,
+        presentation: {
+          type: 'table',
+          group: [],
+          sort: [{ field: 'due', dir: 'asc' }],
+          columns: [{ field: 'status' }, { field: person }],
+        },
+      };
+      return {
+        ...e,
+        properties: { ...e.properties, fields, views: [all] } as unknown as Entry['properties'],
+      };
+    });
+
+  it('shows a stored change at once, keeps search, and the next toolbar edit keeps the new name', () => {
+    useVaultStore.setState({ entries: vaultWith('assignee') });
+    render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
+    expect(screen.getByLabelText('Assignee column menu')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('view-control-search'));
+    fireEvent.change(screen.getByTestId('view-search-input'), { target: { value: 'flow' } });
+
+    act(() => useVaultStore.setState({ entries: vaultWith('assigned_to') }));
+    expect(screen.getByLabelText('Assigned to column menu')).toBeTruthy();
+    expect(screen.queryByLabelText('Assignee column menu')).toBeNull();
+    expect((screen.getByTestId('view-search-input') as HTMLInputElement).value).toBe('flow');
+
+    fireEvent.click(screen.getByLabelText('Status column menu'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Sort ascending' }));
+    const write = patches.find((p) => p.path === 'types/work-item.md' && 'views' in p.patch);
+    const views = write?.patch.views as { presentation: { columns: { field: string }[] } }[];
+    expect(views[0].presentation.columns.map((c) => c.field)).toEqual(['status', 'assigned_to']);
   });
 });
 

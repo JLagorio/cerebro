@@ -231,7 +231,8 @@ fn refusal(mut lines: Vec<String>) -> String {
 // match counted lies in text the page shows, so a quote with markdown is
 // refused and the finder's matches are filtered to the page's own text: not
 // inside a fence, not on a `:::` line (a toggle's title excepted), not in a
-// line's marker and not in a link's target.
+// line's marker, a link's target, an image or a chip (a wikilink, an
+// assignee, a footnote or a date, which the editor draws as one atom).
 
 /// The characters a comment quote may not hold, because the page does not
 /// show them as typed; a context stops at one as well.
@@ -293,26 +294,172 @@ fn marker_len(line: &str) -> usize {
     at
 }
 
-/// `from..to` of `body` less every link target in it (`](` to its `)`).
-fn without_link_targets(body: &str, from: usize, to: usize, out: &mut Vec<(usize, usize)>) {
-    let mut at = from;
-    while let Some(open) = body[at..to].find("](") {
-        let target = at + open + 1;
-        if target > at {
-            out.push((at, target));
-        }
-        at = body[target..to]
-            .find(')')
-            .map_or(to, |close| target + close + 1);
+/// Whether `c` is a space as a JavaScript `\s` reads one, the class the
+/// editor's date token grammar (`src/engine/dates.ts`) is written in.
+fn js_space(c: char) -> bool {
+    matches!(
+        c,
+        '\t'..='\r'
+            | ' '
+            | '\u{a0}'
+            | '\u{1680}'
+            | '\u{2000}'..='\u{200a}'
+            | '\u{2028}'
+            | '\u{2029}'
+            | '\u{202f}'
+            | '\u{205f}'
+            | '\u{3000}'
+            | '\u{feff}'
+    )
+}
+
+/// The byte length of the run of chars `keep` takes that opens `text`.
+fn run_while(text: &str, keep: impl Fn(char) -> bool) -> usize {
+    text.len() - text.trim_start_matches(keep).len()
+}
+
+/// The bytes `text` opens with when they read `\d{n}` then `sep` then
+/// `\d{n}`, repeated for each `(sep, n)` after the first count.
+fn digit_groups(text: &str, first: usize, rest: &[(char, usize)]) -> Option<usize> {
+    let digits = |at: usize, n: usize| {
+        (text.len() >= at + n && text.as_bytes()[at..at + n].iter().all(u8::is_ascii_digit))
+            .then_some(at + n)
+    };
+    let mut at = digits(0, first)?;
+    for &(sep, n) in rest {
+        at = digits(at + text[at..].strip_prefix(sep).map(|_| 1)?, n)?;
     }
-    if at < to {
-        out.push((at, to));
+    Some(at)
+}
+
+/// A date then an optional time (`\d{4}-\d{2}-\d{2}(?:\s\d{2}:\d{2})?`).
+fn dated(text: &str) -> Option<usize> {
+    let at = digit_groups(text, 4, &[('-', 2), ('-', 2)])?;
+    let time = text[at..]
+        .chars()
+        .next()
+        .filter(|&c| js_space(c))
+        .and_then(|c| {
+            digit_groups(&text[at + c.len_utf8()..], 2, &[(':', 2)]).map(|n| n + c.len_utf8())
+        });
+    Some(at + time.unwrap_or(0))
+}
+
+/// The length of the date token `text` opens with, as `DATE_TOKEN_SOURCE`
+/// reads one: the calendar, a date and time, an arrow and an end, and flags.
+fn date_token_len(text: &str) -> Option<usize> {
+    let mut at = text
+        .strip_prefix('\u{1f4c5}')
+        .map(|_| '\u{1f4c5}'.len_utf8())?;
+    at += run_while(&text[at..], js_space);
+    at += dated(&text[at..])?;
+    let end = (|| {
+        let mut to = at + run_while(&text[at..], js_space);
+        to += text[to..]
+            .strip_prefix('\u{2192}')
+            .map(|_| '\u{2192}'.len_utf8())?;
+        to += run_while(&text[to..], js_space);
+        Some(to + dated(&text[to..])?)
+    })();
+    at = end.unwrap_or(at);
+    let flags = (|| {
+        let mut to = at + run_while(&text[at..], js_space);
+        to += text[to..].strip_prefix("((").map(|_| 2)?;
+        let n = run_while(&text[to..], |c| {
+            c.is_ascii_lowercase() || c.is_ascii_digit() || c == '|' || c == ':'
+        });
+        (n > 0 && text[to + n..].starts_with("))")).then_some(to + n + 2)
+    })();
+    Some(flags.unwrap_or(at))
+}
+
+/// The length of the chip `text` opens with, as `src/editor/markdown.ts`'s
+/// CHIP_PATTERN finds one: `@[[target|alias]]`, `[[target|alias]]`, `[^id]`
+/// or a date token. The editor draws each as one atom, and M70.1 counts no
+/// match inside an atom.
+fn chip_len(text: &str) -> Option<usize> {
+    let link = |s: &str| {
+        let rest = s.strip_prefix("[[")?;
+        let target = run_while(rest, |c| !matches!(c, '[' | ']' | '|'));
+        if target == 0 {
+            return None;
+        }
+        let mut at = 2 + target;
+        if s[at..].starts_with('|') {
+            at += 1 + run_while(&s[at + 1..], |c| !matches!(c, '[' | ']'));
+        }
+        s[at..].starts_with("]]").then_some(at + 2)
+    };
+    if let Some(n) = text.strip_prefix('@').and_then(link) {
+        return Some(n + 1);
+    }
+    if let Some(n) = link(text) {
+        return Some(n);
+    }
+    if let Some(rest) = text.strip_prefix("[^") {
+        let id = run_while(rest, |c| c != ']' && !js_space(c));
+        if id > 0 && rest[id..].starts_with(']') {
+            return Some(2 + id + 1);
+        }
+    }
+    date_token_len(text)
+}
+
+/// The length of the image `text` opens with (`![alt](target)`): the page
+/// draws its picture, and neither its alt text nor its target is text.
+fn image_len(text: &str) -> Option<usize> {
+    let rest = text.strip_prefix("![")?;
+    let alt = run_while(rest, |c| c != ']');
+    let rest = rest[alt..].strip_prefix("](")?;
+    let target = run_while(rest, |c| c != ')');
+    rest[target..]
+        .starts_with(')')
+        .then_some(2 + alt + 2 + target + 1)
+}
+
+/// `from..to` of `body` less what the page does not show as text there: every
+/// link target (`](` to its `)`), every image and every chip.
+fn page_text_in(body: &str, from: usize, to: usize, out: &mut Vec<(usize, usize)>) {
+    let mut kept = from;
+    let mut at = from;
+    while at < to {
+        let rest = &body[at..to];
+        let cut = if rest.starts_with("](") {
+            // A link's text keeps its `]`; its target goes.
+            let open = at + 1;
+            Some((
+                open,
+                body[open..to]
+                    .find(')')
+                    .map_or(to, |close| open + close + 1),
+            ))
+        } else if rest.starts_with(['!', '@', '[', '\u{1f4c5}']) {
+            image_len(rest)
+                .or_else(|| chip_len(rest))
+                .map(|n| (at, at + n))
+        } else {
+            None
+        };
+        match cut {
+            Some((start, end)) => {
+                if start > kept {
+                    out.push((kept, start));
+                }
+                kept = end;
+                at = end;
+            }
+            None => at += rest.chars().next().map_or(1, char::len_utf8),
+        }
+    }
+    if kept < to {
+        out.push((kept, to));
     }
 }
 
 /// The byte ranges of `body` the page shows as text, in order: each line's
-/// own text, less its marker and its link targets, outside every fence and
-/// every `:::` line but a toggle's title. A line's `\r` is never text.
+/// own text, less its marker, its link targets, its images and its chips,
+/// outside every fence and every `:::` line but a toggle's title. A line's
+/// `\r` is never text.
 fn text_ranges(body: &str) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
     // The open fence: its character and how long its run was.
@@ -343,11 +490,11 @@ fn text_ranges(body: &str) -> Vec<(usize, usize)> {
         if directive.starts_with(":::") {
             let colons = run_of(directive, ':');
             if let Some(title) = directive[colons..].strip_prefix("toggle ") {
-                without_link_targets(body, end - title.len(), end, &mut out);
+                page_text_in(body, end - title.len(), end, &mut out);
             }
             continue;
         }
-        without_link_targets(body, from + marker_len(line), end, &mut out);
+        page_text_in(body, from + marker_len(line), end, &mut out);
     }
     out
 }

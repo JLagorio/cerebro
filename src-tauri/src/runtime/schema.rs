@@ -1469,3 +1469,106 @@ pub const SCHEMA_V24: &str = "
         PRIMARY KEY (vault_id, commit_sha)
     );
 ";
+
+/// M63.1 — durable wakes: each trigger match is admitted once, claimed
+/// inside the dispatch transaction, and ends in a closed outcome.
+///
+/// The CHECKs bound lengths and the lifecycle only. Key shapes per cause
+/// kind, cause kinds, skip reasons and cancel whys are closed lists in Rust
+/// (`runtime::wakes`), so a later kind or reason needs no rebuild.
+///
+/// - `wake_key`: 1 to 96 characters; an event wake's is 64 hex.
+/// - `trigger_digest`: the 16 hex of the trigger that matched, so a claim
+///   coalesces only wakes of the same trigger.
+/// - `cause`: the cleaned cause the run will record, written at admission.
+/// - `not_before` and `deferred`: when a deferred pending wake may be tried
+///   again, and the gate's reasons.
+/// - `note`: skip context, a JSON object, on a skipped row only.
+///
+/// One lifecycle CHECK: a pending wake has no run, times, outcome, reason,
+/// detail or note; a started one has its run and start and no retry; a
+/// finished one has its end and outcome, a run exactly for succeeded,
+/// failed, interrupted and coalesced, a reason exactly for skipped and
+/// cancelled, a detail only when cancelled and a note only when skipped.
+///
+/// The unique key covers LIVE wakes only (pending and started): content keys
+/// repeat, so a change removed and made again must wake again. Single flight
+/// is a second partial UNIQUE: one started wake per agent.
+pub const SCHEMA_V25: &str = "
+    CREATE TABLE agent_wakes (
+        wake_id TEXT PRIMARY KEY
+            CHECK (length(wake_id) = 32 AND NOT wake_id GLOB '*[^0-9a-f]*'),
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        agent TEXT NOT NULL CHECK (agent LIKE 'process:_%' AND length(agent) <= 128),
+        wake_key TEXT NOT NULL CHECK (length(wake_key) BETWEEN 1 AND 96),
+        trigger_digest TEXT NOT NULL CHECK (length(trigger_digest) = 16
+            AND NOT trigger_digest GLOB '*[^0-9a-f]*'),
+        cause TEXT NOT NULL CHECK (
+            json_valid(cause) AND json_type(cause) = 'object' AND length(cause) <= 2048),
+        admitted_at TEXT NOT NULL CHECK (admitted_at LIKE '____-__-__T%Z'),
+        not_before TEXT CHECK (not_before IS NULL OR not_before LIKE '____-__-__T%Z'),
+        deferred TEXT CHECK (deferred IS NULL OR length(deferred) BETWEEN 1 AND 400),
+        state TEXT NOT NULL DEFAULT 'pending'
+            CHECK (state IN ('pending', 'started', 'finished')),
+        run_id TEXT REFERENCES runs (run_id),
+        started_at TEXT CHECK (started_at IS NULL OR started_at LIKE '____-__-__T%Z'),
+        finished_at TEXT CHECK (finished_at IS NULL OR finished_at LIKE '____-__-__T%Z'),
+        outcome TEXT CHECK (outcome IS NULL OR outcome IN
+            ('succeeded', 'failed', 'skipped', 'cancelled', 'interrupted', 'coalesced')),
+        reason TEXT CHECK (reason IS NULL OR length(reason) BETWEEN 1 AND 32),
+        detail TEXT CHECK (detail IS NULL OR length(detail) BETWEEN 1 AND 32),
+        note TEXT CHECK (note IS NULL OR (
+            json_valid(note) AND json_type(note) = 'object' AND length(note) <= 2048)),
+        CHECK (CASE state
+            WHEN 'pending' THEN run_id IS NULL AND started_at IS NULL AND finished_at IS NULL
+                AND outcome IS NULL AND reason IS NULL AND detail IS NULL AND note IS NULL
+            WHEN 'started' THEN run_id IS NOT NULL AND started_at IS NOT NULL
+                AND not_before IS NULL AND deferred IS NULL AND finished_at IS NULL
+                AND outcome IS NULL AND reason IS NULL AND detail IS NULL AND note IS NULL
+            ELSE finished_at IS NOT NULL AND outcome IS NOT NULL
+                AND (run_id IS NOT NULL) =
+                    (outcome IN ('succeeded', 'failed', 'interrupted', 'coalesced'))
+                AND (reason IS NOT NULL) = (outcome IN ('skipped', 'cancelled'))
+                AND (detail IS NULL OR outcome = 'cancelled')
+                AND (note IS NULL OR outcome = 'skipped')
+        END)
+    );
+    CREATE UNIQUE INDEX agent_wakes_live_key ON agent_wakes (vault_id, agent, wake_key)
+        WHERE state IN ('pending', 'started');
+    CREATE UNIQUE INDEX agent_wakes_single_flight ON agent_wakes (vault_id, agent)
+        WHERE state = 'started';
+    CREATE INDEX agent_wakes_pending ON agent_wakes (vault_id, agent)
+        WHERE state = 'pending';
+    CREATE INDEX agent_wakes_by_run ON agent_wakes (run_id) WHERE run_id IS NOT NULL;
+";
+
+/// M60.6 — the batch journal: one row per database-wide change in flight,
+/// holding what recovery needs to put every page back.
+///
+/// - `batch_id`: 32 lowercase hex.
+/// - `state`: `staged` once every temp is written, `applying` from the first
+///   rename. Either way an unfinished row is rolled back.
+/// - `files`: a JSON array, one object per page the change writes: its path,
+///   staged temp, pre-image and both hashes, and the Trash stamp a delete or
+///   restore moves through (`runtime::batch_journal::JournalFile`). No CHECK
+///   names an op kind, so a later op (M60.10's renames) needs no rebuild.
+///   At most 64 MiB: a change holds 16 MiB of pages, before and after.
+/// - `actor`: a person (`human:%`). Only a person's doors start a batch.
+/// - `started_at`: the stored spelling, so recovery compares it with the
+///   process start as a string.
+///
+/// A row lives only while its batch runs: the commit deletes it, so an
+/// empty table is the healthy one. Operational, never the ledger (CV-06).
+pub const SCHEMA_V26: &str = "
+    CREATE TABLE batch_journal (
+        batch_id TEXT PRIMARY KEY
+            CHECK (length(batch_id) = 32 AND NOT batch_id GLOB '*[^0-9a-f]*'),
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        state TEXT NOT NULL CHECK (state IN ('staged', 'applying')),
+        files TEXT NOT NULL CHECK (json_valid(files) AND json_type(files) = 'array'
+            AND length(files) <= 67108864),
+        actor TEXT NOT NULL CHECK (actor LIKE 'human:%'),
+        started_at TEXT NOT NULL CHECK (started_at LIKE '____-__-__T%Z')
+    );
+    CREATE INDEX batch_journal_by_vault ON batch_journal (vault_id, started_at);
+";

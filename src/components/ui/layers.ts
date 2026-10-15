@@ -56,12 +56,20 @@ export interface LayerOptions {
    * everything.
    */
   contains?: (node: Node) => boolean;
+  /**
+   * Whether this surface stops the keymap's letter keys and its modifier
+   * commands that are not `inModal` (M65.1). Default true. The docked record
+   * peek registers false: it takes its own Escape, but the page beside it
+   * keeps its keys.
+   */
+  modal?: boolean;
 }
 
 interface Layer {
   id: string;
   kind: LayerKind;
   contains: (node: Node) => boolean;
+  modal: boolean;
 }
 
 const stack: Layer[] = [];
@@ -77,6 +85,7 @@ export function pushLayer(id: string, options: LayerOptions = {}): void {
     id,
     kind: options.kind ?? 'surface',
     contains: options.contains ?? OWNS_NOTHING,
+    modal: options.modal ?? true,
   });
 }
 
@@ -118,9 +127,16 @@ export function ownsEscape(id: string): boolean {
 
 /** True when anything dismissable is open. Global handlers use this to stand
  * down. Neither a tooltip nor a drag gesture is "open" in that sense — nothing
- * should stand down for either. */
+ * should stand down for either. The keymap asks `hasModalLayers` instead,
+ * which skips the docked peek. */
 export function hasLayers(): boolean {
   return surfaces().length > 0;
+}
+
+/** True when a modal surface is open: what the keymap's letters and its
+ * non-`inModal` commands stand down for (M65.1). */
+export function hasModalLayers(): boolean {
+  return surfaces().some((l) => l.modal);
 }
 
 /**
@@ -171,6 +187,7 @@ export function useLayer(options?: LayerOptions): string {
     pushLayer(id, {
       kind: latest.current?.kind,
       contains: (node) => latest.current?.contains?.(node) ?? false,
+      modal: latest.current?.modal,
     });
     return () => popLayer(id);
   }, [id]);

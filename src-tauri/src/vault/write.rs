@@ -1,6 +1,9 @@
 //! Disk writes: frontmatter patching, note bodies, note creation, views.
-//! All writes go through `write_file` so the watcher (Task 8) can register
-//! own-writes for suppression in one place. All caller-supplied paths are
+//! Every write lands through `stage_temp` and `rename_into_place`, which
+//! register own-writes with the watcher (Task 8) in one place: `write_file`
+//! composes the two for one file, and the batch writer (`vault::batch`,
+//! M60.6) stages every file of a change first and renames them after its
+//! journal row says so. All caller-supplied paths are
 //! validated by `safe_join`/`safe_component` — Task 7 exposes these functions
 //! over IPC, so vault containment is enforced here, not in the callers. The
 //! writers that change a NOTE go one step further through `note_join`, which
@@ -82,13 +85,27 @@ fn rel_path(vault: &Path, path: &Path) -> Result<String, String> {
 /// Dot-prefixed and non-`.md`, so the scanner and the watcher never see one.
 const TEMP_MARKER: &str = ".cerebro-tmp-";
 
-/// How old a temp must be before `clean_orphan_temps` may reap it. The engine
-/// is stateless and concurrent commands re-scan constantly, so an in-flight
-/// write's temp must never be reaped — age is the only guard.
+/// Marker a batch's staged temps carry instead (M60.6):
+/// `.{name}.cerebro-batch-{hex}`. A batch stages every file before it renames
+/// any, so its temps live as long as the batch; its journal row, not their
+/// age, says whether they are still wanted.
+pub(super) const BATCH_TEMP_MARKER: &str = ".cerebro-batch-";
+
+/// How old a single write's temp must be before `clean_orphan_temps` may
+/// reap it. The engine is stateless and concurrent commands re-scan
+/// constantly, so an in-flight write's temp must never be reaped, and for a
+/// single write age is the only guard.
 const ORPHAN_TEMP_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// Single funnel for all vault file writes; registers each write with the
-/// watcher so our own saves don't bounce back as `vault-changed` events.
+/// How old a batch temp must be before the janitor reaps it (M60.6). The
+/// batch's journal guards it while the batch runs and recovery removes it
+/// after a crash, so this only clears what both missed.
+const ORPHAN_BATCH_TEMP_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+/// The single-file write: `content` staged beside `abs` (`stage_temp`),
+/// renamed over it (`rename_into_place`) and the rename made durable
+/// (`sync_dir`). Our own saves register with the watcher on the way, so they
+/// don't bounce back as `vault-changed` events.
 ///
 /// Atomic since M21.1: content lands in a same-directory temp, is fsynced,
 /// then renamed over the destination, and the parent directory is fsynced so
@@ -109,16 +126,16 @@ pub(super) fn write_file(lock: &PathLock, abs: &Path, content: &str) -> Result<(
     let parent = abs
         .parent()
         .ok_or_else(|| format!("no parent directory: {}", abs.display()))?;
-    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    let name = abs
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| format!("unusable file name: {}", abs.display()))?;
-    let temp = parent.join(format!(
-        ".{name}{TEMP_MARKER}{:016x}",
-        rand::random::<u64>()
-    ));
-    let result = write_via_temp(abs, parent, &temp, content);
+    let temp = temp_beside(abs, TEMP_MARKER)?;
+    let result = stage_temp(&temp, abs, content).and_then(|()| {
+        rename_into_place(
+            lock,
+            &temp,
+            abs,
+            crate::ledger::sha256_hex(content.as_bytes()),
+        )?;
+        sync_dir(parent)
+    });
     if result.is_err() {
         // Best-effort: after a successful rename the temp no longer exists,
         // and a failure here still gets reaped by clean_orphan_temps later.
@@ -127,11 +144,28 @@ pub(super) fn write_file(lock: &PathLock, abs: &Path, content: &str) -> Result<(
     result
 }
 
-/// The commit sequence for one atomic write. Split out so `write_file` owns
-/// exactly one job: cleaning up the temp on any error path.
-fn write_via_temp(abs: &Path, parent: &Path, temp: &Path, content: &str) -> Result<(), String> {
+/// A fresh temp name beside `abs`, carrying `marker`:
+/// `.{name}{marker}{16 hex}`.
+pub(super) fn temp_beside(abs: &Path, marker: &str) -> Result<PathBuf, String> {
+    let parent = abs
+        .parent()
+        .ok_or_else(|| format!("no parent directory: {}", abs.display()))?;
+    let name = abs
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| format!("unusable file name: {}", abs.display()))?;
+    Ok(parent.join(format!(".{name}{marker}{:016x}", rand::random::<u64>())))
+}
+
+/// Stage `content` at `temp`, beside the file it will replace (`abs`): the
+/// parent made, the bytes written, `abs`'s permissions copied over and the
+/// file fsynced. Nothing at `abs` changes. Crash point `temp-written`.
+pub(super) fn stage_temp(temp: &Path, abs: &Path, content: &str) -> Result<(), String> {
     use std::io::Write;
 
+    if let Some(parent) = temp.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
     let mut file = std::fs::File::create(temp).map_err(|e| e.to_string())?;
     file.write_all(content.as_bytes())
         .map_err(|e| e.to_string())?;
@@ -146,15 +180,36 @@ fn write_via_temp(abs: &Path, parent: &Path, temp: &Path, content: &str) -> Resu
     }
     file.sync_all().map_err(|e| e.to_string())?;
     crate::crash::crash_point("temp-written");
+    Ok(())
+}
+
+/// Rename a staged `temp` over `abs`, under the lock that holds `abs`, its
+/// bytes' SHA-256 registered with the watcher first. Crash point
+/// `renamed-pre-dirsync`; the rename is durable only after `sync_dir`.
+pub(super) fn rename_into_place(
+    lock: &PathLock,
+    temp: &Path,
+    abs: &Path,
+    hash: String,
+) -> Result<(), String> {
+    debug_assert!(
+        lock.covers(abs),
+        "{} is renamed into outside its path lock",
+        abs.display()
+    );
     // Register BEFORE the rename: the suppression entry must exist by the
     // time the OS can deliver a change event for the destination path. With
     // the content hash (M21.6), so the echo is recognized by bytes, not by
     // clock.
-    super::watcher::note_own_write_hashed(abs, crate::ledger::sha256_hex(content.as_bytes()));
+    super::watcher::note_own_write_hashed(abs, hash);
     std::fs::rename(temp, abs).map_err(|e| e.to_string())?;
     crate::crash::crash_point("renamed-pre-dirsync");
-    // The rename is durable only once the directory entry itself is on disk.
-    std::fs::File::open(parent)
+    Ok(())
+}
+
+/// Make the renames into `dir` durable: the directory entry itself fsynced.
+pub(super) fn sync_dir(dir: &Path) -> Result<(), String> {
+    std::fs::File::open(dir)
         .and_then(|dir| dir.sync_all())
         .map_err(|e| e.to_string())
 }
@@ -163,8 +218,10 @@ fn write_via_temp(abs: &Path, parent: &Path, temp: &Path, content: &str) -> Resu
 /// `write_file` writes: every folder but the dot-folders, plus the comment
 /// sidecars under `.comments/` (M70.2) and the Trash's manifests under
 /// `.trash/` (M60.8). Best-effort janitor run once per
-/// `scan_vault` command; temps younger than [`ORPHAN_TEMP_MAX_AGE`] are
-/// spared — they may belong to a write in flight. Records nothing (see
+/// `scan_vault` command. A single write's temp younger than
+/// [`ORPHAN_TEMP_MAX_AGE`] may belong to a write in flight, and a batch's
+/// younger than [`ORPHAN_BATCH_TEMP_MAX_AGE`] to a batch whose journal row
+/// still names it (M60.6), so both are spared. Records nothing (see
 /// [`UNRECORDED`]).
 pub fn clean_orphan_temps(vault: &Path, _by: &WriteReceipt<System>) {
     let walker = walkdir::WalkDir::new(vault)
@@ -179,16 +236,23 @@ pub fn clean_orphan_temps(vault: &Path, _by: &WriteReceipt<System>) {
         })
         .filter_map(Result::ok);
     for item in walker {
-        if !item.file_type().is_file() || !item.file_name().to_string_lossy().contains(TEMP_MARKER)
-        {
+        if !item.file_type().is_file() {
             continue;
         }
+        let name = item.file_name().to_string_lossy();
+        let max_age = if name.contains(TEMP_MARKER) {
+            ORPHAN_TEMP_MAX_AGE
+        } else if name.contains(BATCH_TEMP_MARKER) {
+            ORPHAN_BATCH_TEMP_MAX_AGE
+        } else {
+            continue;
+        };
         let stale = item
             .metadata()
             .ok()
             .and_then(|m| m.modified().ok())
             .and_then(|t| std::time::SystemTime::now().duration_since(t).ok())
-            .is_some_and(|age| age >= ORPHAN_TEMP_MAX_AGE);
+            .is_some_and(|age| age >= max_age);
         if stale {
             let _ = std::fs::remove_file(item.path());
         }
@@ -524,6 +588,29 @@ pub(crate) fn rewrite_note_in<D: Door>(
     next: impl FnOnce(&str) -> Result<String, String>,
     by: &WriteReceipt<D>,
 ) -> Result<Landing, NoteWriteError> {
+    rewrite_note_outcome(vault, rel, extensions, expect, mode, false, next, by)
+        .map(|(landing, _)| landing)
+}
+
+/// `rewrite_note_in`, and whether the bytes changed. With `keep_identical`
+/// false, as every other writer asks, identical bytes are written and
+/// recorded like any others; `set_note_fields` (M60.4) passes true, so a
+/// plan that changes nothing writes nothing: no temp file, no rename, no
+/// `vault_writes` row.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the funnel's arguments, plus the one flag set_note_fields needs"
+)]
+fn rewrite_note_outcome<D: Door>(
+    vault: &Path,
+    rel: &str,
+    extensions: &[&str],
+    expect: Option<&str>,
+    mode: WriteMode,
+    keep_identical: bool,
+    next: impl FnOnce(&str) -> Result<String, String>,
+    by: &WriteReceipt<D>,
+) -> Result<(Landing, bool), NoteWriteError> {
     let target = note_join(vault, rel, extensions)?;
     let lock = lock_paths(vault, &[rel])?;
     let current = std::fs::read_to_string(&target).map_err(|e| format!("{rel}: {e}"))?;
@@ -538,15 +625,19 @@ pub(crate) fn rewrite_note_in<D: Door>(
         }
     }
     let content = next(&current)?;
-    if mode == WriteMode::Commit {
+    let changed = content != current;
+    if mode == WriteMode::Commit && (changed || !keep_identical) {
         write_file(&lock, &target, &content)?;
         shadow_write(vault, rel, &content, "vault.write", by);
     }
-    Ok(Landing {
-        path: rel.to_string(),
-        before: Some(before),
-        after: crate::ledger::sha256_hex(content.as_bytes()),
-    })
+    Ok((
+        Landing {
+            path: rel.to_string(),
+            before: Some(before),
+            after: crate::ledger::sha256_hex(content.as_bytes()),
+        },
+        changed,
+    ))
 }
 
 /// The markdown note a Restore may write (M58.4): `note_join` with the
@@ -734,7 +825,8 @@ fn slashed(path: &Path) -> String {
 /// Every note writer below resolves its target here before it reads a byte —
 /// the ones that go through `rewrite_note` (`save_note`, `update_frontmatter`,
 /// `set_note_title`, and the agent's `patch_note_checked`,
-/// `append_note_checked` and `edit_note`), `create_note`, `write_source` and
+/// `append_note_checked`, `edit_note` and `set_note_fields`), `create_note`,
+/// `write_source` and
 /// `write_text_file` — so the agent's MCP doors and the human IPC commands share one boundary,
 /// and a refused file is never opened, let alone rewritten. It lives in the
 /// mechanism because the grant cannot hold it: panel turns, and every Agent
@@ -802,8 +894,8 @@ fn judge_note(vault: &Path, rel: &str, extensions: &[&str]) -> Result<Resolved, 
 
 /// Why a markdown note door refuses `rel` as no note it may touch, in
 /// `note_join`'s words, or `None` (M54.10): the check the agent's
-/// `update_frontmatter`, `append_to_note` and `edit_note` make before
-/// dispatch.
+/// `update_frontmatter`, `set_fields`, `append_to_note` and `edit_note` make
+/// before dispatch.
 ///
 /// `None` as well where those doors answer in other words: a `.mmd`, which
 /// each refuses as raw diagram source before it judges a note, an empty
@@ -923,8 +1015,8 @@ fn json_to_yaml(value: &serde_json::Value) -> serde_yaml::Value {
 /// Record one committed write's hash in runtime.db's `vault_writes` (M21.8;
 /// moved out of the epistemic ledger in M49.10), stamped with who made it,
 /// in which run, and who approved it, from `by` (M58.1) — see
-/// `runtime::vault_writes`. Best-effort and invisible: it observes writes,
-/// it never gates them.
+/// `runtime::vault_writes`. Best-effort: it observes writes, it never gates
+/// them, and History reads the rows back (`runtime::activity`, M64.2).
 fn shadow_write<D: Door>(vault: &Path, rel: &str, content: &str, kind: &str, by: &WriteReceipt<D>) {
     // Operational, not epistemic (M49.10, Q4): runtime.db, not the ledger.
     let hash = crate::ledger::sha256_hex(content.as_bytes());
@@ -1085,7 +1177,7 @@ fn refuse_mmd_patch(rel: &str) -> Result<(), String> {
 /// `---` fence sitting in that body arrives at byte zero and becomes the
 /// frontmatter the scanner reads (PR #17 security review). The agent's check
 /// judges these bytes, under the write's lock (`patch_note_checked`).
-fn patch_bytes(
+pub(super) fn patch_bytes(
     rel: &str,
     current: &str,
     patch: &serde_json::Map<String, serde_json::Value>,
@@ -1192,6 +1284,73 @@ fn patch_in<D: Door>(
     )
 }
 
+/// A note's frontmatter as JSON, read from `current` the way `patch_bytes`
+/// reads it: no block is an empty mapping, and a malformed block is refused
+/// in `update_frontmatter`'s words (M60.4: what `set_fields` plans on).
+pub(crate) fn frontmatter_json(
+    rel: &str,
+    current: &str,
+) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    let (block, _) = parse::split_frontmatter(current);
+    let mapping = match block {
+        Some(b) => parse::parse_frontmatter(b)
+            .map_err(|e| format!("{rel}: cannot patch malformed frontmatter: {e}"))?,
+        None => serde_yaml::Mapping::new(),
+    };
+    Ok(mapping
+        .iter()
+        .map(|(key, value)| (parse::yaml_key_string(key), parse::yaml_to_json(value)))
+        .collect())
+}
+
+/// What `set_note_fields` landed, or in a preview would: where, and whether
+/// the bytes changed. A plan that changes nothing writes nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldsWritten {
+    pub landing: Landing,
+    pub changed: bool,
+}
+
+/// An agent's schema-checked field write (M60.4, `set_fields`), on the one
+/// note funnel: `note_join` refuses before the lock (a `.mmd` first, as
+/// `patch_bytes` has no frontmatter to patch there), the lock is taken, the
+/// file read, `expect` compared (M55.3), and `plan` turns the bytes under
+/// the lock into a frontmatter patch, so list deltas compose with any write
+/// that landed before. `patch_bytes` applies it, `check` judges
+/// `(before, after)` (the governed check), and the bytes land unless `mode`
+/// is a preview. An empty patch, or one that leaves the bytes as they were,
+/// writes and records nothing (`changed` false).
+pub fn set_note_fields(
+    vault: &Path,
+    rel: &str,
+    plan: impl FnOnce(&str) -> Result<serde_json::Map<String, serde_json::Value>, String>,
+    expect: Option<&str>,
+    check: impl FnOnce(&str, &str) -> Result<(), String>,
+    mode: WriteMode,
+    by: &WriteReceipt<Agent>,
+) -> Result<FieldsWritten, NoteWriteError> {
+    refuse_mmd_patch(rel)?;
+    let (landing, changed) = rewrite_note_outcome(
+        vault,
+        rel,
+        MARKDOWN,
+        expect,
+        mode,
+        true,
+        |current| {
+            let patch = plan(current)?;
+            if patch.is_empty() {
+                return Ok(current.to_string());
+            }
+            let after = patch_bytes(rel, current, &patch)?;
+            check(current, &after)?;
+            Ok(after)
+        },
+        by,
+    )?;
+    Ok(FieldsWritten { landing, changed })
+}
+
 /// The verify path (M23.4): the stamp is a field revision plus a
 /// `belief.attested` pinned to the reviewed revision event and its
 /// projection hash, and the file regenerates as the projection. Refuses
@@ -1233,7 +1392,7 @@ pub fn save_note(
 /// The bytes `save_note` turns `current` into for a new body: the existing
 /// frontmatter block with the body composed under it. A note that has NO
 /// block has its body as the whole file. A `.mmd` is the body itself.
-fn compose_saved(rel: &str, current: &str, body: &str) -> String {
+pub(super) fn compose_saved(rel: &str, current: &str, body: &str) -> String {
     if rel.ends_with(".mmd") {
         return body.to_string();
     }
@@ -1607,8 +1766,9 @@ pub fn compose_new_note(
     })
 }
 
-/// Create `<folder>/<slug>.md` (deduping to `-2`, `-3`, …) with the given
-/// frontmatter and body; empty body gets a humanized `# Title` line.
+/// Create `<folder>/<slug>.md` (deduping to `-2`, `-3`, …, unless
+/// `IfExists::Refuse` refuses, which only `create_note_if` passes) with the
+/// given frontmatter and body; empty body gets a humanized `# Title` line.
 /// Returns the vault-relative path, recorded as a `vault.create` under a
 /// person's or a run's receipt (M58.1).
 pub fn create_note<D: CreatesNotes>(
@@ -1642,23 +1802,110 @@ pub fn create_note_in<D: CreatesNotes>(
     mode: WriteMode,
     by: &WriteReceipt<D>,
 ) -> Result<Landing, String> {
-    resolve(vault, folder)?; // folder must stay inside the vault
+    create_note_if(
+        vault,
+        folder,
+        slug,
+        frontmatter,
+        body,
+        mode,
+        IfExists::Suffix,
+        by,
+    )
+    .map_err(String::from)
+}
+
+/// What a create does when `<folder>/<slug>.md` is already taken (M61.6b):
+/// number a copy beside it (`-2`, `-3`, …), as every create always has, or
+/// write nothing and name the note that holds the name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IfExists {
+    Suffix,
+    Refuse,
+}
+
+/// Why a create wrote nothing (M61.6b): told to refuse a taken name, it
+/// found `<folder>/<slug>.md` under its lock (`Exists`, naming that path),
+/// or it was refused in words. Its own type, not `NoteWriteError`, because
+/// a rewrite never meets a taken name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CreateNoteError {
+    Exists(String),
+    Refused(String),
+}
+
+impl From<String> for CreateNoteError {
+    fn from(message: String) -> Self {
+        CreateNoteError::Refused(message)
+    }
+}
+
+impl From<CreateNoteError> for String {
+    /// The words a caller that does not answer `Exists` itself reads.
+    fn from(error: CreateNoteError) -> Self {
+        match error {
+            CreateNoteError::Refused(message) => message,
+            CreateNoteError::Exists(path) => {
+                format!("{path} already exists, so nothing was written")
+            }
+        }
+    }
+}
+
+/// `create_note_in` with a choice for a taken name (M61.6b). `Suffix`
+/// numbers a copy exactly as `create_note` does. `Refuse` judges only
+/// `<folder>/<slug>.md`, takes its path lock and asks the disk again under
+/// it, so a twin whose name differs only in case counts where the disk folds
+/// case; a taken name is `CreateNoteError::Exists`, with no write, no temp
+/// file and no `vault_writes` row. A preview stops before the write either
+/// way.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "create_note_in's seven plus the one choice it adds; a struct would only rename them"
+)]
+pub fn create_note_if<D: CreatesNotes>(
+    vault: &Path,
+    folder: &str,
+    slug: &str,
+    frontmatter: &serde_json::Map<String, serde_json::Value>,
+    body: &str,
+    mode: WriteMode,
+    if_exists: IfExists,
+    by: &WriteReceipt<D>,
+) -> Result<Landing, CreateNoteError> {
+    resolve(vault, folder).map_err(String::from)?; // folder must stay inside the vault
     safe_component("slug", slug)?;
     let content = compose_new_note(frontmatter, slug, body)?;
-    // Judged on each file it may actually write (PLATFORM-API-1), and picked
-    // under that file's lock, so two creates of one slug land in two files.
-    let path = claim_free_name(
-        vault,
-        note_candidates(folder, slug),
-        |rel| Ok(judge_note(vault, rel, MARKDOWN)?.joined),
-        |lock, rel, target| {
-            if mode == WriteMode::Commit {
-                write_file(lock, target, &content)?;
-                shadow_write(vault, rel, &content, "vault.create", by);
+    let land = |lock: &PathLock, rel: &str, target: &Path| -> Result<(), String> {
+        if mode == WriteMode::Commit {
+            write_file(lock, target, &content)?;
+            shadow_write(vault, rel, &content, "vault.create", by);
+        }
+        Ok(())
+    };
+    let path = match if_exists {
+        // Judged on each file it may actually write (PLATFORM-API-1), and
+        // picked under that file's lock, so two creates of one slug land in
+        // two files.
+        IfExists::Suffix => claim_free_name(
+            vault,
+            note_candidates(folder, slug),
+            |rel| Ok(judge_note(vault, rel, MARKDOWN)?.joined),
+            land,
+        )?,
+        IfExists::Refuse => {
+            let rel = note_in(folder, slug);
+            let target = judge_note(vault, &rel, MARKDOWN)
+                .map_err(String::from)?
+                .joined;
+            let lock = lock_paths(vault, &[&rel])?;
+            if target.exists() {
+                return Err(CreateNoteError::Exists(rel));
             }
-            Ok(())
-        },
-    )?;
+            land(&lock, &rel, &target)?;
+            rel
+        }
+    };
     Ok(Landing {
         path,
         before: None,
@@ -1695,7 +1942,8 @@ pub(crate) fn new_note_refusal(vault: &Path, folder: &str, slug: &str) -> Option
 
 /// Create or REPLACE a knowledge concept at an exact path (M6).
 ///
-/// Unlike `create_note` this does not uniquify the filename: a concept has a
+/// Unlike `create_note`, which numbers a copy beside a taken name unless told
+/// to refuse, this never picks another filename: a concept has a
 /// stable identity (its path is its OKF concept ID), so an agent revising one
 /// must overwrite it rather than leave `churn-2.md` beside `churn.md`.
 /// Intermediate directories are created — the agent organizes the bundle.
@@ -2139,7 +2387,9 @@ pub fn rename_note(
 /// deleted outside Cerebro would otherwise inherit its threads); the sidecar
 /// moves; the page moves, and if that fails the sidecar moves back. A refused
 /// or failed rename leaves every file where it was. The page's move and its
-/// sidecar's carry are each recorded under `by`.
+/// sidecar's carry are each recorded under `by`. Either sidecar path reached
+/// through a link (`comments::sidecar_join`) skips the orphan step and the
+/// carry, logged, and the page still moves.
 pub(crate) fn rename_note_with(
     vault: &Path,
     from: &str,
@@ -2175,9 +2425,21 @@ pub(crate) fn rename_note_with(
     // before any sidecar moves.
     std::fs::symlink_metadata(&src).map_err(|e| format!("{from}: {e}"))?;
     let mut moved = None;
-    if let Some((side_from, side_to)) = &carried {
-        let old_side = safe_join(vault, side_from)?;
-        let new_side = safe_join(vault, side_to)?;
+    // A sidecar reached through a link is neither carried nor cleared: the
+    // link could point at `.git/` or `.cerebro/`, and both steps act on
+    // where the path lands.
+    let sides = carried.as_ref().and_then(|(side_from, side_to)| {
+        let judged = super::comments::sidecar_join(vault, side_from)
+            .and_then(|old| super::comments::sidecar_join(vault, side_to).map(|new| (old, new)));
+        match judged {
+            Ok((old_side, new_side)) => Some((old_side, new_side, side_to)),
+            Err(e) => {
+                log::warn!("comments: the comments of {from} stay where they are: {e}");
+                None
+            }
+        }
+    });
+    if let Some((old_side, new_side, side_to)) = sides {
         if new_side.exists() {
             log::warn!("comments: an orphan sidecar at {side_to} goes to the Trash first");
             remove(&new_side).map_err(|e| {
@@ -2356,10 +2618,10 @@ mod tests {
             .collect()
     }
 
-    // M58.1: every writer here and in the Trash (M60.8) takes a receipt, and
-    // either records a row under it or is declared in UNRECORDED with its
-    // reason. A writer added with a receipt and left off this table fails
-    // here.
+    // M58.1: every writer here, in the Trash (M60.8) and in the batch writer
+    // (M60.6) takes a receipt, and either records a row under it or is
+    // declared in UNRECORDED with its reason. A writer added with a receipt
+    // and left off this table fails here.
     #[test]
     fn every_writer_records_its_stamp_or_is_declared() {
         const WRITERS: &[(&str, &str)] = &[
@@ -2375,6 +2637,14 @@ mod tests {
             ("patch_note_checked", "vault.write"),
             ("patch_note_in", "vault.write"),
             ("patch_in", "vault.write"),
+            (
+                "rewrite_note_outcome",
+                "vault.write, or nothing for identical bytes",
+            ),
+            (
+                "set_note_fields",
+                "vault.write, or nothing for identical bytes",
+            ),
             ("verify_frontmatter", "the ledger's projection"),
             ("save_note", "vault.write"),
             ("append_note_checked", "vault.write"),
@@ -2385,6 +2655,7 @@ mod tests {
             ("import_attachment", "vault.create"),
             ("create_note", "vault.create"),
             ("create_note_in", "vault.create"),
+            ("create_note_if", "vault.create"),
             ("write_concept", "the ledger's projections"),
             ("write_source", "vault.write or vault.create"),
             ("append_knowledge_log", "the ledger's projection"),
@@ -2405,9 +2676,23 @@ mod tests {
             ("restore_from_trash", "vault.create"),
             ("purge_expired", "unrecorded"),
             ("purge_expired_to_os_trash", "purge_expired's"),
+            (
+                "apply_batch",
+                "vault.write, vault.create, and the Trash moves'",
+            ),
+            (
+                "write_all",
+                "the Trash moves' own; apply_batch records the rest",
+            ),
+            ("roll_back", "vault.write, and the Trash moves'"),
+            ("recover", "roll_back's, stamped system:batch-recovery"),
         ];
         let mut taking: Vec<String> = Vec::new();
-        for source in [include_str!("write.rs"), include_str!("trash.rs")] {
+        for source in [
+            include_str!("write.rs"),
+            include_str!("trash.rs"),
+            include_str!("batch.rs"),
+        ] {
             let production = &source[..source.find("#[cfg(test)]\nmod tests").unwrap()];
             let mut from = 0;
             while let Some(i) = production[from..].find("&WriteReceipt<") {
@@ -2676,6 +2961,186 @@ mod tests {
         let (body, read_hash) = read_note_hashed(&vault, "items/atl-1.md").unwrap();
         assert_eq!(read_hash, hash);
         assert_eq!(body, read_note(&vault, "items/atl-1.md").unwrap());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // --- set_note_fields (M60.4) --------------------------------------------
+
+    #[test]
+    fn set_note_fields_changes_only_the_planned_keys() {
+        let vault = vault_with_note("wfm-fields-planned");
+        let written = set_note_fields(
+            &vault,
+            "items/atl-1.md",
+            |_| {
+                Ok(patch(&[
+                    ("status", serde_json::json!("in-progress")),
+                    ("tags", serde_json::json!(["a"])),
+                ]))
+            },
+            None,
+            |_, _| Ok(()),
+            WriteMode::Commit,
+            &agent(),
+        )
+        .unwrap();
+        let landed = read(&vault, "items/atl-1.md");
+        assert_eq!(
+            landed,
+            "---\ntype: Work item\nkey: ATL-1\nstatus: in-progress\ncustom_field: kept\ntags:\n- a\n---\n\n# Ship the scanner\n\nBody stays.\n"
+        );
+        assert!(written.changed);
+        assert_eq!(
+            written.landing.after,
+            crate::ledger::sha256_hex(landed.as_bytes())
+        );
+        assert_eq!(written.landing.before, hashed(NOTE));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // The plan reads the bytes the lock holds, so a write that landed first
+    // is what it builds on (a list delta composes with it).
+    #[test]
+    fn set_note_fields_plans_against_the_bytes_under_the_lock() {
+        let vault = vault_with_note("wfm-fields-locked");
+        update_frontmatter(
+            &vault,
+            "items/atl-1.md",
+            &patch(&[("status", serde_json::json!("done"))]),
+            &human(),
+        )
+        .unwrap();
+        let mut seen = None;
+        set_note_fields(
+            &vault,
+            "items/atl-1.md",
+            |current| {
+                seen = frontmatter_json("items/atl-1.md", current)
+                    .unwrap()
+                    .get("status")
+                    .cloned();
+                Ok(patch(&[("owner", serde_json::json!(["[[ana]]"]))]))
+            },
+            None,
+            |_, _| Ok(()),
+            WriteMode::Commit,
+            &agent(),
+        )
+        .unwrap();
+        assert_eq!(seen, Some(serde_json::json!("done")));
+        assert!(read(&vault, "items/atl-1.md").contains("status: done\n"));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_stale_expectation_on_set_note_fields_writes_nothing() {
+        let _recording = Recording::new("wfm-fields-stale-config");
+        let vault = vault_with_note("wfm-fields-stale");
+        let mut planned = false;
+        let outcome = set_note_fields(
+            &vault,
+            "items/atl-1.md",
+            |_| {
+                planned = true;
+                Ok(patch(&[("status", serde_json::json!("done"))]))
+            },
+            Some(&"0".repeat(64)),
+            |_, _| Ok(()),
+            WriteMode::Commit,
+            &agent(),
+        );
+        assert!(matches!(outcome, Err(NoteWriteError::Stale(_))));
+        assert!(!planned, "a stale expectation refuses before the plan");
+        assert_eq!(read(&vault, "items/atl-1.md"), NOTE);
+        assert_eq!(recorded(&vault), Vec::<Recorded>::new());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_preview_of_set_note_fields_writes_nothing() {
+        let _recording = Recording::new("wfm-fields-preview-config");
+        let vault = vault_with_note("wfm-fields-preview");
+        let previewed = set_note_fields(
+            &vault,
+            "items/atl-1.md",
+            |_| Ok(patch(&[("status", serde_json::json!("done"))])),
+            None,
+            |_, _| Ok(()),
+            WriteMode::Preview,
+            &agent(),
+        )
+        .unwrap();
+        assert!(previewed.changed);
+        assert_ne!(previewed.landing.after, hashed(NOTE).unwrap());
+        assert_eq!(read(&vault, "items/atl-1.md"), NOTE);
+        assert_eq!(recorded(&vault), Vec::<Recorded>::new());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_unchanged_plan_writes_and_records_nothing() {
+        let _recording = Recording::new("wfm-fields-unchanged-config");
+        let vault = vault_with_note("wfm-fields-unchanged");
+        let mtime = || {
+            std::fs::metadata(vault.join("items/atl-1.md"))
+                .unwrap()
+                .modified()
+                .unwrap()
+        };
+        let before = mtime();
+        for planned in [patch(&[]), patch(&[("status", serde_json::json!("todo"))])] {
+            let written = set_note_fields(
+                &vault,
+                "items/atl-1.md",
+                |_| Ok(planned),
+                None,
+                |_, _| Ok(()),
+                WriteMode::Commit,
+                &agent(),
+            )
+            .unwrap();
+            assert!(!written.changed);
+            assert_eq!(Some(written.landing.after), hashed(NOTE));
+        }
+        assert_eq!(read(&vault, "items/atl-1.md"), NOTE);
+        assert_eq!(mtime(), before);
+        assert_eq!(recorded(&vault), Vec::<Recorded>::new());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn set_note_fields_refuses_what_the_check_or_the_plan_refuses() {
+        let vault = vault_with_note("wfm-fields-refused");
+        let checked = set_note_fields(
+            &vault,
+            "items/atl-1.md",
+            |_| Ok(patch(&[("status", serde_json::json!("done"))])),
+            None,
+            |_, _| Err("governed".to_string()),
+            WriteMode::Commit,
+            &agent(),
+        );
+        assert_eq!(checked, Err(NoteWriteError::Refused("governed".into())));
+        let planned = set_note_fields(
+            &vault,
+            "items/atl-1.md",
+            |_| Err("schema".to_string()),
+            None,
+            |_, _| Ok(()),
+            WriteMode::Commit,
+            &agent(),
+        );
+        assert_eq!(planned, Err(NoteWriteError::Refused("schema".into())));
+        assert_eq!(read(&vault, "items/atl-1.md"), NOTE);
+        testutil::write(
+            &vault,
+            "items/bad.md",
+            "---\nkey: [unclosed\n---\n\n# Bad\n",
+        );
+        let malformed = frontmatter_json("items/bad.md", &read(&vault, "items/bad.md"));
+        assert!(malformed
+            .unwrap_err()
+            .starts_with("items/bad.md: cannot patch malformed frontmatter:"));
         let _ = std::fs::remove_dir_all(&vault);
     }
 
@@ -3221,6 +3686,169 @@ mod tests {
         let _ = std::fs::remove_dir_all(&vault);
     }
 
+    // M61.6b: told to refuse, a create over a taken slug writes nothing at
+    // all, and says which note holds the name.
+    #[test]
+    fn create_note_refuses_a_taken_slug_when_asked() {
+        let _recording = Recording::new("wfm-refuse-config");
+        let vault = testutil::temp_vault("wfm-refuse");
+        testutil::write(&vault, "items/new-item.md", "# Taken\n");
+        let modified = || {
+            std::fs::metadata(vault.join("items/new-item.md"))
+                .unwrap()
+                .modified()
+                .unwrap()
+        };
+        let mtime = modified();
+        for mode in [WriteMode::Commit, WriteMode::Preview] {
+            let refused = create_note_if(
+                &vault,
+                "items",
+                "new-item",
+                &patch(&[]),
+                "# New item\n",
+                mode,
+                IfExists::Refuse,
+                &agent(),
+            );
+            assert_eq!(
+                refused,
+                Err(CreateNoteError::Exists("items/new-item.md".into())),
+                "{mode:?}"
+            );
+        }
+        assert_eq!(read(&vault, "items/new-item.md"), "# Taken\n");
+        assert_eq!(modified(), mtime, "the file was not rewritten");
+        assert!(!vault.join("items/new-item-2.md").exists(), "no copy");
+        assert!(temp_files(&vault).is_empty(), "no temp file");
+        assert_eq!(
+            recorded(&vault),
+            Vec::<Recorded>::new(),
+            "no vault_writes row"
+        );
+        assert_eq!(
+            String::from(CreateNoteError::Exists("items/new-item.md".into())),
+            "items/new-item.md already exists, so nothing was written"
+        );
+        // A free name lands as the plain create would.
+        let landed = create_note_if(
+            &vault,
+            "items",
+            "other",
+            &patch(&[]),
+            "# Other\n",
+            WriteMode::Commit,
+            IfExists::Refuse,
+            &agent(),
+        )
+        .unwrap();
+        assert_eq!(landed.path, "items/other.md");
+        assert_eq!(read(&vault, "items/other.md"), "# Other\n");
+        assert_eq!(recorded(&vault).len(), 1);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn create_note_still_numbers_a_copy_by_default() {
+        let vault = testutil::temp_vault("wfm-suffix-default");
+        testutil::write(&vault, "items/new-item.md", "# Taken\n");
+        let numbered = create_note_if(
+            &vault,
+            "items",
+            "new-item",
+            &patch(&[]),
+            "# New item\n",
+            WriteMode::Commit,
+            IfExists::Suffix,
+            &human(),
+        )
+        .unwrap();
+        assert_eq!(numbered.path, "items/new-item-2.md");
+        let plain = create_note(
+            &vault,
+            "items",
+            "new-item",
+            &patch(&[]),
+            "# New item\n",
+            &human(),
+        )
+        .unwrap();
+        assert_eq!(plain, "items/new-item-3.md");
+        assert_eq!(read(&vault, "items/new-item.md"), "# Taken\n");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // Two refusing creates of one free slug race: the name is asked again
+    // under its lock, so exactly one lands and the other is refused.
+    #[test]
+    fn a_refusing_create_checks_under_the_lock() {
+        let vault = testutil::temp_vault("wfm-refuse-race");
+        std::fs::create_dir_all(vault.join("items")).unwrap();
+        let start = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let racers: Vec<_> = (0..2)
+            .map(|n| {
+                let vault = vault.clone();
+                let start = start.clone();
+                std::thread::spawn(move || {
+                    start.wait();
+                    create_note_if(
+                        &vault,
+                        "items",
+                        "raced",
+                        &patch(&[]),
+                        &format!("# Racer {n}\n"),
+                        WriteMode::Commit,
+                        IfExists::Refuse,
+                        &human(),
+                    )
+                })
+            })
+            .collect();
+        let outcomes: Vec<_> = racers.into_iter().map(|r| r.join().unwrap()).collect();
+        let landed = outcomes.iter().filter(|o| o.is_ok()).count();
+        assert_eq!(landed, 1, "{outcomes:?}");
+        assert!(outcomes
+            .iter()
+            .any(|o| o == &Err(CreateNoteError::Exists("items/raced.md".into()))));
+        let files: Vec<_> = std::fs::read_dir(vault.join("items"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(files, vec!["raced.md".to_string()]);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // Where the disk folds case (APFS and HFS+ by default), `Raced.md` holds
+    // the name `raced` too; where it does not, the two are different notes.
+    #[test]
+    fn refuse_matches_a_case_folded_name_where_the_disk_folds_case() {
+        let vault = testutil::temp_vault("wfm-refuse-case");
+        testutil::write(&vault, "items/Taken.md", "# Taken\n");
+        let folds = vault.join("items/taken.md").exists();
+        let outcome = create_note_if(
+            &vault,
+            "items",
+            "taken",
+            &patch(&[]),
+            "# Taken again\n",
+            WriteMode::Commit,
+            IfExists::Refuse,
+            &human(),
+        );
+        if folds {
+            assert_eq!(
+                outcome,
+                Err(CreateNoteError::Exists("items/taken.md".into()))
+            );
+            assert_eq!(read(&vault, "items/Taken.md"), "# Taken\n");
+        } else {
+            assert_eq!(outcome.unwrap().path, "items/taken.md");
+            assert_eq!(read(&vault, "items/Taken.md"), "# Taken\n");
+        }
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
     #[test]
     fn set_note_title_replaces_existing_h1() {
         let vault = vault_with_note("wfm-title");
@@ -3677,6 +4305,8 @@ mod tests {
     // patch would corrupt — and a refusal leaves every byte where it was.
     #[test]
     fn note_targets_replay_the_shared_cases() {
+        // The batch doors (M60.6) journal what they write.
+        let _recording = Recording::new("wfm-note-targets-config");
         let file: serde_json::Value =
             serde_json::from_str(NOTE_TARGETS).expect("note-targets.json parses");
         let seed = file["seed"].as_str().expect("a seed");
@@ -3690,7 +4320,10 @@ mod tests {
                     | "update_frontmatter"
                     | "set_note_title"
                     | "edit_note"
+                    | "set_fields"
                     | "restore_version"
+                    | "batch_patch"
+                    | "batch_body"
             );
             if edits && case["seed"] != serde_json::json!(false) {
                 testutil::write(&vault, path, seed);
@@ -3734,6 +4367,18 @@ mod tests {
                 )
                 .map(|_| path.to_string())
                 .map_err(String::from),
+                // M60.4: the agent's field write, planning one key.
+                "set_fields" => set_note_fields(
+                    &vault,
+                    path,
+                    |_| Ok(patch(&[("status", serde_json::json!("done"))])),
+                    None,
+                    |_, _| Ok(()),
+                    WriteMode::Commit,
+                    &agent(),
+                )
+                .map(|_| path.to_string())
+                .map_err(String::from),
                 // M58.4: the command's own door, on a vault that is not a
                 // repository: every case is a target it refuses first.
                 "restore_version" => {
@@ -3748,6 +4393,26 @@ mod tests {
                         None,
                     )
                     .map(|_| path.to_string())
+                }
+                // M60.6: one op of a batch, through the batch writer.
+                "batch_patch" | "batch_body" | "batch_create" => {
+                    let op = match door {
+                        "batch_patch" => {
+                            serde_json::json!({ "op": "patch", "path": path, "set": { "status": "done" } })
+                        }
+                        "batch_body" => {
+                            serde_json::json!({ "op": "body", "path": path, "body": "\n# Landed\n" })
+                        }
+                        _ => {
+                            serde_json::json!({ "op": "create", "path": path, "content": "# Landed\n" })
+                        }
+                    };
+                    super::super::batch::apply_batch(&vault, &[op], &human())
+                        .map(|_| path.to_string())
+                        .map_err(|error| match error {
+                            super::super::batch::BatchError::Refused(message) => message,
+                            super::super::batch::BatchError::Stale(stale) => stale.path,
+                        })
                 }
                 other => panic!("no door called {other}"),
             };
@@ -5043,6 +5708,58 @@ mod tests {
         let _ = std::fs::remove_dir_all(&vault);
     }
 
+    #[test]
+    fn a_comments_folder_linked_to_git_neither_carries_nor_clears() {
+        // `.comments -> .git`: a folder renamed to `objects` would send
+        // `.git/objects` to the OS Trash, and a folder named `hooks` would
+        // carry `.git/hooks` away with it.
+        let vault = vault_with_note("wfm-carry-git-link");
+        testutil::write(&vault, ".git/objects/ab/cd", "blob");
+        testutil::write(&vault, ".git/hooks/pre-push", "#!/bin/sh\n");
+        testutil::write(&vault, "hooks/a.md", "# A\n");
+        std::os::unix::fs::symlink(vault.join(".git"), vault.join(".comments")).unwrap();
+        let (removed, remove) = recording_remove();
+        rename_note_with(&vault, "items", "objects", remove, &human()).unwrap();
+        assert!(
+            removed.lock().unwrap().is_empty(),
+            "nothing went to the Trash"
+        );
+        assert_eq!(read(&vault, ".git/objects/ab/cd"), "blob");
+        assert_eq!(
+            read(&vault, "objects/atl-1.md"),
+            NOTE,
+            "the folder still moves"
+        );
+        let (removed, remove) = recording_remove();
+        rename_note_with(&vault, "hooks", "moved", remove, &human()).unwrap();
+        assert!(removed.lock().unwrap().is_empty());
+        assert_eq!(read(&vault, ".git/hooks/pre-push"), "#!/bin/sh\n");
+        assert!(!vault.join(".git/moved").exists());
+        assert_eq!(read(&vault, "moved/a.md"), "# A\n");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_comments_folder_linked_to_the_ledger_leaves_it_in_place() {
+        let vault = vault_with_note("wfm-carry-cerebro-link");
+        testutil::write(&vault, ".cerebro/ledger/0001.ndjson", "{}\n");
+        testutil::write(&vault, "ledger/a.md", "# A\n");
+        std::os::unix::fs::symlink(vault.join(".cerebro"), vault.join(".comments")).unwrap();
+        let (removed, remove) = recording_remove();
+        rename_note_with(&vault, "ledger", "kept", remove, &human()).unwrap();
+        assert!(removed.lock().unwrap().is_empty());
+        let (removed, remove) = recording_remove();
+        rename_note_with(&vault, "items", "ledger", remove, &human()).unwrap();
+        assert!(
+            removed.lock().unwrap().is_empty(),
+            "the ledger is no orphan"
+        );
+        assert_eq!(read(&vault, ".cerebro/ledger/0001.ndjson"), "{}\n");
+        assert!(!vault.join(".cerebro/kept").exists());
+        assert_eq!(read(&vault, "ledger/atl-1.md"), NOTE);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
     /// The one stamp dir in `vault`'s Trash.
     fn trash_stamp(vault: &Path) -> String {
         let stamps: Vec<String> = std::fs::read_dir(vault.join(super::super::trash::TRASH_DIR))
@@ -5398,6 +6115,37 @@ mod tests {
             "a fresh temp may belong to an in-flight write"
         );
         assert!(vault.join("items/keep.md").exists());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M60.6: a batch's temps live as long as the batch, which its journal
+    // guards, so the janitor spares one younger than a day...
+    #[test]
+    fn a_fresh_batch_temp_survives_the_janitor() {
+        let vault = testutil::temp_vault("wfm-batch-temp-fresh");
+        let temp = vault.join(format!("items/.a.md{BATCH_TEMP_MARKER}00000000deadbeef"));
+        testutil::write(&vault, "items/a.md", "# A\n");
+        std::fs::write(&temp, "a staged page").unwrap();
+        backdate(&temp, 120);
+        clean_orphan_temps(&vault, &janitor());
+        assert!(
+            temp.exists(),
+            "a batch temp outlives a single write's guard"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // ...and reaps one a day old, which both the journal and recovery missed.
+    #[test]
+    fn a_day_old_batch_temp_is_reaped() {
+        let vault = testutil::temp_vault("wfm-batch-temp-old");
+        let temp = vault.join(format!("items/.a.md{BATCH_TEMP_MARKER}00000000feedface"));
+        testutil::write(&vault, "items/a.md", "# A\n");
+        std::fs::write(&temp, "a staged page").unwrap();
+        backdate(&temp, 24 * 60 * 60 + 60);
+        clean_orphan_temps(&vault, &janitor());
+        assert!(!temp.exists());
+        assert!(vault.join("items/a.md").exists());
         let _ = std::fs::remove_dir_all(&vault);
     }
 

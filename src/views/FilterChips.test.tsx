@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ColumnDef } from '@/engine/columns';
 import type { FilterGroup, FilterRule } from '@/engine/types';
+import type { ViewProblem } from '@/engine/viewCheck';
 import { FilterChips, countRules } from './FilterChips';
 
 afterEach(cleanup);
@@ -363,5 +364,79 @@ describe('Escape unwinds one layer at a time', () => {
     escape();
     expect(screen.queryByRole('listbox')).toBeNull();
     expect(screen.queryByRole('dialog', { name: 'Edit filter' })).toBeTruthy();
+  });
+});
+
+describe('FilterChips marks a chip the view can’t apply (M60.2b)', () => {
+  const ghost: FilterGroup = {
+    all: [
+      { field: 'ghost_field', op: 'is_not_empty' },
+      { field: 'due', op: 'before', value: '2026-09-01' },
+      { any: [{ field: 'status', op: 'equals', value: 'wip' }] },
+    ],
+  };
+  const problems: ViewProblem[] = [
+    { code: 'unknown_field', name: 'ghost_field', position: 'filter', filterPath: [0] },
+    {
+      code: 'unknown_option',
+      name: 'status',
+      position: 'filter',
+      filterPath: [2, 0],
+      option: 'wip',
+    },
+    // A dashboard widget's filter is not this bar's, whatever its path says.
+    { code: 'unknown_field', name: 'x', position: 'widgetFilter', filterPath: [1], widget: 'w' },
+  ];
+
+  const chip = (i: number) => screen.getByTestId(`filter-chip-${i}`).parentElement as HTMLElement;
+
+  it('carries data-problem on the problem chip and on no other', () => {
+    render(
+      <FilterChips
+        filters={ghost}
+        fields={fields}
+        problems={problems}
+        problemSource="Work item"
+        onChange={vi.fn()}
+      />,
+    );
+    expect(chip(0).getAttribute('data-problem')).toBe('unknown_field');
+    expect(chip(1).hasAttribute('data-problem')).toBe(false);
+  });
+
+  it('marks a nested group chip by a problem inside it', () => {
+    render(
+      <FilterChips
+        filters={ghost}
+        fields={fields}
+        problems={problems}
+        problemSource="Work item"
+        onChange={vi.fn()}
+      />,
+    );
+    expect(chip(2).getAttribute('data-problem')).toBe('unknown_option');
+  });
+
+  it('gives the problem chip its sentence as a tooltip', async () => {
+    render(
+      <FilterChips
+        filters={ghost}
+        fields={fields}
+        problems={problems}
+        problemSource="Work item"
+        onChange={vi.fn()}
+      />,
+    );
+    fireEvent.pointerEnter(screen.getByTestId('filter-chip-0'));
+    await waitFor(() =>
+      expect(screen.getByRole('tooltip').textContent).toBe(
+        '“ghost_field” in the filter: Work item has no property by that name.',
+      ),
+    );
+  });
+
+  it('marks nothing without problems', () => {
+    render(<FilterChips filters={ghost} fields={fields} onChange={vi.fn()} />);
+    expect(document.querySelector('[data-problem]')).toBeNull();
   });
 });

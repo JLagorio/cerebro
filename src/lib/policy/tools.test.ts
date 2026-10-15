@@ -709,10 +709,11 @@ describe('toolFacts', () => {
     expect(toolFacts('recheck_concept')?.renderer).toBe('concept');
   });
 
-  it('names exactly the four note writers confirmable, with their titles (M57.4)', () => {
+  it('names exactly the five note writers confirmable, with their titles (M57.4)', () => {
     expect(TOOLS.tools.filter((row) => row.confirmable).map((row) => row.name)).toEqual([
       'create_note',
       'update_frontmatter',
+      'set_fields',
       'append_to_note',
       'edit_note',
     ]);
@@ -722,6 +723,12 @@ describe('toolFacts', () => {
       title: 'Create a note',
     });
     expect(toolFacts('get_note')).toMatchObject({ confirmable: false, title: 'Read a note' });
+    // M60.4: the schema-checked field writer joins the family.
+    expect(toolFacts('set_fields')).toMatchObject({
+      confirmable: true,
+      title: 'Set record fields',
+      writes: true,
+    });
     expect(toolFacts('Write')).toMatchObject({ confirmable: false, title: null });
     for (const name of ['create_note', ' Create_Note ', 'MCP__CEREBRO__EDIT_NOTE']) {
       expect(isConfirmable(name), name).toBe(true);

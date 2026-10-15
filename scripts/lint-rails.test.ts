@@ -68,6 +68,13 @@ describe('engine/ imports only its allowlist', () => {
     ['a policy module off the list', "import '@/lib/policy/verdict';"],
     ['a yaml subpath', "import 'yaml/util';"],
     ['shared/policy code rather than a table', "import '../../shared/policy/table.ts';"],
+    ['shared/schema code rather than a table', "import '../../shared/schema/kinds.ts';"],
+    ['a shared/calendar file that is not JSON', "import '../../shared/calendar/README.md';"],
+    ['a shared/files file that is not JSON', "import '../../shared/files/README.md';"],
+    [
+      'shared JSON outside the four table folders',
+      "import '../../shared/prompt/retired-terms.json';",
+    ],
   ])('fails %s', async (_label, code) => {
     expect(await railMessages(ENGINE, code)).toHaveLength(1);
   });
@@ -85,6 +92,9 @@ describe('engine/ imports only its allowlist', () => {
       "import '@/lib/policy/toolApproval';",
       "import '@/views/viewKinds';",
       "import '../../shared/policy/staleness.v1.json';",
+      "import '../../shared/schema/field-kinds.v1.json';",
+      "import '../../shared/calendar/dates.v1.json';",
+      "import '../../shared/files/kinds.v1.json';",
       "export const t = () => import('./types');",
       "export type V = typeof import('@/views/viewKinds');",
       'export type E = Entry;',

@@ -146,7 +146,17 @@ pub fn has_pending_changes(ws: &GitWorkspaceInfo) -> Result<bool, String> {
 
 /// Commit every change in the vault's scope except the paths a live run
 /// owns (M58.3, `changeset::owned_paths`): those commit with their run when
-/// it ends. Under the repository's lock, through [`commit_paths_in`].
+/// it ends. Under the repository's lock.
+///
+/// A checkpoint commits from the index, never with `--only`: it stages each
+/// unowned path whose worktree side changed, unstages any path a run owns,
+/// then runs a plain `git commit`. So what the index alone holds commits as
+/// it stands: a deletion or rename staged outside Cerebro, and
+/// `ensure_gitignore`'s untrack, whose file stays on disk and ignored. A
+/// merge whose conflicts are all resolved is finished here too, even with
+/// nothing else changed, since git refuses a partial commit during a merge.
+/// The plain commit also carries what a person staged outside a nested
+/// vault's scope, as every checkpoint before M58.3 did.
 ///
 /// Returns Ok(None) when there was nothing to commit — an idle checkpoint
 /// firing on a clean tree, or one where only a run's files changed, is
@@ -161,34 +171,104 @@ pub fn commit_all(ws: &GitWorkspaceInfo, message: &str) -> Result<Option<String>
     let dir = ws.dir();
     let lock = repo_lock(&dir);
     let _held = hold(&lock);
-    if unowned_changes(ws)?.is_empty() {
+    let merging = super::conflict::mode(ws) == super::conflict::ConflictMode::Merge;
+    let (unowned, _) = split_by_owner(ws)?;
+    if unowned.is_empty() && !merging {
         return Ok(None);
     }
     author::ensure_identity(&dir)?;
     // Self-healing for vaults whose repo predates an entry (M13.3: the
     // .cerebro/ credential exclusion must reach EXISTING repos, and init is
-    // the one moment this otherwise ran). Its untrack is a change too, so the
-    // list is read again after it.
+    // the one moment this otherwise ran). Its untrack is a staged deletion,
+    // so the list is read again after it.
     ensure_gitignore(Path::new(&ws.vault_root))?;
-    let paths = unowned_changes(ws)?;
-    let Some(full) = commit_paths_in(ws, &paths, message)? else {
+    let (unowned, owned) = split_by_owner(ws)?;
+    let conflicted = unowned
+        .iter()
+        .chain(&owned)
+        .filter(|r| r.conflicted)
+        .count();
+    if conflicted > 0 {
+        return Err(format!(
+            "{conflicted} file{} still conflicted: resolve {} first",
+            if conflicted == 1 { " is" } else { "s are" },
+            if conflicted == 1 { "it" } else { "them" },
+        ));
+    }
+    // Only a worktree-side change needs staging. An index-only change (a
+    // staged deletion, a rename's old path, the untrack) is already staged,
+    // and naming it would fail the add: no such file, or an ignored one.
+    let stage: Vec<&str> = unowned
+        .iter()
+        .filter(|r| r.tree != ' ')
+        .map(|r| r.git_path.as_str())
+        .collect();
+    pathspec_step(&dir, &["add", "-A"], &stage)?;
+    // A run's path keeps out of the index commit: whatever was staged for it
+    // goes back to HEAD, and its run commits the tree's whole diff. Not
+    // during a merge, where what the index holds for it is the merge's.
+    let unstage: Vec<&str> = owned
+        .iter()
+        .filter(|r| !merging && r.index != ' ' && r.index != '?')
+        .flat_map(|r| std::iter::once(r.git_path.as_str()).chain(r.orig.as_deref()))
+        .collect();
+    pathspec_step(&dir, &["reset", "-q"], &unstage)?;
+    let staged = !command::succeeds(&dir, &["diff", "--cached", "--quiet"]);
+    if !staged && !merging {
         return Ok(None);
-    };
+    }
+    command::run_bounded(&dir, &["commit", "-m", message], command::LOCAL_TIMEOUT)
+        .map_err(|e| e.message())?;
     Ok(Some(
-        command::run_str(&dir, &["rev-parse", "--short", &full])?
-            .trim()
-            .to_string(),
+        command::run_bounded_str(
+            &dir,
+            &["rev-parse", "--short", "HEAD"],
+            command::LOCAL_TIMEOUT,
+        )?
+        .trim()
+        .to_string(),
     ))
 }
 
-/// What a checkpoint may commit: every changed path in the vault's scope that
-/// no live run owns and no conflict holds.
-fn unowned_changes(ws: &GitWorkspaceInfo) -> Result<Vec<String>, String> {
-    Ok(super::status::modified_files(ws)?
-        .into_iter()
-        .filter(|f| f.owner.is_none() && f.status != super::status::FileStatus::Conflicted)
-        .map(|f| f.path)
-        .collect())
+/// Every change in the vault's scope, split into the ones no live run owns
+/// (conflicts among them) and the ones a live run does.
+fn split_by_owner(
+    ws: &GitWorkspaceInfo,
+) -> Result<
+    (
+        Vec<super::status::StatusRecord>,
+        Vec<super::status::StatusRecord>,
+    ),
+    String,
+> {
+    let records = super::status::records(ws)?;
+    if records.is_empty() {
+        return Ok((vec![], vec![]));
+    }
+    let owners = super::changeset::owned_paths(Path::new(&ws.vault_root));
+    Ok(records.into_iter().partition(|record| {
+        ws.to_vault_relative(&record.git_path)
+            .is_none_or(|path| !owners.contains_key(&path))
+    }))
+}
+
+/// Run `git --literal-pathspecs <args>` over `paths`, passed on stdin so a
+/// long list never meets argv's limit; nothing to run for no paths.
+fn pathspec_step(dir: &Path, args: &[&str], paths: &[&str]) -> Result<(), String> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let mut list = Vec::new();
+    for path in paths {
+        list.extend_from_slice(path.as_bytes());
+        list.push(0);
+    }
+    let mut argv = vec!["--literal-pathspecs"];
+    argv.extend_from_slice(args);
+    argv.extend(["--pathspec-from-file=-", "--pathspec-file-nul"]);
+    command::run_bounded_with_input(dir, &argv, Some(&list), command::LOCAL_TIMEOUT)
+        .map(|_| ())
+        .map_err(|e| e.message())
 }
 
 /// Commit exactly `paths` (vault-relative), and nothing else the index or the
@@ -209,12 +289,19 @@ pub fn commit_paths(
 
 /// [`commit_paths`] for a caller already holding the lock. Each step runs
 /// under `command::LOCAL_TIMEOUT`: the identity, then status for those paths
-/// (a rename brings its old path along), then `add -A` and `commit --only`
-/// over the paths that changed, passed on stdin so a long list never meets
-/// argv's limit, then `rev-parse HEAD`. `--literal-pathspecs` so a `*` or a
-/// `:` in a file name is that file. `commit --only` takes each path's whole
-/// diff from the tree, whatever was staged before, and leaves every other
-/// staged change staged.
+/// (a rename brings its old path along), then `add -A` over the ones whose
+/// worktree side changed and `commit --only` over every one with something
+/// left to commit, each list on stdin, then `rev-parse HEAD`.
+/// `--literal-pathspecs` so a `*` or a `:` in a file name is that file.
+/// `commit --only` takes each path's whole diff from the tree, whatever was
+/// staged before, commits a path gone from the tree and the index as a
+/// deletion, and leaves every other staged change staged.
+///
+/// Three index states stay out: a staged deletion whose file is still on
+/// disk is an untrack (`--only` would re-add the file, so the next
+/// checkpoint commits it from the index); a file added then deleted (`AD`)
+/// leaves nothing to commit once the add drops it; and during a merge git
+/// refuses any partial commit, so that is said first.
 pub(crate) fn commit_paths_in(
     ws: &GitWorkspaceInfo,
     paths: &[String],
@@ -225,36 +312,45 @@ pub(crate) fn commit_paths_in(
     }
     let dir = ws.dir();
     let wanted: HashSet<String> = paths.iter().map(|p| ws.to_git_relative(p)).collect();
-    let mut changed: BTreeSet<String> = BTreeSet::new();
+    let mut stage: BTreeSet<String> = BTreeSet::new();
+    let mut commit: BTreeSet<String> = BTreeSet::new();
     for record in super::status::records(ws)? {
         if record.conflicted {
             continue;
         }
         let hit = wanted.contains(&record.git_path)
             || record.orig.as_ref().is_some_and(|o| wanted.contains(o));
-        if hit {
-            changed.insert(record.git_path);
-            changed.extend(record.orig);
+        if !hit {
+            continue;
+        }
+        let untrack = record.index == 'D'
+            && record.tree == ' '
+            && std::fs::symlink_metadata(dir.join(&record.git_path)).is_ok();
+        if untrack {
+            continue;
+        }
+        if record.tree != ' ' {
+            stage.insert(record.git_path.clone());
+        }
+        if !(record.index == 'A' && record.tree == 'D') {
+            commit.insert(record.git_path);
+            commit.extend(record.orig);
         }
     }
-    if changed.is_empty() {
+    if stage.is_empty() && commit.is_empty() {
         return Ok(None);
     }
-    author::ensure_identity(&dir)?;
-    let mut list = Vec::new();
-    for path in &changed {
-        list.extend_from_slice(path.as_bytes());
-        list.push(0);
+    if super::conflict::mode(ws) == super::conflict::ConflictMode::Merge {
+        return Err("a merge is in progress: finish it on the Changes page first".into());
     }
-    let from_stdin = ["--pathspec-from-file=-", "--pathspec-file-nul"];
-    let mut add = vec!["--literal-pathspecs", "add", "-A"];
-    add.extend(from_stdin);
-    command::run_bounded_with_input(&dir, &add, Some(&list), command::LOCAL_TIMEOUT)
-        .map_err(|e| e.message())?;
-    let mut commit = vec!["--literal-pathspecs", "commit", "--only", "-m", message];
-    commit.extend(from_stdin);
-    command::run_bounded_with_input(&dir, &commit, Some(&list), command::LOCAL_TIMEOUT)
-        .map_err(|e| e.message())?;
+    author::ensure_identity(&dir)?;
+    let stage: Vec<&str> = stage.iter().map(String::as_str).collect();
+    pathspec_step(&dir, &["add", "-A"], &stage)?;
+    if commit.is_empty() {
+        return Ok(None);
+    }
+    let commit: Vec<&str> = commit.iter().map(String::as_str).collect();
+    pathspec_step(&dir, &["commit", "--only", "-m", message], &commit)?;
     Ok(Some(
         command::run_bounded_str(&dir, &["rev-parse", "HEAD"], command::LOCAL_TIMEOUT)?
             .trim()
@@ -387,6 +483,188 @@ pub(crate) mod tests {
         for d in [&vault, &data] {
             let _ = std::fs::remove_dir_all(d);
         }
+    }
+
+    /// A scratch repository holding `files`, committed, with an identity:
+    /// the vault is the repository.
+    fn seeded(label: &str, files: &[(&str, &str)]) -> (PathBuf, GitWorkspaceInfo) {
+        let dir = scratch_repo_dir(label);
+        std::fs::create_dir_all(&dir).unwrap();
+        for (path, body) in files {
+            let at = dir.join(path);
+            std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+            std::fs::write(at, body).unwrap();
+        }
+        command::run_str(&dir, &["init", "-q"]).unwrap();
+        // Before ANY staging or committing — see assert_isolated.
+        assert_isolated(&dir);
+        let _ = command::run_str(&dir, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+        author::ensure_identity(&dir).unwrap();
+        command::run_str(&dir, &["add", "-A"]).unwrap();
+        command::run_str(&dir, &["commit", "-q", "-m", "seed"]).unwrap();
+        let ws = super::super::workspace::resolve(&dir);
+        (dir, ws)
+    }
+
+    fn porcelain(dir: &Path) -> String {
+        command::run_str(dir, &["status", "--porcelain"]).unwrap()
+    }
+
+    fn named(dir: &Path, rev: &str) -> Vec<String> {
+        command::run_str(dir, &["show", "--name-status", "--format=", rev])
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    const IGNORES: (&str, &str) = (".gitignore", "# Cerebro\n.DS_Store\n.cerebro/\n.trash/\n");
+
+    /// A deletion staged outside Cerebro (`git rm`) is index-only: a
+    /// checkpoint commits it from the index, and the next one still works.
+    #[test]
+    fn a_checkpoint_commits_a_staged_deletion() {
+        let (dir, ws) = seeded(
+            "m58-staged-rm",
+            &[IGNORES, ("a.md", "# a\n"), ("b.md", "# b\n")],
+        );
+        command::run_str(&dir, &["rm", "-q", "a.md"]).unwrap();
+        std::fs::write(dir.join("b.md"), "# b, edited\n").unwrap();
+        let short = commit_all(&ws, "checkpoint").unwrap().expect("a commit");
+        assert_eq!(named(&dir, &short), vec!["D\ta.md", "M\tb.md"]);
+        assert_eq!(porcelain(&dir), "");
+        std::fs::write(dir.join("b.md"), "# b, again\n").unwrap();
+        assert!(commit_all(&ws, "again").unwrap().is_some());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A rename staged outside Cerebro (`git mv`) commits whole: its old
+    /// path is not on disk, and is never named to `add`.
+    #[test]
+    fn a_checkpoint_commits_a_staged_rename() {
+        let (dir, ws) = seeded("m58-staged-mv", &[IGNORES, ("a.md", "# a\n")]);
+        command::run_str(&dir, &["mv", "a.md", "moved.md"]).unwrap();
+        let short = commit_all(&ws, "checkpoint").unwrap().expect("a commit");
+        assert_eq!(named(&dir, &short), vec!["R100\ta.md\tmoved.md"]);
+        assert_eq!(porcelain(&dir), "");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// M13.3's self-heal: a tracked `.cerebro/connectors.json` is untracked
+    /// by `ensure_gitignore`, and the checkpoint commits that untrack from
+    /// the index. The file stays on disk and never comes back into the index.
+    #[test]
+    fn a_checkpoint_commits_the_untrack_and_never_retracks_it() {
+        let (dir, ws) = seeded(
+            "m58-untrack",
+            &[
+                (".gitignore", "# Cerebro\n.DS_Store\n"),
+                (".cerebro/connectors.json", "{\"servers\":{}}"),
+                ("a.md", "# a\n"),
+            ],
+        );
+        std::fs::write(dir.join("a.md"), "# a, edited\n").unwrap();
+        let short = commit_all(&ws, "checkpoint").unwrap().expect("a commit");
+        let changed = named(&dir, &short);
+        assert!(
+            changed.contains(&"D\t.cerebro/connectors.json".to_string()),
+            "{changed:?}"
+        );
+        assert!(changed.contains(&"M\ta.md".to_string()), "{changed:?}");
+        let tracked = command::run_str(&dir, &["ls-files", "--cached", ".cerebro"]).unwrap();
+        assert_eq!(tracked.trim(), "", "credentials stay out of the index");
+        assert!(dir.join(".cerebro/connectors.json").is_file());
+        assert_eq!(porcelain(&dir), "");
+        // The next checkpoint leaves it out too.
+        std::fs::write(dir.join("a.md"), "# a, once more\n").unwrap();
+        assert!(commit_all(&ws, "again").unwrap().is_some());
+        let tracked = command::run_str(&dir, &["ls-files", "--cached", ".cerebro"]).unwrap();
+        assert_eq!(tracked.trim(), "");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A run's partial commit skips what it cannot carry: a staged deletion
+    /// commits as one, an untracked-but-present file stays for the
+    /// checkpoint, and a file added then deleted leaves nothing to commit.
+    #[test]
+    fn a_partial_commit_reads_the_index_side() {
+        let (dir, ws) = seeded(
+            "m58-partial-index",
+            &[IGNORES, ("gone.md", "# gone\n"), ("kept.md", "# kept\n")],
+        );
+        command::run_str(&dir, &["rm", "-q", "gone.md"]).unwrap();
+        command::run_str(&dir, &["rm", "-q", "--cached", "kept.md"]).unwrap();
+        std::fs::write(
+            dir.join(".gitignore"),
+            "# Cerebro\n.DS_Store\n.cerebro/\n.trash/\nkept.md\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("brief.md"), "# brief\n").unwrap();
+        command::run_str(&dir, &["add", "brief.md"]).unwrap();
+        std::fs::remove_file(dir.join("brief.md")).unwrap();
+        let paths: Vec<String> = ["gone.md", "kept.md", "brief.md"]
+            .map(String::from)
+            .to_vec();
+        let full = commit_paths(&ws, &paths, "run")
+            .unwrap()
+            .expect("gone.md commits");
+        assert_eq!(named(&dir, &full), vec!["D\tgone.md"]);
+        assert_eq!(
+            commit_paths(&ws, &["brief.md".to_string()], "nothing").unwrap(),
+            None,
+            "added then deleted: nothing left"
+        );
+        let tracked = command::run_str(&dir, &["ls-files", "--cached", "kept.md"]).unwrap();
+        assert_eq!(tracked.trim(), "", "the untrack is left for the checkpoint");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A pull that landed in conflict, resolved with Keep mine, leaves a
+    /// clean tree and an open merge. A checkpoint finishes it with an index
+    /// commit (git refuses `--only` during a merge), and a run's partial
+    /// commit says so first rather than failing on git's words.
+    #[test]
+    fn a_checkpoint_finishes_a_resolved_merge() {
+        let (dir, ws) = seeded("m58-merge", &[IGNORES, ("a.md", "# a\n")]);
+        command::run_str(&dir, &["checkout", "-q", "-b", "theirs"]).unwrap();
+        std::fs::write(dir.join("a.md"), "# a, theirs\n").unwrap();
+        command::run_str(&dir, &["commit", "-q", "-am", "theirs"]).unwrap();
+        command::run_str(&dir, &["checkout", "-q", "main"]).unwrap();
+        std::fs::write(dir.join("a.md"), "# a, mine\n").unwrap();
+        command::run_str(&dir, &["commit", "-q", "-am", "mine"]).unwrap();
+        assert!(command::run_str(&dir, &["merge", "-q", "theirs"]).is_err());
+        assert!(
+            commit_all(&ws, "checkpoint").is_err(),
+            "a conflicted file stops the checkpoint"
+        );
+        super::super::conflict::resolve(&ws, "a.md", super::super::conflict::Resolution::Ours)
+            .unwrap();
+        assert_eq!(porcelain(&dir), "", "Keep mine leaves nothing to show");
+        assert!(commit_paths(&ws, &["a.md".to_string()], "run")
+            .unwrap()
+            .is_none());
+        std::fs::write(dir.join("b.md"), "# b\n").unwrap();
+        let err = commit_paths(&ws, &["b.md".to_string()], "run").unwrap_err();
+        assert!(err.contains("merge is in progress"), "{err}");
+        std::fs::remove_file(dir.join("b.md")).unwrap();
+
+        assert!(commit_all(&ws, "checkpoint").unwrap().is_some());
+        assert_eq!(
+            super::super::conflict::mode(&ws),
+            super::super::conflict::ConflictMode::None
+        );
+        let parents =
+            command::run_str(&dir, &["rev-list", "--parents", "-n", "1", "HEAD"]).unwrap();
+        assert_eq!(
+            parents.split_whitespace().count(),
+            3,
+            "a merge commit: {parents}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("a.md")).unwrap(),
+            "# a, mine\n"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

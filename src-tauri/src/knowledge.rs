@@ -19,9 +19,9 @@
 //! `verified` field and stamps `generated` server-side, so the model cannot
 //! self-certify — but `create_note`, `update_frontmatter` and `append_to_note`
 //! reached the same files with no such check, which made the refusal a
-//! formality anyone could route around. `guard_agent_write` closes those
-//! doors and M55.5's `edit_note`, four in all, so the agent reaches the
-//! bundle through exactly two
+//! formality anyone could route around. `guard_agent_write` closes every
+//! agent note writer: those three, M55.5's `edit_note` and M60.4's
+//! `set_fields`, so the agent reaches the bundle through exactly two
 //! server-stamped tools: `write_concept` (a whole concept) and, since M49.7,
 //! `recheck_concept` (moves `stale_after` and nothing else).
 
@@ -390,7 +390,7 @@ pub fn guard_human_write(path: &str) -> Result<HumanCleared, String> {
 /// `update_frontmatter` could patch `verified` straight onto a concept,
 /// `create_note` could author one pre-stamped, and `append_to_note` could
 /// grow a body with no provenance at all, as `edit_note` (M55.5) could
-/// rewrite one.
+/// rewrite one and `set_fields` (M60.4) could set its fields.
 pub fn guard_agent_write(path: &str) -> Result<(), String> {
     if is_knowledge_path(path) {
         return Err(refuse("agent_write", AGENT_USE_WRITE_CONCEPT));
@@ -849,12 +849,12 @@ pub struct RunWrite {
 /// A run's detail said "2 applied" and named nothing: the fleet counted what
 /// the ledger recorded, and the ledger held every proposal with its
 /// `run_id` all along. This is that join — each proposal the run submitted,
-/// the beliefs it named (by its op and by its targets), and the projection
-/// file each belief is. A belief with no file (a relation's end that was
-/// never projected) names nothing and is left out; one path named twice
-/// keeps the furthest state its proposals reached.
+/// the beliefs [`beliefs_named`] finds in it, and the projection file each
+/// belief is. A belief with no file (a relation's end that was never
+/// projected) names nothing and is left out; one path named twice keeps the
+/// furthest state its proposals reached.
 pub fn run_writes(state: &crate::ledger::reduce::EpistemicState, run_id: &str) -> Vec<RunWrite> {
-    use crate::ledger::schema::{ProposalOp, ProposalState, TargetClass};
+    use crate::ledger::schema::ProposalState;
     let path_of: std::collections::HashMap<&str, &str> = state
         .projection_paths
         .iter()
@@ -872,28 +872,7 @@ pub fn run_writes(state: &crate::ledger::reduce::EpistemicState, run_id: &str) -
         if row.proposal.run_id != run_id {
             continue;
         }
-        let mut beliefs: Vec<&str> = row
-            .proposal
-            .targets
-            .iter()
-            .filter(|target| target.target_class == TargetClass::Belief)
-            .map(|target| target.target_id.as_str())
-            .collect();
-        match &row.proposal.op {
-            ProposalOp::CreateBelief { belief_id, .. }
-            | ProposalOp::UpdateBelief { belief_id, .. }
-            | ProposalOp::PromoteDraft { belief_id, .. }
-            | ProposalOp::ContestBelief { belief_id, .. } => beliefs.push(belief_id),
-            ProposalOp::SupersedeBelief {
-                belief_id,
-                successor_id,
-            } => beliefs.extend([belief_id.as_str(), successor_id.as_str()]),
-            ProposalOp::EditRelation { from, to, .. } => {
-                beliefs.extend([from.as_str(), to.as_str()])
-            }
-            _ => {}
-        }
-        for belief in beliefs {
+        for belief in beliefs_named(row) {
             let Some(krel) = path_of.get(belief) else {
                 continue;
             };
@@ -910,12 +889,120 @@ pub fn run_writes(state: &crate::ledger::reduce::EpistemicState, run_id: &str) -
         .into_iter()
         .map(|(path, state)| RunWrite {
             path,
-            state: serde_json::to_value(state)
-                .ok()
-                .and_then(|v| v.as_str().map(String::from))
-                .unwrap_or_default(),
+            state: proposal_state_word(state),
         })
         .collect()
+}
+
+/// The beliefs one proposal names: its Belief targets, then the ids its op
+/// carries (both ends of a supersession or a relation edit). The one rule
+/// [`run_writes`] and [`concept_history`] (M64.2b) both read, so a run's
+/// detail and a concept's History never disagree about what a proposal
+/// touched. An id may appear twice; callers that count dedupe.
+pub fn beliefs_named(row: &crate::ledger::reduce::ProposalRow) -> Vec<&str> {
+    use crate::ledger::schema::{ProposalOp, TargetClass};
+    let mut beliefs: Vec<&str> = row
+        .proposal
+        .targets
+        .iter()
+        .filter(|target| target.target_class == TargetClass::Belief)
+        .map(|target| target.target_id.as_str())
+        .collect();
+    match &row.proposal.op {
+        ProposalOp::CreateBelief { belief_id, .. }
+        | ProposalOp::UpdateBelief { belief_id, .. }
+        | ProposalOp::PromoteDraft { belief_id, .. }
+        | ProposalOp::ContestBelief { belief_id, .. } => beliefs.push(belief_id),
+        ProposalOp::SupersedeBelief {
+            belief_id,
+            successor_id,
+        } => beliefs.extend([belief_id.as_str(), successor_id.as_str()]),
+        ProposalOp::EditRelation { from, to, .. } => beliefs.extend([from.as_str(), to.as_str()]),
+        _ => {}
+    }
+    beliefs
+}
+
+/// A proposal state as the ledger spells it: `submitted`, `queued`,
+/// `rejected`, `applied` or `reverted`.
+fn proposal_state_word(state: crate::ledger::schema::ProposalState) -> String {
+    serde_json::to_value(state)
+        .ok()
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_default()
+}
+
+/// One thing the ledger recorded about a concept (M64.2b), for its page's
+/// History. `kind` is `created`, `revised` (with its `revision`), `verified`
+/// (an applied attestation) or `proposal` (with its `state`, the proposer
+/// as `actor`, and its `run_id`). `at` and `actor` are None when the fold
+/// does not hold them; the page read fills them from the ledger index, and
+/// what neither holds reads "not recorded" (CV-05).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ConceptEvent {
+    pub event_id: String,
+    pub kind: String,
+    pub revision: Option<u64>,
+    pub state: Option<String>,
+    pub actor: Option<String>,
+    pub run_id: Option<String>,
+    pub at: Option<String>,
+}
+
+/// What the ledger recorded about the concept at `krel` (knowledge-relative):
+/// its creation, each revision after the first, each applied attestation,
+/// and each proposal [`beliefs_named`] finds naming it, in that order, the
+/// proposals by when the store received them. Pure over the fold. A path no
+/// belief projects has no history.
+pub fn concept_history(
+    state: &crate::ledger::reduce::EpistemicState,
+    krel: &str,
+) -> Vec<ConceptEvent> {
+    let Some(belief_id) = state.projection_paths.get(krel) else {
+        return Vec::new();
+    };
+    let Some(belief) = state.beliefs.get(belief_id) else {
+        return Vec::new();
+    };
+    let event = |event_id: &str, kind: &str| ConceptEvent {
+        event_id: event_id.to_string(),
+        kind: kind.to_string(),
+        revision: None,
+        state: None,
+        actor: None,
+        run_id: None,
+        at: None,
+    };
+    let mut events = vec![event(&belief.created_event_id, "created")];
+    for revision in belief.revisions.iter().skip(1) {
+        events.push(ConceptEvent {
+            revision: Some(revision.revision),
+            ..event(&revision.event_id, "revised")
+        });
+    }
+    for attestation in &belief.attestation_events {
+        events.push(event(attestation, "verified"));
+    }
+    let mut proposals: Vec<&crate::ledger::reduce::ProposalRow> = state
+        .proposals
+        .values()
+        .filter(|row| beliefs_named(row).contains(&belief_id.as_str()))
+        .collect();
+    proposals.sort_by(|a, b| {
+        a.submitted_at
+            .cmp(&b.submitted_at)
+            .then(a.proposal_id.cmp(&b.proposal_id))
+    });
+    for row in proposals {
+        events.push(ConceptEvent {
+            state: Some(proposal_state_word(row.state)),
+            actor: Some(row.actor.clone()),
+            run_id: Some(row.proposal.run_id.clone()),
+            at: Some(row.submitted_at.clone()),
+            ..event(&row.submitted_event_id, "proposal")
+        });
+    }
+    events
 }
 
 /// The trust label an agent reads (M49.8, K21).
@@ -2178,6 +2265,284 @@ mod tests {
             about(&entries, "rq-84b-kestrel", TODAY, 20, None).omitted,
             0
         );
+    }
+
+    // --- A concept's History (M64.2b) -------------------------------------
+    //
+    // Pure over the fold, so the state is built in memory: two projected
+    // beliefs, and proposals naming them by target and by op.
+
+    mod history {
+        use crate::knowledge::{beliefs_named, concept_history, run_writes, ConceptEvent};
+        use crate::ledger::reduce::{BeliefState, EpistemicState, ProposalRow, RevisionState};
+        use crate::ledger::schema::{
+            BeliefBasis, IntendedUse, IntendedUseKind, Lifecycle, ProposalBasis, ProposalOp,
+            ProposalState, ProposalTarget, ProposalV1, Qualification, Risk, TargetClass,
+            TransitionCause, PROPOSAL_SCHEMA,
+        };
+
+        const OLD: &str = "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1";
+        const NEW: &str = "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2";
+        const RUN: &str = "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3";
+
+        fn revision(n: u64, event_id: &str) -> RevisionState {
+            RevisionState {
+                revision: n,
+                event_id: event_id.into(),
+                content: String::new(),
+                fields: serde_json::json!({}),
+                basis: BeliefBasis::Unsupported {
+                    reason: "a history fixture".into(),
+                },
+            }
+        }
+
+        fn belief(id: &str, path: &str, revisions: &[&str], attested: &[&str]) -> BeliefState {
+            BeliefState {
+                belief_id: id.into(),
+                entity_id: "e".repeat(32),
+                created_event_id: revisions[0].into(),
+                revisions: revisions
+                    .iter()
+                    .enumerate()
+                    .map(|(i, e)| revision(i as u64 + 1, e))
+                    .collect(),
+                attested: None,
+                attestation_events: attested.iter().map(|e| e.to_string()).collect(),
+                path: Some(path.into()),
+                overrides: vec![],
+                override_head_event: None,
+                projection_head_event: revisions[revisions.len() - 1].into(),
+                qualification: Qualification::Qualified,
+                lifecycle: Lifecycle::Active,
+                tombstoned_by: None,
+                open_contest_event: None,
+                qualification_head_event: None,
+                lifecycle_head_event: None,
+                contest_head_event: None,
+                entity_merge_event_ids: vec![],
+            }
+        }
+
+        fn proposal(
+            id: &str,
+            op: ProposalOp,
+            targets: &[&str],
+            state: ProposalState,
+            submitted_at: &str,
+        ) -> ProposalRow {
+            ProposalRow {
+                proposal_id: id.into(),
+                proposal: Box::new(ProposalV1 {
+                    schema: PROPOSAL_SCHEMA,
+                    proposal_id: id.into(),
+                    run_id: RUN.into(),
+                    targets: targets
+                        .iter()
+                        .map(|t| ProposalTarget {
+                            target_id: t.to_string(),
+                            target_class: TargetClass::Belief,
+                            expected_version: Some(1),
+                        })
+                        .collect(),
+                    op,
+                    intended_use: IntendedUse {
+                        kind: IntendedUseKind::ReversibleWork,
+                        stakes: Risk::Low,
+                        predicate_class: None,
+                    },
+                    basis: ProposalBasis {
+                        transition_cause: TransitionCause::NewEvidence,
+                        evidence_refs: vec![],
+                        coverage_refs: vec![],
+                        authority_refs: vec![],
+                        authority_route_refs: vec![],
+                        addressed_contradictions: vec![],
+                        absence_claim: false,
+                    },
+                    declared_risk: Risk::Low,
+                    reason: "a history fixture".into(),
+                    candidate_search_receipt: None,
+                }),
+                actor: "process:knowledge".into(),
+                state,
+                commit_set_id: None,
+                queued_members: vec![],
+                queued_risk: None,
+                queued_for: vec![],
+                decision: None,
+                applied_event_id: None,
+                revert_plan: None,
+                submitted_event_id: format!("sub-{id}"),
+                submitted_at: submitted_at.into(),
+            }
+        }
+
+        fn update(belief: &str) -> ProposalOp {
+            ProposalOp::UpdateBelief {
+                belief_id: belief.into(),
+                patch: vec![],
+                basis: BeliefBasis::Unsupported {
+                    reason: "a history fixture".into(),
+                },
+            }
+        }
+
+        /// `old` (revised twice, verified once) is superseded by `new`; one
+        /// proposal names `old` by target only, one queued update names `new`.
+        fn state() -> EpistemicState {
+            let mut state = EpistemicState::default();
+            for (id, path, revisions, attested) in [
+                (
+                    OLD,
+                    "systems/old.md",
+                    &["ev-c", "ev-r2", "ev-r3"][..],
+                    &["ev-v"][..],
+                ),
+                (NEW, "systems/new.md", &["ev-n"][..], &[][..]),
+            ] {
+                state
+                    .beliefs
+                    .insert(id.into(), belief(id, path, revisions, attested));
+                state.projection_paths.insert(path.into(), id.into());
+            }
+            let rows = [
+                proposal(
+                    &"1".repeat(32),
+                    ProposalOp::SupersedeBelief {
+                        belief_id: OLD.into(),
+                        successor_id: NEW.into(),
+                    },
+                    &[],
+                    ProposalState::Applied,
+                    "2026-07-28T09:05:00.000Z",
+                ),
+                proposal(
+                    &"2".repeat(32),
+                    update(NEW),
+                    &[OLD],
+                    ProposalState::Rejected,
+                    "2026-07-28T09:00:00.000Z",
+                ),
+                proposal(
+                    &"3".repeat(32),
+                    update(NEW),
+                    &[],
+                    ProposalState::Queued,
+                    "2026-07-28T10:00:00.000Z",
+                ),
+            ];
+            for row in rows {
+                state.proposals.insert(row.proposal_id.clone(), row);
+            }
+            state
+        }
+
+        fn kinds(events: &[ConceptEvent]) -> Vec<(&str, &str)> {
+            events
+                .iter()
+                .map(|e| (e.kind.as_str(), e.event_id.as_str()))
+                .collect()
+        }
+
+        #[test]
+        fn concept_history_lists_creation_revisions_verifications_and_proposals() {
+            let state = state();
+            let events = concept_history(&state, "systems/old.md");
+            let two = format!("sub-{}", "2".repeat(32));
+            let one = format!("sub-{}", "1".repeat(32));
+            assert_eq!(
+                kinds(&events),
+                vec![
+                    ("created", "ev-c"),
+                    ("revised", "ev-r2"),
+                    ("revised", "ev-r3"),
+                    ("verified", "ev-v"),
+                    // By when the store received them, a target naming it too.
+                    ("proposal", two.as_str()),
+                    ("proposal", one.as_str()),
+                ]
+            );
+            assert_eq!(events[1].revision, Some(2));
+            assert_eq!(events[2].revision, Some(3));
+            assert_eq!(
+                events[0].actor, None,
+                "the fold holds no creator; the index does"
+            );
+            assert_eq!(events[0].at, None);
+            let applied = &events[5];
+            assert_eq!(applied.state.as_deref(), Some("applied"));
+            assert_eq!(applied.actor.as_deref(), Some("process:knowledge"));
+            assert_eq!(applied.run_id.as_deref(), Some(RUN));
+            assert_eq!(applied.at.as_deref(), Some("2026-07-28T09:05:00.000Z"));
+            assert_eq!(events[4].state.as_deref(), Some("rejected"));
+
+            let wire = serde_json::to_value(&events[0]).unwrap();
+            assert_eq!(
+                wire,
+                serde_json::json!({
+                    "event_id": "ev-c", "kind": "created", "revision": null, "state": null,
+                    "actor": null, "run_id": null, "at": null
+                })
+            );
+        }
+
+        #[test]
+        fn a_path_with_no_belief_has_no_history() {
+            let state = state();
+            assert!(concept_history(&state, "systems/unknown.md").is_empty());
+            assert!(concept_history(&EpistemicState::default(), "systems/old.md").is_empty());
+        }
+
+        /// One rule decides what a proposal touched: every belief `run_writes`
+        /// names for a run, that run's proposals appear in the concept's
+        /// History, and a concept no proposal named lists none.
+        #[test]
+        fn run_writes_and_concept_history_name_the_same_beliefs() {
+            let state = state();
+            let named: Vec<String> = run_writes(&state, RUN)
+                .into_iter()
+                .map(|w| w.path)
+                .collect();
+            assert_eq!(
+                named,
+                vec![
+                    "knowledge/systems/new.md".to_string(),
+                    "knowledge/systems/old.md".to_string()
+                ]
+            );
+            for path in &named {
+                let krel = path.strip_prefix("knowledge/").unwrap();
+                let history = concept_history(&state, krel);
+                let listed: Vec<&str> = history
+                    .iter()
+                    .filter(|e| e.kind == "proposal")
+                    .map(|e| e.run_id.as_deref().unwrap_or(""))
+                    .collect();
+                assert!(listed.contains(&RUN), "{path} lists the run's proposals");
+            }
+            for row in state.proposals.values() {
+                for belief in beliefs_named(row) {
+                    let path = &state.beliefs[belief].path;
+                    let krel = path.as_deref().unwrap();
+                    assert!(
+                        concept_history(&state, krel)
+                            .iter()
+                            .any(|e| e.event_id == row.submitted_event_id),
+                        "{krel} lists {}",
+                        row.proposal_id
+                    );
+                }
+            }
+            // new.md is named by the supersession and both updates.
+            assert_eq!(
+                concept_history(&state, "systems/new.md")
+                    .iter()
+                    .filter(|e| e.kind == "proposal")
+                    .count(),
+                3
+            );
+        }
     }
 
     /// Regenerating the digest is a deliberate act, so it is a test you run by

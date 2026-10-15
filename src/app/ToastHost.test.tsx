@@ -79,4 +79,34 @@ describe('ToastHost', () => {
     expect(useUiStore.getState().toasts).toHaveLength(0);
     expect(screen.queryByText('Saved')).toBeNull();
   });
+
+  it("shows a toast's action; clicking it runs the action and dismisses (M60.7)", () => {
+    const run = vi.fn();
+    render(<ToastHost />);
+    act(() => {
+      useUiStore.getState().toast('Moved “A” to Trash', { action: { label: 'Undo', run } });
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(run).toHaveBeenCalledOnce();
+    expect(screen.queryByText('Moved “A” to Trash')).toBeNull();
+    expect(useUiStore.getState().toasts).toHaveLength(0);
+  });
+
+  it('keeps a toast with an action for 10 seconds', () => {
+    vi.useFakeTimers();
+    try {
+      render(<ToastHost />);
+      act(() => {
+        useUiStore.getState().toast('Undid: Deleted property “Size”', {
+          action: { label: 'Redo', run: () => {} },
+        });
+      });
+      act(() => vi.advanceTimersByTime(9999));
+      expect(screen.getByText('Undid: Deleted property “Size”')).toBeTruthy();
+      act(() => vi.advanceTimersByTime(1));
+      expect(screen.queryByText('Undid: Deleted property “Size”')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

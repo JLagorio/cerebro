@@ -42,7 +42,7 @@ export interface AggregateMeta {
 
 /**
  * Declaration order is menu order, and `satisfies Record<AggregateCalc, …>`
- * is the enforcement — the same guard `KIND_META` carries. A calc added to
+ * is the enforcement — the same guard `KIND_UI` carries. A calc added to
  * the union and forgotten here would otherwise fall through `aggregateMeta`'s
  * fallback and silently render as Count all.
  */
@@ -77,7 +77,8 @@ export function parseAggregateCalc(raw: unknown): AggregateCalc | null {
 /**
  * The calculations a column of this kind can honestly offer.
  *
- * Gated on `KIND_META.numeric` rather than on a `Set<FieldKind>` of its own:
+ * Gated on the kind's `numeric` fact (field-kinds.v1.json, through
+ * `kindMeta`) rather than on a `Set<FieldKind>` of its own:
  * two hand-maintained lists of the same fact is what M16.13 spent a commit
  * deleting. A `show` rollup will therefore be offered Sum and answer with
  * nothing, which is the honest report of a column holding no numbers — and

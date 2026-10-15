@@ -16,6 +16,7 @@ import type { CommentAnchor } from '@/engine/commentAnchor';
 import type { CommentsFile } from '@/engine/comments';
 import type { ConnectorStatusRow } from '@/engine/connectors';
 import type { TrashedItem } from '@/engine/trash';
+import type { BatchApplied, BatchOp, OpenReport } from '@/engine/batch';
 import type { Entry } from '@/engine/types';
 import { faulted } from './mockFaults';
 import * as mock from './mockIpc';
@@ -64,7 +65,10 @@ export function setPanelAgent(vault: string, handle: string | null): Promise<voi
 }
 
 export function scanVault(vault: string): Promise<Entry[]> {
-  return inTauri() ? invokeTauri('scan_vault', { vault }) : mock.scanVault(vault);
+  // Faulted so the state lab can stage a failed vault read (M64.7's Speakers).
+  return inTauri()
+    ? invokeTauri('scan_vault', { vault })
+    : faulted('scan_vault', () => mock.scanVault(vault));
 }
 
 export function readNote(vault: string, path: string): Promise<string> {
@@ -273,7 +277,9 @@ export function saveList(vault: string, folder: string, id: string, yaml: string
     : mock.saveList(vault, folder, id, yaml);
 }
 
-export function startWatcher(vault: string): Promise<void> {
+/** Start watching `vault`. Resolves what the open put back from a change an
+ * earlier run left unfinished (M60.6): all zero on an ordinary open. */
+export function startWatcher(vault: string): Promise<OpenReport> {
   return inTauri() ? invokeTauri('start_watcher', { vault }) : mock.startWatcher(vault);
 }
 
@@ -345,6 +351,13 @@ export function restoreFromTrash(vault: string, stamp: string): Promise<string> 
   return inTauri()
     ? invokeTauri('restore_from_trash', { vault, stamp })
     : mock.restoreFromTrash(vault, stamp);
+}
+
+/** Apply `ops` as one change, all or nothing (M60.6). Resolves one result per
+ * page written; rejects in the backend's words, a stale page as
+ * `stale_content: …`. The store's `applyBatch` is the caller. */
+export function applyBatch(vault: string, ops: BatchOp[]): Promise<BatchApplied> {
+  return inTauri() ? invokeTauri('apply_batch', { vault, ops }) : mock.applyBatch(vault, ops);
 }
 
 /** All vault directories (for folder trees, including empty folders). */
@@ -796,6 +809,8 @@ export function pipelineOverview(vault: string): Promise<PipelineOverview> {
 // --- The fleet read surface (M33.2) ----------------------------------------
 
 import type {
+  ActivityRun,
+  HistoryActivity,
   FleetRun,
   FleetRunCause,
   FleetCostComponent,
@@ -809,6 +824,8 @@ import type {
 } from './mockIpc';
 
 export type {
+  ActivityRun,
+  HistoryActivity,
   FleetRun,
   FleetRunCause,
   FleetCostComponent,
@@ -842,6 +859,34 @@ export function pageAttribution(vault: string, path: string): Promise<PageAttrib
   return inTauri()
     ? invokeTauri('page_attribution', { vault, path })
     : mock.pageAttribution(vault, path);
+}
+
+/** What happened in one vault over `[since, until)` (M64.2): its write rows,
+ * its runs and when Cerebro had it open, each lane read alone through a
+ * read-only handle, for `engine/activity.ts` to fold. A window that is not
+ * one REFUSES in words, and so does a runtime database that will not open,
+ * which History renders as unavailable, never as an empty year. */
+export function vaultActivity(
+  vault: string,
+  since: string,
+  until: string,
+): Promise<HistoryActivity> {
+  return inTauri()
+    ? invokeTauri('vault_activity', { vault, since, until })
+    : faulted('vault_activity', () => mock.vaultActivity(vault, since, until));
+}
+
+import type { HistoryPageActivity } from './mockIpc';
+export type { HistoryPageActivity };
+
+/** What one page's History reads (M64.2b): the names it has had, the write
+ * rows under any of them and its comment sidecar, the runs those rows name,
+ * when the vault began recording, and on a knowledge page the ledger's
+ * events, each lane read alone. A path outside the vault REFUSES in words. */
+export function pageActivity(vault: string, path: string): Promise<HistoryPageActivity> {
+  return inTauri()
+    ? invokeTauri('page_activity', { vault, path })
+    : faulted('page_activity', () => mock.pageActivity(vault, path));
 }
 
 /** What one run changed in Knowledge (M50.3): the concepts its proposals
@@ -1143,6 +1188,46 @@ export function setAgentPaused(vault: string, actor: string, paused: boolean): P
   return inTauri()
     ? invokeTauri('set_agent_paused', { vault, actor, paused })
     : mock.setAgentPaused(vault, actor, paused);
+}
+
+// --- Durable wakes (M63.1) ---------------------------------------------------
+
+import type { AdmitReport, PendingWake, WakeCancel, WakeOffer } from '@/engine/wakes';
+export type { AdmitReport, PendingWake, WakeCancel, WakeOffer };
+
+/** Offer trigger matches for admission, each admitted once: a live key is
+ * counted, never admitted twice, and a malformed offer or an agent paused on
+ * the fleet is refused by name. Throws without a runtime database; the runner
+ * keeps the batch and offers it again. */
+export function admitWakes(vault: string, wakes: readonly WakeOffer[]): Promise<AdmitReport> {
+  return inTauri() ? invokeTauri('admit_wakes', { vault, wakes }) : mock.admitWakes(vault, wakes);
+}
+
+/** The vault's pending wakes, oldest first. A failed read throws, and the
+ * runner derives no woken run and cancels nothing: gated, not empty. */
+export function wakesPending(vault: string): Promise<PendingWake[]> {
+  return inTauri() ? invokeTauri('wakes_pending', { vault }) : mock.wakesPending(vault);
+}
+
+/** Cancel pending wakes the vault no longer backs, each with its why.
+ * Answers how many were still pending and are now cancelled. */
+export function cancelWakes(vault: string, cancels: readonly WakeCancel[]): Promise<number> {
+  return inTauri()
+    ? invokeTauri('cancel_wakes', { vault, cancels })
+    : mock.cancelWakes(vault, cancels);
+}
+
+import type { FleetWake } from './mockIpc';
+export type { FleetWake };
+
+/** What is waiting to wake this vault's agents, and what was skipped or
+ * expired this week (M63.1b), optionally for one agent: pending oldest
+ * first, then the rest newest first, at most 200. A failed read throws, and
+ * the list says unavailable, never that nothing is waiting (CV-05). */
+export function fleetWakes(vault: string, actor?: string): Promise<FleetWake[]> {
+  return inTauri()
+    ? invokeTauri('fleet_wakes', { vault, actor: actor ?? null })
+    : mock.fleetWakes(vault, actor ?? null);
 }
 
 // --- Diagnostics (M53.24) --------------------------------------------------

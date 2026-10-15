@@ -12,6 +12,7 @@ pub mod diagnostics;
 pub mod dynamics;
 #[cfg(test)]
 mod eval;
+pub mod files;
 pub mod git;
 pub mod git_commands;
 pub mod ingest;
@@ -415,6 +416,220 @@ fn commit_runs(
     )
 }
 
+/// What happened in one vault (M64.2): its write rows, its runs and when
+/// Cerebro had it open, each lane read alone from runtime.db through a
+/// read-only handle, for History to fold into sessions and days. A window
+/// that is not one is refused in words; a database that will not open is an
+/// error, which History renders as unavailable, never as an empty year.
+#[tauri::command(async)]
+fn vault_activity(
+    app: tauri::AppHandle,
+    vault: String,
+    since: String,
+    until: String,
+) -> Result<runtime::activity::VaultActivity, String> {
+    vault_activity_in(&config_dir(&app)?, Path::new(&vault), &since, &until)
+}
+
+/// `vault_activity` against the runtime database in `config`.
+fn vault_activity_in(
+    config: &Path,
+    vault: &Path,
+    since: &str,
+    until: &str,
+) -> Result<runtime::activity::VaultActivity, String> {
+    let window = runtime::activity::Window::parse(since, until)?;
+    let ro =
+        runtime::ReadOnly::open(config).map_err(|e| format!("History could not be read: {e}"))?;
+    Ok(runtime::activity::vault_activity(
+        &ro,
+        &runtime::scope::derive_vault_id(vault),
+        &window,
+    ))
+}
+
+/// The most write rows one page's History reads (M64.2b).
+const PAGE_WRITE_CAP: usize = 2_000;
+
+/// What a page's History reads (M64.2b): the names it has had (newest
+/// first), the write rows under any of them or their comment sidecars, the
+/// runs those rows name, when the vault's recording began, and, on a
+/// knowledge page only, what the ledger recorded about the concept. Each
+/// lane is read alone, so one that fails says so and the rest still speak.
+#[derive(Debug, Serialize)]
+pub struct PageActivity {
+    pub chain: Vec<String>,
+    pub writes: runtime::activity::Lane<runtime::activity::ActivityWrite>,
+    pub runs: runtime::activity::Lane<runtime::activity::ActivityRun>,
+    pub recording_since: runtime::activity::Since,
+    /// None outside the bundle: a page there has no Knowledge lane at all.
+    pub knowledge: Option<KnowledgeLane>,
+}
+
+/// A concept's ledger lane: what it recorded, a vault that keeps no ledger
+/// (not recorded, never "nothing happened"), or a read that failed.
+#[derive(Debug, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum KnowledgeLane {
+    Read {
+        events: Vec<knowledge::ConceptEvent>,
+    },
+    NotRecorded,
+    Unavailable {
+        reason: String,
+    },
+}
+
+/// What a page outside the vault is refused with (M64.2b).
+fn page_outside_vault(path: &str) -> String {
+    format!("{path} is outside this vault, so it has no history here.")
+}
+
+/// One page's History (M64.2b), merged in the tab with its versions. The
+/// path resolves to where it lands, the spelling every row is stored under,
+/// as `page_attribution` resolves it; a path outside the vault is refused in
+/// words. runtime.db is read through a read-only handle; the ledger lane
+/// through the fold and the index, which it never creates or repairs.
+#[tauri::command(async)]
+fn page_activity(
+    app: tauri::AppHandle,
+    vault: String,
+    path: String,
+) -> Result<PageActivity, String> {
+    page_activity_in(
+        &config_dir(&app)?,
+        Path::new(&vault),
+        &path,
+        chrono::Utc::now(),
+    )
+}
+
+/// `page_activity` against the runtime database and ledger index in `config`.
+fn page_activity_in(
+    config: &Path,
+    vault: &Path,
+    path: &str,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<PageActivity, String> {
+    use runtime::activity::{Lane, Since};
+    let Some(landed) = vault::write::landing_path(vault, path) else {
+        return Err(page_outside_vault(path));
+    };
+    let vault_id = runtime::scope::derive_vault_id(vault);
+    let window = runtime::activity::Window::through(now);
+    fn unavailable<T>(reason: &str) -> runtime::activity::Lane<T> {
+        runtime::activity::Lane::Unavailable {
+            reason: reason.to_string(),
+        }
+    }
+    let mut chain = vec![landed.clone()];
+    let (writes, runs, recording_since) = match runtime::ReadOnly::open(config) {
+        Err(e) => {
+            let reason = format!("History could not be read: {e}");
+            (
+                unavailable(&reason),
+                unavailable(&reason),
+                Since::Unavailable { reason },
+            )
+        }
+        Ok(ro) => {
+            let rows = runtime::write_log::rename_chain(
+                &ro,
+                &vault_id,
+                &landed,
+                runtime::write_log::RENAME_HOPS,
+            )
+            .and_then(|names| {
+                chain = names;
+                let mut paths = chain.clone();
+                paths.extend(chain.iter().map(|name| vault::comments::sidecar_rel(name)));
+                runtime::activity::write_rows(&ro, &vault_id, &window, Some(&paths), PAGE_WRITE_CAP)
+            });
+            let runs = match &rows {
+                Err(_) => {
+                    unavailable("the page's edits could not be read, so its runs are unknown")
+                }
+                Ok(page) => {
+                    let mut ids: Vec<String> = Vec::new();
+                    for id in page.rows.iter().filter_map(|w| w.run_id.as_ref()) {
+                        if !ids.contains(id) {
+                            ids.push(id.clone());
+                        }
+                    }
+                    if ids.is_empty() {
+                        Lane::Read {
+                            rows: Vec::new(),
+                            more: false,
+                        }
+                    } else {
+                        runtime::activity::run_rows(
+                            &ro,
+                            &vault_id,
+                            &window,
+                            Some(&ids),
+                            runtime::activity::RUN_CAP,
+                        )
+                        .into()
+                    }
+                }
+            };
+            let since = match runtime::activity::recording_since(&ro, &vault_id) {
+                Ok(at) => Since::Read { at },
+                Err(reason) => Since::Unavailable { reason },
+            };
+            (rows.into(), runs, since)
+        }
+    };
+    let knowledge =
+        knowledge::is_knowledge_path(&landed).then(|| concept_lane(config, vault, &landed));
+    Ok(PageActivity {
+        chain,
+        writes,
+        runs,
+        recording_since,
+        knowledge,
+    })
+}
+
+/// What the ledger recorded about the concept at `landed` (M64.2b): no store
+/// is not recorded; the fold names the events, and the index (read only,
+/// when it exists) dates them and names who made each. With no index the
+/// times read not recorded; any failed read makes the lane unavailable.
+fn concept_lane(config: &Path, vault: &Path, landed: &str) -> KnowledgeLane {
+    if !ledger::has_store(vault) {
+        return KnowledgeLane::NotRecorded;
+    }
+    let read = || -> Result<Vec<knowledge::ConceptEvent>, String> {
+        let krel = landed
+            .strip_prefix(knowledge::KNOWLEDGE_DIR)
+            .and_then(|rest| rest.strip_prefix('/'))
+            .unwrap_or(landed);
+        let folded = ledger::shadow::state_of(vault)?;
+        let mut events = knowledge::concept_history(&folded.state, krel);
+        let Some(store) = ledger::store::load(&ledger::ledger_dir(vault))? else {
+            return Ok(events);
+        };
+        let Some(index) = ledger::index::Index::open_read_only(config, &store.store_id)? else {
+            return Ok(events);
+        };
+        let ids: Vec<String> = events.iter().map(|e| e.event_id.clone()).collect();
+        let facts = index.event_rows(&ids)?;
+        for event in &mut events {
+            if let Some(fact) = facts.get(&event.event_id) {
+                event.at.get_or_insert_with(|| fact.ingested_at.clone());
+                if event.actor.is_none() {
+                    event.actor = fact.actor.clone();
+                }
+            }
+        }
+        Ok(events)
+    };
+    match read() {
+        Ok(events) => KnowledgeLane::Read { events },
+        Err(reason) => KnowledgeLane::Unavailable { reason },
+    }
+}
+
 /// What one run changed in Knowledge (M50.3): the concepts its proposals
 /// named and what became of each, joined from the ledger by `run_id`.
 /// `None` when the vault keeps no ledger — not recorded, never "changed
@@ -591,7 +806,9 @@ fn set_agent_paused(
 ) -> Result<(), String> {
     let conn = runtime::open_existing(&config_dir(&app)?)?;
     let vault_id = runtime::scope::register(&conn, Path::new(&vault))?;
-    runtime::settings::set_agent_paused(&conn, &vault_id, &actor, paused)
+    // M63.1: pausing cancels the agent's pending wakes in the same
+    // transaction, so none is left to run when it resumes.
+    runtime::wakes::pause_agent(&conn, &vault_id, &actor, paused, chrono::Utc::now())
 }
 
 /// Which agents are paused in this vault (M33b.5).
@@ -604,6 +821,68 @@ fn paused_agents(app: tauri::AppHandle, vault: String) -> Result<Vec<String>, St
     let conn = runtime::open_existing(&config_dir(&app)?)?;
     let vault_id = runtime::scope::register(&conn, Path::new(&vault))?;
     runtime::settings::paused_agents(&conn, &vault_id)
+}
+
+/// Admit the trigger matches the renderer saw in this vault (M63.1), each
+/// once: a live key is counted, never admitted twice, and a malformed offer
+/// or an agent paused on the fleet is refused by name. REFUSES without a
+/// runtime database, and the renderer keeps the batch to offer again.
+#[tauri::command(async)]
+fn admit_wakes(
+    app: tauri::AppHandle,
+    vault: String,
+    wakes: Vec<runtime::wakes::WakeOffer>,
+) -> Result<runtime::wakes::AdmitReport, String> {
+    let (conn, vault_id) = job_ledger_scope(&app, &vault)?;
+    runtime::wakes::admit(&conn, &vault_id, &wakes, chrono::Utc::now())
+}
+
+/// The wakes waiting in this vault, oldest first (M63.1), read through a
+/// read-only handle. A failed read is an error, which the runner treats as
+/// "derive no wake job and cancel nothing", never as nothing waiting.
+#[tauri::command(async)]
+fn wakes_pending(
+    app: tauri::AppHandle,
+    vault: String,
+) -> Result<Vec<runtime::wakes::PendingWake>, String> {
+    let ro = runtime::ReadOnly::open(&config_dir(&app)?)?;
+    runtime::wakes::pending(
+        &ro,
+        &runtime::scope::derive_vault_id(Path::new(&vault)),
+        chrono::Utc::now(),
+    )
+}
+
+/// Cancel pending wakes the vault no longer backs (M63.1), each with its
+/// why. An unknown why refuses the whole call before anything is written.
+#[tauri::command(async)]
+fn cancel_wakes(
+    app: tauri::AppHandle,
+    vault: String,
+    cancels: Vec<runtime::wakes::WakeCancel>,
+) -> Result<usize, String> {
+    let (conn, vault_id) = job_ledger_scope(&app, &vault)?;
+    runtime::wakes::cancel(&conn, &vault_id, &cancels, chrono::Utc::now())
+}
+
+/// What is waiting to wake this vault's agents, and what was skipped or
+/// expired this week (M63.1b), optionally for one agent. Read through a
+/// read-only handle under the derived vault id, never `register`: a read
+/// writes nothing. A failed read is an error, which the list renders as
+/// unavailable, never as nothing waiting.
+#[tauri::command(async)]
+fn fleet_wakes(
+    app: tauri::AppHandle,
+    vault: String,
+    actor: Option<String>,
+) -> Result<Vec<runtime::fleet::FleetWake>, String> {
+    let ro = runtime::ReadOnly::open(&config_dir(&app)?)?;
+    runtime::fleet::wakes(
+        &ro,
+        &runtime::scope::derive_vault_id(Path::new(&vault)),
+        actor.as_deref(),
+        chrono::Utc::now(),
+    )
 }
 
 /// How many background runs may be live at once (M33b.2). Subscription-wide
@@ -1263,6 +1542,49 @@ fn restore_from_trash(vault: String, stamp: String) -> Result<String, String> {
     vault::trash::restore_from_trash(Path::new(&vault), &stamp, &by)
 }
 
+/// One database-wide change, all or nothing (M60.6): a property rename,
+/// kind change or copy, or a bulk delete, as `vault::batch` applies it.
+/// Every op's path is guarded as any write is, and the first refusal answers
+/// in its words. A stale `expectHash` (D2 (c)) answers `stale_content` and
+/// records one operational row under surface `batch`.
+#[tauri::command(async)]
+fn apply_batch(
+    vault: String,
+    ops: Vec<serde_json::Value>,
+) -> Result<vault::batch::BatchApplied, String> {
+    let mut cleared = None;
+    for op in &ops {
+        let path = op.get("path").and_then(serde_json::Value::as_str);
+        cleared = Some(knowledge::guard_human_write(path.unwrap_or_default())?);
+    }
+    let Some(cleared) = cleared else {
+        return Ok(vault::batch::BatchApplied {
+            batch_id: String::new(),
+            files: Vec::new(),
+        });
+    };
+    let by = WriteReceipt::ipc(cleared);
+    vault::batch::apply_batch(Path::new(&vault), &ops, &by).map_err(|error| match error {
+        vault::batch::BatchError::Refused(message) => message,
+        vault::batch::BatchError::Stale(stale) => {
+            let message = vault::batch::stale_words(&stale.path);
+            let typed = policy::table::PolicyTable::load().and_then(|table| {
+                policy::rejection::OperationalRefusal::new(
+                    &table,
+                    "stale_content",
+                    "batch",
+                    &message,
+                )
+            });
+            match typed {
+                Ok(typed) => runtime::sink::record(&typed, &runtime::operational::LogEntry::bare()),
+                Err(e) => log::warn!("operational_log: could not type stale_content: {e}"),
+            }
+            message
+        }
+    })
+}
+
 // --- Page comments (M70.2) -------------------------------------------------
 //
 // Each writes only the page's sidecar, `.comments/<page>.json`, never the
@@ -1612,18 +1934,23 @@ pub(crate) fn start_handoff_run(
     })
 }
 
-/// What starting a run answers (M34.2.4): a handle, or a typed deferral.
+/// What starting a run answers: a handle, a typed deferral (M34.2.4), or a
+/// woken run that had nothing left to run (M63.1).
 ///
 /// `Deferred` is the ambient gate saying "not now" — over a ceiling, paused,
 /// accounting unknown — and it is a RESULT, not an error: the caller is
 /// expected to read the reasons, log one honest row, and leave the fire key
-/// unconsumed so the run happens when the window resets. Untagged serde: the
-/// renderer tells the arms apart by which field is present.
+/// unconsumed so the run happens when the window resets. A woken run's wake
+/// stays pending with a time to try again. `Settled` answers a woken run
+/// whose wake was no longer pending, expired, or was cancelled by its
+/// agent's pause: `gone`, nothing started and nothing to retry. Untagged
+/// serde: the renderer tells the arms apart by which field is present.
 #[derive(serde::Serialize)]
 #[serde(untagged)]
 enum RunStart {
     Started(RunHandle),
     Deferred { deferred: Vec<String> },
+    Settled { settled: &'static str },
 }
 
 /// Returns the run's id — the tag on every event this run emits.
@@ -1634,10 +1961,23 @@ fn run_agent(
     mcp_state: tauri::State<'_, mcp::McpState>,
     vault: String,
     request: agent::AgentRequest,
+    wake: Option<runtime::wakes::WakeRequest>,
 ) -> Result<RunStart, String> {
     // M56.5: the run's model and effort first, before the pause check, the
     // endpoint and any lease, so a refused run leaves no token, lease or row.
     agent::run_options::validate_request(&request)?;
+    // M63.1: a woken run is an agent's unattended run on lane agent, and its
+    // cause is its wake's, so a request that says otherwise starts nothing.
+    if wake.is_some() {
+        if let Some(refused) = runtime::wakes::refuse_request(
+            request.attended.unwrap_or(false),
+            request.lane.as_deref(),
+            request.actor.as_deref(),
+            request.cause.is_some(),
+        ) {
+            return Err(refused);
+        }
+    }
     // Attribution rides the run's own bearer token (M13.4): the MCP server
     // stamps `generated.by` from the token each request presents, so a
     // child killed while a write is in flight still stamps as itself.
@@ -1702,7 +2042,48 @@ fn run_agent(
     // attended booking — metering is a record, never a precondition.
     let dir = config_dir(&app)?;
     let mut lease: Option<runtime::dispatch::Lease> = None;
-    if !request.attended.unwrap_or(false) {
+    // The wakes a woken run took with it, named on its WHY block's Also line.
+    let mut also: Vec<runtime::cause::RunCause> = Vec::new();
+    let mut cause = cause;
+    if let Some(wake) = wake.as_ref() {
+        // M63.1 — a woken run claims its wake inside the dispatch
+        // transaction, with its lease, and records the wake's own cause.
+        let Some((vault_id, store)) = scope
+            .as_ref()
+            .and_then(|s| s.store_uuid.as_ref().map(|store| (&s.vault_id, store)))
+        else {
+            return Err(
+                "this vault has no ledger store, so a woken run cannot claim its lease".into(),
+            );
+        };
+        let conn = runtime::open_existing(&dir)?;
+        let now = chrono::Utc::now();
+        let reservation = ingest::driver::reservation(&conn, now)?;
+        match runtime::dispatch::claim_woken(
+            &conn,
+            vault_id,
+            store,
+            "agent",
+            reservation,
+            request.actor.as_deref().unwrap_or_default(),
+            wake,
+            now,
+        )? {
+            runtime::dispatch::Woken::Started {
+                lease: l,
+                cause: woke,
+                also: took,
+            } => {
+                lease = Some(l);
+                cause = woke;
+                also = took;
+            }
+            runtime::dispatch::Woken::Deferred(reasons) => {
+                return Ok(RunStart::Deferred { deferred: reasons });
+            }
+            runtime::dispatch::Woken::Gone => return Ok(RunStart::Settled { settled: "gone" }),
+        }
+    } else if !request.attended.unwrap_or(false) {
         if let Some(lane) = request.lane.as_deref() {
             if !runtime::schema::LANES
                 .iter()
@@ -1757,6 +2138,7 @@ fn run_agent(
         scope.as_ref(),
         cause,
         lease,
+        also,
     )
     .map(RunStart::Started)
 }
@@ -1765,7 +2147,8 @@ fn run_agent(
 /// through it): the durable id, the bearer, the meter and the stream. The
 /// request's endpoint is already set, its pause gate and cause already
 /// passed. `lease` is the ambient claim an unattended laned run made; an
-/// attended run, an answer's resume among them, has none.
+/// attended run, an answer's resume among them, has none. `also` is the
+/// causes of the wakes a woken run took with it (M63.1), empty otherwise.
 #[expect(
     clippy::too_many_arguments,
     reason = "each is a different fact run_agent and the answer command already hold"
@@ -1779,6 +2162,7 @@ fn spawn_requested_run(
     scope: Option<&runtime::VaultScope>,
     cause: Option<runtime::cause::RunCause>,
     lease: Option<runtime::dispatch::Lease>,
+    also: Vec<runtime::cause::RunCause>,
 ) -> Result<RunHandle, String> {
     let dir = config_dir(app)?;
     // M31.2a: the durable id is minted BEFORE the token so the grant and the
@@ -1807,9 +2191,11 @@ fn spawn_requested_run(
     // turn's cause has none, so what a person typed goes to the CLI as typed.
     // M57.4c: an unattended agent run hears, after the WHY block, what became
     // of the writes it queued for Review; a run with none decided keeps its
-    // message byte for byte, and an attended turn hears nothing.
+    // message byte for byte, and an attended turn hears nothing. M63.1: a
+    // woken run's block names the other wakes it took, as data.
     let (message, told) = with_outcomes(&request.message, &request, vault);
-    request.message = runtime::cause::with_preamble(&message, cause.as_ref(), chrono::Utc::now());
+    request.message =
+        runtime::cause::with_preamble_also(&message, cause.as_ref(), &also, chrono::Utc::now());
     // M57.4: whether the agent asks before its page writes, read from its
     // own record here as well as from the request, so a renderer that leaves
     // it out cannot drop it. The plan, the seat's snapshot (an answer's
@@ -2121,6 +2507,7 @@ fn answer_interaction(
             scope.as_ref(),
             cause,
             None,
+            Vec::new(),
         )
     })();
     match started {
@@ -2207,8 +2594,9 @@ fn start_watcher(
     ambient: tauri::State<'_, ingest::ambient::AmbientState>,
     agents: tauri::State<'_, agent::AgentState>,
     vault: String,
-) -> Result<(), String> {
+) -> Result<OpenReport, String> {
     let vault_path = PathBuf::from(&vault);
+    let mut report = OpenReport::default();
     // M53.10: a run never outlives its vault. Opening one stops every run in
     // any other, Cerebro's own included; reopening this one (a webview
     // reload) stops nothing, and a run started here while it opened is kept.
@@ -2235,6 +2623,9 @@ fn start_watcher(
         // a previous process left `running` has no finisher left; the cutoff
         // is this process's start, so a run it opened is never touched.
         agent::meter::recover_orphaned(&dir, process_started());
+        // M63.1: wakes past their week expire, and a started wake whose run
+        // ended without finishing it is closed. Never fails the open.
+        runtime::wakes::sweep_at_open(&dir, &vault_path, chrono::Utc::now());
         // M70.4: a comment thread's pending answer whose run this process
         // does not hold reads failed, "didn't finish"; a live one is kept.
         agent::thread_turn::settle_orphans(&vault_path);
@@ -2246,6 +2637,17 @@ fn start_watcher(
         if let Some(scope) = runtime::open_vault(&vault_path) {
             runtime::sessions::track(&scope);
         }
+        // M60.6: a batch an earlier process left unfinished is put back
+        // before the purge and the watcher, and the webview says so. The
+        // cutoff is this process's start, so a reload never touches a batch
+        // this process is running.
+        let recovered = WriteReceipt::system(vault::receipt::SystemWriter::BatchRecovery);
+        let rolled = vault::batch::recover(&vault_path, process_started(), &recovered);
+        report = OpenReport {
+            unfinished: rolled.unfinished,
+            restored: rolled.restored,
+            kept: rolled.kept,
+        };
         // M60.8: Trash items past their days move to the OS Trash, on a
         // thread of their own so the open never waits on the Finder.
         let purged = vault_path.clone();
@@ -2265,7 +2667,18 @@ fn start_watcher(
         // enabling the work, and nothing here turns it on.
         ingest::ambient::start(&app, ambient.inner(), &vault_path, &dir);
     }
-    vault::watcher::start(app, state.inner(), vault_path)
+    vault::watcher::start(app, state.inner(), vault_path)?;
+    Ok(report)
+}
+
+/// What opening a vault put back (M60.6): the pages of batches an earlier
+/// process left unfinished, the ones restored as they were, and the ones
+/// left alone because they changed since. All zero on an ordinary open.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub struct OpenReport {
+    pub unfinished: usize,
+    pub restored: usize,
+    pub kept: usize,
 }
 
 /// The instant this process started (M49.9) — the line between attended
@@ -2327,6 +2740,8 @@ pub fn run() {
             run_knowledge_writes,
             page_attribution,
             commit_runs,
+            vault_activity,
+            page_activity,
             fleet_actor_summary,
             fleet_actor_summaries,
             job_ledger_read,
@@ -2337,6 +2752,10 @@ pub fn run() {
             set_global_pause,
             set_agent_paused,
             paused_agents,
+            admit_wakes,
+            wakes_pending,
+            cancel_wakes,
+            fleet_wakes,
             set_ambient_concurrency,
             set_lane_enabled,
             trigger_status,
@@ -2364,6 +2783,7 @@ pub fn run() {
             delete_note,
             list_trash,
             restore_from_trash,
+            apply_batch,
             list_comments,
             start_comment_thread,
             reply_to_comment_thread,
@@ -2486,6 +2906,7 @@ mod tests {
             session_id: None,
             model: None,
             shell: None,
+            web: None,
             connectors: None,
             connector_names: None,
             attended: None,
@@ -2537,6 +2958,214 @@ mod tests {
         request.actor = Some("process:release-scout".into());
         request.attended = Some(false);
         (config, vault, request)
+    }
+
+    #[test]
+    fn vault_activity_refuses_a_malformed_window() {
+        let config = vault::testutil::temp_vault("lib-activity-config");
+        let vault = vault::testutil::temp_vault("lib-activity");
+        let got = vault_activity_in(&config, &vault, "yesterday", "2026-07-29T00:00:00Z");
+        assert_eq!(
+            got.err().as_deref(),
+            Some("yesterday is not an RFC 3339 instant.")
+        );
+        let backwards = vault_activity_in(
+            &config,
+            &vault,
+            "2026-07-29T00:00:00Z",
+            "2026-07-28T00:00:00Z",
+        );
+        assert_eq!(
+            backwards.err().as_deref(),
+            Some(runtime::activity::BACKWARDS)
+        );
+        // A good window over no runtime database says History could not be
+        // read, never an empty year.
+        let missing = vault_activity_in(
+            &config,
+            &vault,
+            "2026-07-28T00:00:00Z",
+            "2026-07-29T00:00:00Z",
+        );
+        let refused = missing.err().unwrap_or_default();
+        assert!(
+            refused.starts_with("History could not be read: "),
+            "{refused}"
+        );
+        let conn = runtime::open(&config).unwrap();
+        runtime::scope::register(&conn, &vault).unwrap();
+        let read = vault_activity_in(
+            &config,
+            &vault,
+            "2026-07-28T00:00:00Z",
+            "2026-07-29T00:00:00Z",
+        )
+        .unwrap();
+        assert!(matches!(
+            read.recording_since,
+            runtime::activity::Since::Read { at: None }
+        ));
+        drop(conn);
+        for dir in [&vault, &config] {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    /// One `vault_writes` row for the page-activity tests (M64.2b).
+    fn page_row<'a>(
+        kind: &'a str,
+        path: &'a str,
+        to: Option<&'a str>,
+        actor: &'a str,
+        run_id: Option<&'a str>,
+    ) -> runtime::vault_writes::WriteRow<'a> {
+        runtime::vault_writes::WriteRow {
+            kind,
+            path,
+            to,
+            content_hash: None,
+            actor: Some(actor),
+            run_id,
+            approved_by: None,
+        }
+    }
+
+    #[test]
+    fn page_activity_refuses_a_path_outside_the_vault() {
+        let config = vault::testutil::temp_vault("lib-page-activity-config");
+        let vault = vault::testutil::temp_vault("lib-page-activity");
+        let outside = config.join("outside.md");
+        std::fs::write(&outside, "# A\n").unwrap();
+        for path in ["../outside.md", outside.to_str().unwrap()] {
+            assert_eq!(
+                page_activity_in(&config, &vault, path, chrono::Utc::now())
+                    .err()
+                    .as_deref(),
+                Some(page_outside_vault(path).as_str()),
+                "{path} is no page of this vault"
+            );
+        }
+        assert_eq!(
+            page_outside_vault("../outside.md"),
+            "../outside.md is outside this vault, so it has no history here."
+        );
+        // No runtime database: every runtime lane says so, never empty.
+        let read = page_activity_in(&config, &vault, "notes/a.md", chrono::Utc::now()).unwrap();
+        assert!(matches!(
+            read.writes,
+            runtime::activity::Lane::Unavailable { .. }
+        ));
+        assert!(matches!(
+            read.recording_since,
+            runtime::activity::Since::Unavailable { .. }
+        ));
+        for dir in [&vault, &config] {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn a_renamed_page_reads_rows_under_its_old_name() {
+        let config = vault::testutil::temp_vault("lib-page-rename-config");
+        let vault = vault::testutil::temp_vault("lib-page-rename");
+        let conn = runtime::open(&config).unwrap();
+        let vault_id = runtime::scope::register(&conn, &vault).unwrap();
+        let at = |minute: i64| {
+            chrono::DateTime::parse_from_rfc3339("2026-07-27T14:00:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc)
+                + chrono::Duration::minutes(minute)
+        };
+        let me = vault::receipt::HUMAN_ACTOR;
+        let rows = [
+            page_row("vault.create", "notes/a.md", None, me, None),
+            page_row(
+                "vault.write",
+                "notes/a.md",
+                None,
+                "process:release-scout",
+                Some("run-1"),
+            ),
+            page_row(
+                "vault.comment",
+                ".comments/notes/a.md.json",
+                None,
+                "human:owner",
+                None,
+            ),
+            page_row("vault.rename", "notes/a.md", Some("notes/b.md"), me, None),
+            page_row("vault.write", "notes/b.md", None, me, None),
+            page_row("vault.write", "notes/other.md", None, me, None),
+        ];
+        for (minute, row) in rows.iter().enumerate() {
+            runtime::vault_writes::record_at(&conn, &vault_id, row, at(minute as i64 * 10))
+                .unwrap();
+        }
+        let read = page_activity_in(&config, &vault, "notes/b.md", at(120)).unwrap();
+        assert_eq!(read.chain, vec!["notes/b.md", "notes/a.md"]);
+        let runtime::activity::Lane::Read { rows, more } = &read.writes else {
+            panic!("the writes lane reads");
+        };
+        assert!(!more);
+        let seen: Vec<(&str, &str)> = rows
+            .iter()
+            .map(|w| (w.kind.as_str(), w.path.as_str()))
+            .collect();
+        assert_eq!(
+            seen,
+            vec![
+                ("vault.write", "notes/b.md"),
+                ("vault.rename", "notes/a.md"),
+                ("vault.comment", ".comments/notes/a.md.json"),
+                ("vault.write", "notes/a.md"),
+                ("vault.create", "notes/a.md"),
+            ],
+            "the old name's rows and its comments, never another page's"
+        );
+        // The run that wrote it under its old name is the page's run too. No
+        // `runs` row was recorded for it, so the lane reads, and is empty.
+        assert!(matches!(
+            &read.runs,
+            runtime::activity::Lane::Read { rows, .. } if rows.is_empty()
+        ));
+        assert!(matches!(
+            &read.recording_since,
+            runtime::activity::Since::Read { at: Some(_) }
+        ));
+        drop(conn);
+        for dir in [&vault, &config] {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn a_page_outside_the_bundle_has_no_knowledge_lane() {
+        let config = vault::testutil::temp_vault("lib-page-lane-config");
+        let vault = vault::testutil::temp_vault("lib-page-lane");
+        let page = page_activity_in(&config, &vault, "notes/a.md", chrono::Utc::now()).unwrap();
+        assert!(page.knowledge.is_none());
+        let wire = serde_json::to_value(&page).unwrap();
+        assert_eq!(wire["knowledge"], serde_json::Value::Null);
+        // A concept in a vault that keeps no ledger: not recorded, never empty.
+        let concept = page_activity_in(
+            &config,
+            &vault,
+            "knowledge/systems/x.md",
+            chrono::Utc::now(),
+        )
+        .unwrap();
+        assert!(matches!(
+            concept.knowledge,
+            Some(KnowledgeLane::NotRecorded)
+        ));
+        let wire = serde_json::to_value(&concept).unwrap();
+        assert_eq!(
+            wire["knowledge"],
+            serde_json::json!({ "state": "not_recorded" })
+        );
+        for dir in [&vault, &config] {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     #[test]
@@ -2913,6 +3542,9 @@ mod tests {
             "rename_note" => rename_note(v, text("from"), text("to")),
             "delete_note" => delete_note(v, text("path")).map(drop),
             "restore_from_trash" => restore_from_trash(v, text("stamp")).map(drop),
+            "apply_batch" => {
+                apply_batch(v, args["ops"].as_array().cloned().unwrap_or_default()).map(drop)
+            }
             "write_text_file" => write_text_file(v, text("path"), text("content")).map(drop),
             "import_attachment" => {
                 let named = text("source").replace("/SOURCE/", "");
@@ -2964,15 +3596,20 @@ mod tests {
                 }
                 None => {
                     outcome.unwrap_or_else(|e| panic!("{case} must land: {e}"));
-                    let expected: Vec<DoorRow> = match &case["records"] {
-                        serde_json::Value::Null => Vec::new(),
-                        row => vec![(
+                    let row_of = |row: &serde_json::Value| -> DoorRow {
+                        (
                             row["kind"].as_str().unwrap().to_string(),
                             row["path"].as_str().unwrap().to_string(),
                             row["to"].as_str().map(str::to_string),
                             Some(human.to_string()),
                             None,
-                        )],
+                        )
+                    };
+                    // M60.6: a batch names each row it records, in order.
+                    let expected: Vec<DoorRow> = match &case["records"] {
+                        serde_json::Value::Null => Vec::new(),
+                        serde_json::Value::Array(rows) => rows.iter().map(row_of).collect(),
+                        row => vec![row_of(row)],
                     };
                     assert_eq!(door_rows(&dir), expected, "{case}");
                 }
@@ -2982,6 +3619,52 @@ mod tests {
         runtime::sink::disarm();
         for dir in [&config, &source] {
             let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    // M60.6: a stale expectHash refuses the whole batch in the IPC's words,
+    // and records one operational stale_content row under surface `batch`.
+    #[test]
+    fn a_stale_batch_records_one_operational_row() {
+        let _sink = runtime::sink::test_lock();
+        let config = vault::testutil::temp_vault("stale-batch-config");
+        let dir = vault::testutil::temp_vault("stale-batch");
+        runtime::sink::arm(&config).unwrap();
+        vault::testutil::write(&dir, "records/a.md", "# A\n");
+        vault::testutil::write(&dir, "records/b.md", "# B\n");
+        let count = || {
+            runtime::sink::with_sink(|conn| {
+                conn.query_row(
+                    "SELECT count(*) FROM operational_log WHERE surface = 'batch' \
+                     AND code = 'stale_content'",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap()
+            })
+            .unwrap()
+        };
+        let before = count();
+        let err = apply_batch(
+            dir.to_string_lossy().to_string(),
+            vec![
+                serde_json::json!({ "op": "body", "path": "records/a.md", "body": "x\n" }),
+                serde_json::json!({
+                    "op": "body", "path": "records/b.md", "body": "y\n",
+                    "expectHash": "0".repeat(64),
+                }),
+            ],
+        )
+        .unwrap_err();
+        assert_eq!(err, vault::batch::stale_words("records/b.md"));
+        assert_eq!(count(), before + 1);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("records/a.md")).unwrap(),
+            "# A\n"
+        );
+        runtime::sink::disarm();
+        for d in [&dir, &config] {
+            let _ = std::fs::remove_dir_all(d);
         }
     }
 

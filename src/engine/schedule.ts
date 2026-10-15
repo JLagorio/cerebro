@@ -5,6 +5,7 @@ import {
   parseDateProperty,
   serializeDateProperty,
   toIsoDate,
+  type DateValue,
 } from './dates';
 import { resolveTarget } from './wikilink';
 import type { Entry, FieldKind, Presentation, Schema } from './types';
@@ -18,9 +19,17 @@ import type { Entry, FieldKind, Presentation, Schema } from './types';
  * and how a span maps onto a row of day columns. Keeping that here is what lets
  * the three renderers be layout code and nothing else.
  *
- * Everything is inclusive ISO calendar dates in LOCAL time. Not timestamps: a
- * task due the 3rd is due the 3rd in the user's timezone, and routing that
- * through UTC is how a due date lands on the 2nd for half the world.
+ * Everything is inclusive ISO calendar dates in LOCAL time. A floating date
+ * stays floating: a task due the 3rd is due the 3rd in the user's timezone,
+ * and routing that through UTC is how a due date lands on the 2nd for half
+ * the world. An instant (`2026-07-28T09:20:00Z`, dates.v1.json) is a moment,
+ * so it converts to its local day on read: it lands on the day the user's
+ * clock said it happened.
+ *
+ * One exception to "inclusive" (M61.8): a range whose end is exactly 00:00 on
+ * a later day ends on the day BEFORE, because midnight is where the last day
+ * stops, not a minute of the next one. A 22:00 → 00:00 deploy is a Tuesday
+ * evening, never also a Wednesday.
  */
 
 export type Zoom = NonNullable<Presentation['zoom']>;
@@ -72,12 +81,32 @@ export function spanOf(entry: Entry, field: string | null): Span | null {
   // before M16.14 gave dates a time component, and one that would have had to
   // learn every spelling `parseDateProperty` already knows.
   const value = parseDateProperty(entry.properties[field]);
-  if (value === null) return null;
-  // An open or backwards end is a one-day milestone rather than a dropped
-  // record: the start date is a fact, and the missing end is not a reason to
-  // hide it from the schedule.
-  const end = value.end !== null && value.end >= value.start ? value.end : value.start;
-  return { start: value.start, end };
+  return value === null ? null : spanOfValue(value);
+}
+
+/**
+ * The days a parsed date value covers — `spanOf`'s rule, for a caller that
+ * already holds the value (the hours grid's placement, M61.8).
+ *
+ * An open or backwards end is a one-day milestone rather than a dropped
+ * record: the start date is a fact, and the missing end is not a reason to
+ * hide it from the schedule. An end at exactly 00:00 on a later day ends on
+ * the day before (the midnight exception in the header), and never before
+ * its start.
+ */
+export function spanOfValue(value: DateValue): Span {
+  if (value.end === null || value.end < value.start) {
+    return { start: value.start, end: value.start };
+  }
+  if (value.endTime === '00:00' && value.end > value.start) {
+    return { start: value.start, end: addDays(value.end, -1) };
+  }
+  return { start: value.start, end: value.end };
+}
+
+/** Whether a stored value ends at a midnight `spanOfValue` pulls back. */
+function endsAtMidnight(value: DateValue): boolean {
+  return value.end !== null && value.endTime === '00:00' && value.end > value.start;
 }
 
 /**
@@ -87,7 +116,13 @@ export function spanOf(entry: Entry, field: string | null): Span | null {
  * and dropping the time on the way through would silently reschedule the
  * meeting as well as the day. So would re-serializing through anything but
  * `serializeDateProperty`, which is the one place that knows a `date` field
- * stores a scalar and a `daterange` stores a mapping.
+ * stores a scalar and a `daterange` stores a mapping. An instant moves as the
+ * local wall time it read as, and is written back as that floating time.
+ *
+ * A range that ends at midnight (M61.8) is drawn ending the day before, so
+ * `next.end` is its last covered day; the stored end goes back to the
+ * midnight after it. A whole-day move or a timeline resize keeps the 00:00
+ * end, and never writes a range that runs backwards.
  */
 export function rescheduleValue(raw: unknown, kind: 'date' | 'daterange', next: Span): unknown {
   const current = parseDateProperty(raw) ?? makeDateValue(next.start);
@@ -95,11 +130,12 @@ export function rescheduleValue(raw: unknown, kind: 'date' | 'daterange', next: 
   // dragging a record does not claim to know when it finishes. Dragging its
   // right edge does, and that arrives here as an end past the start.
   const keepsEnd = current.end !== null || next.end !== next.start;
+  const midnight = endsAtMidnight(current);
   return serializeDateProperty(
     {
       ...current,
       start: next.start,
-      end: kind === 'daterange' && keepsEnd ? next.end : null,
+      end: kind === 'daterange' && keepsEnd ? (midnight ? addDays(next.end, 1) : next.end) : null,
     },
     kind,
   );
@@ -260,6 +296,14 @@ export function weekLabel(days: string[]): string {
   const day = (iso: string) => Number(iso.slice(8, 10));
   const tail = `${isSameMonth(first, last) ? '' : `${month(last)} `}${day(last)}, ${last.slice(0, 4)}`;
   return `${month(first)} ${day(first)} – ${tail}`;
+}
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/** Heading for a day grid (M61.8), e.g. "Tuesday, July 28, 2026". */
+export function dayLabel(iso: string): string {
+  const d = fromIsoDate(iso);
+  return `${WEEKDAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}, ${iso.slice(0, 4)}`;
 }
 
 export function weekdayLabels(weekStart: WeekStart = 0, showWeekends = true): string[] {

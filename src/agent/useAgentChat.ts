@@ -8,6 +8,7 @@ import {
   runAgent,
   startedOrThrow,
   stopAgent,
+  type AnswerResult,
   type RunHandle,
 } from './agentIpc';
 import { newRunId } from './runs';
@@ -23,7 +24,7 @@ import type {
 import { flushOpenPages } from '@/editor/openPages';
 import { listAgents, narrowTools, readAddress } from '@/engine/agents';
 import type { Place } from '@/engine/place';
-import { grantedTools, holdsShell, type PromptGrant } from '@/engine/toolGrant';
+import { grantedTools, holdsShell, holdsWeb, type PromptGrant } from '@/engine/toolGrant';
 import { readNote } from '@/lib/ipc';
 import { effectiveCeiling, type ShellCeiling } from '@/lib/policy/toolApproval';
 import { addressedAgentPrompt, panelAgentPrompt, standingInstructionsBlock } from '@/lib/prompts';
@@ -151,7 +152,9 @@ export interface AgentChat {
    * turn stays, `stopping`, until its Cancelled and Done arrive, so the next
    * turn never shares a session with a child still in its grace. Before the
    * child exists, or with a card waiting (which has no child), it ends at
-   * once. Either way the reply reads cancelled. */
+   * once. With the card's answer already in flight (M57.1) it is stopping
+   * until the answer settles, then stops the run it resumed, or cancels the
+   * card if it still waits. Either way the reply reads cancelled. */
   stop(): void;
   /** A stop is on its way and the run's Done has not come (M57.5). */
   stopping: boolean;
@@ -238,7 +241,16 @@ function stamped(message: ChatMessage, event: AgentEvent): ChatMessage {
 export function useAgentChat(
   /** This turn's context — see TurnContext for why it is a getter. */
   getTurn: () => TurnContext,
-  { shell, connectors }: { shell: ShellCeiling; connectors: boolean },
+  {
+    shell,
+    web = false,
+    connectors,
+  }: {
+    shell: ShellCeiling;
+    /** Web access in Settings (M57.7); absent is off. */
+    web?: boolean;
+    connectors: boolean;
+  },
 ): AgentChat {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const toast = useUiStore((s) => s.toast);
@@ -794,10 +806,21 @@ export function useAgentChat(
           // what Settings denies, and addressing one is never the way around
           // that, exactly as on a schedule (useJobRunner).
           const ceiling = effectiveCeiling(shell, recipient === null ? null : recipient.shell);
+          // M57.7 — the web the same way: Web access in Settings, and for an
+          // addressed or bound agent only when its record declares
+          // `tools: web`.
+          const webCeiling = web && (recipient !== null ? recipient.web : true);
           const grant: PromptGrant = {
             tools: grantedTools(allowed),
             shell: holdsShell({
               shell: ceiling,
+              attended: true,
+              readScoped: recipient?.readScope != null,
+              narrowing: allowed,
+            }),
+            web: holdsWeb({
+              shell: ceiling,
+              web: webCeiling ? 'on' : 'off',
               attended: true,
               readScoped: recipient?.readScope != null,
               narrowing: allowed,
@@ -839,6 +862,7 @@ export function useAgentChat(
               // Settings since M56.6), and it can only ever SUBTRACT: the
               // ceiling worked out above.
               shell: ceiling,
+              web: webCeiling,
               connectors,
               connectorNames: recipient?.connectors ?? null,
               // A person typed this turn and is watching it stream — the one
@@ -937,75 +961,8 @@ export function useAgentChat(
       startRun,
       toast,
       vaultPath,
+      web,
     ],
-  );
-
-  /**
-   * Answer the waiting card (M57.1). Rust resumes the run on the same
-   * session, and its events land in the card's bubble, under the same task,
-   * registered again if the host ended it when the first run stopped; the
-   * turn's `live` moves to the resume (M57.6), with a fresh cursor, since a
-   * new run counts its events from 1. A late answer is refused
-   * `no_longer_waiting`: handled here, without a toast, because the card
-   * says it in Rust's words and the turn it waited for is over (CV-03
-   * written reason: a typed outcome, not a failure). A write card's edited
-   * draft Rust refused (M57.4b) keeps the card waiting, with the refusal on
-   * it. Any other failure is toasted and the card stays, to be answered
-   * again.
-   */
-  const answer = useCallback(
-    (given: PersonAnswer) => {
-      const current = interactionRef.current;
-      if (current === null || current.answering || current.stale !== null || vaultPath === null) {
-        return;
-      }
-      showInteraction({ ...current, answering: true, refused: null });
-      const epoch = sendEpoch.current;
-      void (async () => {
-        try {
-          const result = await answerInteraction(vaultPath, current.card.id, given);
-          if (sendEpoch.current !== epoch) return;
-          // M57.4b: Rust refused a write card's edited draft and the card
-          // still waits, so it stays, saying why (CV-03 written reason: a
-          // typed outcome the card shows, not a failure to toast).
-          if (
-            'refused' in result &&
-            current.card.kind === 'write' &&
-            result.refused.code !== 'no_longer_waiting'
-          ) {
-            showInteraction({ ...current, answering: false, refused: result.refused.message });
-            return;
-          }
-          if ('refused' in result) {
-            showInteraction({ ...current, answering: false, stale: result.refused.message });
-            finishTurn();
-            return;
-          }
-          showInteraction(null);
-          const handle = result.resumed;
-          const resumed = handle.sessionId;
-          if (resumed !== undefined && resumed !== null) {
-            sessionRef.current = resumed;
-            setSessionId(resumed);
-          }
-          patchMessage(current.messageId, (m) => {
-            const { seq: _cursor, ...rest } = m;
-            return { ...rest, streaming: true };
-          });
-          runRef.current = handle.run;
-          ensureTask(handle, current.messageId);
-          if (handle.attach !== undefined) {
-            setLive({ run: handle.run, attach: handle.attach, assistantId: current.messageId });
-          }
-          follow(handle, 0, current.messageId);
-        } catch (err) {
-          if (sendEpoch.current !== epoch) return;
-          showInteraction({ ...current, answering: false });
-          toast(err instanceof Error ? err.message : String(err));
-        }
-      })();
-    },
-    [ensureTask, finishTurn, follow, patchMessage, setLive, showInteraction, toast, vaultPath],
   );
 
   /** Refuse the waiting card's call as stopped (M57.1): Stop does; a thread
@@ -1023,6 +980,221 @@ export function useAgentChat(
     showInteraction(null);
   }, [patchMessage, showInteraction]);
 
+  // The card whose answer was already with Rust when Stop was pressed. Rust
+  // holds it Answering, so cancelling it would refuse, and the call would
+  // run anyway: Stop waits for the answer instead, and stops the run it
+  // resumed the moment it comes back (answer()).
+  const stopOnAnswer = useRef<string | null>(null);
+
+  /** The turn is stopping (M57.5): it stays until its run's Cancelled and
+   * Done, and gives up on a Done that never comes. */
+  const awaitStopped = useCallback(
+    (replyId: string) => {
+      stoppingRef.current = replyId;
+      setStopping(true);
+      stopTimer.current = setTimeout(() => {
+        if (stoppingRef.current !== replyId) return;
+        // CV-03: a stop is a human action, so a lost Done is a toast and
+        // the turn ends anyway, never a throw. No host will see that Done
+        // either, so its record ends here. The epoch moves, so an answer
+        // still in flight is stopped when it comes back, never followed by
+        // a turn that already ended.
+        sendEpoch.current += 1;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.streaming === true
+              ? { ...m, streaming: false, interrupted: true, cancelled: true }
+              : m,
+          ),
+        );
+        if (taskRef.current !== null) endRun(taskRef.current);
+        endTurn();
+        toast('The stopped turn never said it ended, so Cerebro stopped waiting for it.');
+      }, STOP_CONFIRM_MS);
+    },
+    [endRun, endTurn, toast],
+  );
+
+  const stop = useCallback(() => {
+    if (!turnInFlight.current || stoppingRef.current !== null) return;
+    const waitingOn = interactionRef.current;
+    // An answer in flight (M57.1): Rust already took it, so the turn waits
+    // for the run it resumes and stops that, or, if the card still waits
+    // after all, cancels it then.
+    if (waitingOn !== null && waitingOn.answering) {
+      stopOnAnswer.current = waitingOn.card.id;
+      awaitStopped(waitingOn.messageId);
+      return;
+    }
+    // A waiting card has no child (its run already sent Done): its call is
+    // refused, and its reply reads cancelled.
+    if (waitingOn !== null && waitingOn.stale === null) {
+      patchMessage(waitingOn.messageId, (m) => ({ ...m, cancelled: true }));
+    }
+    cancelWaiting();
+    // The epoch bump is what reaches a send still parked on a skill expansion
+    // or a record read: it quits at its next checkpoint without a child.
+    sendEpoch.current += 1;
+    const run = runRef.current;
+    const reply = spawning.current;
+    if (run !== null || reply !== null) {
+      // M57.5: the child is stopped, and the turn stays until its run's
+      // Cancelled and Done, so nothing starts on this session while it is
+      // still in its grace. A send inside runAgent takes its child first.
+      const replyId =
+        reply ??
+        [...messagesRef.current].reverse().find((m) => m.streaming === true)?.id ??
+        'stopping';
+      awaitStopped(replyId);
+      if (run !== null) void stopAgent(run).catch(() => undefined);
+      return;
+    }
+    // No child yet, or a card: the turn ends now, cancelled. A card's run
+    // already said Done, so its record ends here too.
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.streaming === true ? { ...m, streaming: false, interrupted: true, cancelled: true } : m,
+      ),
+    );
+    if (taskRef.current !== null) endRun(taskRef.current);
+    endTurn();
+  }, [awaitStopped, cancelWaiting, endRun, endTurn, patchMessage]);
+
+  /**
+   * Answer the waiting card (M57.1). Rust resumes the run on the same
+   * session, and its events land in the card's bubble, under the same task,
+   * registered again if the host ended it when the first run stopped; the
+   * turn's `live` moves to the resume (M57.6), with a fresh cursor, since a
+   * new run counts its events from 1. A late answer is refused
+   * `no_longer_waiting`: handled here, without a toast, because the card
+   * says it in Rust's words and the turn it waited for is over (CV-03
+   * written reason: a typed outcome, not a failure). A write card's edited
+   * draft Rust refused (M57.4b) keeps the card waiting, with the refusal on
+   * it. Any other failure is toasted and the card stays, to be answered
+   * again.
+   *
+   * A resume is never abandoned. Stop pressed while the answer was in
+   * flight stops it as soon as it comes back (and cancels a card that still
+   * waits); a New conversation, a thread switch or a close in that window
+   * leaves it running, registered for ChatTurnsHost to settle, as a detach
+   * leaves any run (M57.6).
+   */
+  const answer = useCallback(
+    (given: PersonAnswer) => {
+      const current = interactionRef.current;
+      if (current === null || current.answering || current.stale !== null || vaultPath === null) {
+        return;
+      }
+      showInteraction({ ...current, answering: true, refused: null });
+      const epoch = sendEpoch.current;
+      // Read now: a resume the turn no longer follows is registered with
+      // the question it answers, after a New conversation emptied the thread.
+      const label = questionBefore(messagesRef.current, current.messageId);
+      const asked = turnPlace.current;
+      const stopRequested = () => {
+        const stopped = stopOnAnswer.current === current.card.id;
+        if (stopped) stopOnAnswer.current = null;
+        return stopped;
+      };
+      /** The resume came back to a turn that moved on: a Stop stops it, by
+       * id, and a detach leaves it to ChatTurnsHost, which settles a run by
+       * its key; one with no key nothing could settle, so it is stopped. */
+      const disown = (handle: RunHandle, stopped: boolean) => {
+        if (stopped || handle.attach === undefined) {
+          void stopAgent(handle.run).catch(() => undefined);
+          return;
+        }
+        useUiStore.getState().startRun({
+          id: newRunId(),
+          owner: 'chat',
+          label,
+          place: asked.place,
+          path: null,
+          conversationId: asked.conversationId,
+          run: handle.run,
+          attach: handle.attach,
+          startedAt: Date.now(),
+        });
+      };
+      void (async () => {
+        let result: AnswerResult;
+        try {
+          result = await answerInteraction(vaultPath, current.card.id, given);
+        } catch (err) {
+          const stopped = stopRequested();
+          if (sendEpoch.current !== epoch) return;
+          showInteraction({ ...current, answering: false });
+          toast(err instanceof Error ? err.message : String(err));
+          // The card still waits, and Stop was pressed: it is cancelled now.
+          if (stopped) {
+            clearStopping();
+            stop();
+          }
+          return;
+        }
+        const stopped = stopRequested();
+        if (sendEpoch.current !== epoch) {
+          if ('resumed' in result) disown(result.resumed, stopped);
+          return;
+        }
+        // M57.4b: Rust refused a write card's edited draft and the card
+        // still waits, so it stays, saying why (CV-03 written reason: a
+        // typed outcome the card shows, not a failure to toast).
+        if (
+          'refused' in result &&
+          current.card.kind === 'write' &&
+          result.refused.code !== 'no_longer_waiting'
+        ) {
+          showInteraction({ ...current, answering: false, refused: result.refused.message });
+          if (stopped) {
+            clearStopping();
+            stop();
+          }
+          return;
+        }
+        if ('refused' in result) {
+          showInteraction({ ...current, answering: false, stale: result.refused.message });
+          finishTurn();
+          return;
+        }
+        showInteraction(null);
+        // The answered call is the resume's now: its ToolDone, or a Stop's
+        // Cancelled, settles it, and it is no hook's pause.
+        deferredIds.current.delete(current.card.tool_id);
+        const handle = result.resumed;
+        const resumed = handle.sessionId;
+        if (resumed !== undefined && resumed !== null) {
+          sessionRef.current = resumed;
+          setSessionId(resumed);
+        }
+        patchMessage(current.messageId, (m) => {
+          const { seq: _cursor, ...rest } = m;
+          return { ...rest, streaming: true };
+        });
+        runRef.current = handle.run;
+        ensureTask(handle, current.messageId);
+        if (handle.attach !== undefined) {
+          setLive({ run: handle.run, attach: handle.attach, assistantId: current.messageId });
+        }
+        follow(handle, 0, current.messageId);
+        // Stopped while the answer was in flight (M57.5): the turn follows
+        // the resume, stops it, and stays stopping until its Done.
+        if (stopped) void stopAgent(handle.run).catch(() => undefined);
+      })();
+    },
+    [
+      clearStopping,
+      ensureTask,
+      finishTurn,
+      follow,
+      patchMessage,
+      setLive,
+      showInteraction,
+      stop,
+      toast,
+      vaultPath,
+    ],
+  );
   /**
    * Unmounting mid-turn detaches it (M57.6): closing the assistant leaves
    * the run running, its registry record standing and its card waiting, and
@@ -1065,60 +1237,6 @@ export function useAgentChat(
       }, 0);
     };
   }, []);
-
-  const stop = useCallback(() => {
-    if (!turnInFlight.current || stoppingRef.current !== null) return;
-    // A waiting card has no child (its run already sent Done): its call is
-    // refused, and its reply reads cancelled.
-    const waitingOn = interactionRef.current;
-    if (waitingOn !== null && waitingOn.stale === null) {
-      patchMessage(waitingOn.messageId, (m) => ({ ...m, cancelled: true }));
-    }
-    cancelWaiting();
-    // The epoch bump is what reaches a send still parked on a skill expansion
-    // or a record read: it quits at its next checkpoint without a child.
-    sendEpoch.current += 1;
-    const run = runRef.current;
-    const reply = spawning.current;
-    if (run !== null || reply !== null) {
-      // M57.5: the child is stopped, and the turn stays until its run's
-      // Cancelled and Done, so nothing starts on this session while it is
-      // still in its grace. A send inside runAgent takes its child first.
-      const replyId =
-        reply ??
-        [...messagesRef.current].reverse().find((m) => m.streaming === true)?.id ??
-        'stopping';
-      stoppingRef.current = replyId;
-      setStopping(true);
-      if (run !== null) void stopAgent(run).catch(() => undefined);
-      stopTimer.current = setTimeout(() => {
-        if (stoppingRef.current !== replyId) return;
-        // CV-03: a stop is a human action, so a lost Done is a toast and
-        // the turn ends anyway, never a throw. No host will see that Done
-        // either, so its record ends here.
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.streaming === true
-              ? { ...m, streaming: false, interrupted: true, cancelled: true }
-              : m,
-          ),
-        );
-        if (taskRef.current !== null) endRun(taskRef.current);
-        endTurn();
-        toast('The stopped turn never said it ended, so Cerebro stopped waiting for it.');
-      }, STOP_CONFIRM_MS);
-      return;
-    }
-    // No child yet, or a card: the turn ends now, cancelled. A card's run
-    // already said Done, so its record ends here too.
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.streaming === true ? { ...m, streaming: false, interrupted: true, cancelled: true } : m,
-      ),
-    );
-    if (taskRef.current !== null) endRun(taskRef.current);
-    endTurn();
-  }, [cancelWaiting, endRun, endTurn, patchMessage, toast]);
 
   const busy = useCallback(() => {
     const card = interactionRef.current;

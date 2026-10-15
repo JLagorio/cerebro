@@ -1,0 +1,716 @@
+{
+  "about": "What kinds.v1.json answers for a path (M66.1), replayed by src-tauri/src/files/kinds.rs and src/engine/fileKinds.test.ts. kinds: the row's facts, then the presentation TS adds (names override icon, color and shiki; Rust ignores names). open: Rust's open_policy over a regular file with this name, octal mode and hex head; TS never reads it. refusals: one edit to the shipped table (at: keys, a kinds or names row picked by its ext or name; set a value or delete) and the words both loaders refuse it in.",
+  "kinds": [
+    {
+      "name": "docs/README.md",
+      "ext": "md",
+      "kind": "markdown",
+      "mime": "text/markdown",
+      "viewer": "doc",
+      "bytes": "none",
+      "open": "allow",
+      "shiki": "markdown",
+      "icon": "book-open",
+      "color": "blue",
+      "capture": true
+    },
+    {
+      "name": "Dockerfile",
+      "ext": null,
+      "kind": "unknown",
+      "mime": "application/octet-stream",
+      "viewer": "code",
+      "bytes": "none",
+      "open": "confirm",
+      "shiki": "docker",
+      "icon": "container",
+      "color": "blue",
+      "capture": false
+    },
+    {
+      "name": "Dockerfile.dev",
+      "ext": "dev",
+      "kind": "unknown",
+      "mime": "application/octet-stream",
+      "viewer": "code",
+      "bytes": "none",
+      "open": "confirm",
+      "shiki": null,
+      "icon": "file",
+      "color": null,
+      "capture": false
+    },
+    {
+      "name": ".env",
+      "ext": null,
+      "kind": "unknown",
+      "mime": "application/octet-stream",
+      "viewer": "code",
+      "bytes": "none",
+      "open": "confirm",
+      "shiki": null,
+      "icon": "key-round",
+      "color": "yellow",
+      "capture": false
+    },
+    {
+      "name": ".env.example",
+      "ext": "example",
+      "kind": "unknown",
+      "mime": "application/octet-stream",
+      "viewer": "code",
+      "bytes": "none",
+      "open": "confirm",
+      "shiki": null,
+      "icon": "key-round",
+      "color": "yellow",
+      "capture": false
+    },
+    {
+      "name": ".gitignore",
+      "ext": null,
+      "kind": "unknown",
+      "mime": "application/octet-stream",
+      "viewer": "code",
+      "bytes": "none",
+      "open": "confirm",
+      "shiki": "ini",
+      "icon": "git-branch",
+      "color": "orange",
+      "capture": false
+    },
+    {
+      "name": "a.rs/b.md",
+      "ext": "md",
+      "kind": "markdown",
+      "mime": "text/markdown",
+      "viewer": "doc",
+      "bytes": "none",
+      "open": "allow",
+      "shiki": "markdown",
+      "icon": "file-text",
+      "color": "blue",
+      "capture": true
+    },
+    {
+      "name": "Main.RS",
+      "ext": "rs",
+      "kind": "code",
+      "mime": "text/plain",
+      "viewer": "code",
+      "bytes": "none",
+      "open": "confirm",
+      "shiki": "rust",
+      "icon": "file-code",
+      "color": "orange",
+      "capture": false
+    },
+    {
+      "name": "notes.",
+      "ext": null,
+      "kind": "unknown",
+      "mime": "application/octet-stream",
+      "viewer": "code",
+      "bytes": "none",
+      "open": "confirm",
+      "shiki": null,
+      "icon": "file",
+      "color": null,
+      "capture": false
+    },
+    {
+      "name": "archive.tar.gz",
+      "ext": "gz",
+      "kind": "archive",
+      "mime": "application/gzip",
+      "viewer": "none",
+      "bytes": "none",
+      "open": "confirm",
+      "shiki": null,
+      "icon": "file-archive",
+      "color": "n-500",
+      "capture": false
+    },
+    {
+      "name": "Photo.HEIC",
+      "ext": "heic",
+      "kind": "image",
+      "mime": "image/heic",
+      "viewer": "image",
+      "bytes": "scheme",
+      "open": "allow",
+      "shiki": null,
+      "icon": "image",
+      "color": "pink",
+      "capture": false
+    },
+    {
+      "name": "clip.mov",
+      "ext": "mov",
+      "kind": "video",
+      "mime": "video/quicktime",
+      "viewer": "media",
+      "bytes": "scheme",
+      "open": "allow",
+      "shiki": null,
+      "icon": "file-video",
+      "color": "purple",
+      "capture": false
+    },
+    {
+      "name": "voice.m4a",
+      "ext": "m4a",
+      "kind": "audio",
+      "mime": "audio/mp4",
+      "viewer": "media",
+      "bytes": "scheme",
+      "open": "allow",
+      "shiki": null,
+      "icon": "file-audio",
+      "color": "purple",
+      "capture": false
+    },
+    {
+      "name": "report.pdf",
+      "ext": "pdf",
+      "kind": "pdf",
+      "mime": "application/pdf",
+      "viewer": "pdf",
+      "bytes": "ipc",
+      "open": "allow",
+      "shiki": null,
+      "icon": "file-type",
+      "color": "red",
+      "capture": false
+    },
+    {
+      "name": "deck.pptx",
+      "ext": "pptx",
+      "kind": "presentation",
+      "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "viewer": "none",
+      "bytes": "none",
+      "open": "allow",
+      "shiki": null,
+      "icon": "presentation",
+      "color": "orange",
+      "capture": false
+    },
+    {
+      "name": "book.xlsm",
+      "ext": "xlsm",
+      "kind": "spreadsheet",
+      "mime": "application/vnd.ms-excel.sheet.macroenabled.12",
+      "viewer": "none",
+      "bytes": "none",
+      "open": "confirm",
+      "shiki": null,
+      "icon": "file-spreadsheet",
+      "color": "green",
+      "capture": false
+    },
+    {
+      "name": "run.command",
+      "ext": "command",
+      "kind": "executable",
+      "mime": "text/plain",
+      "viewer": "code",
+      "bytes": "none",
+      "open": "deny",
+      "shiki": "shell",
+      "icon": "file-terminal",
+      "color": "red",
+      "capture": false
+    },
+    {
+      "name": "setup.py",
+      "ext": "py",
+      "kind": "code",
+      "mime": "text/plain",
+      "viewer": "code",
+      "bytes": "none",
+      "open": "deny",
+      "shiki": "python",
+      "icon": "file-code",
+      "color": "green",
+      "capture": false
+    },
+    {
+      "name": "index.html",
+      "ext": "html",
+      "kind": "code",
+      "mime": "text/plain",
+      "viewer": "code",
+      "bytes": "none",
+      "open": "confirm",
+      "shiki": "html",
+      "icon": "code",
+      "color": "orange",
+      "capture": false
+    },
+    {
+      "name": "logo.svg",
+      "ext": "svg",
+      "kind": "image",
+      "mime": "image/svg+xml",
+      "viewer": "image",
+      "bytes": "scheme",
+      "open": "confirm",
+      "shiki": "xml",
+      "icon": "image",
+      "color": "green",
+      "capture": false
+    },
+    {
+      "name": "diagram.mmd",
+      "ext": "mmd",
+      "kind": "diagram",
+      "mime": "text/plain",
+      "viewer": "code",
+      "bytes": "none",
+      "open": "confirm",
+      "shiki": null,
+      "icon": "workflow",
+      "color": "purple",
+      "capture": false
+    },
+    {
+      "name": "data.csv",
+      "ext": "csv",
+      "kind": "data",
+      "mime": "text/csv",
+      "viewer": "table",
+      "bytes": "none",
+      "open": "allow",
+      "shiki": null,
+      "icon": "file-spreadsheet",
+      "color": "green",
+      "capture": false
+    },
+    {
+      "name": "talk.vtt",
+      "ext": "vtt",
+      "kind": "text",
+      "mime": "text/vtt",
+      "viewer": "code",
+      "bytes": "none",
+      "open": "allow",
+      "shiki": null,
+      "icon": "captions",
+      "color": "n-500",
+      "capture": true
+    },
+    {
+      "name": "notes.xyz",
+      "ext": "xyz",
+      "kind": "unknown",
+      "mime": "application/octet-stream",
+      "viewer": "code",
+      "bytes": "none",
+      "open": "confirm",
+      "shiki": null,
+      "icon": "file",
+      "color": null,
+      "capture": false
+    },
+    {
+      "name": "no-extension",
+      "ext": null,
+      "kind": "unknown",
+      "mime": "application/octet-stream",
+      "viewer": "code",
+      "bytes": "none",
+      "open": "confirm",
+      "shiki": null,
+      "icon": "file",
+      "color": null,
+      "capture": false
+    },
+    {
+      "name": ".DS_Store",
+      "ext": null,
+      "kind": "unknown",
+      "mime": "application/octet-stream",
+      "viewer": "code",
+      "bytes": "none",
+      "open": "confirm",
+      "shiki": null,
+      "icon": "file",
+      "color": null,
+      "capture": false
+    },
+    {
+      "name": "clip.m\u212av",
+      "ext": "m\u212av",
+      "kind": "unknown",
+      "mime": "application/octet-stream",
+      "viewer": "code",
+      "bytes": "none",
+      "open": "confirm",
+      "shiki": null,
+      "icon": "file",
+      "color": null,
+      "capture": false
+    }
+  ],
+  "open": [
+    {
+      "name": "program",
+      "mode": "644",
+      "head": "7f454c4602010100",
+      "verdict": "deny",
+      "why": "an ELF head denies whatever the name says"
+    },
+    {
+      "name": "a.tool",
+      "mode": "644",
+      "head": "7f454c4602010100",
+      "verdict": "deny",
+      "why": "a launcher row denies, and so does its ELF head"
+    },
+    {
+      "name": "run",
+      "mode": "755",
+      "head": "6563686f2068690a",
+      "verdict": "deny",
+      "why": "an execute bit on a file with no row denies"
+    },
+    {
+      "name": "notes.xyz",
+      "mode": "755",
+      "head": "6e6f7465730a",
+      "verdict": "deny",
+      "why": "an unknown extension is no row, so its execute bit denies"
+    },
+    {
+      "name": "notes.xyz",
+      "mode": "644",
+      "head": "6e6f7465730a",
+      "verdict": "confirm",
+      "why": "an unknown extension with no sign confirms"
+    },
+    {
+      "name": "notes.txt",
+      "mode": "755",
+      "head": "6e6f7465730a",
+      "verdict": "allow",
+      "why": "an execute bit on a known row is not a verdict: exFAT and SMB mark every file executable"
+    },
+    {
+      "name": "notes.txt",
+      "mode": "644",
+      "head": "6e6f7465730a",
+      "verdict": "allow",
+      "why": "a text file opens"
+    },
+    {
+      "name": "x.pdf",
+      "mode": "644",
+      "head": "23212f62696e2f73680a",
+      "verdict": "deny",
+      "why": "a #! head denies, whatever the row"
+    },
+    {
+      "name": "report.pdf",
+      "mode": "644",
+      "head": "255044462d312e370a",
+      "verdict": "allow",
+      "why": "a real PDF head opens"
+    },
+    {
+      "name": "setup.py",
+      "mode": "644",
+      "head": "7072696e7428290a",
+      "verdict": "deny",
+      "why": "a script row denies"
+    },
+    {
+      "name": "Main.class",
+      "mode": "644",
+      "head": "cafebabe00000034",
+      "verdict": "deny",
+      "why": "CAFEBABE (a fat Mach-O or a class file) denies"
+    },
+    {
+      "name": "thin.bin",
+      "mode": "644",
+      "head": "cffaedfe07000001",
+      "verdict": "deny",
+      "why": "a 64-bit Mach-O head denies"
+    },
+    {
+      "name": "old.bin",
+      "mode": "644",
+      "head": "cefaedfe07000000",
+      "verdict": "deny",
+      "why": "a 32-bit Mach-O head denies"
+    },
+    {
+      "name": "big.bin",
+      "mode": "644",
+      "head": "feedfacf00000007",
+      "verdict": "deny",
+      "why": "a big-endian 64-bit Mach-O head denies"
+    },
+    {
+      "name": "big32.bin",
+      "mode": "644",
+      "head": "feedface00000007",
+      "verdict": "deny",
+      "why": "a big-endian 32-bit Mach-O head denies"
+    },
+    {
+      "name": "setup.exe",
+      "mode": "644",
+      "head": "4d5a900003000000",
+      "verdict": "deny",
+      "why": "an MZ head denies"
+    },
+    {
+      "name": "photo.png",
+      "mode": "755",
+      "head": "89504e470d0a1a0a",
+      "verdict": "allow",
+      "why": "an image with an execute bit still opens"
+    },
+    {
+      "name": "empty.txt",
+      "mode": "644",
+      "head": "",
+      "verdict": "allow",
+      "why": "an empty file has no sign"
+    },
+    {
+      "name": "index.html",
+      "mode": "644",
+      "head": "3c21646f63747970",
+      "verdict": "confirm",
+      "why": "html confirms"
+    }
+  ],
+  "refusals": [
+    { "rule": "format", "at": ["format"], "set": 2, "error": "kinds: format must be 1, not 2" },
+    {
+      "rule": "format",
+      "at": ["format"],
+      "set": "1",
+      "error": "kinds: format must be 1, not \"1\""
+    },
+    {
+      "rule": "fields",
+      "at": ["names"],
+      "delete": true,
+      "error": "kinds: the table is missing names"
+    },
+    {
+      "rule": "fields",
+      "at": ["kinds", "7z", "open"],
+      "delete": true,
+      "error": "kinds: 7z is missing open"
+    },
+    {
+      "rule": "fields",
+      "at": ["kinds", "7z", "size"],
+      "set": 1,
+      "error": "kinds: 7z has an unknown field size"
+    },
+    {
+      "rule": "fields",
+      "at": ["limits", "max_bytes"],
+      "set": 5,
+      "error": "kinds: limits has an unknown field max_bytes"
+    },
+    {
+      "rule": "fields",
+      "at": ["unknown", "ext"],
+      "set": "bin",
+      "error": "kinds: unknown has an unknown field ext"
+    },
+    {
+      "rule": "fields",
+      "at": ["names", ".editorconfig", "kind"],
+      "set": "code",
+      "error": "kinds: .editorconfig has an unknown field kind"
+    },
+    {
+      "rule": "fields",
+      "at": ["kinds", "7z", "icon"],
+      "set": 5,
+      "error": "kinds: 7z icon must be a string"
+    },
+    {
+      "rule": "fields",
+      "at": ["kinds", "7z", "shiki"],
+      "set": 5,
+      "error": "kinds: 7z shiki must be a string or null"
+    },
+    {
+      "rule": "fields",
+      "at": ["kinds", "7z"],
+      "set": "7z",
+      "error": "kinds: kinds[0] must be an object"
+    },
+    {
+      "rule": "ext",
+      "at": ["kinds", "7z", "ext"],
+      "set": "7Z",
+      "error": "kinds: ext 7Z must match ^[a-z0-9]+$"
+    },
+    {
+      "rule": "ext",
+      "at": ["kinds", "gz", "ext"],
+      "set": "tar.gz",
+      "error": "kinds: ext tar.gz must match ^[a-z0-9]+$"
+    },
+    {
+      "rule": "ext_order",
+      "at": ["kinds", "aac", "ext"],
+      "set": "7z",
+      "error": "kinds: ext 7z is listed twice"
+    },
+    {
+      "rule": "ext_order",
+      "at": ["kinds", "aac", "ext"],
+      "set": "1a",
+      "error": "kinds: ext 1a is out of order"
+    },
+    {
+      "rule": "name",
+      "at": ["names", ".editorconfig", "name"],
+      "set": ".EditorConfig",
+      "error": "kinds: name .EditorConfig must be lowercase with no slash"
+    },
+    {
+      "rule": "name",
+      "at": ["names", ".editorconfig", "name"],
+      "set": "a/b",
+      "error": "kinds: name a/b must be lowercase with no slash"
+    },
+    {
+      "rule": "name",
+      "at": ["names", ".env", "name"],
+      "set": ".editorconfig",
+      "error": "kinds: name .editorconfig is listed twice"
+    },
+    {
+      "rule": "name",
+      "at": ["names", ".env", "name"],
+      "set": ".aaa",
+      "error": "kinds: name .aaa is out of order"
+    },
+    {
+      "rule": "name",
+      "at": ["names", ".editorconfig"],
+      "set": { "name": ".editorconfig" },
+      "error": "kinds: name .editorconfig overrides nothing"
+    },
+    {
+      "rule": "vocabulary",
+      "at": ["kinds", "7z", "kind"],
+      "set": "zip",
+      "error": "kinds: 7z has an unknown kind zip"
+    },
+    {
+      "rule": "vocabulary",
+      "at": ["kinds", "7z", "viewer"],
+      "set": "hex",
+      "error": "kinds: 7z has an unknown viewer hex"
+    },
+    {
+      "rule": "vocabulary",
+      "at": ["kinds", "7z", "open"],
+      "set": "maybe",
+      "error": "kinds: 7z has an unknown open maybe"
+    },
+    {
+      "rule": "vocabulary",
+      "at": ["kinds", "7z", "color"],
+      "set": "teal",
+      "error": "kinds: 7z has an unknown color teal"
+    },
+    {
+      "rule": "vocabulary",
+      "at": ["names", ".editorconfig", "color"],
+      "set": "teal",
+      "error": "kinds: .editorconfig has an unknown color teal"
+    },
+    {
+      "rule": "mime",
+      "at": ["kinds", "7z", "mime"],
+      "set": "Application/X-7z",
+      "error": "kinds: 7z mime Application/X-7z is not a lowercase type/subtype"
+    },
+    {
+      "rule": "mime",
+      "at": ["kinds", "7z", "mime"],
+      "set": "application",
+      "error": "kinds: 7z mime application is not a lowercase type/subtype"
+    },
+    {
+      "rule": "door",
+      "at": ["kinds", "txt", "bytes"],
+      "set": "scheme",
+      "error": "kinds: txt serves bytes by scheme but is not an image, audio or video"
+    },
+    {
+      "rule": "door",
+      "at": ["kinds", "png", "bytes"],
+      "set": "ipc",
+      "error": "kinds: png serves bytes by ipc but is not a pdf"
+    },
+    {
+      "rule": "ingest",
+      "at": ["kinds", "png", "ingest"],
+      "set": "capture",
+      "error": "kinds: png is captured but is not markdown or text"
+    },
+    {
+      "rule": "ingest",
+      "at": ["kinds", "doc", "ingest"],
+      "set": "extract",
+      "error": "kinds: doc is extracted but names no extractor"
+    },
+    {
+      "rule": "extractor",
+      "at": ["kinds", "txt", "extractor"],
+      "set": "pdf",
+      "error": "kinds: txt names an extractor but is not a pdf, document, presentation or spreadsheet"
+    },
+    {
+      "rule": "unknown_row",
+      "at": ["unknown", "open"],
+      "set": "allow",
+      "error": "kinds: the unknown row must be kind unknown, application/octet-stream, viewer code, no extractor, ingest none, no shiki, icon file, no color, bytes none, open confirm"
+    },
+    {
+      "rule": "unknown_row",
+      "at": ["unknown", "shiki"],
+      "set": "text",
+      "error": "kinds: the unknown row must be kind unknown, application/octet-stream, viewer code, no extractor, ingest none, no shiki, icon file, no color, bytes none, open confirm"
+    },
+    {
+      "rule": "limit",
+      "at": ["limits", "capture_max_bytes"],
+      "set": 0,
+      "error": "kinds: limits capture_max_bytes must be a positive integer"
+    },
+    {
+      "rule": "limit",
+      "at": ["artifact_version"],
+      "set": -1,
+      "error": "kinds: artifact_version must be a positive integer"
+    },
+    {
+      "rule": "empty",
+      "at": ["kinds", "7z", "icon"],
+      "set": "",
+      "error": "kinds: 7z has an empty icon"
+    },
+    {
+      "rule": "empty",
+      "at": ["names", ".eslintrc", "shiki"],
+      "set": "",
+      "error": "kinds: .eslintrc has an empty shiki"
+    }
+  ]
+}

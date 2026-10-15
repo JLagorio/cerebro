@@ -705,3 +705,15 @@ describe('blocks page (M44.4)', () => {
     expect(nextPresentation().dashboard?.global).toBeUndefined();
   });
 });
+
+/** Day is a third calendar span (M61.8), chosen where Month and Week are. */
+describe('calendar span (M61.8)', () => {
+  it('choosing Day writes calendarSpan day', () => {
+    const { nextPresentation } = setup({ type: 'calendar', dateField: 'due' });
+    fireEvent.click(screen.getByTestId('view-settings-date axis'));
+    const select = screen.getByTestId('view-calendar-span') as HTMLSelectElement;
+    expect([...select.options].map((o) => o.value)).toEqual(['month', 'week', 'day']);
+    fireEvent.change(select, { target: { value: 'day' } });
+    expect(nextPresentation().calendarSpan).toBe('day');
+  });
+});

@@ -46,19 +46,24 @@ export interface AgentRef {
   title: string;
   path: string;
   description: string;
-  /** The record's `tools:` — 'shell' widens the run to the host tools,
-   * still capped by the Settings ceiling, unless the record also declares a
-   * `read-scope:`, which withdraws it in Rust (M53.5). Anything else reads as
-   * safe. */
+  /** Does the record's `tools:` declare the shell (`hostGrants`)? It widens
+   * the run to the host tools, still capped by the Settings ceiling, unless
+   * the record also declares a `read-scope:`, which withdraws it in Rust
+   * (M53.5). */
   shell: boolean;
+  /** Does the record's `tools:` declare the web (M57.7, `hostGrants`)? It
+   * gives the run Claude Code's WebFetch and WebSearch, still capped by Web
+   * access in Settings. A read limit leaves it alone. */
+  web: boolean;
   /**
    * Vault-relative folders this agent may WRITE inside (M17.13).
    *
-   * Null when the record declares no `scope:` — unrestricted, which is what
-   * every agent was before this. An EMPTY list is not the same thing: a record
-   * that declares `scope:` and lists nothing has scoped itself to nothing, and
+   * Null only when the record has no `scope:` key — unrestricted, which is
+   * what every agent was before this. An EMPTY list is not the same thing: a
+   * record whose `scope:` names no folder has scoped itself to nothing, and
    * reading that as "everywhere" would make the safest-looking declaration the
-   * most dangerous one.
+   * most dangerous one. A bare key, a number, a mapping or a `[[link]]` names
+   * no folder either (M58.6, `parseFolders`).
    *
    * Folders, and only folders, because a folder prefix is what Rust can refuse
    * without knowing the vault's schema. "Only records of type Risk" would have
@@ -68,8 +73,9 @@ export interface AgentRef {
    */
   scope: string[] | null;
   /**
-   * Folders this agent may READ (M34.4) — `read-scope:`. Null when the
-   * record declares none: unrestricted, which is what every agent was. Its
+   * Folders this agent may READ (M34.4) — `read-scope:`. Null only when the
+   * record has no `read-scope:` key: unrestricted, which is what every agent
+   * was. Its
    * own axis because the normal agent reads broadly and writes narrowly;
    * folding read into write would make the safest write scope also the
    * blindest reader. Same null-vs-empty reading as `scope`, enforced on the
@@ -261,29 +267,62 @@ export function askFirstOf(entry: Entry): { on: boolean; warning: string | null 
 
 /** `scope:` frontmatter — a folder, or a list of them. */
 export function parseScope(entry: Entry): string[] | null {
-  // Wikilink-valued fields land in `relationships`; a folder is not a
-  // wikilink, so this only reads properties — but a hand-written
-  // `scope: [[Product]]` would arrive there, and is not a folder either way.
-  return folderList(entry.properties.scope);
+  return parseFolders(entry, 'scope');
 }
 
 /** `read-scope:` frontmatter (M34.4) — same grammar, the READ axis. */
 export function parseReadScope(entry: Entry): string[] | null {
-  return folderList(entry.properties['read-scope']);
+  return parseFolders(entry, 'read-scope');
 }
 
-function folderList(raw: unknown): string[] | null {
-  if (raw === undefined || raw === null) return null;
-  const items = Array.isArray(raw) ? raw : [raw];
+/**
+ * A record's folder axis (M58.6), read exactly as Rust's `folder_list` reads
+ * it for a hand-off or a thread turn; src-tauri/fixtures/grant-scope.json
+ * holds the two to one reading.
+ *
+ * Absent is null, unrestricted. Present but naming no folder is [], scoped to
+ * nothing: a bare key, a number, a boolean, a mapping, or a `[[link]]`, which
+ * the scanner files under relationships (CV-09). A missing field must never
+ * widen access, and a malformed one is not missing. A string is one folder
+ * and a list keeps its strings, each trimmed, every leading `./` and its
+ * outer `/` stripped, empties dropped.
+ */
+export function parseFolders(entry: Entry, key: string): string[] | null {
+  if (Object.hasOwn(entry.relationships, key)) return [];
+  // No scan yields `undefined`; a key an edit left undefined is absent.
+  const raw: unknown = Object.hasOwn(entry.properties, key) ? entry.properties[key] : undefined;
+  if (raw === undefined) return null;
+  const items = typeof raw === 'string' ? [raw] : Array.isArray(raw) ? raw : [];
   return items
     .filter((v): v is string => typeof v === 'string')
     .map((v) =>
       v
         .trim()
-        .replace(/^\.?\/+/, '')
-        .replace(/\/+$/, ''),
+        .replace(/^(?:\.\/)+/, '')
+        .replace(/^\/+|\/+$/g, ''),
     )
     .filter((v) => v !== '');
+}
+
+/**
+ * Off duty without being dismantled (M18).
+ *
+ * Activation is DERIVED — an agent runs exactly when it has a schedule or a
+ * trigger — which is the right rule and left no way to stop one temporarily.
+ * The only "off" available was deleting the thing that fires it, so turning an
+ * agent off for an afternoon meant destroying the configuration and rebuilding
+ * it from memory afterwards. `paused: true` is the pause; the trigger stays on
+ * the record, readable, and comes back on when the switch does.
+ *
+ * Deliberately NOT the inverse (`enabled: true`): a record with no schedule and
+ * no trigger is already inert, and a second flag that also has to say so would
+ * give "is this running?" two answers that can disagree.
+ *
+ * Here rather than in engine/jobs.ts since M63.1, so engine/wakes.ts reads it
+ * without importing the queue; jobs.ts re-exports it.
+ */
+export function isPaused(entry: Entry): boolean {
+  return entry.properties.paused === true;
 }
 
 export function isAgentEntry(entry: Entry): boolean {
@@ -316,7 +355,7 @@ export function agentRef(entry: Entry): AgentRef {
       typeof entry.properties.description === 'string'
         ? entry.properties.description.replace(/\s+/g, ' ').trim()
         : '',
-    shell: entry.properties.tools === 'shell',
+    ...hostGrants(entry.properties.tools),
     scope: parseScope(entry),
     readScope: parseReadScope(entry),
     allowedTools: parseAllowedTools(entry.properties['allowed-tools']),
@@ -329,6 +368,24 @@ export function agentRef(entry: Entry): AgentRef {
     askFirstWarning: askFirstOf(entry).warning,
     memory: parseMemory(entry),
   };
+}
+
+/** The host grants a record's `tools:` may declare (M57.7). */
+export const HOST_GRANTS = ['shell', 'web'] as const;
+
+/**
+ * What an Agent record's `tools:` declares (M57.7): the shell, the web, both
+ * or neither. It takes one word or a list of them, so `tools: web` and
+ * `tools: [shell, web]` both read; `safe`, any other word and any other shape
+ * declare nothing, so an odd value grants no host tool. Each grant is still
+ * capped by its Settings ceiling.
+ */
+export function hostGrants(value: unknown): { shell: boolean; web: boolean } {
+  const words = typeof value === 'string' ? [value] : Array.isArray(value) ? value : [];
+  const declared = new Set(
+    words.filter((word): word is string => typeof word === 'string').map((word) => word.trim()),
+  );
+  return { shell: declared.has('shell'), web: declared.has('web') };
 }
 
 export function listAgents(entries: Entry[]): AgentRef[] {

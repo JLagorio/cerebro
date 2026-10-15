@@ -952,9 +952,11 @@ function AxisPage({
             <Select
               size="sm"
               value={presentation.calendarSpan ?? 'month'}
+              testId="view-calendar-span"
               options={[
                 { value: 'month', label: 'Month' },
                 { value: 'week', label: 'Week' },
+                { value: 'day', label: 'Day' },
               ]}
               onChange={(e) =>
                 onChange({
@@ -1203,8 +1205,8 @@ function CardsPage({
  * multi-series lines. The footnote under the controls names whichever axis
  * source is live.
  *
- * The properties offered for sum/average come from the `numeric` flag on
- * KIND_META, not a field-kind `=== 'number'` compare — the rule M16.4
+ * The properties offered for sum/average come from the kind's `numeric` fact
+ * in field-kinds.v1.json, not a field-kind `=== 'number'` compare — the rule M16.4
  * established and M16.13 applied to grouping and sorting. (The CHART kind
  * named `number` is unrelated: it is the big-stat layout, M44.2.)
  */

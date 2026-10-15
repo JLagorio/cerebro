@@ -19,8 +19,9 @@ import { useDragGesture } from '@/hooks/useDragGesture';
  * piece of it: the claim on Escape and the teardown an unmount runs are
  * `useDragGesture` now, shared with every other pointer loop in the app.
  *
- * Everything is measured in WHOLE DAYS. A drag never produces a fraction of a
- * day, because a date property cannot store one.
+ * Everything is measured in WHOLE DAYS. A drag moves a record by days and
+ * never by hours: a stored time of day (M16.14) rides along unchanged through
+ * `rescheduleValue`, so a 9:00 standup dragged to Thursday is still at 9:00.
  */
 
 /** What a gesture moves: the whole span, or one of its two endpoints. */

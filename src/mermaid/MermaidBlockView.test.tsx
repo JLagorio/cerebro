@@ -1,8 +1,19 @@
 import { useState } from 'react';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useUndoShortcuts } from '@/app/useUndoShortcuts';
 import { resetMockFs } from '@/lib/mockIpc';
+import { useUndoStore } from '@/stores/undoStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { MermaidBlockView } from './MermaidBlockView';
@@ -443,6 +454,74 @@ describe('MermaidBlockView full screen (M29.27)', () => {
       expect(onUndo).toHaveBeenCalledTimes(1);
       fireEvent.keyDown(document.body, { key: 'z', metaKey: true, shiftKey: true });
       expect(onRedo).toHaveBeenCalledTimes(1);
+    });
+
+    // M65.1: the block binds `diagram.undo` in its own key scope, which the
+    // pointerdown on Edit recorded, so the app's undo binding never runs too.
+    it("after Edit, with focus left on body, ⌘Z runs the block's undo and never the app's", async () => {
+      renderMock.mockResolvedValue({ ok: true, svg: '<svg></svg>' });
+      const appUndo = vi.fn(async () => true);
+      const before = useUndoStore.getState();
+      useUndoStore.setState({
+        undo: appUndo,
+        past: [{ id: 1, label: 'Renamed', vault: '/demo-vault', at: 0, kind: 'batch', files: [] }],
+      });
+      try {
+        renderHook(() => useUndoShortcuts());
+        const onUndo = vi.fn();
+        render(
+          <MermaidBlockView
+            code={'flowchart TD\n  A --> B'}
+            onChangeCode={() => {}}
+            onUndo={onUndo}
+          />,
+        );
+        await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+        await screen.findByTestId('structural-host');
+        expect(document.activeElement).toBe(document.body);
+        fireEvent.keyDown(document.body, { key: 'z', metaKey: true });
+        expect(onUndo).toHaveBeenCalledTimes(1);
+        // Inside the block its editor claim holds ⌘Z back from the keymap,
+        // and the block's own listener answers it, once.
+        fireEvent.keyDown(screen.getByRole('button', { name: 'Done' }), {
+          key: 'z',
+          metaKey: true,
+        });
+        expect(onUndo).toHaveBeenCalledTimes(2);
+        expect(appUndo).not.toHaveBeenCalled();
+      } finally {
+        useUndoStore.setState({ undo: before.undo, past: [] });
+      }
+    });
+
+    it('with two blocks editing, the one last pressed takes ⌘Z', async () => {
+      renderMock.mockResolvedValue({ ok: true, svg: '<svg></svg>' });
+      const undoA = vi.fn();
+      const undoB = vi.fn();
+      render(
+        <>
+          <MermaidBlockView
+            code={'flowchart TD\n  A --> B'}
+            onChangeCode={() => {}}
+            onUndo={undoA}
+          />
+          <MermaidBlockView
+            code={'flowchart TD\n  C --> D'}
+            onChangeCode={() => {}}
+            onUndo={undoB}
+          />
+        </>,
+      );
+      const [a, b] = screen.getAllByTestId('mermaid-block');
+      await userEvent.click(within(a!).getByRole('button', { name: 'Edit' }));
+      await userEvent.click(within(b!).getByRole('button', { name: 'Edit' }));
+      fireEvent.keyDown(document.body, { key: 'z', metaKey: true });
+      expect(undoB).toHaveBeenCalledTimes(1);
+      expect(undoA).not.toHaveBeenCalled();
+      fireEvent.pointerDown(within(a!).getByRole('button', { name: 'Done' }));
+      fireEvent.keyDown(document.body, { key: 'z', metaKey: true });
+      expect(undoA).toHaveBeenCalledTimes(1);
+      expect(undoB).toHaveBeenCalledTimes(1);
     });
 
     it("⌘Z inside the source box stays the textarea's own undo", async () => {

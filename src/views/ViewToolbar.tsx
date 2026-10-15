@@ -20,6 +20,7 @@ import type {
   ViewType,
 } from '@/engine/types';
 import { filterStatusSet } from '@/engine/viewFilters';
+import type { ViewProblem } from '@/engine/viewCheck';
 import { MAX_GROUP_DEPTH, MAX_NEST_DEPTH, MAX_SORT_KEYS, moveSortKey } from '@/engine/views';
 import { VIEW_SEGMENTS } from '@/views/viewKinds';
 
@@ -146,6 +147,8 @@ export interface ViewToolbarProps {
   /** M11: per-view filters, edited from the toolbar like every other axis. */
   filters?: FilterGroup | null;
   onFiltersChange?: (next: FilterGroup | null) => void;
+  /** What the view names that it can't apply (M60.2b); marks filter chips. */
+  problems?: readonly ViewProblem[];
 }
 
 // Task 8: the Save-view button is gone — saved-view tabs auto-persist edits
@@ -159,6 +162,7 @@ export function ViewToolbar({
   showLayout = true,
   filters = null,
   onFiltersChange,
+  problems,
 }: ViewToolbarProps) {
   const declared = fields ?? [];
 
@@ -268,6 +272,8 @@ export function ViewToolbar({
           // TYPE's `statuses:`, and this is the highest place that knows both
           // the source type and the schema (M16.29).
           statuses={filterStatusSet(schema, sourceType)}
+          problems={problems}
+          problemSource={sourceType}
           onChange={onFiltersChange}
         />
       )}

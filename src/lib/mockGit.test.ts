@@ -93,6 +93,17 @@ describe('mock git discard', () => {
     ]);
     expect((await getModifiedFiles('/v')).map((f) => f.path)).toEqual(['knowledge/concepts/a.md']);
   });
+
+  it('takes the path literally, as status.rs does', async () => {
+    await expect(gitDiscardFile('/v', 'kn?wledge/concepts/a.md')).rejects.toThrow(
+      'nothing to discard',
+    );
+    for (const path of ['.', './notes/a.md', 'notes//a.md', 'notes/']) {
+      await expect(gitDiscardFile('/v', path)).rejects.toThrow();
+    }
+    expect(writes()).toEqual([]);
+    expect((await getModifiedFiles('/v')).map((f) => f.path)).toHaveLength(3);
+  });
 });
 
 // M58.3: a run's own commit, the paths a live run owns, and its patches.

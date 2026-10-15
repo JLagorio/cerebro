@@ -31,11 +31,12 @@ function setup(docPartial: Partial<Entry> = {}) {
     ...docPartial,
   };
   const all = [...entries, doc];
-  const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
-  useVaultStore.setState({ entries: all, vaultPath: '/vault', patchFrontmatter });
+  const patchFrontmatter = vi.fn().mockResolvedValue(true);
+  const applyBatch = vi.fn().mockResolvedValue({ batchId: 'b'.repeat(32), files: [] });
+  useVaultStore.setState({ entries: all, vaultPath: '/vault', patchFrontmatter, applyBatch });
   const schema = buildSchema(all);
   render(<DocProperties entry={doc} schema={schema} />);
-  return { patchFrontmatter };
+  return { patchFrontmatter, applyBatch };
 }
 
 describe('DocProperties', () => {
@@ -53,25 +54,62 @@ describe('DocProperties', () => {
     expect(screen.queryByRole('button', { name: 'Type' })).toBeNull();
   });
 
-  it('converts a doc to a record through the explicit Convert action', async () => {
+  // M61.8: an instant prints the day this machine's clock said, not UTC's.
+  it('prints Created and Modified as local dates', () => {
+    const tz = process.env.TZ;
+    process.env.TZ = 'America/Los_Angeles';
+    try {
+      // 03:00Z is the evening BEFORE in Los Angeles.
+      setup({ createdAt: '2026-07-01T03:00:00Z', modifiedAt: '2026-07-02T03:00:00Z' });
+      expect(screen.getByText('Created 2026-06-30')).toBeTruthy();
+      expect(screen.getByText('Modified 2026-07-01')).toBeTruthy();
+    } finally {
+      if (tz === undefined) delete process.env.TZ;
+      else process.env.TZ = tz;
+    }
+  });
+
+  // M60.7: one labelled batch, so the store toasts "Converted to …" with Undo.
+  it('converts a doc to a record through the explicit Convert action, undoably', async () => {
     const user = userEvent.setup();
-    const { patchFrontmatter } = setup();
+    const { patchFrontmatter, applyBatch } = setup({ hash: 'c'.repeat(64) });
+    await user.click(screen.getByRole('button', { name: 'Convert to record…' }));
+    expect(screen.queryByText(/cannot be undone|not from the app/)).toBeNull();
+    await user.click(screen.getByRole('option', { name: 'Work item' }));
+    await user.click(screen.getByRole('button', { name: 'Convert to Work item' }));
+    await vi.waitFor(() => expect(applyBatch).toHaveBeenCalledOnce());
+    expect(applyBatch).toHaveBeenCalledWith(
+      [{ op: 'patch', path: DOC, set: { type: 'Work item' }, expectHash: 'c'.repeat(64) }],
+      { undo: 'Converted to Work item' },
+    );
+    expect(patchFrontmatter).not.toHaveBeenCalled();
+  });
+
+  it('converts a page under knowledge/ through patchFrontmatter, never undoably', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter, applyBatch } = setup({ path: 'knowledge/notes/welcome.md' });
     await user.click(screen.getByRole('button', { name: 'Convert to record…' }));
     await user.click(screen.getByRole('option', { name: 'Work item' }));
     await user.click(screen.getByRole('button', { name: 'Convert to Work item' }));
-    expect(patchFrontmatter).toHaveBeenCalledWith(DOC, { type: 'Work item' });
+    await vi.waitFor(() =>
+      expect(patchFrontmatter).toHaveBeenCalledWith('knowledge/notes/welcome.md', {
+        type: 'Work item',
+      }),
+    );
+    expect(applyBatch).not.toHaveBeenCalled();
   });
 
-  // M15: conversion has no inverse in the app, so picking a type in the list
-  // must select, not commit — a stray click used to convert immediately.
+  // M15: picking a type in the list must select, not commit — a stray click
+  // used to convert immediately, and the note leaves Docs.
   it('selects a type without converting until the footer action is pressed', async () => {
     const user = userEvent.setup();
-    const { patchFrontmatter } = setup();
+    const { patchFrontmatter, applyBatch } = setup();
     await user.click(screen.getByRole('button', { name: 'Convert to record…' }));
     const row = screen.getByRole('option', { name: 'Work item' });
     expect(row.getAttribute('aria-selected')).toBe('false');
     await user.click(row);
     expect(patchFrontmatter).not.toHaveBeenCalled();
+    expect(applyBatch).not.toHaveBeenCalled();
     expect(screen.getByRole('option', { name: 'Work item' }).getAttribute('aria-selected')).toBe(
       'true',
     );

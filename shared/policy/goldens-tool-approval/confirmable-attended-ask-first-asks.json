@@ -1,8 +1,9 @@
 {
-  "why": "A panel turn with an ask-first agent: its four page writers ask, so they leave --allowedTools and join the gate's matcher, and the mode stays acceptEdits, which never approves an MCP tool.",
+  "why": "A panel turn with an ask-first agent: its five page writers ask, so they leave --allowedTools and join the gate's matcher, and the mode stays acceptEdits, which never approves an MCP tool.",
   "input": {
     "kind": "attended",
     "shell": "off",
+    "web": "off",
     "ask_first": true,
     "read_scoped": false,
     "narrowing": null
@@ -15,12 +16,17 @@
       "Edit",
       "MultiEdit",
       "NotebookEdit",
-      "Bash"
+      "Bash",
+      "WebFetch",
+      "WebSearch",
+      "Read(./.trash/**)",
+      "Edit(./.trash/**)"
     ],
     "matcher": [
       "AskUserQuestion",
       "mcp__cerebro__create_note",
       "mcp__cerebro__update_frontmatter",
+      "mcp__cerebro__set_fields",
       "mcp__cerebro__append_to_note",
       "mcp__cerebro__edit_note",
       "ExitPlanMode"
@@ -35,13 +41,14 @@
       "Read": "cli",
       "Glob": "cli",
       "Grep": "cli",
-      "WebFetch": "cli",
-      "WebSearch": "cli",
+      "WebFetch": "deny",
+      "WebSearch": "deny",
       "Task": "cli",
       "AskUserQuestion": "ask",
       "ExitPlanMode": "refuse",
       "mcp__cerebro__create_note": "ask",
       "mcp__cerebro__update_frontmatter": "ask",
+      "mcp__cerebro__set_fields": "ask",
       "mcp__cerebro__append_to_note": "ask",
       "mcp__cerebro__edit_note": "ask"
     }

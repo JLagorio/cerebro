@@ -1,0 +1,947 @@
+{
+  "about": "M63.1: durable wakes. Each scenario starts from an empty agent_wakes and runs its steps in order, each at its own instant. admit offers matches as the renderer sends them (an event wake's key is 64 lowercase hex, its trigger 16, its agent process: and a handle of [a-z0-9-], its cause kind event) and answers how many were admitted, how many were already live, and each refusal in offer order. claim, finish and cancel name a wake by its key, meaning the latest wake admitted with it; claim answers started (the cause the run records and the subjects it took with it), deferred with its reasons, gone, or an error that writes nothing. finish ends the claimed run with a run outcome. pause pauses or resumes an agent on the fleet. expire cancels pending wakes past ttl_days. pending lists the pending wakes inside ttl_days, oldest first. rows lists every wake in admission order. Replayed by src-tauri/src/runtime/wakes.rs and src/lib/mockIpc.test.ts.",
+  "ttl_days": 7,
+  "coalesce_max": 20,
+  "busy_retry_secs": 60,
+  "budget_retry_secs": 600,
+  "cancel_whys": ["paused", "trigger_changed", "agent_gone", "page_gone"],
+  "scenarios": [
+    {
+      "why": "a live key is ignored while pending or started, and admitted again once finished",
+      "steps": [
+        {
+          "op": "admit",
+          "at": "2026-10-13T09:00:00.000Z",
+          "offers": [
+            {
+              "agent": "process:scout",
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/a.md",
+                "detail": "it changes in records/risks"
+              }
+            }
+          ],
+          "expect": {
+            "admitted": 1,
+            "live": 0,
+            "refused": []
+          }
+        },
+        {
+          "op": "admit",
+          "at": "2026-10-13T09:01:00.000Z",
+          "offers": [
+            {
+              "agent": "process:scout",
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/a.md",
+                "detail": "it changes in records/risks"
+              }
+            }
+          ],
+          "expect": {
+            "admitted": 0,
+            "live": 1,
+            "refused": []
+          }
+        },
+        {
+          "op": "claim",
+          "at": "2026-10-13T09:02:00.000Z",
+          "agent": "process:scout",
+          "wake": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "coalesce": [],
+          "expect": {
+            "started": {
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/a.md",
+                "detail": "it changes in records/risks"
+              },
+              "also": []
+            }
+          }
+        },
+        {
+          "op": "admit",
+          "at": "2026-10-13T09:03:00.000Z",
+          "offers": [
+            {
+              "agent": "process:scout",
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/a.md",
+                "detail": "it changes in records/risks"
+              }
+            }
+          ],
+          "expect": {
+            "admitted": 0,
+            "live": 1,
+            "refused": []
+          }
+        },
+        {
+          "op": "finish",
+          "at": "2026-10-13T09:04:00.000Z",
+          "wake": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "outcome": "succeeded"
+        },
+        {
+          "op": "admit",
+          "at": "2026-10-13T09:05:00.000Z",
+          "offers": [
+            {
+              "agent": "process:scout",
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/a.md",
+                "detail": "it changes in records/risks"
+              }
+            }
+          ],
+          "expect": {
+            "admitted": 1,
+            "live": 0,
+            "refused": []
+          }
+        },
+        {
+          "op": "rows",
+          "expect": [
+            {
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "state": "finished",
+              "outcome": "succeeded",
+              "reason": null,
+              "detail": null
+            },
+            {
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "state": "pending",
+              "outcome": null,
+              "reason": null,
+              "detail": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "why": "a paused agent and each malformed offer are refused one by one, in offer order",
+      "steps": [
+        {
+          "op": "pause",
+          "at": "2026-10-13T09:00:00.000Z",
+          "agent": "process:scout",
+          "paused": true
+        },
+        {
+          "op": "admit",
+          "at": "2026-10-13T09:01:00.000Z",
+          "offers": [
+            {
+              "agent": "process:scout",
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/a.md",
+                "detail": "it changes in records/risks"
+              }
+            },
+            {
+              "agent": "process:other",
+              "wakeKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/b.md",
+                "detail": "it changes in records/risks"
+              }
+            },
+            {
+              "agent": "process:other",
+              "wakeKey": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/c.md",
+                "detail": "it changes in records/risks"
+              }
+            },
+            {
+              "agent": "process:other",
+              "wakeKey": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "schedule",
+                "subject": "records/risks/d.md",
+                "detail": "it changes in records/risks"
+              }
+            },
+            {
+              "agent": "process:Other",
+              "wakeKey": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/e.md",
+                "detail": "it changes in records/risks"
+              }
+            },
+            {
+              "agent": "process:other",
+              "wakeKey": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/f.md",
+                "detail": "it changes in records/risks"
+              }
+            }
+          ],
+          "expect": {
+            "admitted": 1,
+            "live": 0,
+            "refused": [
+              {
+                "agent": "process:scout",
+                "reason": "paused"
+              },
+              {
+                "agent": "process:other",
+                "reason": "malformed"
+              },
+              {
+                "agent": "process:other",
+                "reason": "malformed"
+              },
+              {
+                "agent": "process:Other",
+                "reason": "malformed"
+              },
+              {
+                "agent": "process:other",
+                "reason": "malformed"
+              }
+            ]
+          }
+        },
+        {
+          "op": "rows",
+          "expect": [
+            {
+              "wakeKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "state": "pending",
+              "outcome": null,
+              "reason": null,
+              "detail": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "why": "a claim takes the pending event wakes of its own trigger and agent, and no others",
+      "steps": [
+        {
+          "op": "admit",
+          "at": "2026-10-13T09:00:00.000Z",
+          "offers": [
+            {
+              "agent": "process:scout",
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/a.md",
+                "detail": "it changes in records/risks"
+              }
+            },
+            {
+              "agent": "process:scout",
+              "wakeKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/b.md",
+                "detail": "it changes in records/risks"
+              }
+            },
+            {
+              "agent": "process:scout",
+              "wakeKey": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "trigger": "2222222222222222",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/c.md",
+                "detail": "it changes in records/risks"
+              }
+            },
+            {
+              "agent": "process:other",
+              "wakeKey": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/d.md",
+                "detail": "it changes in records/risks"
+              }
+            }
+          ],
+          "expect": {
+            "admitted": 4,
+            "live": 0,
+            "refused": []
+          }
+        },
+        {
+          "op": "claim",
+          "at": "2026-10-13T09:01:00.000Z",
+          "agent": "process:scout",
+          "wake": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "coalesce": [
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          ],
+          "expect": {
+            "started": {
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/a.md",
+                "detail": "it changes in records/risks"
+              },
+              "also": ["records/risks/b.md"]
+            }
+          }
+        },
+        {
+          "op": "rows",
+          "expect": [
+            {
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "state": "started",
+              "outcome": null,
+              "reason": null,
+              "detail": null
+            },
+            {
+              "wakeKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "state": "finished",
+              "outcome": "coalesced",
+              "reason": null,
+              "detail": null
+            },
+            {
+              "wakeKey": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "state": "pending",
+              "outcome": null,
+              "reason": null,
+              "detail": null
+            },
+            {
+              "wakeKey": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "state": "pending",
+              "outcome": null,
+              "reason": null,
+              "detail": null
+            }
+          ]
+        },
+        {
+          "op": "finish",
+          "at": "2026-10-13T09:02:00.000Z",
+          "wake": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "outcome": "failed"
+        },
+        {
+          "op": "rows",
+          "expect": [
+            {
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "state": "finished",
+              "outcome": "failed",
+              "reason": null,
+              "detail": null
+            },
+            {
+              "wakeKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "state": "finished",
+              "outcome": "coalesced",
+              "reason": null,
+              "detail": null
+            },
+            {
+              "wakeKey": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "state": "pending",
+              "outcome": null,
+              "reason": null,
+              "detail": null
+            },
+            {
+              "wakeKey": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "state": "pending",
+              "outcome": null,
+              "reason": null,
+              "detail": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "why": "a claim that names its own wake again, or another agent's wake, is refused and writes nothing",
+      "steps": [
+        {
+          "op": "admit",
+          "at": "2026-10-13T09:00:00.000Z",
+          "offers": [
+            {
+              "agent": "process:scout",
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/a.md",
+                "detail": "it changes in records/risks"
+              }
+            }
+          ],
+          "expect": {
+            "admitted": 1,
+            "live": 0,
+            "refused": []
+          }
+        },
+        {
+          "op": "claim",
+          "at": "2026-10-13T09:01:00.000Z",
+          "agent": "process:scout",
+          "wake": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "coalesce": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+          "expect": {
+            "error": true
+          }
+        },
+        {
+          "op": "claim",
+          "at": "2026-10-13T09:01:00.000Z",
+          "agent": "process:other",
+          "wake": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "coalesce": [],
+          "expect": {
+            "error": true
+          }
+        },
+        {
+          "op": "rows",
+          "expect": [
+            {
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "state": "pending",
+              "outcome": null,
+              "reason": null,
+              "detail": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "why": "one agent runs one wake at a time; the next waits a minute, then starts",
+      "steps": [
+        {
+          "op": "admit",
+          "at": "2026-10-13T09:00:00.000Z",
+          "offers": [
+            {
+              "agent": "process:scout",
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/a.md",
+                "detail": "it changes in records/risks"
+              }
+            },
+            {
+              "agent": "process:scout",
+              "wakeKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "trigger": "2222222222222222",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/b.md",
+                "detail": "it changes in records/risks"
+              }
+            }
+          ],
+          "expect": {
+            "admitted": 2,
+            "live": 0,
+            "refused": []
+          }
+        },
+        {
+          "op": "claim",
+          "at": "2026-10-13T09:01:00.000Z",
+          "agent": "process:scout",
+          "wake": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "coalesce": [],
+          "expect": {
+            "started": {
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/a.md",
+                "detail": "it changes in records/risks"
+              },
+              "also": []
+            }
+          }
+        },
+        {
+          "op": "claim",
+          "at": "2026-10-13T09:01:00.000Z",
+          "agent": "process:scout",
+          "wake": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coalesce": [],
+          "expect": {
+            "deferred": ["agent_running"]
+          }
+        },
+        {
+          "op": "pending",
+          "at": "2026-10-13T09:01:00.000Z",
+          "expect": [
+            {
+              "wakeKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "notBefore": "2026-10-13T09:02:00.000Z",
+              "deferred": "agent_running"
+            }
+          ]
+        },
+        {
+          "op": "finish",
+          "at": "2026-10-13T09:01:30.000Z",
+          "wake": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "outcome": "cancelled"
+        },
+        {
+          "op": "claim",
+          "at": "2026-10-13T09:02:00.000Z",
+          "agent": "process:scout",
+          "wake": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "coalesce": [],
+          "expect": {
+            "started": {
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/b.md",
+                "detail": "it changes in records/risks"
+              },
+              "also": []
+            }
+          }
+        },
+        {
+          "op": "rows",
+          "expect": [
+            {
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "state": "finished",
+              "outcome": "interrupted",
+              "reason": null,
+              "detail": null
+            },
+            {
+              "wakeKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "state": "started",
+              "outcome": null,
+              "reason": null,
+              "detail": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "why": "pausing an agent cancels its pending wakes, which can no longer be claimed; resuming cancels nothing",
+      "steps": [
+        {
+          "op": "admit",
+          "at": "2026-10-13T09:00:00.000Z",
+          "offers": [
+            {
+              "agent": "process:scout",
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/a.md",
+                "detail": "it changes in records/risks"
+              }
+            },
+            {
+              "agent": "process:other",
+              "wakeKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/b.md",
+                "detail": "it changes in records/risks"
+              }
+            }
+          ],
+          "expect": {
+            "admitted": 2,
+            "live": 0,
+            "refused": []
+          }
+        },
+        {
+          "op": "pause",
+          "at": "2026-10-13T09:01:00.000Z",
+          "agent": "process:scout",
+          "paused": true
+        },
+        {
+          "op": "claim",
+          "at": "2026-10-13T09:02:00.000Z",
+          "agent": "process:scout",
+          "wake": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "coalesce": [],
+          "expect": "gone"
+        },
+        {
+          "op": "rows",
+          "expect": [
+            {
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "state": "finished",
+              "outcome": "cancelled",
+              "reason": "superseded",
+              "detail": "paused"
+            },
+            {
+              "wakeKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "state": "pending",
+              "outcome": null,
+              "reason": null,
+              "detail": null
+            }
+          ]
+        },
+        {
+          "op": "pause",
+          "at": "2026-10-13T09:03:00.000Z",
+          "agent": "process:scout",
+          "paused": false
+        },
+        {
+          "op": "admit",
+          "at": "2026-10-13T09:04:00.000Z",
+          "offers": [
+            {
+              "agent": "process:scout",
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/a.md",
+                "detail": "it changes in records/risks"
+              }
+            }
+          ],
+          "expect": {
+            "admitted": 1,
+            "live": 0,
+            "refused": []
+          }
+        },
+        {
+          "op": "rows",
+          "expect": [
+            {
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "state": "finished",
+              "outcome": "cancelled",
+              "reason": "superseded",
+              "detail": "paused"
+            },
+            {
+              "wakeKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "state": "pending",
+              "outcome": null,
+              "reason": null,
+              "detail": null
+            },
+            {
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "state": "pending",
+              "outcome": null,
+              "reason": null,
+              "detail": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "why": "cancel names its why and touches pending wakes only; an unknown why writes nothing",
+      "steps": [
+        {
+          "op": "admit",
+          "at": "2026-10-13T09:00:00.000Z",
+          "offers": [
+            {
+              "agent": "process:scout",
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/a.md",
+                "detail": "it changes in records/risks"
+              }
+            },
+            {
+              "agent": "process:scout",
+              "wakeKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/b.md",
+                "detail": "it changes in records/risks"
+              }
+            }
+          ],
+          "expect": {
+            "admitted": 2,
+            "live": 0,
+            "refused": []
+          }
+        },
+        {
+          "op": "cancel",
+          "at": "2026-10-13T09:01:00.000Z",
+          "cancels": [
+            {
+              "wake": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "why": "trigger_changed"
+            },
+            {
+              "wake": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "why": "bored"
+            }
+          ],
+          "expect": {
+            "error": true
+          }
+        },
+        {
+          "op": "rows",
+          "expect": [
+            {
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "state": "pending",
+              "outcome": null,
+              "reason": null,
+              "detail": null
+            },
+            {
+              "wakeKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "state": "pending",
+              "outcome": null,
+              "reason": null,
+              "detail": null
+            }
+          ]
+        },
+        {
+          "op": "cancel",
+          "at": "2026-10-13T09:02:00.000Z",
+          "cancels": [
+            {
+              "wake": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "why": "trigger_changed"
+            },
+            {
+              "wake": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "why": "page_gone"
+            }
+          ],
+          "expect": {
+            "cancelled": 2
+          }
+        },
+        {
+          "op": "cancel",
+          "at": "2026-10-13T09:03:00.000Z",
+          "cancels": [
+            {
+              "wake": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "why": "agent_gone"
+            }
+          ],
+          "expect": {
+            "cancelled": 0
+          }
+        },
+        {
+          "op": "rows",
+          "expect": [
+            {
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "state": "finished",
+              "outcome": "cancelled",
+              "reason": "superseded",
+              "detail": "trigger_changed"
+            },
+            {
+              "wakeKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "state": "finished",
+              "outcome": "cancelled",
+              "reason": "superseded",
+              "detail": "page_gone"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "why": "a wake waits at most seven days: the pending read leaves it out, a claim or the sweep expires it",
+      "steps": [
+        {
+          "op": "admit",
+          "at": "2026-10-01T09:00:00.000Z",
+          "offers": [
+            {
+              "agent": "process:scout",
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/a.md",
+                "detail": "it changes in records/risks"
+              }
+            }
+          ],
+          "expect": {
+            "admitted": 1,
+            "live": 0,
+            "refused": []
+          }
+        },
+        {
+          "op": "admit",
+          "at": "2026-10-07T09:00:00.000Z",
+          "offers": [
+            {
+              "agent": "process:scout",
+              "wakeKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/b.md",
+                "detail": "it changes in records/risks"
+              }
+            }
+          ],
+          "expect": {
+            "admitted": 1,
+            "live": 0,
+            "refused": []
+          }
+        },
+        {
+          "op": "admit",
+          "at": "2026-10-06T09:00:00.000Z",
+          "offers": [
+            {
+              "agent": "process:scout",
+              "wakeKey": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "event",
+                "subject": "records/risks/c.md",
+                "detail": "it changes in records/risks"
+              }
+            }
+          ],
+          "expect": {
+            "admitted": 1,
+            "live": 0,
+            "refused": []
+          }
+        },
+        {
+          "op": "pending",
+          "at": "2026-10-08T09:00:00.000Z",
+          "expect": [
+            {
+              "wakeKey": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "notBefore": null,
+              "deferred": null
+            },
+            {
+              "wakeKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "notBefore": null,
+              "deferred": null
+            }
+          ]
+        },
+        {
+          "op": "claim",
+          "at": "2026-10-13T09:00:00.000Z",
+          "agent": "process:scout",
+          "wake": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "coalesce": [],
+          "expect": "gone"
+        },
+        {
+          "op": "expire",
+          "at": "2026-10-13T09:00:00.000Z",
+          "expect": {
+            "expired": 1
+          }
+        },
+        {
+          "op": "rows",
+          "expect": [
+            {
+              "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "state": "finished",
+              "outcome": "cancelled",
+              "reason": "expired",
+              "detail": null
+            },
+            {
+              "wakeKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "state": "pending",
+              "outcome": null,
+              "reason": null,
+              "detail": null
+            },
+            {
+              "wakeKey": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "state": "finished",
+              "outcome": "cancelled",
+              "reason": "expired",
+              "detail": null
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

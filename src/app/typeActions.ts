@@ -10,16 +10,38 @@
  *   - duplicate names are checked case-insensitively.
  */
 
+import {
+  dryRunKindChange,
+  stripMisfitTests,
+  type KindChangeCtx,
+  type KindChangePreview,
+} from '@/engine/castRules';
+import type { BatchOp } from '@/engine/batch';
 import { homeFolderFor } from '@/engine/createRecord';
+import {
+  deleteBlockedWords,
+  deleteBlockers,
+  groupingUses,
+  planFieldRename,
+  renameFlagWords,
+  renameRefusalWords,
+} from '@/engine/fieldRefs';
+import { isKnowledgePath } from '@/engine/okf';
 import { kindMeta } from '@/engine/properties';
 import { humanize, serializeDisplayConfig, serializeLayoutConfig } from '@/engine/schema';
-import { coerceValueToKind } from '@/engine/properties';
 import {
   isLockedField,
   isReservedTypeName,
   serializeFields,
   serializeOptions,
 } from '@/engine/typeCatalog';
+import {
+  addedFromLabel,
+  copiedLabel,
+  deletedPropertyLabel,
+  kindChangedLabel,
+  renamedLabel,
+} from '@/engine/undoPlan';
 import { serializeTabList, serializeViewList } from '@/engine/views';
 import type {
   DisplayConfig,
@@ -29,6 +51,7 @@ import type {
   FieldOption,
   FieldVisibility,
   LayoutConfig,
+  ListFile,
   StatusDef,
   TabDef,
   ViewDefinition,
@@ -197,18 +220,77 @@ const KIND_KEYS: Record<string, string[]> = {
   daterange: ['dateFormat', 'timeFormat'],
 };
 
+/** A field's declared kind, read from its raw spec (`field: text` or
+ * `{kind: …}`), as `rawFieldsOf` hands it back. */
+function rawKindOf(raw: unknown): string {
+  if (typeof raw === 'string') return raw;
+  if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+    const kind = (raw as Record<string, unknown>).kind;
+    if (typeof kind === 'string') return kind;
+  }
+  return 'text';
+}
+
 /**
- * Change a declared field's kind, coercing every record's stored value into
- * the new shape (M12.4b — the header menu's Change type). Values with no
- * honest reading in the new kind are cleared, never mangled; converting to a
- * select-family kind seeds the option set from the values that survive.
+ * What Change type's dry run reads for one field (M60.5): the type's records,
+ * its views, the List files over it and the keys a property may never take.
+ * Null when the type has no Type doc or does not declare the field.
+ */
+export function kindChangeContext(
+  entries: Entry[],
+  lists: ListFile[],
+  typeName: string,
+  fieldName: string,
+): KindChangeCtx | null {
+  const doc = findTypeDoc(entries, typeName);
+  if (doc === null) return null;
+  const fields = rawFieldsOf(doc);
+  const field = Object.keys(fields).find((k) => k.toLowerCase() === fieldName.toLowerCase());
+  if (field === undefined) return null;
+  const schema = getSchema(entries);
+  const typeDef = schema.types.get(typeName) ?? schema.types.get(doc.title);
+  const declared = typeDef?.fields.find((f) => f.name === field);
+  const def: FieldDef = declared ?? { name: field, kind: rawKindOf(fields[field]) as FieldKind };
+  return { typeName, field, def, entries, schema, lists, reserved: RESERVED };
+}
+
+const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
+
+/**
+ * A patch op on `entry` for a database-wide change (M60.6), carrying the
+ * hash of the bytes its values were read from when the scan knows it, so a
+ * page edited since refuses the whole change (D2 (c)).
+ */
+function patchOp(entry: Entry, set: Record<string, unknown>): BatchOp {
+  return entry.hash === null
+    ? { op: 'patch', path: entry.path, set }
+    : { op: 'patch', path: entry.path, set, expectHash: entry.hash };
+}
+
+/** The ops' records by path, for a patch op on each. */
+const byPath = (entries: Entry[]) => new Map(entries.map((e) => [e.path, e]));
+
+/** How many pages a change's ops touch: the count its undo label names. */
+const pagesIn = (ops: BatchOp[]) => new Set(ops.map((op) => op.path)).size;
+
+/**
+ * Change a declared field's kind in place (M60.5), only when every value
+ * converts. The dry run runs again against the vault as it is now, so values
+ * edited since the preview are checked too: a refusal, or any value that no
+ * longer converts, writes nothing and toasts why.
+ *
+ * One batch (M60.6), the Type doc first: its new spec (the keys the new kind
+ * understands, plus seeded options) and, when its views held filter rules
+ * the new kind cannot express, those views with the rules stripped; then
+ * each record whose value changes. All of it lands, or none of it does.
  */
 export async function changeFieldKind(
   typeName: string,
   fieldName: string,
   kind: FieldKind,
 ): Promise<boolean> {
-  const { entries, patchFrontmatter } = useVaultStore.getState();
+  const { entries, views: lists, applyBatch } = useVaultStore.getState();
+  const toast = useUiStore.getState().toast;
   const doc = findTypeDoc(entries, typeName);
   if (doc === null) return false;
   if (!guardEditable(doc, typeName)) return false;
@@ -221,21 +303,22 @@ export async function changeFieldKind(
     typeof raw === 'object' && raw !== null && !Array.isArray(raw)
       ? { ...(raw as Record<string, unknown>) }
       : {};
-  const oldKind =
-    typeof oldSpec.kind === 'string' ? oldSpec.kind : typeof raw === 'string' ? raw : 'text';
-  if (oldKind === kind) return true;
+  if (rawKindOf(raw) === kind) return true;
 
-  // Coerce first, so the option seed below sees the final values.
-  const records = entries.filter((e) => e.type === typeName && e.path !== doc.path);
-  const conversions: { path: string; value: unknown }[] = [];
-  for (const record of records) {
-    const stored =
-      record.relationships[actual] !== undefined
-        ? record.relationships[actual]
-        : record.properties[actual];
-    if (stored === undefined || stored === null || stored === '') continue;
-    const next = coerceValueToKind(stored, kind);
-    conversions.push({ path: record.path, value: next });
+  const ctx = kindChangeContext(entries, lists, typeName, actual);
+  if (ctx === null) return false;
+  const preview = dryRunKindChange(ctx, kind);
+  const kindLabel = kindMeta(kind).label;
+  if (preview.cast === 'never') {
+    toast(preview.reason ?? `Can't change "${humanize(actual)}" to ${kindLabel}`);
+    return false;
+  }
+  if (preview.failures > 0) {
+    const n = preview.failures;
+    toast(
+      `${n} ${plural(n, 'value no longer converts', 'values no longer convert')} to ${kindLabel}; nothing was changed`,
+    );
+    return false;
   }
 
   /**
@@ -258,42 +341,81 @@ export async function changeFieldKind(
   for (const key of keep) {
     if (oldSpec[key] !== undefined) spec[key] = oldSpec[key];
   }
-  if ((kind === 'select' || kind === 'multiselect') && !Array.isArray(spec.options)) {
-    const distinct = [
-      ...new Set(
-        conversions
-          .flatMap((c) => (Array.isArray(c.value) ? c.value : [c.value]))
-          .filter((v): v is string => typeof v === 'string' && v !== ''),
-      ),
-    ];
-    if (distinct.length > 0) spec.options = distinct;
-  }
+  if (preview.options !== null && !Array.isArray(spec.options)) spec.options = preview.options;
   fields[actual] = spec;
 
-  // Schema first: patchFrontmatter validates records against the CURRENT
-  // schema, and the optimistic update makes the new kind visible before the
-  // value writes run — so a schema write that didn't land must stop the
-  // conversions rather than run them against a schema that never changed.
-  if (!(await patchFrontmatter(doc.path, { fields }))) return false;
-  // Accepted asymmetry: the schema change is what this function's return
-  // value answers for. Each conversion's own patchFrontmatter call already
-  // self-toasts on failure (vaultStore's contract), so an individual record
-  // keeping its old value doesn't turn a landed kind change into a `false`.
-  for (const c of conversions) {
-    await patchFrontmatter(c.path, { [actual]: c.value });
+  const patch: Record<string, unknown> = { fields };
+  if (preview.stripped > 0) {
+    const typeViews = ctx.schema.types.get(typeName)?.views ?? [];
+    patch.views = serializeViewList(stripMisfitTests(typeViews, actual, kind).views);
   }
-  return true;
+  const records = byPath(entries);
+  const ops: BatchOp[] = [patchOp(doc, patch)];
+  for (const w of preview.writes) {
+    const record = records.get(w.path);
+    if (record !== undefined) ops.push(patchOp(record, { [actual]: w.value }));
+  }
+  const label = kindChangedLabel(humanize(actual), kindLabel, pagesIn(ops));
+  return (await applyBatch(ops, { undo: label })) !== null;
+}
+
+/**
+ * Convert a field into a NEW property of another kind (M60.5): the way out
+ * when some values would not survive an in-place change. The new key
+ * (`newPropertyName`, `<field>_<kind>`) is declared right after the old one
+ * on the Type doc and written only on the records whose value converts, in
+ * one batch (M60.6). The old property, its values and the views are never
+ * touched. Returns the new key, or null when nothing was written (failures
+ * toast).
+ */
+export async function convertFieldToNewProperty(
+  typeName: string,
+  fieldName: string,
+  kind: FieldKind,
+): Promise<string | null> {
+  const { entries, views: lists, applyBatch } = useVaultStore.getState();
+  const toast = useUiStore.getState().toast;
+  const doc = findTypeDoc(entries, typeName);
+  if (doc === null) return null;
+  if (!guardEditable(doc, typeName)) return null;
+  const ctx = kindChangeContext(entries, lists, typeName, fieldName);
+  if (ctx === null) return null;
+  const preview: KindChangePreview = dryRunKindChange(ctx, kind);
+  if (preview.converts === 0) {
+    toast(
+      preview.reason ??
+        `None of ${humanize(ctx.field)}'s values can be read as ${kindMeta(kind).label}`,
+    );
+    return null;
+  }
+  const fields = rawFieldsOf(doc);
+  const spec: Record<string, unknown> = { kind };
+  if (preview.options !== null) spec.options = preview.options;
+  const rebuilt: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    rebuilt[key] = value;
+    if (key === ctx.field) rebuilt[preview.newName] = spec;
+  }
+  const records = byPath(entries);
+  const ops: BatchOp[] = [patchOp(doc, { fields: rebuilt })];
+  for (const w of preview.writes) {
+    const record = records.get(w.path);
+    if (record !== undefined) ops.push(patchOp(record, { [preview.newName]: w.value }));
+  }
+  const label = addedFromLabel(humanize(preview.newName), humanize(ctx.field), pagesIn(ops));
+  return (await applyBatch(ops, { undo: label })) === null ? null : preview.newName;
 }
 
 /**
  * Duplicate a declared field: same spec under a fresh name, values copied on
- * every record (M12.4b — the header menu's Duplicate property).
+ * every record (M12.4b — the header menu's Duplicate property), the Type doc
+ * and the records in one batch (M60.6).
  */
 export async function duplicateFieldOnType(
   typeName: string,
   fieldName: string,
 ): Promise<string | null> {
-  const { entries, patchFrontmatter } = useVaultStore.getState();
+  const { entries, applyBatch } = useVaultStore.getState();
   const doc = findTypeDoc(entries, typeName);
   if (doc === null) return null;
   if (!guardEditable(doc, typeName)) return null;
@@ -312,11 +434,7 @@ export async function duplicateFieldOnType(
       rebuilt[copy] = typeof spec === 'object' && spec !== null ? { ...(spec as object) } : spec;
     }
   }
-  if (!(await patchFrontmatter(doc.path, { fields: rebuilt }))) return null;
-  // Accepted asymmetry: the schema declaration is what this function's
-  // return value answers for. Each copy's own patchFrontmatter call already
-  // self-toasts on failure (vaultStore's contract), so a record that doesn't
-  // get the copied value doesn't turn a landed duplicate into a `null`.
+  const ops: BatchOp[] = [patchOp(doc, { fields: rebuilt })];
   for (const record of entries) {
     if (record.type !== typeName || record.path === doc.path) continue;
     const stored =
@@ -325,9 +443,10 @@ export async function duplicateFieldOnType(
           record.relationships[actual].map((v) => `[[${v}]]`)
         : record.properties[actual];
     if (stored === undefined || stored === null || stored === '') continue;
-    await patchFrontmatter(record.path, { [copy]: stored });
+    ops.push(patchOp(record, { [copy]: stored }));
   }
-  return copy;
+  const label = copiedLabel(humanize(actual), pagesIn(ops));
+  return (await applyBatch(ops, { undo: label })) === null ? null : copy;
 }
 
 /**
@@ -370,9 +489,15 @@ export async function insertFieldOnType(
   return name;
 }
 
-/** Remove a custom field from a type. System-locked fields refuse. */
+/**
+ * Remove a custom field from a type. System-locked fields refuse, and so
+ * does a field a board or chart still groups by (M60.2): the view would draw
+ * one band of everything, so the toast names the view to regroup first.
+ * One labelled batch (M60.7), so the removal is undoable; a Type doc under
+ * knowledge/ keeps patchFrontmatter and is never undoable.
+ */
 export async function removeFieldFromType(typeName: string, fieldName: string): Promise<boolean> {
-  const { entries, patchFrontmatter } = useVaultStore.getState();
+  const { entries, views: lists, patchFrontmatter, applyBatch } = useVaultStore.getState();
   const toast = useUiStore.getState().toast;
   if (isLockedField(typeName, fieldName)) {
     toast(`"${fieldName}" is a built-in property of ${typeName} and can't be removed`);
@@ -384,22 +509,37 @@ export async function removeFieldFromType(typeName: string, fieldName: string): 
   const fields = rawFieldsOf(doc);
   const actual = Object.keys(fields).find((k) => k.toLowerCase() === fieldName.toLowerCase());
   if (actual === undefined) return false;
+  const blockers = deleteBlockers(
+    groupingUses(entries, lists, typeName, actual, getSchema(entries)),
+  );
+  if (blockers.length > 0) {
+    toast(deleteBlockedWords(humanize(actual), blockers));
+    return false;
+  }
   delete fields[actual];
-  if (!(await patchFrontmatter(doc.path, { fields }))) return false;
-  return true;
+  if (isKnowledgePath(doc.path)) return patchFrontmatter(doc.path, { fields });
+  const label = deletedPropertyLabel(humanize(actual));
+  return (await applyBatch([patchOp(doc, { fields })], { undo: label })) !== null;
 }
 
 /**
- * Rename a declared field, keeping its position in the `fields:` mapping and
- * migrating every record that carries the old key (M3.1: renaming the schema
- * without moving the data would orphan every stored value).
+ * Rename a declared field and every stored reference to it (M60.2), as ONE
+ * labelled batch (M60.6, M60.7): the key in place on the Type doc, the
+ * type's layout, every saved view and rollup that names it on any Type doc,
+ * and the value on every record and template of the type (M3.1: renaming
+ * the schema without moving the data would orphan every stored value).
+ * `planFieldRename` builds the ops: all of them land, or none do.
+ *
+ * A record that already holds the new key refuses the whole rename. What
+ * the plan leaves alone (List files, agent triggers, knowledge/ pages, …)
+ * is named in one toast after the batch lands.
  */
 export async function renameFieldOnType(
   typeName: string,
   fieldName: string,
   rawNext: string,
 ): Promise<boolean> {
-  const { entries, patchFrontmatter } = useVaultStore.getState();
+  const { entries, views: lists, applyBatch } = useVaultStore.getState();
   const toast = useUiStore.getState().toast;
   const next = normalizeFieldName(rawNext);
   if (next === '' || next === fieldName) return false;
@@ -421,27 +561,18 @@ export async function renameFieldOnType(
     toast('Property already exists');
     return false;
   }
-  // Rebuild the mapping so the renamed key keeps its slot in the panel order.
-  const renamed = Object.fromEntries(
-    Object.entries(fields).map(([k, v]) => (k === actual ? [next, v] : [k, v])),
+  const plan = planFieldRename(
+    { type: typeName, from: actual, to: next },
+    { entries, schema: getSchema(entries), lists },
   );
-  if (!(await patchFrontmatter(doc.path, { fields: renamed }))) return false;
-  // Move stored values on every record of this type. patchFrontmatter never
-  // throws — a record whose write fails reports it by returning false, not
-  // by rejecting — so failure is counted from that boolean. A record that
-  // fails keeps its old key: the schema rename already landed, so the value
-  // still resolves as an undeclared property rather than vanishing.
-  const records = entries.filter(
-    (e) => e.type === typeName && (actual in e.properties || actual in e.relationships),
-  );
-  let failed = 0;
-  for (const record of records) {
-    const targets = record.relationships[actual];
-    const value =
-      targets !== undefined ? targets.map((t) => `[[${t}]]`) : record.properties[actual];
-    if (!(await patchFrontmatter(record.path, { [next]: value, [actual]: null }))) failed += 1;
+  if (!plan.ok) {
+    toast(renameRefusalWords(plan.refusal.holders, next));
+    return false;
   }
-  if (failed > 0) toast(`Renamed, but ${failed} record(s) kept the old value`);
+  const label = renamedLabel(humanize(actual), humanize(next), pagesIn(plan.ops));
+  if ((await applyBatch(plan.ops, { undo: label })) === null) return false;
+  const flags = renameFlagWords(plan.flagged, actual);
+  if (flags !== null) toast(flags);
   return true;
 }
 

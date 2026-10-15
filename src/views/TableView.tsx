@@ -11,7 +11,6 @@ import { Tooltip } from '@/components/ui/Tooltip';
 import { AddPropertyPanel, type RelationConfig } from '@/detail/AddPropertyPanel';
 import { FieldEditor } from '@/detail/FieldEditor';
 import { useDragGesture } from '@/hooks/useDragGesture';
-import { deleteNote } from '@/lib/ipc';
 import { aggregate, aggregateMeta, aggregatesFor, type AggregateCalc } from '@/engine/aggregate';
 import {
   MIN_COL_W,
@@ -26,21 +25,16 @@ import {
   type ColumnDef,
 } from '@/engine/columns';
 import { buildRows, entryRows } from '@/engine/rows';
-import {
-  CREATABLE_PROPERTY_KINDS,
-  GROUPABLE_KINDS,
-  kindMeta,
-  progressRatio,
-} from '@/engine/properties';
+import type { KindChangePreview } from '@/engine/castRules';
+import { GROUPABLE_KINDS, kindMeta, progressRatio } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
-import { couldntMoveToast, movedRecordsToast, movedToast, TRASH_WORDS } from '@/engine/trash';
+import { movedRecordsToast, movedToast, TRASH_WORDS } from '@/engine/trash';
 import { typeStyle } from '@/engine/typeCatalog';
 import { groupByField, sortBy } from '@/engine/views';
 import type {
   ChipStyle,
   ColumnSpec,
   Entry,
-  FieldDef,
   FieldKind,
   GroupNode,
   Presentation,
@@ -49,7 +43,6 @@ import type {
 import {
   addFieldToType,
   addRelationProperty,
-  changeFieldKind,
   duplicateFieldOnType,
   insertFieldOnType,
   normalizeFieldName,
@@ -57,7 +50,13 @@ import {
   renameFieldOnType,
 } from '@/app/typeActions';
 import { useOpenPath } from '@/app/useOpenPath';
-import { ConfirmDeleteProperty, ConfirmKindChange, PropertyEditor } from '@/views/PropertyEditor';
+import { KindChangeList } from '@/views/KindChangeList';
+import {
+  ConfirmDeleteProperty,
+  ConfirmKindChange,
+  PropertyEditor,
+  runKindChange,
+} from '@/views/PropertyEditor';
 import { duplicateRecord } from '@/app/recordActions';
 import { QuickAddInline } from '@/views/QuickAdd';
 import {
@@ -1487,7 +1486,7 @@ function HeaderMenu({
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [changingKind, setChangingKind] = useState(false);
   const [calcOpen, setCalcOpen] = useState(false);
-  const [pendingKind, setPendingKind] = useState<FieldDef['kind'] | null>(null);
+  const [pendingKind, setPendingKind] = useState<KindChangePreview | null>(null);
   // The third unguarded delete. `PropertyMenu` and `PropertyEditor` were
   // guarded; this menu has its OWN "Delete property" item that called
   // `removeFieldFromType` on one click, from a surface that already tells you
@@ -1529,16 +1528,9 @@ function HeaderMenu({
   const commitRename = () => {
     const next = draft.trim();
     if (ownerType === null || next === '' || humanize(def.name) === next) return;
-    void (async () => {
-      if (await renameFieldOnType(ownerType, def.name, next)) {
-        // The view addresses the column by field name — follow the rename.
-        onColumnsChange?.(
-          columns.map((c) =>
-            c.field === def.name ? { ...c, field: normalizeFieldName(next) } : c,
-          ),
-        );
-      }
-    })();
+    // The batch renames every stored view's column too (M60.2); rewriting
+    // the open view from these props here would write its pre-rename shape.
+    void renameFieldOnType(ownerType, def.name, next);
   };
 
   const items: HeaderItem[] = [];
@@ -1762,17 +1754,8 @@ function HeaderMenu({
                   />
                 )}
                 {changingKind && ownerType !== null && (
-                  <div className="mb-1 max-h-[180px] overflow-y-auto rounded-md bg-n-25 p-0.5">
-                    {CREATABLE_PROPERTY_KINDS.filter((k) => !k.computed).map((k) => (
-                      <MenuItem
-                        key={k.kind}
-                        icon={k.icon}
-                        label={k.label}
-                        checked={k.kind === def.kind}
-                        testId={`change-type-${k.kind}`}
-                        onSelect={() => setPendingKind(k.kind)}
-                      />
-                    ))}
+                  <div className="mb-1 max-h-[220px] overflow-y-auto rounded-md bg-n-25 p-0.5">
+                    <KindChangeList typeName={ownerType} def={def} asMenu onPick={setPendingKind} />
                   </div>
                 )}
                 <HeaderItems items={items} onClose={close} />
@@ -1801,14 +1784,13 @@ function HeaderMenu({
       {pendingKind !== null && ownerType !== null && (
         <ConfirmKindChange
           name={name}
-          from={def.kind}
-          to={pendingKind}
-          count={allEntriesForCount.filter((e) => e.type === ownerType).length}
+          preview={pendingKind}
           onCancel={() => setPendingKind(null)}
           onConfirm={() => {
+            const preview = pendingKind;
             setPendingKind(null);
             close();
-            void changeFieldKind(ownerType, def.name, pendingKind);
+            void runKindChange(ownerType, def.name, preview, columns, onColumnsChange);
           }}
         />
       )}
@@ -2201,8 +2183,7 @@ export function TableView({
   const [checkedPaths, setCheckedPaths] = useState<ReadonlySet<string>>(() => new Set());
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const anchorRow = useRef(-1);
-  const vaultPath = useVaultStore((s) => s.vaultPath);
-  const rescan = useVaultStore((s) => s.rescan);
+  const applyBatch = useVaultStore((s) => s.applyBatch);
   const toast = useUiStore((s) => s.toast);
 
   const rowPaths = useMemo(() => flatRows.map((r) => r.entry.path), [flatRows]);
@@ -2299,44 +2280,27 @@ export function TableView({
     })();
   }, [checked, toast]);
 
-  /** Move a set of records to the vault's Trash (M60.8), one call each until
-   * the batch writer takes them. Never throws — it reports and returns, like
-   * every other action that touches the vault. */
+  /** Move a set of records to the vault's Trash (M60.8) as one batch of
+   * delete ops, for one row or many (M60.6): every record goes, or none
+   * does. Never throws: a refusal is the store's one toast, and the store
+   * rescans either way. Undoable (M60.7): the store toasts the label with
+   * Undo. */
   const deleteRecords = useCallback(
     (targets: Entry[]) => {
       setConfirmBulkDelete(false);
       void (async () => {
-        if (vaultPath === null || targets.length === 0) return;
-        const failed: string[] = [];
-        for (const entry of targets) {
-          try {
-            await deleteNote(vaultPath, entry.path);
-          } catch {
-            failed.push(entry.title);
-          }
-        }
-        // Cleared before the rescan: leaving the paths checked would flash a
-        // bulk bar counting records that are already gone.
+        if (targets.length === 0) return;
+        const label =
+          targets.length === 1 ? movedToast(targets[0].title) : movedRecordsToast(targets.length);
+        const applied = await applyBatch(
+          targets.map((entry) => ({ op: 'delete' as const, path: entry.path })),
+          { undo: label },
+        );
+        if (applied === null) return;
         setCheckedPaths(new Set());
-        if (failed.length > 0) {
-          toast(
-            failed.length === 1
-              ? couldntMoveToast(failed[0])
-              : `Couldn't move ${failed.length} records to Trash`,
-          );
-        } else {
-          toast(
-            targets.length === 1 ? movedToast(targets[0].title) : movedRecordsToast(targets.length),
-          );
-        }
-        try {
-          await rescan();
-        } catch {
-          toast("Couldn't refresh vault");
-        }
       })();
     },
-    [rescan, toast, vaultPath],
+    [applyBatch],
   );
 
   const [confirmRow, setConfirmRow] = useState<Entry | null>(null);
@@ -2497,10 +2461,11 @@ export function TableView({
    *
    * Measured before this existed: `Escape` cancelled nothing, the loop kept
    * tracking the pointer and the RELEASE COMMITTED the reorder — the opposite
-   * of what the user asked for, and the app has no undo. Two leaks came with
-   * it, both closed by the same teardown: a table unmounted mid-drag stranded
-   * its window listeners, and left `cb-col-dragging` on `<body>`, which is
-   * `cursor: grabbing !important` on every element in the app, permanently.
+   * of what the user asked for, and a drop is not an undoable change. Two
+   * leaks came with it, both closed by the same teardown: a table unmounted
+   * mid-drag stranded its window listeners, and left `cb-col-dragging` on
+   * `<body>`, which is `cursor: grabbing !important` on every element in the
+   * app, permanently.
    */
   const gesture = useDragGesture();
 

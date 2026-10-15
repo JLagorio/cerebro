@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { backlinksFor, outgoingFor } from './links';
 import type { Entry } from './types';
+import { resolveTarget } from './wikilink';
 
 const entry = (path: string, partial: Partial<Entry> = {}): Entry => ({
   path,
@@ -73,5 +74,95 @@ describe('section links', () => {
     expect(backlinksFor(kickoff, vault).map((l) => [l.entry.path, l.via])).toEqual([
       ['docs/plan.md', 'body'],
     ]);
+  });
+});
+
+/** `items` behind a Proxy that counts its index reads, so a test can bound the passes. */
+function counted<T extends object>(items: T[]): { array: T[]; reads: () => number } {
+  let reads = 0;
+  const array = new Proxy(items, {
+    get(target, prop, receiver) {
+      if (typeof prop === 'string' && /^\d+$/.test(prop)) reads += 1;
+      return Reflect.get(target, prop, receiver) as unknown;
+    },
+  });
+  return { array, reads: () => reads };
+}
+
+// M60.9: backlinks come from one index built in one pass over the vault.
+describe('the backlink index', () => {
+  const via = (links: { entry: Entry; via: string }[]) => links.map((l) => [l.entry.path, l.via]);
+
+  it('lists a note that links by item key or into a section', () => {
+    const task = entry('records/work/ship-docs.md', { properties: { key: 'FLD-13' } });
+    const byKey = entry('docs/a.md', { outgoingLinks: ['FLD-13'] });
+    const bySection = entry('docs/b.md', { relationships: { blocks: ['fld-13#Notes'] } });
+    expect(via(backlinksFor(task, [task, byKey, bySection]))).toEqual([
+      ['docs/a.md', 'body'],
+      ['docs/b.md', 'blocks'],
+    ]);
+  });
+
+  it('gives one body backlink per source, body before fields, and never the source itself', () => {
+    const target = entry('docs/target.md');
+    const self = entry('docs/self.md', { outgoingLinks: ['self'], relationships: { x: ['self'] } });
+    const source = entry('docs/source.md', {
+      outgoingLinks: ['target', 'Target', 'target#Risks'],
+      relationships: { owner: ['target', 'target'], parent: ['target'] },
+    });
+    const later = entry('docs/later.md', { relationships: { owner: ['target'] } });
+    const vault = [later, target, self, source];
+    expect(via(backlinksFor(target, vault))).toEqual([
+      ['docs/later.md', 'owner'],
+      ['docs/source.md', 'body'],
+      ['docs/source.md', 'owner'],
+      ['docs/source.md', 'parent'],
+    ]);
+    expect(backlinksFor(self, vault)).toEqual([]);
+  });
+
+  it('answers as the scan per note it replaced', () => {
+    // The pre-index rule, kept here as the reference.
+    const scan = (target: Entry, vault: Entry[]) => {
+      const out: string[][] = [];
+      for (const other of vault) {
+        if (other.path === target.path) continue;
+        if (other.outgoingLinks.some((t) => resolveTarget(t, vault)?.path === target.path)) {
+          out.push([other.path, 'body']);
+        }
+        for (const [field, targets] of Object.entries(other.relationships)) {
+          if (targets.some((t) => resolveTarget(t, vault)?.path === target.path)) {
+            out.push([other.path, field]);
+          }
+        }
+      }
+      return out;
+    };
+    const names = ['a', 'b', 'c', 'Title c', 'd#Risks', 'nowhere', 'k-1'];
+    const vault = Array.from({ length: 24 }, (_, i) =>
+      entry(`f${i % 3}/${'abcd'[i % 4]}${i >= 4 ? i : ''}.md`, {
+        title: i === 2 ? 'Title c' : `T${i}`,
+        properties: i === 5 ? { key: 'K-1' } : {},
+        outgoingLinks: [names[i % 7], names[(i * 3) % 7]],
+        relationships: { up: [names[(i + 2) % 7]], side: [names[(i * 5) % 7], names[i % 7]] },
+      }),
+    );
+    for (const note of vault)
+      expect(via(backlinksFor(note, vault)), note.path).toEqual(scan(note, vault));
+  });
+
+  it('reads a 2,000-note vault at most 3N times for every note’s backlinks', () => {
+    const N = 2000;
+    const notes = Array.from({ length: N }, (_, i) =>
+      entry(`n/note-${i}.md`, {
+        outgoingLinks: [`note-${(i + 1) % N}`, `note-${(i + 7) % N}`],
+        relationships: { parent: [`note-${Math.floor(i / 2)}`] },
+      }),
+    );
+    const { array, reads } = counted(notes);
+    let total = 0;
+    for (const note of notes) total += backlinksFor(note, array).length;
+    expect(total).toBeGreaterThan(N);
+    expect(reads()).toBeLessThanOrEqual(3 * N);
   });
 });

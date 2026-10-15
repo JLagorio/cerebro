@@ -1,8 +1,8 @@
-import { isAgentEntry } from './agents';
-import type { VaultEvent } from './events';
+import { agentRef, isAgentEntry, isPaused } from './agents';
 import { recordIdentity } from './identity';
 import { fireKeyDate, isSkillEntry, lastFireKey, parseSchedule } from './skills';
-import { firstMatch, parseTriggers } from './triggers';
+import { parseTriggers, type Trigger } from './triggers';
+import { triggerDigest, WAKE_COALESCE_MAX, type PendingWake } from './wakes';
 import { resolveTarget } from './wikilink';
 import { isKnowledgePath, type Concept } from './okf';
 import { sha256Hex } from '@/lib/sha256';
@@ -28,8 +28,9 @@ import type { Entry } from './types';
  * bytes, so filing is picked up because it WRITES, not because the UI
  * remembered to say so.
  *
- * What is left here is not distillation: scheduled skills, scheduled and
- * event-triggered agent runs, and the concept recheck lanes (`stale`,
+ * What is left here is not distillation: scheduled skills, scheduled agent
+ * runs and the runs their durable wakes ask for (M63.1), and the concept
+ * recheck lanes (`stale`,
  * `schema`) that M26.6's maintenance pass will take over. Cached-source
  * refresh derives no job since M54.9 (see `jobQueue`).
  *
@@ -64,35 +65,19 @@ export const KNOWLEDGE_JOB_KINDS: ReadonlySet<JobKind> = new Set<JobKind>(['stal
  *
  * The clock is the agent's, under its bare identity in `triggerRuns`, and it
  * only bounds anything while the check and the stamp agree on that key —
- * which is why the job carries it (`AgentJob.cooldownKey`). Only an
- * EVENT-fired run stamps it. A scheduled run does not, so what it writes into
- * the folder its agent watches can fire one event run, and that run starts
- * the clock. Attended @agent chat turns and `hand_to` runs never stamp it.
+ * which is why the job carries it (`AgentJob.cooldownKey`). Only a WOKEN run
+ * stamps it. A scheduled run does not, so what it writes into the folder its
+ * agent watches can wake one run, and that run starts the clock. Attended
+ * @agent chat turns and `hand_to` runs never stamp it.
  *
- * Stamping on a scheduled run too was tried and reverted (AUTOMATION-2). It
- * only postponed that one event run, and a person's edit inside the window
- * could be lost rather than delayed: the runner keeps one event list, and
- * the next scan that finds a change replaces it (useJobRunner).
+ * The cooldown DELAYS, and drops nothing (M63.1): a change made inside the
+ * window waits as a durable wake, and runs, with the other changes that
+ * matched the same trigger, once the window has passed.
  */
 export const TRIGGER_COOLDOWN_MS = 15 * 60 * 1000;
 
-/**
- * Off duty without being dismantled (M18).
- *
- * Activation is DERIVED — an agent runs exactly when it has a schedule or a
- * trigger — which is the right rule and left no way to stop one temporarily.
- * The only "off" available was deleting the thing that fires it, so turning an
- * agent off for an afternoon meant destroying the configuration and rebuilding
- * it from memory afterwards. `paused: true` is the pause; the trigger stays on
- * the record, readable, and comes back on when the switch does.
- *
- * Deliberately NOT the inverse (`enabled: true`): a record with no schedule and
- * no trigger is already inert, and a second flag that also has to say so would
- * give "is this running?" two answers that can disagree.
- */
-export function isPaused(entry: Entry): boolean {
-  return entry.properties.paused === true;
-}
+// Moved to engine/agents with M63.1; re-exported so imports keep working.
+export { isPaused };
 
 export interface AgentJob {
   kind: JobKind;
@@ -106,14 +91,9 @@ export interface AgentJob {
    * renames its file, and a path-keyed ledger therefore forgot every fire the
    * schedule had answered and ran one catch-up for the privilege.
    *
-   * An EVENT-triggered agent run is remembered apart from its schedule, as
-   * `<identity>#event` (AUTOMATION-2); the bare identity is the schedule's
-   * alone. The two shared one slot: an event run overwrote the fire key its
-   * schedule had answered, so the schedule fired again the same period, and
-   * that re-fire overwrote the event in turn, so the same event fired again
-   * once the cooldown ran out — the two ping-ponging every fifteen minutes
-   * until the day's budget stopped them. No scanned path ends in `#event`
-   * (they all end in `.md`), and no slug contains a `#`.
+   * A woken run's is `<identity>#wake` (M63.1), so a session's hold on it
+   * never shares the schedule's slot. Its ledger is Rust's `agent_wakes`, not
+   * the job ledger: no scanned path ends in `#wake`, and no slug has a `#`.
    */
   key: string;
   title: string;
@@ -124,8 +104,8 @@ export interface AgentJob {
    * - `stale` — `stale:<stale_after>`, the recheck date;
    * - `schema` — `schema:<hash of the anchoring Type docs>`, plus
    *   `|stale:<stale_after>` when the concept is also stale;
-   * - `scheduled` / `agent` — the schedule's fire key; an event-triggered
-   *   `agent` run — `event:<kind>:<path>@<modifiedAt>`.
+   * - `scheduled` / `agent` — the schedule's fire key; a woken `agent` run —
+   *   `wake:<wake id>`, the wake it claims.
    */
   runKey: string;
   /**
@@ -133,22 +113,37 @@ export interface AgentJob {
    * derivation gates on one, and never re-derived in the runner. The
    * review's worst finding was exactly that drift: agent jobs gated on
    * skillRuns but recorded in attempts, which re-ran a scheduled agent
-   * back-to-back forever.
+   * back-to-back forever. `wakes` is a woken run's (M63.1): Rust's durable
+   * wake is its record, claimed with its lease, and the job ledger never
+   * hears of it.
    */
-  ledger: 'attempts' | 'skillRuns';
+  ledger: 'attempts' | 'skillRuns' | 'wakes';
   /**
    * The `triggerRuns` key this job's run stamps when it spawns — the event
-   * cooldown's clock — or null for every job but an event-fired agent run,
-   * the one run that starts it (see TRIGGER_COOLDOWN_MS).
+   * cooldown's clock — or null for every job but a woken agent run, the one
+   * run that starts it (see TRIGGER_COOLDOWN_MS).
    *
    * Carried, never re-derived in the runner, for the same reason as `ledger`.
    * It is the agent's bare identity, which is what the cooldown check reads,
-   * and NOT `key`: the runner used to stamp under `key`, so splitting event
-   * runs into `<identity>#event` (AUTOMATION-2) would have moved the stamp
-   * where the check never looks and silently deleted the only bound on an
-   * agent re-firing on its own writes.
+   * and NOT `key`, which is the job's own slot: stamped there, the clock
+   * would sit where the check never looks, and nothing would bound an agent
+   * waking on its own writes.
    */
   cooldownKey: string | null;
+  /**
+   * What a woken run claims (M63.1): the head wake, the due wakes of the same
+   * trigger it takes with it (oldest first, at most 19), the trigger that
+   * matched (its `ask:` and `do:` go to the prompt, its words to the log),
+   * when the head was admitted, and the reasons it was last deferred, null
+   * when it never was.
+   */
+  wake?: {
+    claim: string;
+    coalesce: string[];
+    trigger: Trigger;
+    admittedAt: string;
+    deferredBefore: string | null;
+  };
 }
 
 export interface JobQueueInput {
@@ -160,16 +155,15 @@ export interface JobQueueInput {
    */
   attempts: Readonly<Record<string, string>>;
   /** Ledger key → run key last answered: a schedule's fire key under the
-   * record's identity, an event run's key under `<identity>#event` (see
-   * `AgentJob.key`). The OPEN VAULT's slice of uiStore.skillRuns, which is
+   * record's identity. The OPEN VAULT's slice of uiStore.skillRuns, which is
    * vault-scoped (PR #5 review). */
   skillRuns: Readonly<Record<string, string>>;
-  /** What changed since the last scan of the open vault (M17.12). Absent
-   * means no previous scan to compare against — the first scan of a session,
-   * or of a vault just opened (AUTOMATION-2b), fires nothing. */
-  events?: readonly VaultEvent[];
+  /** The open vault's pending wakes, oldest first, as `wakes_pending` read
+   * them (M63.1). Absent derives no woken run: a read that failed is not a
+   * vault where nothing is waiting, and neither is one not read yet. */
+  wakes?: readonly PendingWake[];
   /** Agent identity → when it last ran from a trigger, ISO. The bare
-   * identity, never the `#event` key — see TRIGGER_COOLDOWN_MS. */
+   * identity, never the job's `#wake` key — see TRIGGER_COOLDOWN_MS. */
   triggerRuns?: Readonly<Record<string, string>>;
   /** The wall clock — passed in so the queue stays a pure derivation. */
   now: Date;
@@ -204,7 +198,7 @@ function schemaKey(docs: readonly Entry[]): string {
 export function jobQueue(
   entries: readonly Entry[],
   concepts: readonly Concept[],
-  { attempts, skillRuns, now, events = [], triggerRuns = {} }: JobQueueInput,
+  { attempts, skillRuns, now, wakes = [], triggerRuns = {} }: JobQueueInput,
 ): AgentJob[] {
   // A cached source past its refresh date (cache_source's stale_after) is
   // NOT a job (M54.9). Re-fetching needs the connector the source came from,
@@ -307,50 +301,59 @@ export function jobQueue(
       runKey: key,
       ledger: 'skillRuns',
       // No scheduled run starts the event cooldown, an agent's included:
-      // only an event-fired run does (TRIGGER_COOLDOWN_MS).
+      // only a woken run does (TRIGGER_COOLDOWN_MS).
       cooldownKey: null,
     });
   }
 
-  // Event-triggered agent runs (M17.12). Layer ONE only: everything here is
-  // answered from the scanned frontmatter, with no model consulted, because a
-  // trigger that asks a model whether to fire costs money to be idle and
-  // cannot be explained from the record. The `ask:` half is layer two and
-  // happens inside the run, in the prompt the runner builds.
-  if (events.length > 0) {
-    for (const entry of entries) {
-      if (!isAgentEntry(entry) || isPaused(entry)) continue;
-      const triggers = parseTriggers(entry.properties.when);
-      if (triggers.length === 0) continue;
-      const identity = recordIdentity(entry);
-      // ONE variable is both the key this check reads and the key the run
-      // stamps (`cooldownKey` below) — see AgentJob.cooldownKey.
-      const cooldownKey = identity;
-      const last = triggerRuns[cooldownKey];
-      if (last !== undefined && now.getTime() - Date.parse(last) < TRIGGER_COOLDOWN_MS) continue;
-      // An agent must never be fired by a change to ITSELF: editing an agent's
-      // instructions, or its own memory write at the end of a run, would
-      // otherwise be an event it reacts to.
-      const event = events.find(
-        (e: VaultEvent) => e.path !== entry.path && firstMatch(triggers, e) !== null,
-      );
-      if (event === undefined) continue;
-      const runKey = `event:${event.kind}:${event.path}@${event.entry.modifiedAt}`;
-      // The event lane's own slot (AUTOMATION-2). Answered here, the same
-      // event stays answered however long the vault stays quiet, and the
-      // schedule's slot never learns that an event ran.
-      const key = `${identity}#event`;
-      if (skillRuns[key] === runKey) continue;
-      scheduled.push({
-        kind: 'agent',
-        path: entry.path,
-        key,
-        title: entry.title,
-        runKey,
-        ledger: 'skillRuns',
-        cooldownKey,
-      });
-    }
+  // Woken agent runs (M63.1): the wake lane. Each agent drains its own due
+  // wakes, one run at a time, oldest first. Only a due wake counts (its
+  // `notBefore` passed, or never set), and the cooldown DELAYS: a wake held
+  // by it is still pending, and runs once the window has passed. Which
+  // changes wake whom, and why, is engine/wakes.ts's; Rust admitted each once.
+  for (const entry of entries) {
+    if (!isAgentEntry(entry) || isPaused(entry) || wakes.length === 0) continue;
+    const triggers = parseTriggers(entry.properties.when);
+    if (triggers.length === 0) continue;
+    const identity = recordIdentity(entry);
+    // ONE variable is both the key this check reads and the key the run
+    // stamps (`cooldownKey` below) — see AgentJob.cooldownKey.
+    const cooldownKey = identity;
+    const last = triggerRuns[cooldownKey];
+    if (last !== undefined && now.getTime() - Date.parse(last) < TRIGGER_COOLDOWN_MS) continue;
+    const actor = agentRef(entry).actor;
+    const due = wakes.filter(
+      (w) =>
+        w.agent === actor && (w.notBefore === null || Date.parse(w.notBefore) <= now.getTime()),
+    );
+    // The head is the oldest due wake whose trigger is still on the record;
+    // one whose trigger was edited away waits for its cancel, never runs.
+    const byDigest = new Map(triggers.map((t) => [triggerDigest(t), t]));
+    const head = due.find((w) => byDigest.has(w.trigger));
+    if (head === undefined) continue;
+    const coalesce =
+      head.cause.kind === 'event'
+        ? due
+            .filter((w) => w !== head && w.trigger === head.trigger && w.cause.kind === 'event')
+            .slice(0, WAKE_COALESCE_MAX - 1)
+            .map((w) => w.wakeId)
+        : [];
+    scheduled.push({
+      kind: 'agent',
+      path: entry.path,
+      key: `${identity}#wake`,
+      title: entry.title,
+      runKey: `wake:${head.wakeId}`,
+      ledger: 'wakes',
+      cooldownKey,
+      wake: {
+        claim: head.wakeId,
+        coalesce,
+        trigger: byDigest.get(head.trigger)!,
+        admittedAt: head.admittedAt,
+        deferredBefore: head.deferred,
+      },
+    });
   }
 
   // Every kind has a DISTINCT rank, and that is load-bearing for the tie-
@@ -361,8 +364,9 @@ export function jobQueue(
   // - `stale`: the LATEST recheck date first, so the longest-overdue
   //   concept goes last;
   // - `schema`: hash order — stable, but meaningless;
-  // - `scheduled` / `agent`: the latest fire first; within `agent`, which
-  //   mixes the two formats, every `event:` key sorts before every fire key.
+  // - `scheduled` / `agent`: the latest fire first. Woken runs are not
+  //   compared by key: within `agent` they go before every fire, ordered by
+  //   when their head wake was admitted, oldest first.
   // Equal keys fall back to path order.
   // `refresh` keeps its slot before stale, where a re-fetch belongs: a
   // concept recheck reads its sources, and rechecking against a copy about
@@ -374,10 +378,19 @@ export function jobQueue(
     stale: 3,
     schema: 4,
   };
+  const woken = (a: AgentJob, b: AgentJob): number =>
+    a.wake !== undefined && b.wake !== undefined
+      ? a.wake.admittedAt.localeCompare(b.wake.admittedAt)
+      : a.wake !== undefined
+        ? -1
+        : b.wake !== undefined
+          ? 1
+          : 0;
   return [...scheduled, ...recheck].sort(
     (a, b) =>
       RANK[a.kind] - RANK[b.kind] ||
-      b.runKey.localeCompare(a.runKey) ||
+      woken(a, b) ||
+      (a.wake !== undefined ? 0 : b.runKey.localeCompare(a.runKey)) ||
       a.path.localeCompare(b.path),
   );
 }
@@ -406,36 +419,19 @@ const MAINTENANCE_DETAIL: Partial<Record<JobKind, string>> = {
   schema: 'the schema a concept describes changed',
 };
 
-/** The path an event run key names: `event:<kind>:<path>@<modifiedAt>`. */
-function eventPath(runKey: string): string | null {
-  const match = runKey.match(/^event:[^:]+:(.+)@[^@]*$/);
-  return match === null ? null : match[1];
-}
-
 /**
  * The cause one job's run names (M56.7).
  *
- * - An event run: `event`, its subject the changed path and its detail the
- *   trigger's words. `woke` is what the runner matched; without it the path
- *   is read back from the run key, and the words are left out.
+ * - A woken run: null. Its cause is its wake's, which Rust cleaned and stored
+ *   when the change was admitted (engine/wakes.ts names it), and a woken
+ *   request that named another would be refused.
  * - A schedule's fire, a skill's or an agent's: `schedule`, its detail the
  *   record's `schedule:` and its due moment the fire key's instant.
  * - The recheck lanes: `maintenance`, the concept as subject, the lane's
  *   reason as detail.
  */
-export function causeOfJob(
-  job: AgentJob,
-  woke: { subject: string; because: string } | null,
-  schedule: string | null,
-): RunCauseRequest {
-  if (job.runKey.startsWith('event:')) {
-    const subject = woke?.subject ?? eventPath(job.runKey);
-    return {
-      kind: 'event',
-      ...(subject === null ? {} : { subject }),
-      ...(woke === null ? {} : { detail: woke.because }),
-    };
-  }
+export function causeOfJob(job: AgentJob, schedule: string | null): RunCauseRequest | null {
+  if (job.wake !== undefined) return null;
   if (job.kind === 'scheduled' || job.kind === 'agent') {
     const due = fireKeyDate(job.runKey);
     const said = schedule?.trim() ?? '';

@@ -714,12 +714,45 @@ pub fn comment_page(vault: &Path, page: &str) -> Result<PathBuf, String> {
     }
 }
 
-/// Where `page`'s sidecar is, contained in the vault (a `.comments` linked
-/// out of it is refused, as any escape is).
+/// Where `page`'s sidecar is, judged by [`sidecar_join`].
 fn sidecar_path(vault: &Path, page: &str) -> Result<(String, PathBuf), String> {
     let rel = sidecar_rel(page);
-    let abs = write::safe_join(vault, &rel)?;
+    let abs = sidecar_join(vault, &rel)?;
     Ok((rel, abs))
+}
+
+/// Where `rel`, a path under `.comments/`, is on disk, judged: contained in
+/// the vault (`safe_join`, so a `.comments` linked out of it is refused, as
+/// any escape is), with no name from `.comments` down a symlink, the leaf
+/// included, and landing at `rel` up to case folding. Containment alone is
+/// not enough: a `.comments`, or a folder in it, linked to `.git/`,
+/// `.cerebro/` or `knowledge/` would carry a comment write, a rename's carry
+/// or an orphan's trip to the OS Trash into that folder. Every sidecar read,
+/// write, carry and orphan step goes through here (`rewrite`, `read_threads`,
+/// `write::rename_note_with`, `trash::carry_out`/`carry_back`).
+pub(crate) fn sidecar_join(vault: &Path, rel: &str) -> Result<PathBuf, String> {
+    let under = rel
+        .strip_prefix(COMMENTS_DIR)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'));
+    if !under {
+        return Err(format!("{rel} is not under {COMMENTS_DIR}/"));
+    }
+    let abs = write::safe_join(vault, rel)?;
+    let linked = || format!("{rel} is reached through a link, so no comments are kept there");
+    let mut at = vault.to_path_buf();
+    for name in rel.split('/') {
+        at.push(name);
+        match std::fs::symlink_metadata(&at) {
+            Ok(meta) if meta.file_type().is_symlink() => return Err(linked()),
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    let lands = write::landing_path(vault, rel).ok_or_else(linked)?;
+    if lands.to_lowercase() != rel.to_lowercase() {
+        return Err(linked());
+    }
+    Ok(abs)
 }
 
 /// A sidecar's bytes as a file, or the reason they can't be read, logged
@@ -930,10 +963,22 @@ pub(crate) fn settle_answer(
 }
 
 /// Every page that has a sidecar, by the sidecar's path, sorted. A folder
-/// that can't be read lists nothing under it.
+/// that can't be read lists nothing under it, and a `.comments` that is not a
+/// real folder (a link, out of the vault or into it) lists nothing at all:
+/// [`sidecar_join`] would refuse every read, and walkdir follows a root link
+/// by default, so a `.comments -> ~` would walk the home folder on every open.
 pub fn pages_with_threads(vault: &Path) -> Vec<String> {
     let root = vault.join(COMMENTS_DIR);
+    match std::fs::symlink_metadata(&root) {
+        Ok(m) if m.file_type().is_dir() => {}
+        Ok(m) if m.file_type().is_symlink() => {
+            log::warn!("comments: {COMMENTS_DIR} is a link, so no page's threads are listed");
+            return Vec::new();
+        }
+        _ => return Vec::new(),
+    }
     let mut pages: Vec<String> = walkdir::WalkDir::new(&root)
+        .follow_root_links(false)
         .follow_links(false)
         .into_iter()
         .filter_map(Result::ok)
@@ -1245,9 +1290,66 @@ mod tests {
         let err = read_comments(&vault, PAGE).unwrap_err();
         assert!(err.contains("path escapes the vault"), "{err}");
         assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
+        // The vault-open listing never walks the folder the link points at.
+        testutil::write(&outside, "notes/plan.md.json", "{}\n");
+        assert!(pages_with_threads(&vault).is_empty());
         for dir in [&vault, &outside] {
             let _ = std::fs::remove_dir_all(dir);
         }
+    }
+
+    /// The bytes of every file under `dir`, by path.
+    fn files_under(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+        let mut files: Vec<_> = walkdir::WalkDir::new(dir)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_file())
+            .map(|e| (e.path().to_path_buf(), std::fs::read(e.path()).unwrap()))
+            .collect();
+        files.sort();
+        files
+    }
+
+    #[test]
+    fn a_comments_folder_linked_inside_the_vault_is_refused() {
+        for (label, target, link) in [
+            ("comments-to-git", ".git", COMMENTS_DIR),
+            ("comments-to-knowledge", "knowledge", COMMENTS_DIR),
+            ("comments-folder-to-cerebro", ".cerebro", ".comments/notes"),
+        ] {
+            let vault = vault_with_page(label);
+            testutil::write(&vault, &format!("{target}/notes/plan.md.json"), "{}\n");
+            testutil::write(&vault, &format!("{target}/plan.md.json"), "{}\n");
+            let link = vault.join(link);
+            std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+            std::os::unix::fs::symlink(vault.join(target), &link).unwrap();
+            let before = files_under(&vault.join(target));
+            let err = write_comment(&vault, PAGE, &start("Hm."), OWNER, None).unwrap_err();
+            assert!(err.contains("reached through a link"), "{label}: {err}");
+            let err = read_comments(&vault, PAGE).unwrap_err();
+            assert!(err.contains("reached through a link"), "{label}: {err}");
+            assert_eq!(files_under(&vault.join(target)), before, "{label}");
+            if link.ends_with(COMMENTS_DIR) {
+                assert!(pages_with_threads(&vault).is_empty(), "{label}");
+            }
+            let _ = std::fs::remove_dir_all(&vault);
+        }
+    }
+
+    #[test]
+    fn a_sidecar_that_is_a_link_is_refused() {
+        let vault = vault_with_page("comments-leaf-link");
+        testutil::write(&vault, ".git/config", "[core]\n");
+        std::fs::create_dir_all(sidecar(&vault).parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(vault.join(".git/config"), sidecar(&vault)).unwrap();
+        let err = write_comment(&vault, PAGE, &start("Hm."), OWNER, None).unwrap_err();
+        assert!(err.contains("reached through a link"), "{err}");
+        assert!(read_comments(&vault, PAGE).is_err());
+        assert_eq!(
+            std::fs::read_to_string(vault.join(".git/config")).unwrap(),
+            "[core]\n"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
     }
 
     #[test]

@@ -33,7 +33,8 @@ pub struct ModifiedFile {
 }
 
 /// One `git status` record, as git spells its path (M58.3): what
-/// `commit::commit_paths_in` matches the paths it was asked for against.
+/// `commit::commit_paths_in` matches the paths it was asked for against, and
+/// what `commit::commit_all` reads to stage only worktree-side changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StatusRecord {
     /// Repository-relative.
@@ -43,6 +44,10 @@ pub(crate) struct StatusRecord {
     pub status: FileStatus,
     pub staged: bool,
     pub conflicted: bool,
+    /// git's two status letters, index then worktree: `commit` reads which
+    /// side a change is on (`?` for an untracked file).
+    pub index: char,
+    pub tree: char,
 }
 
 /// Parse one `git status --porcelain=v1 -z` record.
@@ -111,12 +116,15 @@ fn parse_records(out: &str) -> Vec<StatusRecord> {
         } else {
             None
         };
+        let mut letters = code.chars();
         records.push(StatusRecord {
             git_path: path.to_string(),
             orig,
             conflicted: status == FileStatus::Conflicted,
             status,
             staged,
+            index: letters.next().unwrap_or(' '),
+            tree: letters.next().unwrap_or(' '),
         });
     }
     records
@@ -149,8 +157,15 @@ pub fn modified_files(ws: &GitWorkspaceInfo) -> Result<Vec<ModifiedFile>, String
         .collect())
 }
 
-/// Throw away a file's uncommitted changes. Untracked files are removed;
+/// Throw away one file's uncommitted changes. Untracked files are removed;
 /// tracked ones are restored from HEAD.
+///
+/// The path is one file, spelled literally: every git call runs under
+/// `--literal-pathspecs`, so `kn?wledge/a.md` or `[x].md` names that file and
+/// never what the glob matches, and a path with an empty or `.` segment, or
+/// one naming a folder, is refused. So the bundle guard the caller cleared
+/// the path with, and the row below, both name the one file git touches. A
+/// path neither tracked nor on disk has nothing to discard and is refused.
 ///
 /// Recorded under `by` (M58.1): a restored file as a `vault.write` with the
 /// restored bytes' hash, a removed one as a `vault.delete`.
@@ -163,21 +178,41 @@ pub fn discard_file(
         return Err("this vault is not a git repository".into());
     }
     let safe = command::safe_relative(vault_relative)?;
+    if safe.split('/').any(|part| part.is_empty() || part == ".") {
+        return Err(format!("refusing a path that names no one file: {safe}"));
+    }
+    let vault = Path::new(&ws.vault_root);
+    if vault.join(&safe).is_dir() {
+        return Err(format!("refusing to discard a folder: {safe}"));
+    }
     let dir = ws.dir();
     let git_path = ws.to_git_relative(&safe);
     let lock = super::commit::repo_lock(&dir);
     let _held = super::commit::hold(&lock);
 
-    let tracked = command::succeeds(&dir, &["ls-files", "--error-unmatch", &git_path]);
-    let vault = Path::new(&ws.vault_root);
+    // Tracked means the index holds exactly this path, not a folder of them.
+    let listed = command::run_str(
+        &dir,
+        &["--literal-pathspecs", "ls-files", "-z", "--", &git_path],
+    )?;
+    let tracked = listed.split('\0').any(|entry| entry == git_path);
     if tracked {
-        command::run_str(&dir, &["checkout", "HEAD", "--", &git_path])?;
+        command::run_str(
+            &dir,
+            &["--literal-pathspecs", "checkout", "HEAD", "--", &git_path],
+        )?;
         let hash = std::fs::read(vault.join(&safe))
             .ok()
             .map(|bytes| crate::ledger::sha256_hex(&bytes));
         record(vault, "vault.write", &safe, hash.as_deref(), by);
     } else {
-        command::run_str(&dir, &["clean", "-f", "--", &git_path])?;
+        if std::fs::symlink_metadata(vault.join(&safe)).is_err() {
+            return Err(format!("nothing to discard at {safe}"));
+        }
+        command::run_str(
+            &dir,
+            &["--literal-pathspecs", "clean", "-f", "--", &git_path],
+        )?;
         record(vault, "vault.delete", &safe, None, by);
     }
     Ok(())
@@ -281,6 +316,54 @@ mod tests {
         for d in [&dir, &config] {
             let _ = std::fs::remove_dir_all(d);
         }
+    }
+
+    /// A discard names one file, spelled literally: a glob-named untracked
+    /// file is removed without reverting the tracked file its glob matches,
+    /// and `.`, a `.` segment, a folder and a path with nothing at it are
+    /// refused before git runs.
+    #[test]
+    fn a_discard_takes_its_path_literally() {
+        let _sink = crate::runtime::sink::test_lock();
+        let dir = crate::vault::testutil::temp_vault("discard-literal");
+        crate::git::commit::init_repo(&dir).unwrap();
+        let ws = crate::git::workspace::resolve(&dir);
+        command::run_str(&ws.dir(), &["config", "user.email", "t@example.com"]).unwrap();
+        command::run_str(&ws.dir(), &["config", "user.name", "t"]).unwrap();
+        crate::vault::testutil::write(&dir, "notes/x.md", "# X\n");
+        command::run_str(&ws.dir(), &["add", "notes/x.md"]).unwrap();
+        command::run_str(&ws.dir(), &["commit", "-m", "seed"]).unwrap();
+        crate::vault::testutil::write(&dir, "notes/x.md", "# X\n\nEdited.\n");
+        crate::vault::testutil::write(&dir, "notes/[x].md", "# Bracket\n");
+        let by = || WriteReceipt::ipc(crate::knowledge::guard_human_write("notes").unwrap());
+
+        discard_file(&ws, "notes/[x].md", &by()).unwrap();
+        assert!(!dir.join("notes/[x].md").exists());
+        assert_eq!(
+            std::fs::read_to_string(dir.join("notes/x.md")).unwrap(),
+            "# X\n\nEdited.\n"
+        );
+
+        for path in [
+            ".",
+            "./notes/x.md",
+            "notes/./x.md",
+            "notes//x.md",
+            "notes",
+            "notes/",
+        ] {
+            assert!(
+                discard_file(&ws, path, &by()).is_err(),
+                "{path} was not refused"
+            );
+        }
+        let missing = discard_file(&ws, "notes/?.md", &by()).unwrap_err();
+        assert!(missing.contains("nothing to discard"), "{missing}");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("notes/x.md")).unwrap(),
+            "# X\n\nEdited.\n"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A path a live run wrote names its run and actor (M58.3), as long as

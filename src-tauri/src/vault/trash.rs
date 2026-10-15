@@ -21,7 +21,9 @@
 //! Lock order: a move holds its path locks (M55.1) over the item, its sidecar
 //! and the stamp's manifest. Restore also takes [`TRASH_LOCK`], a leaf mutex
 //! shared only with the purge, so the purge never takes a stamp dir a
-//! restore is emptying.
+//! restore is emptying. The batch writer (`vault::batch`, M60.6) moves its
+//! deletes and restores through [`trash_locked`] and [`untrash_locked`] under
+//! the locks it took for the whole batch.
 //!
 //! Mirrored by the mock (`src/lib/mockIpc.ts`) and `src/engine/trash.ts`; all
 //! replay `src-tauri/fixtures/trash-cases.json`.
@@ -111,7 +113,7 @@ pub fn nothing_at(stamp: &str) -> String {
 }
 
 /// Two deletes minted one stamp; the second mints again.
-const STAMP_TAKEN: &str = "that Trash stamp is taken";
+pub(crate) const STAMP_TAKEN: &str = "that Trash stamp is taken";
 
 // --- Stamps ------------------------------------------------------------------
 
@@ -198,11 +200,11 @@ pub fn parse_manifest(text: &str) -> Option<Manifest> {
     })
 }
 
-fn stamp_rel(stamp: &str) -> String {
+pub(crate) fn stamp_rel(stamp: &str) -> String {
     format!("{TRASH_DIR}/{stamp}")
 }
 
-fn manifest_rel(stamp: &str) -> String {
+pub(crate) fn manifest_rel(stamp: &str) -> String {
     format!("{TRASH_DIR}/{stamp}/{MANIFEST}")
 }
 
@@ -217,7 +219,7 @@ fn holds_an_item(stamp_dir: &Path) -> bool {
 }
 
 /// A stamp's manifest, under the words a restore refuses with.
-fn read_manifest(vault: &Path, stamp: &str) -> Result<Manifest, String> {
+pub(crate) fn read_manifest(vault: &Path, stamp: &str) -> Result<Manifest, String> {
     if parse_stamp(stamp).is_none() {
         return Err(nothing_at(stamp));
     }
@@ -344,9 +346,16 @@ pub(crate) fn trash_locked<D: Door>(
     }
     match std::fs::create_dir(&stamp_dir) {
         Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+        // A stamp dir holding no manifest and no item is one a restore
+        // emptied but could not prune (its sidecar stayed): a batch rolling
+        // that restore back (M60.6) moves the page back into it.
+        Err(e)
+            if e.kind() == std::io::ErrorKind::AlreadyExists
+                && (stamp_dir.join(MANIFEST).exists() || holds_an_item(&stamp_dir)) =>
+        {
             return Err(STAMP_TAKEN.to_string())
         }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(e) => return Err(format!("{TRASH_DIR}: {e}")),
     }
     let title = title_of(rel, &src, is_dir);
@@ -396,7 +405,9 @@ pub(crate) fn trash_locked<D: Door>(
 }
 
 /// Move a trashed item's sidecar into its stamp dir. Best-effort: a sidecar
-/// that stays is logged, and the page's delete stands.
+/// that stays is logged, and the page's delete stands. One reached through a
+/// link (`comments::sidecar_join`) stays, so the carry never moves the
+/// folder a link names.
 fn carry_out<D: Door>(
     vault: &Path,
     side: &str,
@@ -404,7 +415,7 @@ fn carry_out<D: Door>(
     lock: &PathLock,
     by: &WriteReceipt<D>,
 ) {
-    let from = match write::safe_join(vault, side) {
+    let from = match super::comments::sidecar_join(vault, side) {
         Ok(from) if from.exists() => from,
         Ok(_) => return,
         Err(e) => {
@@ -488,7 +499,8 @@ pub(crate) fn untrash_locked<D: Door>(
 }
 
 /// Return a restored item's sidecar from its stamp dir, unless one now sits
-/// at its place: then the Trash copy stays, logged.
+/// at its place, or its place is reached through a link
+/// (`comments::sidecar_join`): then the Trash copy stays, logged.
 fn carry_back<D: Door>(vault: &Path, side: &str, stamp: &str, is_dir: bool, by: &WriteReceipt<D>) {
     let Ok(from) = write::safe_join(vault, &format!("{}/{side}", stamp_rel(stamp))) else {
         return;
@@ -496,7 +508,7 @@ fn carry_back<D: Door>(vault: &Path, side: &str, stamp: &str, is_dir: bool, by: 
     if std::fs::symlink_metadata(&from).is_err() {
         return;
     }
-    let to = match write::safe_join(vault, side) {
+    let to = match super::comments::sidecar_join(vault, side) {
         Ok(to) => to,
         Err(e) => {
             log::warn!("comments: {side} stayed in the Trash: {e}");
@@ -940,6 +952,41 @@ mod tests {
     }
 
     #[test]
+    fn a_comments_folder_linked_inside_the_vault_is_never_carried() {
+        let vault = testutil::temp_vault("trash-comments-link");
+        testutil::write(&vault, ".git/hooks/pre-push", "#!/bin/sh\n");
+        testutil::write(&vault, "hooks/a.md", PAGE);
+        testutil::write(&vault, "notes/a.md", PAGE);
+        testutil::write(&vault, ".comments/notes/a.md.json", SIDECAR);
+        let page = move_to_trash(&vault, "notes/a.md", &human()).unwrap();
+        assert!(!vault.join(".comments").exists());
+
+        // `.comments -> .git`: trashing `hooks` must not take `.git/hooks`.
+        std::os::unix::fs::symlink(vault.join(".git"), vault.join(".comments")).unwrap();
+        let folder = move_to_trash(&vault, "hooks", &human()).unwrap();
+        assert_eq!(read(&vault, ".git/hooks/pre-push"), "#!/bin/sh\n");
+        assert!(!vault
+            .join(format!(".trash/{}/.comments", folder.stamp))
+            .exists());
+
+        // `.comments -> knowledge`: a restore leaves its sidecar in the Trash.
+        std::fs::remove_file(vault.join(".comments")).unwrap();
+        std::fs::create_dir_all(vault.join("knowledge")).unwrap();
+        std::os::unix::fs::symlink(vault.join("knowledge"), vault.join(".comments")).unwrap();
+        restore_from_trash(&vault, &page.stamp, &human()).unwrap();
+        assert_eq!(read(&vault, "notes/a.md"), PAGE);
+        assert!(!vault.join("knowledge/notes").exists());
+        assert_eq!(
+            read(
+                &vault,
+                &format!(".trash/{}/.comments/notes/a.md.json", page.stamp)
+            ),
+            SIDECAR
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
     fn restore_refuses_to_overwrite() {
         let vault = testutil::temp_vault("trash-overwrite");
         testutil::write(&vault, "notes/a.md", PAGE);
@@ -1205,6 +1252,9 @@ mod tests {
             ("trash.rs", "remove_file", "remove_manifest"),
             ("write.rs", "trash::delete", "rename_note"),
             ("trash.rs", ".delete(path)", "purge_expired_to_os_trash"),
+            // M60.6: a rollback removes the batch's own staged temps, never
+            // a page; a created page goes to the Trash.
+            ("batch.rs", "remove_file", "roll_back"),
         ];
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/vault");
         let mut found = Vec::new();

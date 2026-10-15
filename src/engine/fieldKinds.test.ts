@@ -83,10 +83,12 @@ describe('field kind registration', () => {
  *
  * `coerceValueToKind` returns `unknown`, and `undefined` is assignable to
  * `unknown` — so a kind added to the union and forgotten in that switch
- * compiled clean. `changeFieldKind` then pushed the undefined through
+ * compiled clean, and its caller pushed the undefined through
  * `patchFrontmatter`, which spells undefined as "delete": converting a field
  * to a forgotten kind wiped the value on every record of the type, silently.
- * The switch has a `never` default now; this pins the runtime half.
+ * The caller is the adoption wizard now (engine/adopt.ts); Change type reads
+ * values through castRules since M60.5. The switch has a `never` default;
+ * this pins the runtime half.
  */
 describe('kind coercion is total', () => {
   it('returns a value, never undefined, for every declared kind', () => {

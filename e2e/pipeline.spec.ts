@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { boot, openKnowledgeTab, readMockFile, showConceptDetails } from './boot';
 
 /**
@@ -13,17 +13,10 @@ import { boot, openKnowledgeTab, readMockFile, showConceptDetails } from './boot
 const TRANSCRIPT = 'inbox/phoenix-cutover-standup.md';
 const CONCEPT = 'knowledge/systems/pick-queue-drain.md';
 
-test('ingest: a dropped transcript becomes an untyped working doc in the Inbox', async ({
-  page,
-}) => {
-  await boot(page);
-  await page
-    .getByTestId('nav-surfaces')
-    .getByRole('button', { name: /^Inbox/ })
-    .click();
-
-  // Drop a .vtt the way a user would. DataTransfer has to be built in the
-  // page: Playwright cannot hand a File across the boundary.
+/** Drop the Scanner slip `.vtt` on the Inbox the way a user would.
+ * DataTransfer has to be built in the page: Playwright cannot hand a File
+ * across the boundary. */
+async function dropScannerSlip(page: Page): Promise<void> {
   const handle = await page.evaluateHandle(() => {
     const vtt = [
       'WEBVTT',
@@ -43,6 +36,18 @@ test('ingest: a dropped transcript becomes an untyped working doc in the Inbox',
     return dt;
   });
   await page.getByTestId('inbox-page').dispatchEvent('drop', { dataTransfer: handle });
+}
+
+test('ingest: a dropped transcript becomes an untyped working doc in the Inbox', async ({
+  page,
+}) => {
+  await boot(page);
+  await page
+    .getByTestId('nav-surfaces')
+    .getByRole('button', { name: /^Inbox/ })
+    .click();
+
+  await dropScannerSlip(page);
 
   // It lands untyped — untyped is what queues it — and opens.
   const row = page.locator('[data-testid="inbox-row"][data-path="inbox/scanner-slip.md"]');
@@ -62,6 +67,72 @@ test('ingest: a dropped transcript becomes an untyped working doc in the Inbox',
   expect(written).toContain('source_file:');
   expect(written).toContain('ingest_format: vtt');
   expect(written).not.toContain('\ntype:');
+  // The identity a repeat drop is matched by (M64.7).
+  expect(written).toMatch(/\nsource_sha256: [0-9a-f]{64}\n/);
+});
+
+test('ingest: dropping the same transcript again names its filed copy and writes nothing', async ({
+  page,
+}) => {
+  await boot(page);
+  await page
+    .getByTestId('nav-surfaces')
+    .getByRole('button', { name: /^Inbox/ })
+    .click();
+  await dropScannerSlip(page);
+  await expect(
+    page.locator('[data-testid="inbox-row"][data-path="inbox/scanner-slip.md"]'),
+  ).toBeVisible();
+
+  await dropScannerSlip(page);
+  await expect(page.getByTestId('toast-host')).toContainText(
+    'Scanner slip.vtt is already filed as Scanner slip',
+  );
+  expect(await page.evaluate(() => window.__cerebroMockFs.has('inbox/scanner-slip-2.md'))).toBe(
+    false,
+  );
+  await expect(
+    page.locator('[data-testid="inbox-row"][data-path^="inbox/scanner-slip"]'),
+  ).toHaveCount(1);
+});
+
+test('meeting: a transcript files as a record with its matched speakers, only on Apply', async ({
+  page,
+}) => {
+  await boot(page);
+  await page
+    .getByTestId('nav-surfaces')
+    .getByRole('button', { name: /^Inbox/ })
+    .click();
+  await page.locator(`[data-testid="inbox-row"][data-path="${TRANSCRIPT}"]`).click();
+
+  // The three speakers are the demo's people, each matched to one page.
+  const speakers = page.getByLabel('Organize').getByTestId('transcript-speakers');
+  await expect(speakers).toHaveAttribute('data-state', 'ready');
+  await expect(speakers.getByTestId('speaker-row')).toHaveCount(3);
+  for (const name of ['Marcus Webb', 'Priya Nair', 'Tom Keller']) {
+    await expect(speakers.getByRole('button', { name })).toBeVisible();
+  }
+
+  const before = await readMockFile(page, TRANSCRIPT);
+  await page.getByRole('button', { name: 'Ask the Assistant to file it' }).click();
+  const card = page.getByTestId('proposal-card');
+  await expect(card).toBeVisible();
+  await expect(card.getByTestId('proposal-summary')).toContainText('rollback');
+  await expect(card).toContainText('Attendees');
+  await expect(card).toContainText('Marcus Webb, Priya Nair, Tom Keller');
+  // A suggestion until applied: the file has not moved.
+  expect(await readMockFile(page, TRANSCRIPT)).toBe(before);
+
+  await card.getByRole('button', { name: 'Apply' }).click();
+  await expect(card).toBeHidden();
+  await expect.poll(() => readMockFile(page, TRANSCRIPT)).toContain('type: Meeting');
+  const written = await readMockFile(page, TRANSCRIPT);
+  expect(written).toContain('summary: ');
+  for (const link of ['[[marcus-webb]]', '[[priya-nair]]', '[[tom-keller]]']) {
+    expect(written).toContain(link);
+  }
+  expect(written).toContain('# Meeting: Phoenix cutover standup');
 });
 
 test('distil: the ingested transcript and its cached ticket are cited by a concept', async ({

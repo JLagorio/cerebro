@@ -1405,7 +1405,7 @@ mod tests {
     }
 
     #[test]
-    fn the_shipped_manifest_confirms_exactly_the_four_note_writers() {
+    fn the_shipped_manifest_confirms_exactly_the_five_note_writers() {
         let rows: Vec<&str> = manifest()
             .tools
             .iter()
@@ -1417,6 +1417,7 @@ mod tests {
             [
                 "create_note",
                 "update_frontmatter",
+                "set_fields",
                 "append_to_note",
                 "edit_note"
             ]
@@ -1427,6 +1428,7 @@ mod tests {
             [
                 "mcp__cerebro__create_note",
                 "mcp__cerebro__update_frontmatter",
+                "mcp__cerebro__set_fields",
                 "mcp__cerebro__append_to_note",
                 "mcp__cerebro__edit_note"
             ]
@@ -1610,6 +1612,19 @@ mod tests {
         assert_eq!(
             hashed(json!(2)),
             Err("The edited draft's expect_hash must be a string.".into())
+        );
+        // M60.4: a set_fields draft takes its three key maps as objects.
+        let fields = json!({
+            "path": "records/risks/r-1.md",
+            "set": { "status": "Closed" },
+            "add": { "owners": ["ana"] },
+            "remove": { "tags": "stale" },
+            "expect_hash": "a".repeat(64),
+        });
+        assert_eq!(validate_input("set_fields", &fields), Ok(()));
+        assert_eq!(
+            validate_input("set_fields", &json!({ "path": "r.md", "set": ["status"] })),
+            Err("The edited draft's set must be an object.".into())
         );
         assert_eq!(
             validate_input("get_vault_context_nope", &json!({})),

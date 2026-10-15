@@ -56,17 +56,17 @@ export interface RunLogEntry {
   files: string[];
   /** `deferred` (M34.2.4) is the budget gate saying "not now" — the run
    * never started and its fire key was surrendered. A schedule's fire
-   * retries on a later launch; an event run does not, because events are
-   * never stored and the first scan after a launch emits none. Deliberately
-   * not `failed`: nothing went wrong. */
+   * retries on a later launch; a woken run's wake stays pending in
+   * `runtime.db` and runs once the gate lets it (M63.1), logged deferred
+   * once. Deliberately not `failed`: nothing went wrong. */
   status: 'ok' | 'failed' | 'stopped' | 'deferred';
   /** Present when status is 'failed' or 'deferred'. One line, never a
    * stack — for a deferral, the gate's reasons. */
   error?: string;
   /**
    * When a schedule owed this run (M34.2), ISO. Present only for
-   * schedule-fired jobs — an event run is due the moment its event lands and
-   * a chat turn is due never. Optional like `durableId`, and for the same
+   * schedule-fired jobs — a woken run is due the moment its wake is admitted
+   * and a chat turn is due never. Optional like `durableId`, and for the same
    * reason: old entries parse unchanged.
    */
   dueAt?: string;

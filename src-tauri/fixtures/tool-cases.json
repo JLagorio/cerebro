@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "about": "What a tool call writes and where it is aimed, read off shared/policy/tools.v1.json (M54.1). A name is read in its short or its mcp__cerebro__ spelling. `confirmable` is whether an ask-first agent's call waits for the person's Allow (M57.4): the four note writers, in any spelling. `writes_disk` is whether a successful call changes something on disk: the row's door, the generated door for an op the policy table offers agents, or the CLI row, and false for a name the manifest does not know (propose_revert_proposal is no agent-facing op, so it is one). The comment tools (door comment, M70.3) write only a page's comment sidecar, never a page, so they count as no write: no rescan, checkpoint or written path. `write_target` is the path the write scope checks, '' being the vault root when a folder target is missing; `read_target` is the path the read scope checks, the bundle's folder for a bundle target, and a read_write writer (edit_note, M55.5) has both. `written_path` is what a run log reports for the call: the target argument of a tool that writes, else null, for the frontend's replay (M54.2). `renderer` is how a transcript draws the call and `fold` the phrases a run of its calls folds under, null for a tool that never folds (M56.8): a step with no fold for a name the manifest does not know. Replayed by replays_the_shared_tool_cases in src-tauri/src/mcp.rs.",
+  "about": "What a tool call writes and where it is aimed, read off shared/policy/tools.v1.json (M54.1). A name is read in its short or its mcp__cerebro__ spelling. `confirmable` is whether an ask-first agent's call waits for the person's Allow (M57.4): the five note writers, in any spelling. `writes_disk` is whether a successful call changes something on disk: the row's door, the generated door for an op the policy table offers agents, or the CLI row, and false for a name the manifest does not know (propose_revert_proposal is no agent-facing op, so it is one). The comment tools (door comment, M70.3) write only a page's comment sidecar, never a page, so they count as no write: no rescan, checkpoint or written path. `write_target` is the path the write scope checks, '' being the vault root when a folder target is missing; `read_target` is the path the read scope checks, the bundle's folder for a bundle target, and a read_write writer (edit_note, M55.5; set_fields, M60.4) has both. `written_path` is what a run log reports for the call: the target argument of a tool that writes, else null, for the frontend's replay (M54.2). `renderer` is how a transcript draws the call and `fold` the phrases a run of its calls folds under, null for a tool that never folds (M56.8): a step with no fold for a name the manifest does not know. Replayed by replays_the_shared_tool_cases in src-tauri/src/mcp.rs.",
   "cases": [
     {
       "tool": "append_to_note",
@@ -101,6 +101,28 @@
       "confirmable": true,
       "write_target": "records/risks/r-1.md",
       "read_target": null,
+      "written_path": "records/risks/r-1.md",
+      "renderer": "change",
+      "fold": null
+    },
+    {
+      "tool": "set_fields",
+      "args": { "path": "records/risks/r-1.md", "set": { "status": "Closed" } },
+      "writes_disk": true,
+      "confirmable": true,
+      "write_target": "records/risks/r-1.md",
+      "read_target": "records/risks/r-1.md",
+      "written_path": "records/risks/r-1.md",
+      "renderer": "change",
+      "fold": null
+    },
+    {
+      "tool": "mcp__cerebro__set_fields",
+      "args": { "path": "records/risks/r-1.md", "add": { "owners": "ana" } },
+      "writes_disk": true,
+      "confirmable": true,
+      "write_target": "records/risks/r-1.md",
+      "read_target": "records/risks/r-1.md",
       "written_path": "records/risks/r-1.md",
       "renderer": "change",
       "fold": null

@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetMockFs, writeTextFile } from '@/lib/mockIpc';
+import { useUndoShortcuts } from '@/app/useUndoShortcuts';
 import { useNavStore } from '@/stores/navStore';
+import { useUndoStore } from '@/stores/undoStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { DiagramPage } from './DiagramPage';
@@ -83,6 +85,39 @@ describe('DiagramPage', () => {
     expect(raw.startsWith('---\nconfig:\n  layout: elk\n---\n')).toBe(true);
     expect(raw).toBe(edited);
     await waitFor(() => expect(screen.getByTestId('diagram-save-state').textContent).toBe('Saved'));
+  });
+
+  // M65.1: the page binds `diagram.undo`, which shadows the app's own undo,
+  // so ⌘Z on the canvas steps the diagram back and never a database batch.
+  it('⌘Z on the canvas undoes the diagram edit and leaves undoStore alone', async () => {
+    const appUndo = vi.fn(async () => true);
+    const before = useUndoStore.getState();
+    useUndoStore.setState({
+      undo: appUndo,
+      past: [{ id: 1, label: 'Renamed', vault: '/demo-vault', at: 0, kind: 'batch', files: [] }],
+    });
+    try {
+      renderHook(() => useUndoShortcuts());
+      render(<DiagramPage selection={{ kind: 'diagram', path: PIPELINE }} />);
+      await screen.findByTestId('structural-host');
+      const original = fs().get(PIPELINE)!;
+      fireEvent.click(screen.getByRole('button', { name: 'Show code' }));
+      const textarea = (await screen.findByLabelText('Mermaid source')) as HTMLTextAreaElement;
+      fireEvent.change(textarea, { target: { value: `${textarea.value}  D --> E[Ship]\n` } });
+      await waitFor(() => expect(fs().get(PIPELINE)).toContain('E[Ship]'), { timeout: 3000 });
+      const event = new KeyboardEvent('keydown', {
+        key: 'z',
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      screen.getAllByTestId('structural-host')[0]!.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+      await waitFor(() => expect(fs().get(PIPELINE)).toBe(original), { timeout: 3000 });
+      expect(appUndo).not.toHaveBeenCalled();
+    } finally {
+      useUndoStore.setState({ undo: before.undo, past: [] });
+    }
   });
 
   // The tombstone keys on the READ failing, not on the entry lookup (M29.23):

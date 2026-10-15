@@ -90,6 +90,14 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
     setSearch('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection.name, activeId]);
+  // Re-seed, keeping search, when the STORED view changes under the open tab
+  // (M60.2): a field rename rewrites every saved view in one batch, and a
+  // stale local copy would write the old name back on the next toolbar edit.
+  const storedPresentation = JSON.stringify(activeView.presentation);
+  useEffect(() => {
+    setPresentation(clonePresentation(activeView.presentation));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the stored JSON, so a re-parse with the same content does not reset an edit in flight
+  }, [storedPresentation]);
 
   // M9.2: one resolution path shared with every other surface.
   // M20.2: reads the CHAIN, so a tab whose grouping descends a relation gets

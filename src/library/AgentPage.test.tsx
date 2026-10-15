@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Entry } from '@/engine/types';
-import { resetMockFs } from '@/lib/mockIpc';
+import { __seedWakes, resetMockFs } from '@/lib/mockIpc';
 import { useVaultStore } from '@/stores/vaultStore';
 import { AGENT_TABS, AgentPageBody, agentTabOf } from './AgentPage';
 
@@ -71,6 +71,23 @@ describe('AgentPageBody', () => {
     expect(await screen.findByTestId('agent-runs')).toBeTruthy();
     expect(screen.queryByTestId('the-editor')).toBeNull();
     expect(screen.getByTestId('agent-dossier')).toBeTruthy();
+  });
+
+  it('Runs names only this agent’s wakes, above its history (M63.1b)', async () => {
+    const at = new Date(Date.now() - 60_000).toISOString();
+    __seedWakes([
+      { vault: '/demo-vault', agent: 'process:release-scout', admittedAt: at },
+      { vault: '/demo-vault', agent: 'process:knowledge', admittedAt: at },
+    ]);
+    body('runs');
+    const rows = await screen.findAllByTestId('agent-wake');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain('Release scout');
+    const runs = await screen.findByTestId('agent-runs');
+    expect(
+      screen.getByTestId('agent-wakes').compareDocumentPosition(runs) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('Memory shows the memory tiers', () => {

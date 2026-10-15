@@ -3,6 +3,7 @@
   "input": {
     "kind": "attended",
     "shell": "ask",
+    "web": "off",
     "ask_first": false,
     "read_scoped": true,
     "narrowing": null
@@ -18,7 +19,11 @@
       "Bash",
       "Read",
       "Glob",
-      "Grep"
+      "Grep",
+      "WebFetch",
+      "WebSearch",
+      "Read(./.trash/**)",
+      "Edit(./.trash/**)"
     ],
     "matcher": [
       "AskUserQuestion",
@@ -34,13 +39,14 @@
       "Read": "deny",
       "Glob": "deny",
       "Grep": "deny",
-      "WebFetch": "cli",
-      "WebSearch": "cli",
+      "WebFetch": "deny",
+      "WebSearch": "deny",
       "Task": "cli",
       "AskUserQuestion": "ask",
       "ExitPlanMode": "refuse",
       "mcp__cerebro__create_note": "allow",
       "mcp__cerebro__update_frontmatter": "allow",
+      "mcp__cerebro__set_fields": "allow",
       "mcp__cerebro__append_to_note": "allow",
       "mcp__cerebro__edit_note": "allow"
     }

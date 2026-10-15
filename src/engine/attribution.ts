@@ -1,4 +1,5 @@
 import { actorLabel } from './authors';
+import { OWNER } from './comments';
 import { isKnowledgePath } from './okf';
 import type { Entry } from './types';
 import { relativeWhen } from './whenText';
@@ -57,11 +58,13 @@ export const WROTE_NO_PAGES = 'Wrote no pages';
 export const PAGES_NOT_RECORDED = 'Pages written: not recorded';
 export const SHELL_NOT_RECORDED = 'Shell changes not recorded';
 
-/** Who a write's actor names: "You" for your own, the app's noun for anyone
- *  else (`actorLabel`), and "not recorded" for a write nobody stamped. */
+/** Who a write's actor names: "You" for your own — your page writes
+ *  (`human:me`) and your comments (`human:owner`, M70) alike (D1, M58 Q5) —
+ *  the app's noun for anyone else (`actorLabel`), and "not recorded" for a
+ *  write nobody stamped. */
 export function writerWords(actor: string | null, entries: Entry[]): string {
   if (actor === null) return 'not recorded';
-  if (actor === HUMAN_ACTOR) return 'You';
+  if (actor === HUMAN_ACTOR || actor === OWNER) return 'You';
   return actorLabel(actor, entries).text;
 }
 

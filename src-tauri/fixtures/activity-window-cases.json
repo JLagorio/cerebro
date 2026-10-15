@@ -1,0 +1,103 @@
+{
+  "about": "M64.2: the window History reads activity in. since and until are RFC 3339 instants, with Z or an offset, each read as the instant it names. since is checked first, then until, then that since comes before until, then that the window spans at most max_days days. A refused window answers in words, with {value} replaced by the text that was given. Replayed by src-tauri/src/runtime/activity.rs and src/lib/mockIpc.test.ts; M64.2c's read_activity replays it too.",
+  "max_days": 400,
+  "words": {
+    "backwards": "History needs a window that starts before it ends.",
+    "too_long": "History reads at most 400 days at a time.",
+    "not_an_instant": "{value} is not an RFC 3339 instant."
+  },
+  "cases": [
+    {
+      "why": "History's own window: local midnight 370 days back to local midnight tomorrow",
+      "since": "2025-07-23T00:00:00Z",
+      "until": "2026-07-29T00:00:00Z",
+      "since_utc": "2025-07-23T00:00:00.000Z",
+      "until_utc": "2026-07-29T00:00:00.000Z",
+      "refusal": null
+    },
+    {
+      "why": "an offset is read as the instant it names",
+      "since": "2026-07-28T02:00:00-07:00",
+      "until": "2026-07-28T09:00:00.001Z",
+      "since_utc": "2026-07-28T09:00:00.000Z",
+      "until_utc": "2026-07-28T09:00:00.001Z",
+      "refusal": null
+    },
+    {
+      "why": "RFC 3339 lets a space part the date and time, and either case spell T and Z",
+      "since": "2026-07-28 09:00:00z",
+      "until": "2026-07-28t10:00:00.5Z",
+      "since_utc": "2026-07-28T09:00:00.000Z",
+      "until_utc": "2026-07-28T10:00:00.500Z",
+      "refusal": null
+    },
+    {
+      "why": "exactly 400 days",
+      "since": "2025-06-24T00:00:00Z",
+      "until": "2026-07-29T00:00:00Z",
+      "since_utc": "2025-06-24T00:00:00.000Z",
+      "until_utc": "2026-07-29T00:00:00.000Z",
+      "refusal": null
+    },
+    {
+      "why": "the same instant spelled two ways starts nowhere before it ends",
+      "since": "2026-07-28T10:00:00+01:00",
+      "until": "2026-07-28T09:00:00Z",
+      "refusal": "backwards"
+    },
+    {
+      "why": "backwards",
+      "since": "2026-07-29T00:00:00Z",
+      "until": "2026-07-28T00:00:00Z",
+      "refusal": "backwards"
+    },
+    {
+      "why": "401 days",
+      "since": "2025-06-23T00:00:00Z",
+      "until": "2026-07-29T00:00:00Z",
+      "refusal": "too_long"
+    },
+    {
+      "why": "a word is no instant",
+      "since": "yesterday",
+      "until": "2026-07-29T00:00:00Z",
+      "refusal": "not_an_instant",
+      "value": "yesterday"
+    },
+    {
+      "why": "a date is no instant",
+      "since": "2026-07-28T00:00:00Z",
+      "until": "2026-07-29",
+      "refusal": "not_an_instant",
+      "value": "2026-07-29"
+    },
+    {
+      "why": "a time with no offset names no instant",
+      "since": "2026-07-28T09:00:00",
+      "until": "2026-07-29T00:00:00Z",
+      "refusal": "not_an_instant",
+      "value": "2026-07-28T09:00:00"
+    },
+    {
+      "why": "a month that does not exist",
+      "since": "2026-13-01T00:00:00Z",
+      "until": "2026-07-29T00:00:00Z",
+      "refusal": "not_an_instant",
+      "value": "2026-13-01T00:00:00Z"
+    },
+    {
+      "why": "an offset past 23:59",
+      "since": "2026-07-28T09:00:00+24:00",
+      "until": "2026-07-29T00:00:00Z",
+      "refusal": "not_an_instant",
+      "value": "2026-07-28T09:00:00+24:00"
+    },
+    {
+      "why": "since is checked before until",
+      "since": "soon",
+      "until": "later",
+      "refusal": "not_an_instant",
+      "value": "soon"
+    }
+  ]
+}

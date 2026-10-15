@@ -2086,6 +2086,7 @@ mod tests {
             crate::policy::tool_approval::plan(&crate::policy::tool_approval::ApprovalInput {
                 kind: crate::policy::tool_approval::RunKind::Unattended,
                 shell: crate::policy::tool_approval::ShellCeiling::Ask,
+                web: crate::policy::tool_approval::WebCeiling::Off,
                 ask_first: false,
                 read_scoped: false,
                 narrowing: None,

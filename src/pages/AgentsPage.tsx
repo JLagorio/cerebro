@@ -8,6 +8,7 @@ import type { Selection } from '@/engine/types';
 import { AgentRoster } from '@/status/AgentRoster';
 import { AgentRunHistory } from '@/status/AgentRunHistory';
 import { FleetSection } from '@/status/FleetSection';
+import { WakesSection } from '@/status/WakesSection';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -71,7 +72,8 @@ function AgentDetail({ actor }: { actor: string }) {
 /**
  * The agents' front door (M41).
  *
- * The roster over the fleet's run feed: who is on duty, and what ran. Each
+ * The roster, what is waiting to wake it (M63.1b), and the fleet's run feed:
+ * who is on duty, what will run, and what ran. Each
  * agent is its own page (M55.12) — its instructions, its grants, its runs and
  * its memory — and the roster opens it on its Runs tab. Internal constructs,
  * which have no page, keep one here.
@@ -149,6 +151,12 @@ export function AgentsPage({ selection }: { selection: AgentsSelection }) {
               );
             }}
           />
+          {/* M63.1b: what is waiting to wake them, between the roster and
+              the run feed. Nested in the fleet section rather than splitting
+              it, so the roster and the feed stay one section to address. */}
+          <section data-section="wakes" className="my-2">
+            <WakesSection vaultPath={vaultPath} />
+          </section>
           <FleetSection />
         </section>
       </div>

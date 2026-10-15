@@ -36,7 +36,7 @@ export interface RecordBinding {
  * targets with, so a `https://` or `mailto:` line can never be dressed up as a
  * record even if some entry happened to be titled after it. Then the exact
  * vault path, which is what "Add record" writes and what survives a retitle.
- * Then the wikilink resolver (stem → project folder → title), so a
+ * Then the wikilink resolver (stem → project folder → item key → title), so a
  * hand-authored `click a "ship-v2"` binds as well as a generated one.
  */
 export function resolveBinding(target: string, entries: Entry[]): Entry | null {

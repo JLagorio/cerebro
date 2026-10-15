@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   coerceValueToKind,
   computeRollup,
@@ -51,10 +51,25 @@ describe('validateValue (shape enforcement)', () => {
     expect(validateValue(def('date'), '26/07/2026')).toMatch(/YYYY-MM-DD/);
   });
 
+  it('date accepts the instant Rust writes and refuses a day that does not exist (M60.3)', () => {
+    // phx-421's fetched_at, written by mcp.rs `now_iso`.
+    expect(validateValue(def('date'), '2026-07-28T09:20:00Z')).toBeNull();
+    expect(validateValue(def('date'), '2026-02-30')).toBe(
+      'field must be a date (YYYY-MM-DD, optionally HH:MM)',
+    );
+  });
+
   it('daterange validates both endpoints', () => {
     expect(validateValue(def('daterange'), { start: '2026-07-01', end: null })).toBeNull();
     expect(validateValue(def('daterange'), { start: 'soon' })).toMatch(/YYYY-MM-DD/);
     expect(validateValue(def('daterange'), 'not-a-range')).toMatch(/range/);
+  });
+
+  it('daterange refuses a backwards range and an end with no start (M60.3)', () => {
+    expect(validateValue(def('daterange'), { start: '2026-08-02', end: '2026-07-28' })).toBe(
+      'field ends before it starts',
+    );
+    expect(validateValue(def('daterange'), { end: '2026-07-28' })).toMatch(/YYYY-MM-DD/);
   });
 
   it('select stays advisory on membership but strict on shape', () => {
@@ -97,6 +112,11 @@ describe('validateValue (shape enforcement)', () => {
   it('the derived side of a two-way relation rejects direct writes', () => {
     const derived = def('relation', { from: { type: 'Key result', field: 'objective' } });
     expect(validateValue(derived, ['[[kr-1]]'])).toMatch(/other side/);
+  });
+
+  it('a derived person is refused like a relation (M16.13b, M60.3)', () => {
+    const derived = def('person', { from: { type: 'Work item', field: 'assignee' } });
+    expect(validateValue(derived, ['[[ana]]'])).toMatch(/other side/);
   });
 });
 
@@ -171,9 +191,29 @@ describe('computeRollup', () => {
   });
 });
 
+/** The created and edited cells show this machine's wall time (M61.8). */
 describe('formatTimestamp', () => {
-  it('shows date and minutes', () => {
-    expect(formatTimestamp('2026-07-24T09:30:12.000Z')).toBe('2026-07-24 09:30');
+  const tz = process.env.TZ;
+  afterEach(() => {
+    if (tz === undefined) delete process.env.TZ;
+    else process.env.TZ = tz;
+  });
+
+  it('shows the Los Angeles date and minutes', () => {
+    process.env.TZ = 'America/Los_Angeles';
+    expect(formatTimestamp('2026-07-24T09:30:12.000Z')).toBe('2026-07-24 02:30');
+    expect(formatTimestamp('2026-07-24T03:00:00Z')).toBe('2026-07-23 20:00');
+  });
+
+  it('shows the Sydney date and minutes', () => {
+    process.env.TZ = 'Australia/Sydney';
+    expect(formatTimestamp('2026-07-24T09:30:12.000Z')).toBe('2026-07-24 19:30');
+    expect(formatTimestamp('2026-07-24T20:00:00Z')).toBe('2026-07-25 06:00');
+  });
+
+  it('keeps text that is not an instant as written', () => {
+    expect(formatTimestamp('2026-07-24 09:30')).toBe('2026-07-24 09:30');
+    expect(formatTimestamp('soon')).toBe('soon');
   });
 });
 
@@ -203,11 +243,14 @@ describe('coerceValueToKind', () => {
   });
 
   it('to date keeps only real dates', () => {
-    // A UTC instant degrades to its date: lifting 10:00 out of it and storing
-    // it as a local wall-clock time would shift the value by the reader's
-    // offset, which is the mistake schedule.ts exists to avoid (M16.14).
-    expect(coerceValueToKind('2026-07-30T10:00:00Z', 'date')).toBe('2026-07-30');
+    // An instant is kept verbatim (M60.3): it keeps its zone and reads as local
+    // time wherever it is shown, rather than degrading to its UTC day (M16.14).
+    expect(coerceValueToKind('2026-07-30T10:00:00Z', 'date')).toBe('2026-07-30T10:00:00Z');
     expect(coerceValueToKind('next week', 'date')).toBeNull();
+    // The narrow grammar: a day that does not exist, or prose after a day, is
+    // not a date.
+    expect(coerceValueToKind('2026-02-30', 'date')).toBeNull();
+    expect(coerceValueToKind('2026-07-30 kickoff', 'date')).toBeNull();
     // A bare wall-clock time is unambiguous, so it survives.
     expect(coerceValueToKind('2026-07-30 14:30', 'date')).toBe('2026-07-30 14:30');
     expect(coerceValueToKind('2026-07-30T14:30', 'date')).toBe('2026-07-30 14:30');
@@ -241,10 +284,13 @@ describe('inferKindFromValue', () => {
     expect(inferKindFromValue('https://example.com')).toBe('url');
     // Not a date: a partial one has no honest calendar reading.
     expect(inferKindFromValue('2026-08')).toBe('text');
+    // An instant is a date (M60.3); prose that starts with a day is not.
+    expect(inferKindFromValue('2026-07-28T09:20:00Z')).toBe('date');
+    expect(inferKindFromValue('2026-07-28 kickoff')).toBe('text');
   });
 
-  // M16.13: an address used to infer as `url`, because URL_SHAPE accepts
-  // `mailto:` — which was the nearest thing to an Email kind before there
+  // M16.13: an address used to infer as `url`, because `mailto:` is one of the
+  // URL prefixes — which was the nearest thing to an Email kind before there
   // was one. Email is the more specific answer, so it is checked first.
   it('prefers email over url for an address', () => {
     expect(inferKindFromValue('ada@example.com')).toBe('email');

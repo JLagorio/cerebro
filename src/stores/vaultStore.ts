@@ -1,5 +1,13 @@
 import { create } from 'zustand';
+import { announceExternalWrites, flushOpenPages } from '@/editor/openPages';
+import {
+  batchFailureWords,
+  openReportWords,
+  type BatchApplied,
+  type BatchOp,
+} from '@/engine/batch';
 import { validatePatch } from '@/engine/properties';
+import { UNDO } from '@/engine/undoPlan';
 import { buildSchema } from '@/engine/schema';
 import { collectionsFromPages, parseCollectionYaml } from '@/engine/collections';
 import type { CollectionFile, Entry, Scalar, Schema, ListFile } from '@/engine/types';
@@ -8,6 +16,17 @@ import * as ipc from '@/lib/ipc';
 import { coalescedRefresh, writeFence, type PassOutcome } from '@/lib/trailingRefresh';
 import { parseWikilinks } from '@/engine/wikilink';
 import { useUiStore } from '@/stores/uiStore';
+import { useUndoStore } from '@/stores/undoStore';
+
+/** What a batch's caller may ask of it beyond the write (M60.7). */
+export interface BatchOptions {
+  /** Push the landed change on the undo stack under this label, and toast
+   * the label with Undo. Without one the change is not undoable. */
+  undo?: string;
+  /** Hear a refusal in the backend's words instead of the store's toast:
+   * undo words its own refusal. The store still rescans. */
+  onRefused?: (message: string) => void;
+}
 
 export interface VaultState {
   vaultPath: string | null;
@@ -71,6 +90,19 @@ export interface VaultState {
    * has always made, now reachable from a table cell.
    */
   setTitle(path: string, title: string): Promise<boolean>;
+  /**
+   * Apply a database-wide change as one batch, all or nothing (M60.6): a
+   * property rename, kind change or copy, a bulk delete. Open pages land
+   * their pending saves first; patch ops show at once (optimistic, fenced);
+   * the written pages are announced, so an open page merges the change in
+   * place (M55.6), and the vault rescans. Resolves one result per page
+   * written, or null when there is no vault, `entries` is another vault's,
+   * or the backend refused — which toasts once, in a stale page's title or
+   * the backend's words, and rescans. Never throws. No `validatePatch`: a
+   * moved value keeps the shape it had. With `undo`, a landed change goes on
+   * the undo stack and toasts its label with Undo (M60.7).
+   */
+  applyBatch(ops: BatchOp[], options?: BatchOptions): Promise<BatchApplied | null>;
   createItem(args: {
     folder: string;
     slug: string;
@@ -311,6 +343,9 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
   async openVault(path) {
     const ticket = ++openTicket;
     const superseded = () => ticket !== openTicket;
+    // M60.7: undo is per vault and per session; another vault's entries
+    // would revert whatever sits at their paths here.
+    if (get().vaultPath !== path) useUndoStore.getState().clear();
     set({ vaultPath: path, status: 'scanning', error: null });
     // M56.6: who answers in this vault's panel is read now, before the panel
     // can mount, so a handoff that opens the panel finds the binding.
@@ -325,8 +360,13 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
       if (superseded()) return;
       const started = watcherQueue.then(() => ipc.startWatcher(path));
       watcherQueue = started.catch(() => undefined);
-      await started;
+      const report = await started;
       if (superseded()) return;
+      // M60.6: the open put back a change an earlier run left unfinished,
+      // so the read above predates the rollback. Say so, and hand off to a
+      // rescan pass, which reads the pages as they are now.
+      const putBack = report === undefined ? null : openReportWords(report);
+      if (putBack !== null) useUiStore.getState().toast(putBack);
       if (inTauri() && !watcherBound) {
         await ipc.listenVaultChanged(() => {
           // rescan() contains its own failures (one toast per failed cycle,
@@ -344,9 +384,10 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
       // vault, and `status: 'ready'` with it (see `landedScan`).
       if (scan < landedScan) return;
       // An inline edit was pending or settled while this read (a Reopen
-      // racing an edit): the read may predate it, so a rescan pass, which
-      // waits for the write, lands the vault and sets 'ready' instead.
-      if (mark.pending > 0 || writes.moved(mark)) {
+      // racing an edit), or the open rolled a stopped change back: the read
+      // may predate either, so a rescan pass, which waits for the write,
+      // lands the vault and sets 'ready' instead.
+      if (mark.pending > 0 || writes.moved(mark) || putBack !== null) {
         await get().rescan();
         return;
       }
@@ -470,6 +511,54 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     // as failed; it already landed on disk.
     await get().rescan();
     return true;
+  },
+
+  async applyBatch(ops, options = {}) {
+    const state = get();
+    const vault = state.vaultPath;
+    if (vault === null) return null;
+    if (refusedAcrossVaults(state)) return null;
+    await flushOpenPages();
+    const titleOf = (path: string) => get().entries.find((e) => e.path === path)?.title ?? path;
+    try {
+      const applied = await fencedWrite(
+        () => {
+          const patches = ops.filter((op) => op.op === 'patch');
+          if (patches.length === 0) return;
+          set({
+            entries: get().entries.map((entry) =>
+              patches
+                .filter((op) => op.path === entry.path)
+                .reduce((shown, op) => applyPatch(shown, op.set), entry),
+            ),
+          });
+        },
+        () => ipc.applyBatch(vault, ops),
+      );
+      await announceExternalWrites(
+        applied.files.map((file) => file.path),
+        () => get().rescan(),
+      );
+      const label = options.undo;
+      if (label !== undefined) {
+        const id = useUndoStore.getState().pushBatch(label, vault, applied.files);
+        useUiStore
+          .getState()
+          .toast(
+            label,
+            id === null
+              ? undefined
+              : { action: { label: UNDO, run: () => void useUndoStore.getState().undoEntry(id) } },
+          );
+      }
+      return applied;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (options.onRefused !== undefined) options.onRefused(message);
+      else useUiStore.getState().toast(batchFailureWords(message, titleOf));
+      await get().rescan(); // disk truth wins: revert the optimistic update
+      return null;
+    }
   },
 
   // The documented EXCEPTION to the never-throw invariant (M14.8): callers

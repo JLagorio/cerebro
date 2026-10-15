@@ -34,10 +34,13 @@ import {
   agentEdit,
   agentReply,
   agentResolve,
+  agentSetFields,
   beginMockRun,
   bookMockRun,
+  claimMockWake,
   endMockRun,
   finishMockRun,
+  finishMockWake,
   postThreadPlaceholder,
   queueAgentWrite,
   readMockCliTranscript,
@@ -53,6 +56,7 @@ import {
 import {
   APPROVAL_MESSAGES,
   plan as planApproval,
+  subjectIsCut,
   type RunApproval,
   type ShellCeiling,
 } from '@/lib/policy/toolApproval';
@@ -163,6 +167,10 @@ export interface RunOptions {
    * it by the tool-approval table, and reads anything but "ask" and "on" as
    * off. */
   shell: ShellCeiling;
+  /** The web ceiling this run may hold (M57.7): Web access in Settings, less
+   * what an agent's record leaves out. Absent reads off, as Rust reads a
+   * missing `web`, so a caller that never names it never widens a run. */
+  web?: boolean;
   /** Let the run reach the user's own MCP servers (M8.2). */
   connectors: boolean;
   /** Whether a person is watching this run. Only an attended run that names
@@ -224,6 +232,12 @@ export interface RunOptions {
    * message with it quoted as data. Absent records NULL, "why not recorded";
    * an attended run is always recorded as attended, whatever this says. */
   cause?: RunCauseRequest | null;
+  /** The durable wake a woken run claims, and the pending wakes of the same
+   * trigger it takes with it (M63.1). Sent as `run_agent`'s top-level
+   * `wake`: Rust claims it inside the dispatch transaction and records the
+   * wake's own cause, so a woken run is unattended, on lane `agent`, and
+   * names no `cause`. The answer can be `{ settled: 'gone' }`. */
+  wake?: { claim: string; coalesce: string[] } | null;
 }
 
 /** The kinds a mock run records for its session's replay (M56.3): what the
@@ -274,23 +288,30 @@ export interface RunHandle {
 }
 
 /**
- * What starting a run answers (M34.2.4): a handle, or a typed deferral.
+ * What starting a run answers: a handle, a typed deferral (M34.2.4), or a
+ * woken run settled without starting (M63.1).
  *
  * `deferred` is the ambient gate saying "not now" — over a ceiling, paused,
  * accounting unknown — and only an unattended run that named a `lane` can
  * receive it. It is a RESULT the caller must read, not an error to toast
  * away: the runner logs one honest row and surrenders the fire key so the
- * run happens when the window resets.
+ * run happens when the window resets; a woken run's wake waits pending.
+ * `settled` answers only a woken run: `gone` when its wake was no longer
+ * pending, expired, or was cancelled by its agent's pause, so nothing
+ * started and nothing is owed; `skipped` is held for a later part's check.
  */
-export type RunStart = RunHandle | { deferred: string[] };
+export type RunStart = RunHandle | { deferred: string[] } | { settled: 'gone' | 'skipped' };
 
 /** Narrow a RunStart to its handle. Attended callers — every call without a
- * `lane` — are never gated and never deferred, so reaching a deferral there
- * is a contract break: thrown loudly rather than rendered as a silent
- * no-run. Unattended callers must NOT use this — they read the deferral. */
+ * `lane` or a `wake` — are never gated, deferred or settled, so reaching
+ * either there is a contract break: thrown loudly rather than rendered as a
+ * silent no-run. Unattended callers must NOT use this — they read both. */
 export function startedOrThrow(start: RunStart): RunHandle {
   if ('deferred' in start) {
     throw new Error(`run deferred by the budget gate: ${start.deferred.join(', ')}`);
+  }
+  if ('settled' in start) {
+    throw new Error(`run settled without starting: ${start.settled}`);
   }
   return start;
 }
@@ -311,6 +332,11 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunS
     // the same artifact, before anything starts.
     const refused = runOptionsRefusal({ model: options.model, effort: options.effort });
     if (refused !== null) throw new Error(refused);
+    // M63.1: the same refusal Rust's `wakes::refuse_request` gives a woken
+    // request that is attended, off lane agent, not an agent's, or names a
+    // cause of its own, in its words.
+    const wokenRefused = options.wake == null ? null : wokenRunRefusal(options);
+    if (wokenRefused !== null) throw new Error(wokenRefused);
     // No cause check here (M56.7), unlike the pause: the vocabulary and its
     // refusals live once, in src-tauri/src/runtime/cause.rs, and a second
     // copy of the kinds on this side is the twin list that rule forbids. The
@@ -326,47 +352,60 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunS
     settleMockSession(sessionId);
     // M57.2: the run's plan, by the same table Rust plans it with, and the
     // row a run that withheld tools books, as Rust's meter does.
+    // M63.1: a woken run claims its wake in the mock store first, as Rust
+    // claims it inside the dispatch transaction, under the run's attach id
+    // (M58.1's stamp id), which is minted here so the claim can name it.
+    const run = ++mockRunSeq;
+    if (options.wake != null) {
+      const woken = claimMockWake(vault, options.actor ?? '', options.wake, mockAttach(run));
+      if (woken === 'gone') return { settled: 'gone' };
+      if ('deferred' in woken) return { deferred: woken.deferred };
+    }
     const approval = mockApproval(options);
     const booked = bookWithheld(options, approval, sessionId);
-    const run = startMockRun(
+    startMockRun(
       vault,
       options,
       sessionId,
       [{ kind: 'UserPrompt', text: options.message }],
       undefined,
       booked,
+      run,
     );
     // The browser keeps no runtime database: only a run that withheld tools
     // books a row (the mock fleet's), and every other has no id to name.
     return { run, durableId: booked, sessionId, attach: mockAttach(run) };
   }
-  return invokeTauri<{ run: number; run_id: string; session_id: string } | { deferred: string[] }>(
-    'run_agent',
-    {
-      vault,
-      request: {
-        message: options.message,
-        system_prompt: options.systemPrompt ?? null,
-        session_id: options.sessionId ?? null,
-        model: options.model ?? null,
-        effort: options.effort ?? null,
-        shell: options.shell,
-        connectors: options.connectors,
-        attended: options.attended,
-        ask_first: options.askFirst ?? false,
-        actor: options.actor ?? null,
-        approved_stdio: options.approvedStdio ?? [],
-        allowed_tools: options.allowedTools ?? null,
-        disallowed_tools: options.disallowedTools ?? null,
-        read_scope: options.readScope ?? null,
-        connector_names: options.connectorNames ?? null,
-        scope: options.scope ?? null,
-        lane: options.lane ?? null,
-        cause: options.cause ?? null,
-      },
+  return invokeTauri<
+    | { run: number; run_id: string; session_id: string }
+    | { deferred: string[] }
+    | { settled: 'gone' | 'skipped' }
+  >('run_agent', {
+    vault,
+    request: {
+      message: options.message,
+      system_prompt: options.systemPrompt ?? null,
+      session_id: options.sessionId ?? null,
+      model: options.model ?? null,
+      effort: options.effort ?? null,
+      shell: options.shell,
+      web: options.web ?? false,
+      connectors: options.connectors,
+      attended: options.attended,
+      ask_first: options.askFirst ?? false,
+      actor: options.actor ?? null,
+      approved_stdio: options.approvedStdio ?? [],
+      allowed_tools: options.allowedTools ?? null,
+      disallowed_tools: options.disallowedTools ?? null,
+      read_scope: options.readScope ?? null,
+      connector_names: options.connectorNames ?? null,
+      scope: options.scope ?? null,
+      lane: options.lane ?? null,
+      cause: options.cause ?? null,
     },
-  ).then((result) =>
-    'deferred' in result
+    wake: options.wake ?? null,
+  }).then((result) =>
+    'deferred' in result || 'settled' in result
       ? result
       : {
           run: result.run,
@@ -375,6 +414,28 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunS
           attach: result.run_id,
         },
   );
+}
+
+/** What is wrong with a woken request, in `wakes::refuse_request`'s words,
+ * or null (M63.1). */
+function wokenRunRefusal(options: RunOptions): string | null {
+  if (options.attended) {
+    return 'a woken run is unattended: a change woke it, and nobody is watching. Nothing was started.';
+  }
+  if (options.lane !== 'agent') {
+    const lane = options.lane === undefined ? 'None' : `Some(${JSON.stringify(options.lane)})`;
+    return `a woken run bills to lane "agent", not ${lane}. Nothing was started.`;
+  }
+  if (!(options.actor ?? '').startsWith('process:')) {
+    return "a woken run is an agent's run, so it needs a process: actor. Nothing was started.";
+  }
+  if (options.cause != null) {
+    return (
+      "a woken run's cause is its wake's, stored when the change was admitted, so the request " +
+      'may not name another. Nothing was started.'
+    );
+  }
+  return null;
 }
 
 /**
@@ -387,6 +448,7 @@ function mockApproval(options: RunOptions): RunApproval {
   return planApproval({
     kind: options.attended ? 'attended' : 'unattended',
     shell: options.shell,
+    web: options.web === true ? 'on' : 'off',
     askFirst: options.askFirst ?? false,
     readScoped: options.readScope != null,
     narrowing:
@@ -446,8 +508,8 @@ function startMockRun(
   replay: AgentStreamEvent[],
   resume?: { toolId: string; answer: PersonAnswer },
   booked: string | null = null,
+  run: number = ++mockRunSeq,
 ): number {
-  const run = ++mockRunSeq;
   mockJournal.open(run);
   // M58.1: every write the run makes is stamped with its actor (blank reads
   // as the assistant, as Rust's normalize_actor reads it) and its run, the
@@ -458,6 +520,10 @@ function startMockRun(
   // M58.3: the run's paths are its own from here until its commit lands, as
   // Rust's claim holds them; the commit comes before its closing events.
   beginMockRun(stamp.runId, actor);
+  // M63.1: how the run ended, for the wake it claimed — stopped on purpose
+  // is interrupted, an Error before Done failed, and anything else succeeded.
+  let stopped = false;
+  let errored = false;
   let settled = false;
   const settle = () => {
     if (settled) return;
@@ -475,7 +541,10 @@ function startMockRun(
     options.message,
     (event) => {
       if (REPLAYED.has(event.kind)) replay.push(event);
+      if (event.kind === 'Cancelled') stopped = true;
+      if (event.kind === 'Error') errored = true;
       if (event.kind === 'Done') {
+        finishMockWake(stamp.runId, stopped ? 'cancelled' : errored ? 'failed' : 'succeeded');
         // A turn held on a call is suspended, not stopped (M57.1).
         const held = replay.some((e) => e.kind === 'ToolDeferred');
         if (!held && !replay.some((e) => e.kind === 'TurnEnded')) {
@@ -499,15 +568,16 @@ function startMockRun(
     // Knowledge can read the snapshot the real agent would. The write
     // scripts land on the mock disk through the same refusals as Rust's:
     // the append as tool_append's (M53.6), the edit as tool_edit_note's
-    // (M55.5), and the comment scripts in the page's sidecar as
-    // comment_tools.rs's (M70.3).
+    // (M55.5), the set as set_fields_write's (M60.4), and the comment
+    // scripts in the page's sidecar as comment_tools.rs's (M70.3).
     {
       onUiAction: emitUiAction,
       onAppend: (path, content) => agentAppend(vault, path, content, undefined, stamp),
       onEdit: (path, edits) => agentEdit(vault, path, edits, undefined, stamp),
+      onSetFields: (path, args) => agentSetFields(vault, path, args, stamp),
       // M57.4: the create script's create_note, through tool_create_note's
-      // refusals.
-      onCreate: (args) => agentCreate(vault, args, stamp),
+      // refusals, and its if_exists (M61.6b).
+      onCreate: (args) => agentCreate(vault, args, stamp, args.if_exists ?? null),
       onComment: (args) => agentComment(vault, args, stamp),
       onReply: (args) => agentReply(vault, args, stamp),
       onResolve: (args) => agentResolve(vault, args, stamp),
@@ -584,7 +654,7 @@ async function runUnattended(
     actor: run.actor,
     scope: run.scope ?? null,
   });
-  if ('deferred' in start) return start;
+  if ('deferred' in start || 'settled' in start) return start;
   await new Promise<void>((resolve) => {
     const off = onAgentEvent((event) => {
       if (event.kind !== 'Done') return;
@@ -734,12 +804,15 @@ export async function answerInteraction(
   answer: PersonAnswer,
 ): Promise<AnswerResult> {
   if (!inTauri()) {
-    // M57.2: This conversation only for a card the table asked about, as
-    // Rust's book refuses it otherwise.
+    // M57.2: This conversation only for a card the table asked about, on a
+    // subject that was not cut, as Rust's book refuses it otherwise.
     if (answer.kind === 'allow' && answer.remember === 'conversation') {
       const card = listMockInteractions(vault).find((pending) => pending.id === id);
       if (card !== undefined && card.family == null) {
         return { refused: { code: 'malformed_arguments', message: NOT_REMEMBERED } };
+      }
+      if (card?.subject != null && subjectIsCut(card.subject)) {
+        return { refused: { code: 'malformed_arguments', message: NOT_REMEMBERED_CUT } };
       }
     }
     // M57.3: the book checks the answer fits its card, a question's
@@ -790,6 +863,11 @@ export async function answerInteraction(
  * (Rust's `interaction::NOT_REMEMBERED`). */
 export const NOT_REMEMBERED =
   'This conversation is offered only for a command or file change the shell ceiling asks about.';
+
+/** What the book says to This conversation on a call whose subject was cut
+ * (Rust's `interaction::NOT_REMEMBERED_CUT`). */
+export const NOT_REMEMBERED_CUT =
+  'This conversation is not offered for a command too long to show in full. Allow it once instead.';
 
 /**
  * The person's own Claude Code settings, counted (M57.2): allow, ask and

@@ -4,13 +4,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   editedText,
   MOCK_FAILURES,
+  MOCK_MEETING_SUMMARY,
   releaseHeldMockRuns,
   resetMockGrants,
   runMockAgent,
 } from './mockAgent';
 import type { AgentStreamEvent, UiAction } from './types';
 import { notesPrompt, type ReviewNote } from '@/engine/reviewNotes';
-import { pendingWrites, queueAgentWrite, resetMockFs } from '@/lib/mockIpc';
+import { makeEntry } from '@/engine/testHelpers';
+import { organizePrompt } from '@/lib/prompts';
+import { agentCreate, pendingWrites, queueAgentWrite, resetMockFs } from '@/lib/mockIpc';
 import { APPROVAL_MESSAGES, plan as planApproval } from '@/lib/policy/toolApproval';
 
 /**
@@ -23,6 +26,9 @@ import { APPROVAL_MESSAGES, plan as planApproval } from '@/lib/policy/toolApprov
  * path with no test running through it and made the panel's own transcript
  * the least trustworthy thing on screen.
  */
+
+/** A people page for the meeting asks; the mock reads only the links. */
+const PAGE = makeEntry({ path: 'people/marcus-webb.md', title: 'Marcus Webb' });
 
 function drain(
   message: string,
@@ -150,6 +156,41 @@ describe('runMockAgent', () => {
     expect(action.path).toBe('inbox/warehouse-cutover-thought.md');
     expect(action.type).toBe('Work item');
     expect(action.reasoning).not.toBe('');
+  });
+
+  // M64.7 — the meeting ask names an inbox/ path, and gets its own filing.
+  it('files a meeting ask as one proposal for its path, with the links the ask names', async () => {
+    const ask = organizePrompt('inbox/phoenix-cutover-standup.md', {
+      title: 'Phoenix cutover standup',
+      speakers: [
+        { label: 'Marcus Webb', kind: 'matched', page: PAGE, link: '[[marcus-webb]]' },
+        { label: 'Priya Nair', kind: 'matched', page: PAGE, link: '[[priya-nair]]' },
+        { label: 'Jo Nobody', kind: 'none' },
+      ],
+    });
+    const { events, actions } = await drain(ask);
+    expect(toolNames(events)).toEqual(['get_note', 'propose_organize']);
+    expect(actions).toEqual([
+      {
+        action: 'propose_organize',
+        path: 'inbox/phoenix-cutover-standup.md',
+        type: 'Meeting',
+        title: 'Meeting: Phoenix cutover standup',
+        properties: {
+          summary: MOCK_MEETING_SUMMARY,
+          attendees: ['[[marcus-webb]]', '[[priya-nair]]'],
+        },
+        reasoning: expect.any(String) as string,
+      },
+    ]);
+  });
+
+  it('files a meeting that names no speakers with a summary and no attendees', async () => {
+    const ask = organizePrompt('inbox/call.md', { title: 'Call', speakers: [] });
+    const { actions } = await drain(ask);
+    const [action] = actions;
+    if (action?.action !== 'propose_organize') throw new Error('no proposal');
+    expect(action.properties).toEqual({ summary: MOCK_MEETING_SUMMARY });
   });
 
   it('fires the ui action only after its tools report done', async () => {
@@ -514,6 +555,87 @@ describe('runMockAgent', () => {
         expect(toolNames(events)).not.toContain('edit_note');
       }
       expect(onEdit).not.toHaveBeenCalled();
+    });
+  });
+
+  // M60.4 — the set script: set_fields through its handler, which writes
+  // the record's frontmatter and announces a rescan, as Rust does.
+  describe('the set script', () => {
+    const PAGE = 'records/objectives/obj-launch-pipeline.md';
+    const REPORT = `Set fields on ${PAGE}.\nquarter: set to 2026-q4 (from "2026 Q4")\nHash: abc`;
+    const gated = globalThis as { __cerebroAgentWriteGate?: Promise<void> };
+
+    afterEach(() => {
+      delete gated.__cerebroAgentWriteGate;
+    });
+
+    function runSet(
+      ask: string,
+      onSetFields?: (path: string, args: Record<string, unknown>) => Promise<string>,
+    ) {
+      const events: AgentStreamEvent[] = [];
+      const actions: UiAction[] = [];
+      const done = new Promise<void>((resolve) => {
+        runMockAgent(
+          ask,
+          (event) => {
+            events.push(event);
+            if (event.kind === 'Done') resolve();
+          },
+          { delayMs: 0, onUiAction: (action) => void actions.push(action), onSetFields },
+        );
+      });
+      return done.then(() => ({ events, actions }));
+    }
+
+    it('calls set_fields with the field and value, announces a rescan, and reports', async () => {
+      const onSetFields = vi.fn(async () => REPORT);
+      const { events, actions } = await runSet(`set quarter to "2026 Q4" on ${PAGE}`, onSetFields);
+      expect(toolNames(events)).toEqual(['set_fields']);
+      expect(JSON.parse(toolInputs(events)[0])).toEqual({
+        path: PAGE,
+        set: { quarter: '2026 Q4' },
+      });
+      expect(onSetFields).toHaveBeenCalledWith(PAGE, { set: { quarter: '2026 Q4' } });
+      expect(actions).toEqual([{ action: 'vault_changed' }]);
+      expect(events.find((e) => e.kind === 'ToolDone')).toMatchObject({ output: REPORT });
+      expect(replyOf(events)).toBe(`I set quarter on ${PAGE}.`);
+    });
+
+    it('reports a refusal, announcing nothing', async () => {
+      const refusal = `schema_invalid: nothing was written to ${PAGE}.\n- progress is computed and can't be edited`;
+      const { events, actions } = await runSet(`set progress to "50" on ${PAGE}`, async () => {
+        throw new Error(refusal);
+      });
+      expect(actions).toEqual([]);
+      expect(events.find((e) => e.kind === 'ToolDone')).toMatchObject({
+        is_error: true,
+        output: refusal,
+      });
+      expect(replyOf(events)).toBe(`I could not set progress on ${PAGE}: ${refusal}`);
+    });
+
+    it('refuses when nothing can carry out the set', async () => {
+      const { events, actions } = await runSet(`set quarter to "x" on ${PAGE}`);
+      expect(actions).toEqual([]);
+      expect(replyOf(events)).toBe(
+        `I could not set quarter on ${PAGE}: set_fields is not available here`,
+      );
+    });
+
+    it('waits for the write gate', async () => {
+      let open = () => {};
+      gated.__cerebroAgentWriteGate = new Promise<void>((resolve) => {
+        open = resolve;
+      });
+      const onSetFields = vi.fn(async () => REPORT);
+      const run = runSet(`set quarter to "2026 Q4" on ${PAGE}`, onSetFields);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(onSetFields).not.toHaveBeenCalled();
+      open();
+      const { actions } = await run;
+      expect(onSetFields).toHaveBeenCalledOnce();
+      expect(actions).toEqual([{ action: 'vault_changed' }]);
     });
   });
 
@@ -1096,6 +1218,30 @@ describe('the CLI-tool scripts decide through the tool-approval table (M57.2)', 
       is_error: true,
     });
   });
+
+  // M57.7: the fetch script calls WebFetch, which the web ceiling decides.
+  it('fetches a page under Web access On, and reads WebFetch as unavailable Off', async () => {
+    const web = (kind: 'attended' | 'unattended', ceiling: 'off' | 'on') =>
+      planApproval({ kind, shell: 'off', web: ceiling, readScoped: false, narrowing: null });
+    for (const kind of ['attended', 'unattended'] as const) {
+      const on = await run('fetch "https://example.com"', { approval: web(kind, 'on') });
+      expect(on.find((e) => e.kind === 'ToolStart')).toMatchObject({ tool_name: 'WebFetch' });
+      expect(doneOf(on)).toMatchObject({
+        output: '(mock) The page at https://example.com says hello.',
+      });
+      expect(doneOf(on)?.is_error).toBeUndefined();
+      expect(replyOf(on)).toBe('I fetched https://example.com.');
+      const off = await run('fetch "https://example.com"', { approval: web(kind, 'off') });
+      expect(doneOf(off)).toMatchObject({
+        output: 'WebFetch is not available in this run.',
+        is_error: true,
+      });
+      expect(replyOf(off)).toBe('WebFetch is not available in this run.');
+    }
+    // A plan with no web named reads off.
+    const absent = await run('fetch "https://example.com"', { approval: plan('attended', 'on') });
+    expect(doneOf(absent)?.is_error).toBe(true);
+  });
 });
 
 describe('an ask-first agent’s page write (M57.4)', () => {
@@ -1118,7 +1264,8 @@ describe('an ask-first agent’s page write (M57.4)', () => {
           delayMs: 0,
           onCreate: async (args) => {
             created.push(args);
-            return `Created ${args.folder}/${args.slug}.md`;
+            const path = `${args.folder}/${args.slug}.md`;
+            return { path, reply: `Created ${path}` };
           },
           ...opts,
         },
@@ -1223,6 +1370,36 @@ describe('an ask-first agent’s page write (M57.4)', () => {
     const { created } = await run({ approval: plan('attended', false), onDefer });
     expect(onDefer).not.toHaveBeenCalled();
     expect(created).toEqual([ARGS]);
+  });
+
+  it('"if new" passes refuse, and replies with the tool text (M61.6b)', async () => {
+    resetMockFs();
+    const stamp = { actor: 'process:release-scout', runId: 'r' };
+    const onCreate = (args: Parameters<typeof agentCreate>[1] & { if_exists?: string }) =>
+      agentCreate('/demo-vault', args, stamp, args.if_exists ?? null);
+    const message = 'create "Vendor delay" in records/risks if new';
+    const first = (await run({ onCreate }, message)).events;
+    const start = first.find(
+      (e): e is Extract<AgentStreamEvent, { kind: 'ToolStart' }> => e.kind === 'ToolStart',
+    );
+    expect(JSON.parse(String(start?.input))).toEqual({ ...ARGS, if_exists: 'refuse' });
+    expect(doneOf(first)).toMatchObject({ output: 'Created records/risks/vendor-delay.md' });
+    expect(first).toContainEqual(
+      expect.objectContaining({ kind: 'Text', text: 'Created records/risks/vendor-delay.md' }),
+    );
+    const second = (await run({ onCreate }, message)).events;
+    const refusal =
+      'note_exists: records/risks/vendor-delay.md already exists, so nothing was written. ' +
+      'Read it and change it there, or call again with if_exists "suffix" for a numbered copy ' +
+      'beside it.';
+    expect(doneOf(second)).toMatchObject({ output: refusal, is_error: true });
+    expect(second).toContainEqual(expect.objectContaining({ kind: 'Text', text: refusal }));
+    // Without "if new", the same create numbers a copy, as before.
+    const plain = (await run({ onCreate }, MESSAGE)).events;
+    expect(String(doneOf(plain)?.output)).toMatch(
+      /^Created records\/risks\/vendor-delay-2\.md \(records\/risks\/vendor-delay\.md was taken/,
+    );
+    resetMockFs();
   });
 
   it('records/risks never falls to the risk branch', async () => {

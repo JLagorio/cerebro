@@ -20,7 +20,7 @@ export function distinctTitles(items: DefaultReactSuggestionItem[]): DefaultReac
   return items.map((item) => {
     const repeats = seen.get(item.title) ?? 0;
     seen.set(item.title, repeats + 1);
-    return repeats === 0 ? item : { ...item, title: item.title + '​'.repeat(repeats) };
+    return repeats === 0 ? item : { ...item, title: item.title + '\u200B'.repeat(repeats) };
   });
 }
 

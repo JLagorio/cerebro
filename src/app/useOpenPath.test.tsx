@@ -242,6 +242,41 @@ describe('useOpenPath and the open log (M59.3)', () => {
     expect(useOpenLogStore.getState().logs['/v']?.[0]?.count).toBe(1);
   });
 
+  it('logs nothing when the record is already in the panel', () => {
+    const { result } = renderHook(() => useOpenPath('in-place'));
+    act(() => result.current('projects/onboarding/items/fld-2.md'));
+    act(() => result.current('projects/onboarding/items/fld-2.md'));
+    expect(useOpenLogStore.getState().logs['/v']).toEqual([
+      expect.objectContaining({ path: 'projects/onboarding/items/fld-2.md', count: 1 }),
+    ]);
+  });
+
+  it('logs nothing when a Type doc is opened on its own type screen', () => {
+    const { result } = renderHook(() => useOpenPath());
+    act(() => result.current('types/risk.md'));
+    act(() => result.current('types/risk.md'));
+    expect(useNavStore.getState().history).toHaveLength(2);
+    expect(useOpenLogStore.getState().logs['/v']).toEqual([
+      expect.objectContaining({ path: 'types/risk.md', count: 1 }),
+    ]);
+  });
+
+  it('logs nothing when a Collection page is opened on its own collection', () => {
+    useVaultStore.setState({
+      entries: [
+        ...useVaultStore.getState().entries,
+        makeEntry({ path: 'reading/reading.md', title: 'Reading', type: 'Collection' }),
+      ],
+    });
+    const { result } = renderHook(() => useOpenPath());
+    act(() => result.current('reading/reading.md'));
+    expect(useNavStore.getState().selection).toEqual({ kind: 'collection', folder: 'reading' });
+    act(() => result.current('reading/reading.md'));
+    expect(useOpenLogStore.getState().logs['/v']).toEqual([
+      expect.objectContaining({ path: 'reading/reading.md', count: 1 }),
+    ]);
+  });
+
   it('logs nothing for an agent', () => {
     const { result } = renderHook(() => useOpenPath('navigate', { byAgent: true }));
     act(() => result.current('projects/onboarding/items/fld-2.md'));

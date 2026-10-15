@@ -125,6 +125,29 @@ describe('agentDraft / agentPatch', () => {
     expect(agentPatch(agentDraft(agentEntry({}), ''), AGENT_KEYS).tools).toBe('safe');
   });
 
+  // M57.7: `tools:` holds shell, web, both as a list, or safe, and each form
+  // round-trips through the draft.
+  it('round-trips the four tools: forms', () => {
+    for (const [tools, shell, web] of [
+      ['safe', false, false],
+      ['shell', true, false],
+      ['web', false, true],
+      [['shell', 'web'], true, true],
+    ] as const) {
+      const drafted = agentDraft(agentEntry({ tools }), '');
+      expect([drafted.shell, drafted.web], JSON.stringify(tools)).toEqual([shell, web]);
+      expect(agentPatch(drafted, ['web'])).toEqual({ tools });
+      expect(agentPatch(drafted, ['shell'])).toEqual({ tools });
+    }
+    // The Web row adds web beside a declared shell, and the Shell row keeps
+    // a declared web when it turns the shell off.
+    const shellOnly = agentDraft(agentEntry({ tools: 'shell' }), '');
+    expect(agentPatch({ ...shellOnly, web: true }, ['web'])).toEqual({ tools: ['shell', 'web'] });
+    const both = agentDraft(agentEntry({ tools: ['shell', 'web'] }), '');
+    expect(agentPatch({ ...both, shell: false }, ['shell'])).toEqual({ tools: 'web' });
+    expect(agentPatch({ ...both, web: false }, ['web'])).toEqual({ tools: 'shell' });
+  });
+
   it('reads `disallowed-tools:` and never writes it (M54.9)', () => {
     // The form shows what a record denies and does not edit it, so a save
     // must leave the key exactly as whoever wrote it left it — absent, empty
@@ -187,6 +210,7 @@ describe('agentPatch by key (M55.12)', () => {
     expect(agentPatch(d, ['allowedTools'])).toEqual({ 'allowed-tools': ['get_note'] });
     expect(agentPatch(d, ['connectors'])).toEqual({ connectors: ['gmail'] });
     expect(agentPatch(d, ['shell'])).toEqual({ tools: 'safe' });
+    expect(agentPatch(d, ['web'])).toEqual({ tools: 'safe' });
     expect(agentPatch({ ...d, triggers: [] }, ['triggers'])).toEqual({ when: null });
     expect(agentPatch({ ...d, schedule: '' }, ['schedule'])).toEqual({ schedule: null });
     expect(agentPatch({ ...d, preferences: '  ' }, ['preferences'])).toEqual({ preferences: null });

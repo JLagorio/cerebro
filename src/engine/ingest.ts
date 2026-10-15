@@ -13,6 +13,7 @@
  */
 
 import { sha256Hex } from '@/lib/sha256';
+import { isKnowledgePath } from './okf';
 import type { Entry } from './types';
 
 export type IngestFormat = 'vtt' | 'srt' | 'markdown' | 'text';
@@ -258,6 +259,14 @@ export interface IngestInput {
  * `source_file` and `ingested_at` are the provenance a distilled concept will
  * cite, so they are recorded even when the material is a paste with no file
  * behind it — "pasted on this date" is still an answer to where it came from.
+ *
+ * `source_sha256` is the material's identity (M64.7): a SHA-256 of the text
+ * as decoded, on every inlet, files and pastes alike. A repeat is matched by
+ * it (`filedCopyOf`), never by filename or title, which a rename changes.
+ *
+ * A transcript always records its `speakers`: the labels it names, or `[]`
+ * when it names nobody. Only a capture made before M64.7 lacks the key, and
+ * that reads as not recorded (engine/transcripts.ts), never as nobody.
  */
 export function toWorkingDoc({ filename, content, at }: IngestInput): WorkingDoc {
   const format = detectFormat(filename, content);
@@ -275,12 +284,12 @@ export function toWorkingDoc({ filename, content, at }: IngestInput): WorkingDoc
     title,
     ingested_at: at,
     ingest_format: format,
+    source_sha256: sha256Hex(content),
   };
   if (filename !== '') frontmatter.source_file = filename;
 
   if (transcript) {
-    const speakers = speakersOf(turns);
-    if (speakers.length > 0) frontmatter.speakers = speakers;
+    frontmatter.speakers = speakersOf(turns);
     const last = [...turns].reverse().find((t) => t.at !== null);
     if (last?.at != null) frontmatter.duration = last.at;
   }
@@ -289,6 +298,24 @@ export function toWorkingDoc({ filename, content, at }: IngestInput): WorkingDoc
   // including surfaces that take their title from the body rather than
   // frontmatter (engine/types.ts: first H1, else humanized filename).
   return { title, frontmatter, body: `# ${title}\n\n${body}\n` };
+}
+
+/**
+ * The page already filed from the same material (M64.7): the first entry, in
+ * path order, whose `source_sha256` equals `sha`, or null. Any folder counts,
+ * since a filed capture moves out of inbox/, except the knowledge bundle,
+ * which is agent-written and is never what a person filed.
+ */
+export function filedCopyOf<T extends Pick<Entry, 'path' | 'properties'>>(
+  entries: readonly T[],
+  sha: string,
+): T | null {
+  let found: T | null = null;
+  for (const entry of entries) {
+    if (entry.properties.source_sha256 !== sha || isKnowledgePath(entry.path)) continue;
+    if (found === null || entry.path < found.path) found = entry;
+  }
+  return found;
 }
 
 // --- External references (the connector inlet) -----------------------------

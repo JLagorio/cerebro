@@ -97,8 +97,19 @@ function VersionLens({
   const entryHash = useVaultStore((s) => s.entries.find((e) => e.path === path)?.hash ?? null);
   const closeDiff = useUiStore((s) => s.closeDiff);
   const history = useFileHistory(path);
-  const row: FileCommit | null =
+  const found: FileCommit | null =
     history.kind === 'ready' ? (history.data.find((c) => c.hash === commit) ?? null) : null;
+  // The history reads again whenever the page joins or leaves git's changed
+  // files (a later turn writing it, a run committing it). While it does, the
+  // row last found stands in, so the version on screen, and a note being
+  // typed on its Lines, do not drop out under the reader (M58.5).
+  const [kept, setKept] = useState<FileCommit | null>(null);
+  if (found !== null && found !== kept) setKept(found);
+  const row: FileCommit | null = found ?? (history.kind === 'loading' ? kept : null);
+  // Lines is read by strings, not by the row: a re-read hands back an equal
+  // row as a new object, and that must not read the diff again.
+  const linesPath = row?.pathAt ?? path;
+  const linesPrevious = row?.previousPath ?? null;
   const versions = useFileVersions(row);
   const queries = useMemo(
     () => (row === null ? [] : [{ hash: row.hash, path: row.pathAt, since: row.previousAt }]),
@@ -113,14 +124,8 @@ function VersionLens({
     () =>
       vaultPath === null || tab !== 'lines'
         ? null
-        : () =>
-            git.getFileDiffAtCommit(
-              vaultPath,
-              row?.pathAt ?? path,
-              commit,
-              row?.previousPath ?? null,
-            ),
-    [vaultPath, tab, row, path, commit],
+        : () => git.getFileDiffAtCommit(vaultPath, linesPath, commit, linesPrevious),
+    [vaultPath, tab, linesPath, commit, linesPrevious],
   );
   const lines = useDiffText(linesLoad);
 
@@ -208,7 +213,7 @@ function VersionLens({
                       conversationId: review.conversationId,
                       runId: review.runId,
                       commit,
-                      path: row?.pathAt ?? path,
+                      path: linesPath,
                     }
               }
             />

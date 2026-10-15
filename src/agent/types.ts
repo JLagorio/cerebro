@@ -433,9 +433,9 @@ export interface ChatMessage {
  * The permission model is the folder model instead: the agent owns
  * `knowledge/` and writes there freely, and cerebro's own tools are the only
  * way it reaches anything else. Beside them, the CLI's own tools are set once
- * in Settings by a shell ceiling: off, ask or on (M57.2), which
- * `shared/policy/tool-approval.v1.json` turns into what each run may run,
- * ask about or is refused.
+ * in Settings by two ceilings: the shell's, off, ask or on (M57.2), and the
+ * web's, off or on (M57.7), which `shared/policy/tool-approval.v1.json`
+ * turns into what each run may run, ask about or is refused.
  *
  * Enforcement lives in Rust, not here: a tool the agent never receives is a
  * rule, a tool it receives and is asked not to use is a suggestion.
@@ -443,6 +443,8 @@ export interface ChatMessage {
 export interface AgentPolicy {
   /** The shell ceiling: what the CLI's own shell and file tools may do. */
   shell: ShellCeiling;
+  /** The web ceiling (M57.7): may runs hold WebFetch and WebSearch? */
+  web: boolean;
 }
 
 /** A filing the agent suggests for an Inbox capture — shown, never applied (M7). */

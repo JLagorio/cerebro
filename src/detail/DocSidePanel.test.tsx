@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { CommentsFile } from '@/engine/comments';
 import { buildSchema } from '@/engine/schema';
@@ -14,7 +14,8 @@ import { DocSidePanel } from './DocSidePanel';
 import type { PageCommentsController } from './usePageComments';
 
 /** The side panel's Comments tab (M70.2b): on every page, concepts included.
- *  And its Info's last change (M58.1b), on every page with an Info tab. */
+ *  And its Info's last change (M58.1b) and who can change the page (M58.6),
+ *  on every page with an Info tab. */
 
 const PAGE = 'records/decisions/dec-offline-window-72h.md';
 
@@ -113,6 +114,7 @@ describe('DocSidePanel comments', () => {
 });
 
 // M58.4 (D18): History is a side panel tab on every page, after Comments.
+// M64.2b: it renders PageHistory, the page's versions merged with its edits.
 describe('DocSidePanel history', () => {
   const ids = () =>
     screen
@@ -124,17 +126,18 @@ describe('DocSidePanel history', () => {
     expect(ids().slice(-2)).toEqual(['comments', 'history']);
     fireEvent.click(screen.getByTestId('doc-panel-tab-history'));
     expect(useUiStore.getState().docPanelTab).toBe('history');
-    const history = await screen.findByTestId('git-history');
-    expect(history.dataset.variant).toBe('tab');
+    const history = await screen.findByTestId('page-history');
+    expect(within(history).getByTestId('git-history').dataset.variant).toBe('tab');
   });
 
-  it("follows Comments on a concept's panel too", () => {
+  it("follows Comments on a concept's panel too, and shows its history", async () => {
     // Opened on Comments, so the concept's own Details never renders here.
     useUiStore.setState({ conceptPanelTab: 'comments' });
     render(panel(null, {} as Concept));
     expect(ids().slice(-2)).toEqual(['comments', 'history']);
     fireEvent.click(screen.getByTestId('doc-panel-tab-history'));
     expect(useUiStore.getState().conceptPanelTab).toBe('history');
+    expect(await screen.findByTestId('page-history')).toBeTruthy();
   });
 });
 
@@ -169,5 +172,37 @@ describe('DocSidePanel last change (M58.1b)', () => {
     render(panel(null, {} as Concept));
     expect(screen.queryByTestId('doc-panel-tab-info')).toBeNull();
     expect(screen.queryByTestId('last-change')).toBeNull();
+  });
+});
+
+describe('DocSidePanel page access (M58.6)', () => {
+  const before = (a: HTMLElement, b: HTMLElement) =>
+    Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  it("ends a page's Info with who can change it, after its properties", () => {
+    useUiStore.setState({ docPanelTab: 'info' });
+    render(panel(null));
+    const access = screen.getByTestId('page-access');
+    expect(before(screen.getByTestId('doc-properties'), access)).toBe(true);
+    expect(screen.getByTestId('page-access-summary').textContent).toBe(
+      'No agent can change this page.',
+    );
+  });
+
+  it("follows an agent page's own note", () => {
+    const agent = useVaultStore
+      .getState()
+      .entries.find((e) => e.path === 'records/agents/release-scout.md');
+    if (agent === undefined) throw new Error('fixture vault has no release-scout');
+    entry = agent;
+    useUiStore.setState({ docPanelTab: 'info' });
+    render(panel(null));
+    expect(before(screen.getByTestId('agent-info'), screen.getByTestId('page-access'))).toBe(true);
+  });
+
+  it('is not on a concept, whose panel has no Info', () => {
+    useUiStore.setState({ docPanelTab: 'info', conceptPanelTab: 'outline' });
+    render(panel(null, {} as Concept));
+    expect(screen.queryByTestId('page-access')).toBeNull();
   });
 });

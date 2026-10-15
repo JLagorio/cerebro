@@ -90,17 +90,20 @@ export function useOpenPath(
     }
     // A Type doc IS its type screen — editing the schema by hand in a doc
     // editor is the old world.
+    // A re-open where you already are moves nothing, so it logs nothing.
     if (entry.type === 'Type') {
+      const here = selection.kind === 'type' && selection.name === entry.title;
       navigate({ kind: 'type', name: entry.title });
-      recordOpen(path);
+      if (!here) recordOpen(path);
       return;
     }
     // Same rule for a container: its page IS the collection (M47.5). Routed
     // as a record it opened a `Collection` type screen that exists nowhere
     // else, with the container listed as a row of it.
     if (isCollectionPage(entry)) {
+      const here = selection.kind === 'collection' && selection.folder === entry.folder;
       navigate({ kind: 'collection', folder: entry.folder });
-      recordOpen(path);
+      if (!here) recordOpen(path);
       return;
     }
     // M55.12: an agent opens as a page. Its body is its instructions, and its
@@ -124,7 +127,9 @@ export function useOpenPath(
     if (isRecordEntry(entry) && entry.type !== null) {
       // The backdrop jump: in-place callers get the panel and nothing else —
       // DetailPanel's breadcrumb is how you reach the container deliberately.
-      // The backdrop is never the open; the record is, once.
+      // The backdrop is never the open; the record is, once, and a record
+      // already in the panel is not opened again.
+      const alreadyOpen = useUiStore.getState().detailPath === path;
       if (mode === 'navigate') {
         const folder = entry.project !== null ? dirOf(entry.project) : null;
         const onCollection =
@@ -137,7 +142,7 @@ export function useOpenPath(
         }
       }
       openDetail(path);
-      recordOpen(path);
+      if (!alreadyOpen) recordOpen(path);
       return;
     }
     navigate({ kind: 'doc', path });

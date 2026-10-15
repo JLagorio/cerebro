@@ -124,16 +124,30 @@ const KNOWLEDGE_SNAPSHOT: Fragment = {
   when: knowsTheBundle,
 };
 
-// The connector inlet (M8.2). Said when Settings switched connectors on, to a
-// run that holds cache_source: telling the agent to fetch and cache through
-// tools it does not have produces apologies, not sources. The switch is not
-// yet the run's own connector grant.
+// The two fetch lines: what the run fetches is written down with cache_source,
+// so each is said only to a run that holds it, and only when the run can
+// fetch at all. Telling an agent to fetch and cache through tools it does not
+// have produces apologies, not sources.
+//
+// The connector inlet (M8.2): said when Settings switched connectors on. The
+// switch is not yet the run's own connector grant.
 const CACHE_SOURCES: Fragment = {
   id: 'cache-sources',
   kind: 'instruction',
   uses: ['cache_source'],
   text: `External material you fetch through another MCP server must be written down with cache_source, which stores it under ${SOURCES_DIR}/. Search for an existing copy before fetching: one fetch, a permanent local file, and every later question reads the file.`,
   when: (_grant, options) => options.connectors === true,
+};
+
+// The web inlet (M57.7): said to a run that holds Claude Code's WebFetch (the
+// grant's `web`, by the table), which also finds pages with WebSearch. The
+// CLI's tools are not cerebro's, so `uses` names only cache_source.
+const WEB_SOURCES: Fragment = {
+  id: 'web-sources',
+  kind: 'instruction',
+  uses: ['cache_source'],
+  text: `Pages you fetch with WebFetch or find with WebSearch must be written down with cache_source (kind web, the URL as its id), which keeps them under ${SOURCES_DIR}/. Search for a copy before fetching: one fetch, a local file, and later questions read the file.`,
+  when: (grant) => grant.web === true,
 };
 
 /** The prompt's fixed fragments, each with the tools it names. The rest are
@@ -149,6 +163,7 @@ export const SYSTEM_FRAGMENTS: readonly Fragment[] = [
   KNOWLEDGE,
   KNOWLEDGE_SNAPSHOT,
   CACHE_SOURCES,
+  WEB_SOURCES,
 ];
 
 /**
@@ -196,6 +211,7 @@ export function buildSystemPrompt(
     ...say(KNOWLEDGE),
     ...say(KNOWLEDGE_SNAPSHOT),
     ...say(CACHE_SOURCES),
+    ...say(WEB_SOURCES),
   ];
 
   // The issue keys name no tool, so they keep their M8.2 rule: said whenever

@@ -4,11 +4,12 @@
 //! starts ([`claim_run`]); the claim lasts until the run's commit has landed,
 //! and is let go on Drop, a panic included. While it stands, the paths the
 //! run wrote are its own: the ones its `vault_writes` rows name
-//! (`write_log::run_writes`) and the ones its own Write and Edit calls name
-//! (`RunClaim::note_cli_write`, from `agent::cli_writes`). [`owned_paths`] is
-//! that map, and every other commit leaves those paths alone
-//! (`commit::commit_all`), so a checkpoint never sweeps a live run's half
-//! work into the person's commit. It runs no query when no run is live.
+//! (`write_log::run_writes`) and the ones its own Write and Edit calls wrote,
+//! noted as each call completes (`RunClaim::note_cli_write`, from
+//! `agent::cli_writes`; a deferred call's goes with the run that resumes it).
+//! [`owned_paths`] is that map, and every other commit leaves those paths
+//! alone (`commit::commit_all`), so a checkpoint never sweeps a live run's
+//! half work into the person's commit. It runs no query when no run is live.
 //!
 //! **Settling.** When the run ends, [`settle_run`] commits exactly those
 //! paths through `commit::commit_paths_in`, under the repository's lock, with
@@ -58,7 +59,7 @@ pub struct Owner {
 }
 
 /// One live run's claim on its vault.
-struct Claim {
+struct LiveClaim {
     /// Canonical, so every spelling of the vault finds it.
     vault: PathBuf,
     /// Where the run's runtime database lives.
@@ -68,8 +69,8 @@ struct Claim {
     cli: BTreeSet<String>,
 }
 
-fn claims() -> MutexGuard<'static, HashMap<u64, Claim>> {
-    static CLAIMS: OnceLock<Mutex<HashMap<u64, Claim>>> = OnceLock::new();
+fn claims() -> MutexGuard<'static, HashMap<u64, LiveClaim>> {
+    static CLAIMS: OnceLock<Mutex<HashMap<u64, LiveClaim>>> = OnceLock::new();
     CLAIMS
         .get_or_init(Default::default)
         .lock()
@@ -95,7 +96,7 @@ pub fn claim_run(vault: &Path, data_dir: &Path, run_id: &str, actor: &str) -> Ru
     let vault = canonical(vault);
     claims().insert(
         id,
-        Claim {
+        LiveClaim {
             vault: vault.clone(),
             data_dir: data_dir.to_path_buf(),
             owner: Owner {

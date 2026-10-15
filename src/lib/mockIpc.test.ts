@@ -13,11 +13,18 @@ import COMMENT_TOOLS from '../../src-tauri/fixtures/comment-tools.json';
 import NOTE_TARGETS from '../../src-tauri/fixtures/note-targets.json';
 import QUOTE_CASES from '../../src-tauri/fixtures/quote-cases.json';
 import THREAD_TURNS from '../../src-tauri/fixtures/thread-turns.json';
+import ACTIVITY_WINDOW_CASES from '../../src-tauri/fixtures/activity-window-cases.json';
 import TRASH_CASES from '../../src-tauri/fixtures/trash-cases.json';
+import WAKE_CASES from '../../src-tauri/fixtures/wake-cases.json';
 import APP_CONFIG_RS from '../../src-tauri/src/app_config.rs?raw';
 import CAUSE_RS from '../../src-tauri/src/runtime/cause.rs?raw';
+import LIB_RS from '../../src-tauri/src/lib.rs?raw';
 import MCP_RS from '../../src-tauri/src/mcp.rs?raw';
 import RECEIPT_RS from '../../src-tauri/src/vault/receipt.rs?raw';
+import WAKES_RS from '../../src-tauri/src/runtime/wakes.rs?raw';
+import YAML from 'yaml';
+import BATCH_CASES from '../../src-tauri/fixtures/batch-cases.json';
+import { revertOps } from '@/engine/undoPlan';
 import WRITE_DOORS from '../../src-tauri/fixtures/write-doors.json';
 import {
   fileFromValue,
@@ -29,6 +36,7 @@ import {
 import { demoFleetRuns } from './demoOperational';
 import * as mockGit from './mockGit';
 import * as mock from './mockIpc';
+import { splitFrontmatter } from '@/engine/frontmatter';
 import { sha256Hex } from './sha256';
 
 beforeEach(() => {
@@ -423,6 +431,12 @@ describe('mockIpc', () => {
       const before = mock.peekFile(CONCEPT);
       expect(() => mock.restoreFile(CONCEPT, '# Restored\n')).toThrow(/read-only/);
       expect(mock.peekFile(CONCEPT)).toBe(before);
+      // M60.4: the agent's field writer is refused at the bundle's edge, in
+      // the agent's words.
+      await expect(
+        mock.agentSetFields('/demo-vault', CONCEPT, { set: { verified: true } }, STAMP),
+      ).rejects.toThrow(/written only through write_concept and recheck_concept/);
+      expect(mock.peekFile(CONCEPT)).toBe(before);
     });
 
     it('hard-refuses provenance forgery and alias removal through the valve', async () => {
@@ -612,20 +626,95 @@ describe('mockIpc', () => {
   describe('agentCreate', () => {
     const fs = () =>
       (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
-    const create = (folder: string, slug: string) =>
-      mock.agentCreate('/demo-vault', { folder, slug, body: '# Vendor delay\n' }, STAMP);
+    const create = (folder: string, slug: string, ifExists: string | null = 'suffix') =>
+      mock.agentCreate('/demo-vault', { folder, slug, body: '# Vendor delay\n' }, STAMP, ifExists);
 
     it('writes the note, and picks -2 then -3 when the name is taken', async () => {
       fs().delete('records/risks/vendor-delay.md');
-      expect(await create('records/risks', 'vendor-delay')).toBe(
-        'Created records/risks/vendor-delay.md',
-      );
+      expect(await create('records/risks', 'vendor-delay')).toEqual({
+        path: 'records/risks/vendor-delay.md',
+        taken: null,
+        similar: [],
+        reply: 'Created records/risks/vendor-delay.md',
+      });
       expect(fs().get('records/risks/vendor-delay.md')).toBe('# Vendor delay\n');
-      expect(await create('records/risks', 'vendor-delay')).toBe(
-        'Created records/risks/vendor-delay-2.md',
+      expect((await create('records/risks', 'vendor-delay')).path).toBe(
+        'records/risks/vendor-delay-2.md',
       );
-      expect(await create('records/risks', 'vendor-delay')).toBe(
-        'Created records/risks/vendor-delay-3.md',
+      expect((await create('records/risks', 'vendor-delay')).path).toBe(
+        'records/risks/vendor-delay-3.md',
+      );
+    });
+
+    it('a numbered copy names the taken path (M61.6b)', async () => {
+      mock.resetMockFs();
+      fs().set('records/risks/vendor-delay.md', '# Vendor delay\n');
+      const numbered = await create('records/risks', 'vendor-delay', null);
+      expect(numbered.taken).toBe('records/risks/vendor-delay.md');
+      expect(numbered.reply).toBe(
+        'Created records/risks/vendor-delay-2.md (records/risks/vendor-delay.md was taken, so ' +
+          'this note is records/risks/vendor-delay-2.md)',
+      );
+    });
+
+    it('refuses a taken name in Rust’s words when told to, and logs nothing (M61.6b)', async () => {
+      mock.resetMockFs();
+      fs().set('records/risks/vendor-delay.md', '# Vendor delay\n');
+      const before = new Map(fs());
+      await expect(create('records/risks', 'vendor-delay', 'refuse')).rejects.toThrow(
+        'note_exists: records/risks/vendor-delay.md already exists, so nothing was written. ' +
+          'Read it and change it there, or call again with if_exists "suffix" for a numbered ' +
+          'copy beside it.',
+      );
+      for (const word of ['skip', 'Refuse', '']) {
+        await expect(create('records/risks', 'other', word)).rejects.toThrow(
+          'if_exists must be "suffix" or "refuse"',
+        );
+      }
+      expect(new Map(fs())).toEqual(before);
+      expect(mockWrites()).toEqual([]);
+      // A free name lands as the plain create would.
+      expect((await create('records/risks', 'fresh', 'refuse')).path).toBe(
+        'records/risks/fresh.md',
+      );
+      // Rust says it in the same words.
+      expect(MCP_RS).toContain('"{NOTE_EXISTS}: {path} already exists, so nothing was written.');
+      expect(MCP_RS).toContain('"if_exists must be \\"suffix\\" or \\"refuse\\""');
+    });
+
+    it('lists similar notes: containment in its folder, three at most, never itself (M61.6b)', async () => {
+      mock.resetMockFs();
+      for (const [path, title] of [
+        ['door-cases/vendor-delay.md', 'Vendor delay'],
+        ['door-cases/vendor-delay-port.md', 'Vendor delay at the port'],
+        ['door-cases/q3.md', 'Q3'],
+        ['door-cases/vendor-delay-again.md', 'Vendor delay again'],
+        ['door-cases/vendor-delay-call.md', 'Vendor delay call'],
+        ['door-cases/elsewhere/vendor-delay.md', 'Vendor delay elsewhere'],
+        ['templates/vendor-delay.md', 'Vendor delay template'],
+      ]) {
+        fs().set(path, `# ${title}\n`);
+      }
+      fs().set('door-cases/q3.md', '# Q3\n\nA vendor delay, in the body.\n');
+      const created = await create('door-cases', 'vendor-delay');
+      expect(created.path).toBe('door-cases/vendor-delay-2.md');
+      expect(created.similar).toEqual([
+        { path: 'door-cases/q3.md', title: 'Q3' },
+        { path: 'door-cases/vendor-delay-again.md', title: 'Vendor delay again' },
+        { path: 'door-cases/vendor-delay-call.md', title: 'Vendor delay call' },
+      ]);
+      expect(created.reply).toBe(
+        'Created door-cases/vendor-delay-2.md (door-cases/vendor-delay.md was taken, so this ' +
+          'note is door-cases/vendor-delay-2.md)\n\nSimilar notes already in the vault (advice ' +
+          'only; nothing was merged):\n- door-cases/q3.md: Q3\n- door-cases/vendor-delay-again.md: ' +
+          'Vendor delay again\n- door-cases/vendor-delay-call.md: Vendor delay call',
+      );
+      // An untyped note at the root is compared with nothing.
+      fs().set('vendor-delay.md', '# Vendor delay\n');
+      expect((await create('', 'vendor-delay-root')).similar).toEqual([]);
+      // A refusal lists them after its sentence.
+      await expect(create('door-cases', 'vendor-delay', 'refuse')).rejects.toThrow(
+        /beside it\.\n\nSimilar notes already in the vault \(advice only; nothing was merged\):\n- door-cases\/q3\.md: Q3\n/,
       );
     });
 
@@ -935,6 +1024,124 @@ describe('mockIpc', () => {
   });
 
   /**
+   * The agent's `set_fields` for the browser-mode mock agent (M60.4),
+   * mirroring mcp.rs `set_fields_write`: the record's fields, planned by the
+   * TS twin of Rust's planner, through the refusals Rust makes before writing
+   * a byte, in Rust's order and words.
+   */
+  describe('agentSetFields', () => {
+    const OBJECTIVE = 'records/objectives/obj-launch-pipeline.md';
+    const fs = () =>
+      (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+    const set = (path: string, args: Record<string, unknown>) =>
+      mock.agentSetFields('/demo-vault', path, args, STAMP);
+
+    it('stores an option label as its id, reports it, and logs its stamp', async () => {
+      const before = fs().get(OBJECTIVE)!;
+      const report = await set(OBJECTIVE, { set: { quarter: '2026 Q4' } });
+      const saved = fs().get(OBJECTIVE)!;
+      expect(saved).toBe(before.replace('quarter: 2026-q3', 'quarter: 2026-q4'));
+      expect(report).toBe(
+        [
+          `Set fields on ${OBJECTIVE}.`,
+          'quarter: set to 2026-q4 (from "2026 Q4")',
+          `Hash: ${sha256Hex(saved)}`,
+        ].join('\n'),
+      );
+      expect(mockWrites()).toEqual([
+        {
+          kind: 'vault.write',
+          path: OBJECTIVE,
+          to: null,
+          actor: STAMP.actor,
+          runId: STAMP.runId,
+          approvedBy: null,
+        },
+      ]);
+    });
+
+    it('writes and logs nothing for a set that changes nothing', async () => {
+      const before = new Map(fs());
+      const report = await set(OBJECTIVE, { set: { quarter: '2026 Q3' } });
+      expect(report).toBe(
+        [
+          `Nothing changed on ${OBJECTIVE}.`,
+          'quarter: unchanged',
+          `Hash: ${sha256Hex(fs().get(OBJECTIVE)!)}`,
+        ].join('\n'),
+      );
+      expect(new Map(fs())).toEqual(before);
+      expect(mockWrites()).toEqual([]);
+    });
+
+    it('refuses in Rust\u2019s order and words, and leaves every byte', async () => {
+      fs().set('diagrams/flow.mmd', 'flowchart TD\n  A --> B\n');
+      fs().set('records/agents/scribe.md', '---\ntype: Agent\n---\n\nFile what arrives.\n');
+      fs().set('records/bad.md', '---\nkey: [unclosed\n---\n\n# Bad\n');
+      const before = new Map(fs());
+      const refusals: [string, Record<string, unknown>, string | RegExp][] = [
+        ['', { set: { a: 1 } }, 'set_fields needs a path'],
+        [OBJECTIVE, {}, 'set_fields needs set, add or remove'],
+        [OBJECTIVE, { set: ['quarter'] }, 'set, add and remove must be objects'],
+        [
+          OBJECTIVE,
+          { set: { tags: 'a' }, add: { tags: 'b' } },
+          'tags appears in both set and add; send it once',
+        ],
+        [OBJECTIVE, { set: { a: 1 }, expect_hash: 'abc' }, /^expect_hash must be the 64/],
+        [
+          'knowledge/metrics/onboarding-completion.md',
+          { set: { verified: true } },
+          /written only through write_concept and recheck_concept/,
+        ],
+        [
+          'diagrams/flow.mmd',
+          { set: { a: 1 } },
+          'diagrams/flow.mmd: a .mmd is raw diagram source and has no frontmatter to update',
+        ],
+        ['.git/config', { set: { a: 1 } }, /^not a note/],
+        ['records/nope.md', { set: { a: 1 } }, 'no note at records/nope.md'],
+        [
+          OBJECTIVE,
+          { set: { a: 1 }, expect_hash: '0'.repeat(64) },
+          /^stale_content: records\/objectives\/obj-launch-pipeline.md changed since you read it/,
+        ],
+        ['types/objective.md', { set: { icon: 'x' } }, /^type: Type docs are the vault's schema/],
+        ['records/agents/scribe.md', { set: { recent: 'x' } }, /^type: Agent records are grants/],
+        [
+          'records/bad.md',
+          { set: { a: 1 } },
+          /^records\/bad.md: cannot patch malformed frontmatter/,
+        ],
+        [
+          OBJECTIVE,
+          { set: { key_results: 'obj-field-app-readiness', progress: 50 } },
+          [
+            `schema_invalid: nothing was written to ${OBJECTIVE}.`,
+            '- key_results takes Key result records; [[obj-field-app-readiness]] is typed Objective',
+            "- progress is computed and can't be edited",
+          ].join('\n'),
+        ],
+      ];
+      for (const [path, args, refusal] of refusals) {
+        await expect(set(path, args), `${path} ${JSON.stringify(args)}`).rejects.toThrow(
+          typeof refusal === 'string' ? new Error(refusal) : refusal,
+        );
+      }
+      expect(new Map(fs())).toEqual(before);
+      expect(mockWrites()).toEqual([]);
+    });
+
+    it('composes an add with the bytes on disk now', async () => {
+      await set(OBJECTIVE, { add: { key_results: ['kr-qualified-leads', 'Kr-Pipeline-X'] } });
+      const saved = fs().get(OBJECTIVE)!;
+      expect(saved).toContain('- "[[kr-qualified-leads]]"');
+      expect(saved).toContain('[[Kr-Pipeline-X]]');
+      expect(saved.match(/kr-qualified-leads/g)).toHaveLength(1);
+    });
+  });
+
+  /**
    * Parity with `vault::write::import_attachment` (M16.13c). The mock backend
    * must mirror every Rust-side rule, or a bug only reproduces in the packaged
    * app — the same requirement the knowledge guards are held to.
@@ -1109,7 +1316,10 @@ describe('mockIpc', () => {
       'update_frontmatter',
       'set_note_title',
       'edit_note',
+      'set_fields',
       'restore_version',
+      'batch_patch',
+      'batch_body',
     ];
 
     const call = (c: NoteTargetCase): Promise<string> => {
@@ -1129,9 +1339,27 @@ describe('mockIpc', () => {
           return mock
             .agentEdit('/demo-vault', path, [{ old: 'Seed', new: 'Landed' }], undefined, STAMP)
             .then(() => path);
+        // M60.4: the agent's field write, setting one key.
+        case 'set_fields':
+          return mock
+            .agentSetFields('/demo-vault', path, { set: { status: 'done' } }, STAMP)
+            .then(() => path);
         // M58.4: git_commands.rs judges the target before anything else.
         case 'restore_version':
           return mockGit.restoreNoteVersion('/demo-vault', path, '0'.repeat(40)).then(() => path);
+        // M60.6: one op of a batch, through the batch writer.
+        case 'batch_patch':
+          return mock
+            .applyBatch('/demo-vault', [{ op: 'patch', path, set: { status: 'done' } }])
+            .then(() => path);
+        case 'batch_body':
+          return mock
+            .applyBatch('/demo-vault', [{ op: 'body', path, body: '\n# Landed\n' }])
+            .then(() => path);
+        case 'batch_create':
+          return mock
+            .applyBatch('/demo-vault', [{ op: 'create', path, content: '# Landed\n' }])
+            .then(() => path);
         default:
           throw new Error(`no door called ${c.door}`);
       }
@@ -1156,10 +1384,14 @@ describe('mockIpc', () => {
     it('replays every door both backends share', () => {
       const doors = new Set((NOTE_TARGETS.cases as NoteTargetCase[]).map((c) => c.door));
       expect([...doors].sort()).toEqual([
+        'batch_body',
+        'batch_create',
+        'batch_patch',
         'create_note',
         'edit_note',
         'restore_version',
         'save_note',
+        'set_fields',
         'set_note_title',
         'update_frontmatter',
         'write_text_file',
@@ -1992,7 +2224,8 @@ describe('Claude Code session files, in the browser (M56.3)', () => {
         connectors: false,
         attended: true,
       });
-      if ('deferred' in start) throw new Error('an attended run is never deferred');
+      if ('deferred' in start || 'settled' in start)
+        throw new Error('an attended run always starts');
       const stop = onAgentEvent((event) => {
         if (event.kind === 'Done') done();
       }, start.run);
@@ -2391,7 +2624,7 @@ describe('a mock run that withheld the shell (M57.2)', () => {
       attended: false,
       actor: 'process:shell-probe',
     });
-    if ('deferred' in start) throw new Error('an unlaned run is never deferred');
+    if ('deferred' in start || 'settled' in start) throw new Error('an unlaned run starts');
     expect(start.durableId).toMatch(/^mock-run-/);
     const runs = await mock.fleetRunsPage({ limit: 200 });
     expect(runs).toHaveLength(before + 1);
@@ -2413,7 +2646,7 @@ describe('a mock run that withheld the shell (M57.2)', () => {
       connectors: false,
       attended: false,
     });
-    if ('deferred' in plain) throw new Error('never deferred');
+    if ('deferred' in plain || 'settled' in plain) throw new Error('never deferred');
     expect(plain.durableId).toBeNull();
     expect(await mock.fleetRunsPage({ limit: 200 })).toHaveLength(before + 1);
     await stopAllAgents();
@@ -2584,8 +2817,13 @@ describe('every write carries its stamp (M58.1)', () => {
     seed?: Record<string, string>;
     args: Record<string, unknown>;
     refused?: string;
-    records?: { kind: string; path: string; to?: string } | null;
+    records?: DoorRow | DoorRow[] | null;
     stamp?: { actor: string; run_id: string };
+  }
+  interface DoorRow {
+    kind: string;
+    path: string;
+    to?: string;
   }
 
   const text = (args: Record<string, unknown>, key: string): string =>
@@ -2624,6 +2862,8 @@ describe('every write carries its stamp (M58.1)', () => {
         return mock.deleteNote(VAULT, text(args, 'path'));
       case 'restore_from_trash':
         return mock.restoreFromTrash(VAULT, text(args, 'stamp'));
+      case 'apply_batch':
+        return mock.applyBatch(VAULT, args.ops as unknown[]);
       case 'write_text_file':
         return mock.writeTextFile(VAULT, text(args, 'path'), text(args, 'content'));
       case 'import_attachment':
@@ -2664,6 +2904,8 @@ describe('every write carries its stamp (M58.1)', () => {
           undefined,
           stamp,
         );
+      case 'set_fields':
+        return mock.agentSetFields(VAULT, text(c.args, 'path'), c.args, stamp);
       case 'create_note':
         return mock.agentCreate(
           VAULT,
@@ -2673,6 +2915,7 @@ describe('every write carries its stamp (M58.1)', () => {
             body: text(c.args, 'body'),
           },
           stamp,
+          typeof c.args.if_exists === 'string' ? c.args.if_exists : null,
         );
       default:
         throw new Error(`no agent door called ${c.door}`);
@@ -2688,20 +2931,19 @@ describe('every write carries its stamp (M58.1)', () => {
       return;
     }
     await call();
-    const expected =
-      c.records == null
-        ? []
-        : [
-            {
-              kind: c.records.kind,
-              path: c.records.path,
-              to: c.records.to ?? null,
-              actor: who?.actor ?? mock.HUMAN_ACTOR,
-              runId: who?.runId ?? null,
-              approvedBy: null,
-            },
-          ];
-    expect(mockWrites(), JSON.stringify(c)).toEqual(expected);
+    // M60.6: a batch names each row it records, in order.
+    const rows = c.records == null ? [] : Array.isArray(c.records) ? c.records : [c.records];
+    const expected = rows.map((row) => ({
+      kind: row.kind,
+      path: row.path,
+      to: row.to ?? null,
+      actor: who?.actor ?? mock.HUMAN_ACTOR,
+      runId: who?.runId ?? null,
+      approvedBy: null,
+    }));
+    // A batch's rows carry its id, which Rust keeps no column for.
+    const logged = mockWrites().map(({ batchId: _batch, ...row }) => row);
+    expect(logged, JSON.stringify(c)).toEqual(expected);
   }
 
   it('replays the shared write doors', async () => {
@@ -2979,6 +3221,7 @@ describe('the agent comment tools in the browser (M70.3)', () => {
     why: string;
     tool: string;
     args: Record<string, unknown>;
+    bytes?: string;
     sidecar: string;
     text: string;
     is_error: boolean;
@@ -3014,7 +3257,8 @@ describe('the agent comment tools in the browser (M70.3)', () => {
     const page = COMMENT_TOOLS.page;
     for (const c of COMMENT_TOOLS.calls as Call[]) {
       mock.resetMockFs();
-      fs().set(page, COMMENT_TOOLS.bytes);
+      const bytes = c.bytes ?? COMMENT_TOOLS.bytes;
+      fs().set(page, bytes);
       if (c.sidecar === 'seeded') fs().set(sidecarPathOf(page), seeded());
       else if (c.sidecar !== 'none') fs().set(sidecarPathOf(page), c.sidecar);
       const sideBefore = fs().get(sidecarPathOf(page));
@@ -3026,7 +3270,7 @@ describe('the agent comment tools in the browser (M70.3)', () => {
         text = err instanceof Error ? err.message : String(err);
         refused = true;
       }
-      expect(fs().get(page), c.why).toBe(COMMENT_TOOLS.bytes);
+      expect(fs().get(page), c.why).toBe(bytes);
       expect(refused, `${c.why}: ${text}`).toBe(c.is_error);
       if (c.posted === undefined) {
         expect(text, c.why).toBe(c.text);
@@ -3224,4 +3468,688 @@ describe('an @agent in a comment thread, in the browser (M70.4)', () => {
     expect(gone?.deleted).toBeDefined();
     expect(gone?.body).toBe('');
   });
+});
+
+describe("History's activity read (M64.2)", () => {
+  const VAULT = '/demo-vault';
+  const WINDOW = ['2025-07-23T00:00:00Z', '2026-07-29T00:00:00Z'] as const;
+
+  it("replays activity-window-cases.json: refusals in Rust's words", async () => {
+    const words = ACTIVITY_WINDOW_CASES.words as Record<string, string>;
+    expect(mock.ACTIVITY_WORDS.backwards).toBe(words.backwards);
+    expect(mock.ACTIVITY_WORDS.too_long).toBe(words.too_long);
+    expect(mock.ACTIVITY_WORDS.not_an_instant('x')).toBe(
+      words.not_an_instant.replace('{value}', 'x'),
+    );
+    for (const c of ACTIVITY_WINDOW_CASES.cases as {
+      since: string;
+      until: string;
+      refusal: string | null;
+      value?: string;
+      since_utc?: string;
+      until_utc?: string;
+    }[]) {
+      if (c.refusal === null) {
+        expect(mock.parseActivityWindow(c.since, c.until), c.since).toEqual({
+          since: Date.parse(c.since_utc!),
+          until: Date.parse(c.until_utc!),
+        });
+        await expect(mock.vaultActivity(VAULT, c.since, c.until)).resolves.toBeTruthy();
+      } else {
+        const expected = words[c.refusal].replace('{value}', c.value ?? '');
+        await expect(mock.vaultActivity(VAULT, c.since, c.until), c.since).rejects.toThrow(
+          expected,
+        );
+      }
+    }
+  });
+
+  it('serves the demo history, apart from the live write log', async () => {
+    const got = await mock.vaultActivity(VAULT, ...WINDOW);
+    expect(got.recording_since).toEqual({ state: 'read', at: '2026-07-21T10:00:00.000Z' });
+    // Newest first by when each row landed.
+    expect(got.writes.state === 'read' && got.writes.rows.map((w) => w.at.slice(0, 16))).toEqual([
+      '2026-07-28T09:26',
+      '2026-07-28T09:18',
+      '2026-07-28T09:05',
+      '2026-07-27T14:31',
+      '2026-07-27T14:12',
+      '2026-07-21T10:04',
+    ]);
+    expect(got.runs.state === 'read' && got.runs.rows.map((r) => r.run_id)).toContain(
+      'run-scout-1',
+    );
+    const scout =
+      got.runs.state === 'read' ? got.runs.rows.find((r) => r.run_id === 'run-scout-1') : null;
+    expect(scout?.writes_booked).toBe(1);
+    expect(got.app_sessions.state === 'read' && got.app_sessions.rows).toHaveLength(7);
+    expect((window as unknown as { __cerebroMockWrites: unknown[] }).__cerebroMockWrites).toEqual(
+      [],
+    );
+  });
+
+  it("sets content from Rust's kinds", async () => {
+    mock.__seedActivity({
+      writes: [
+        {
+          kind: 'vault.comment',
+          path: '.comments/a.md.json',
+          to: null,
+          actor: 'human:owner',
+          run_id: null,
+          approved_by: null,
+          first_at: '2026-07-28T09:00:00.000Z',
+          at: '2026-07-28T09:00:00.000Z',
+        },
+      ],
+    });
+    const got = await mock.vaultActivity(VAULT, ...WINDOW);
+    expect(got.writes.state === 'read' && got.writes.rows.map((w) => w.content)).toEqual([false]);
+  });
+
+  it("lists a live save stamped with the clock's time", async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-07-28T12:00:00Z'));
+    try {
+      await mock.saveNote(VAULT, 'delivery/how-we-schedule.md', '# How we schedule\n\nSaved.\n');
+      const got = await mock.vaultActivity(VAULT, ...WINDOW);
+      expect(got.writes.state === 'read' && got.writes.rows[0]).toMatchObject({
+        kind: 'vault.write',
+        content: true,
+        path: 'delivery/how-we-schedule.md',
+        actor: 'human:me',
+        first_at: '2026-07-28T12:00:00.000Z',
+        at: '2026-07-28T12:00:00.000Z',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('fails each lane alone', async () => {
+    mock.__seedActivity({ sessions: null });
+    let got = await mock.vaultActivity(VAULT, ...WINDOW);
+    expect(got.app_sessions.state).toBe('unavailable');
+    expect([got.writes.state, got.runs.state, got.recording_since.state]).toEqual([
+      'read',
+      'read',
+      'read',
+    ]);
+    mock.resetMockFs();
+    mock.__seedFleet(null);
+    got = await mock.vaultActivity(VAULT, ...WINDOW);
+    expect(got.runs).toEqual({
+      state: 'unavailable',
+      reason: 'no runtime database for this workspace',
+    });
+    expect([got.writes.state, got.app_sessions.state]).toEqual(['read', 'read']);
+  });
+
+  it('restores the demo activity on reset', async () => {
+    mock.__seedActivity({ writes: null, sessions: [] });
+    mock.resetMockFs();
+    const got = await mock.vaultActivity(VAULT, ...WINDOW);
+    expect(got.writes.state).toBe('read');
+    expect(got.app_sessions.state === 'read' && got.app_sessions.rows).toHaveLength(7);
+  });
+});
+
+describe("a page's History read (M64.2b)", () => {
+  const VAULT = '/demo-vault';
+  const PAGE = 'delivery/how-we-schedule.md';
+  const CUTOVER = 'knowledge/playbooks/warehouse-cutover.md';
+  beforeEach(() => mock.resetMockFs());
+
+  it("refuses a path outside the vault in Rust's words", async () => {
+    // lib.rs `page_outside_vault`, word for word.
+    expect(LIB_RS).toContain('format!("{path} is outside this vault, so it has no history here.")');
+    for (const path of ['../outside.md', '/etc/outside.md']) {
+      await expect(mock.pageActivity(VAULT, path)).rejects.toThrow(mock.pageOutsideVault(path));
+    }
+    expect(mock.pageOutsideVault('../x.md')).toBe(
+      '../x.md is outside this vault, so it has no history here.',
+    );
+  });
+
+  it("reads a renamed page's rows under its old names, and its comments", async () => {
+    await mock.saveNote(VAULT, PAGE, '# How we schedule\n\nSaved.\n');
+    await mock.startCommentThread(VAULT, PAGE, null, 'A note.');
+    await mock.renameNote(VAULT, PAGE, 'delivery/schedule.md');
+    await mock.renameNote(VAULT, 'delivery/schedule.md', 'delivery/when-we-ship.md');
+    const got = await mock.pageActivity(VAULT, 'delivery/when-we-ship.md');
+    expect(got.chain).toEqual(['delivery/when-we-ship.md', 'delivery/schedule.md', PAGE]);
+    if (got.writes.state !== 'read') throw new Error('the writes lane reads');
+    const kinds = got.writes.rows.map((w) => `${w.kind} ${w.path}`);
+    expect(kinds).toContain(`vault.write ${PAGE}`);
+    expect(kinds).toContain(`vault.comment .comments/${PAGE}.json`);
+    // The demo's own NULL-actor edit of the old name is the page's too.
+    expect(got.writes.rows.some((w) => w.actor === null && w.path === PAGE)).toBe(true);
+    expect(got.knowledge).toBeNull();
+    expect(got.recording_since).toEqual({ state: 'read', at: '2026-07-21T10:00:00.000Z' });
+  });
+
+  it('names the runs that wrote the page, and fails that lane alone', async () => {
+    const risk = 'records/risks/risk-scanner-delivery.md';
+    const got = await mock.pageActivity(VAULT, risk);
+    expect(got.runs.state === 'read' && got.runs.rows.map((r) => r.run_id)).toEqual([
+      'run-scout-1',
+    ]);
+    mock.__seedFleet(null);
+    const down = await mock.pageActivity(VAULT, risk);
+    expect(down.runs.state).toBe('unavailable');
+    expect(down.writes.state).toBe('read');
+    mock.__seedActivity({ writes: null });
+    const blind = await mock.pageActivity(VAULT, risk);
+    expect([blind.writes.state, blind.runs.state, blind.recording_since.state]).toEqual([
+      'unavailable',
+      'unavailable',
+      'unavailable',
+    ]);
+  });
+
+  it('reads each concept seed state', async () => {
+    const created = await mock.pageActivity(VAULT, CUTOVER);
+    expect(created.knowledge?.state).toBe('read');
+    expect(
+      created.knowledge?.state === 'read' &&
+        created.knowledge.events.map((e) => [e.kind, e.actor, e.run_id, e.state]),
+    ).toEqual([
+      ['created', 'process:knowledge', 'run-ingest-2', null],
+      ['proposal', 'process:knowledge', 'run-ingest-2', 'applied'],
+    ]);
+    const other = [
+      ...(window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs.keys(),
+    ].find(
+      (p) =>
+        p.startsWith('knowledge/') &&
+        p.endsWith('.md') &&
+        p !== CUTOVER &&
+        p !== 'knowledge/systems/pick-queue-drain.md',
+    )!;
+    expect((await mock.pageActivity(VAULT, other)).knowledge).toEqual({ state: 'not_recorded' });
+    mock.__seedConceptHistory(CUTOVER, null);
+    expect((await mock.pageActivity(VAULT, CUTOVER)).knowledge?.state).toBe('unavailable');
+    mock.__seedConceptHistory(CUTOVER, 'not_recorded');
+    expect((await mock.pageActivity(VAULT, CUTOVER)).knowledge).toEqual({ state: 'not_recorded' });
+    mock.__seedConceptHistory(CUTOVER, []);
+    expect((await mock.pageActivity(VAULT, CUTOVER)).knowledge).toEqual({
+      state: 'read',
+      events: [],
+    });
+    mock.resetMockFs();
+    expect((await mock.pageActivity(VAULT, CUTOVER)).knowledge?.state).toBe('read');
+  });
+});
+
+describe('durable wakes (M63.1)', () => {
+  const VAULT_W = '/demo-vault';
+  beforeEach(() => mock.resetMockFs());
+  const snapshot = () =>
+    (window as unknown as { __cerebroMockWakes: () => mock.MockWake[] }).__cerebroMockWakes();
+  /** The latest wake admitted with this key, as wake-cases.json names one. */
+  const idOf = (key: string) => {
+    const found = snapshot()
+      .filter((w) => w.wakeKey === key)
+      .at(-1);
+    if (found === undefined) throw new Error(`no wake with key ${key.slice(0, 8)}`);
+    return found.wakeId;
+  };
+
+  it('replays wake-cases.json: admission, claims, finishes, cancels, pauses and expiry', async () => {
+    expect(WAKE_CASES.cancel_whys).toEqual([
+      'paused',
+      'trigger_changed',
+      'agent_gone',
+      'page_gone',
+    ]);
+    for (const scenario of WAKE_CASES.scenarios) {
+      mock.resetMockFs();
+      const runs = new Map<string, string>();
+      for (const [n, raw] of scenario.steps.entries()) {
+        // One step, read loosely: each op names its own fields.
+        const step = raw as Record<string, unknown> & { op: string; at?: string; expect?: unknown };
+        const here = `${scenario.why}, step ${n}`;
+        const at = new Date(step.at ?? '2026-10-13T09:00:00Z');
+        const expected = step.expect;
+        switch (step.op) {
+          case 'admit': {
+            const got = await mock.admitWakes(VAULT_W, step.offers as never, at);
+            expect(got, here).toEqual(expected);
+            break;
+          }
+          case 'pause':
+            vi.useFakeTimers({ toFake: ['Date'] });
+            vi.setSystemTime(at);
+            await mock.setAgentPaused(VAULT_W, step.agent as string, step.paused as boolean);
+            vi.useRealTimers();
+            break;
+          case 'expire':
+            expect(mock.expireMockWakes(VAULT_W, at), here).toBe(
+              (expected as { expired: number }).expired,
+            );
+            break;
+          case 'cancel': {
+            const cancels = (step.cancels as { wake: string; why: string }[]).map((c) => ({
+              wakeId: idOf(c.wake),
+              why: c.why as never,
+            }));
+            const answer = mock.cancelWakes(VAULT_W, cancels, at);
+            if ((expected as { error?: boolean }).error === true) {
+              await expect(answer, here).rejects.toThrow(/is not a reason to cancel a wake/);
+            } else {
+              expect(await answer, here).toBe((expected as { cancelled: number }).cancelled);
+            }
+            break;
+          }
+          case 'claim': {
+            const key = step.wake as string;
+            const runId = `fixture-run-${n}`;
+            const claim = () =>
+              mock.claimMockWake(
+                VAULT_W,
+                step.agent as string,
+                { claim: idOf(key), coalesce: (step.coalesce as string[]).map(idOf) },
+                runId,
+                at,
+              );
+            if ((expected as { error?: boolean }).error === true) {
+              const before = JSON.stringify(snapshot());
+              expect(claim, here).toThrow();
+              expect(JSON.stringify(snapshot()), `${here}: an error changes nothing`).toBe(before);
+              break;
+            }
+            const got = claim();
+            if (got === 'gone') {
+              expect(expected, here).toBe('gone');
+            } else if ('deferred' in got) {
+              expect(got.deferred, here).toEqual((expected as { deferred: string[] }).deferred);
+            } else {
+              const started = (expected as { started: { cause: unknown; also: string[] } }).started;
+              expect(got.started.cause, here).toEqual(started.cause);
+              expect(
+                got.started.also.map((c) => c.subject),
+                here,
+              ).toEqual(started.also);
+              runs.set(key, runId);
+            }
+            break;
+          }
+          case 'finish':
+            mock.finishMockWake(
+              runs.get(step.wake as string) as string,
+              step.outcome as string,
+              at,
+            );
+            break;
+          case 'pending': {
+            const listed = (await mock.wakesPending(VAULT_W, at)).map((w) => ({
+              wakeKey: w.wakeKey,
+              notBefore: w.notBefore,
+              deferred: w.deferred,
+            }));
+            expect(listed, here).toEqual(expected);
+            break;
+          }
+          case 'rows':
+            expect(
+              snapshot().map((w) => ({
+                wakeKey: w.wakeKey,
+                state: w.state,
+                outcome: w.outcome,
+                reason: w.reason,
+                detail: w.detail,
+              })),
+              here,
+            ).toEqual(expected);
+            break;
+          default:
+            throw new Error(`${here}: unknown op ${step.op}`);
+        }
+      }
+    }
+  });
+
+  it("setAgentPaused cancels the agent's pending wakes, and resuming cancels nothing", async () => {
+    const offer = (agent: string, key: string) => ({
+      agent,
+      wakeKey: key.repeat(64),
+      trigger: '1'.repeat(16),
+      cause: { kind: 'event', subject: 'records/risks/a.md' },
+    });
+    await mock.admitWakes(VAULT_W, [offer('process:scout', 'a'), offer('process:other', 'b')]);
+    await mock.setAgentPaused(VAULT_W, 'process:scout', true);
+    await mock.setAgentPaused(VAULT_W, 'process:scout', false);
+    expect(snapshot().map((w) => [w.agent, w.state, w.detail])).toEqual([
+      ['process:scout', 'finished', 'paused'],
+      ['process:other', 'pending', null],
+    ]);
+  });
+
+  it('resetOperational empties the store', async () => {
+    await mock.admitWakes(VAULT_W, [
+      {
+        agent: 'process:scout',
+        wakeKey: 'a'.repeat(64),
+        trigger: '1'.repeat(16),
+        cause: { kind: 'event', subject: 'records/risks/a.md' },
+      },
+    ]);
+    expect(snapshot()).toHaveLength(1);
+    mock.resetOperational();
+    expect(snapshot()).toEqual([]);
+    expect(await mock.wakesPending(VAULT_W)).toEqual([]);
+  });
+});
+
+describe('what is waiting to wake an agent (M63.1b)', () => {
+  const V = '/demo-vault';
+  const NOW = new Date('2026-10-13T12:00:00.000Z');
+  const at = (raw: string) => `2026-10-${raw}.000Z`;
+  beforeEach(() => mock.resetMockFs());
+
+  /** Rust's `words` source, with its one interpolated constant read in. */
+  const rustWords = (() => {
+    const days = /pub const WAKE_TTL_DAYS: i64 = (\d+);/.exec(WAKES_RS)?.[1];
+    if (days === undefined) throw new Error('WAKE_TTL_DAYS not found in wakes.rs');
+    return WAKES_RS.replaceAll('{WAKE_TTL_DAYS}', days);
+  })();
+
+  it('says every end in Rust’s words, read from wakes.rs', () => {
+    const named = [
+      ...['paused', 'trigger_changed', 'agent_gone', 'page_gone'].map((why) =>
+        mock.mockWakeWords('cancelled', 'superseded', why),
+      ),
+      mock.mockWakeWords('cancelled', 'expired', null),
+      mock.mockWakeWords(null, null, null),
+    ];
+    for (const words of named) expect(rustWords).toContain(`"${words}"`);
+    expect(named).toContain('expired — waited more than 7 days');
+    expect(named).toContain('waiting');
+    const unnamed = mock.mockWakeWords('skipped', 'cycle', null);
+    expect(unnamed).toBe('skipped (or cancelled) for a reason this version does not name (cycle)');
+    const prefix = unnamed.slice(0, unnamed.lastIndexOf(' ('));
+    expect(rustWords).toContain(`"${prefix}"`);
+    expect(mock.mockWakeWords('cancelled', 'superseded', 'renamed')).toBe(
+      `${prefix} (superseded: renamed)`,
+    );
+    expect(mock.mockWakeWords('cancelled', null, null)).toBe(`${prefix} (not recorded)`);
+    // A mock wake's cause says its kind in cause.rs's words.
+    expect(CAUSE_RS).toContain('("event", "a vault change matched its trigger")');
+  });
+
+  it('lists pending oldest first, then skipped and expired newest first, as fleet::wakes does', async () => {
+    mock.__seedWakes([
+      { vault: V, agent: 'process:scout', admittedAt: at('13T10:00:00') },
+      { vault: V, agent: 'process:scout', admittedAt: at('13T09:00:00') },
+      {
+        vault: V,
+        agent: 'process:scout',
+        admittedAt: at('13T06:00:00'),
+        finishedAt: at('13T07:00:00'),
+        outcome: 'skipped',
+        reason: 'cycle',
+      },
+      {
+        vault: V,
+        agent: 'process:scout',
+        admittedAt: at('05T06:00:00'),
+        finishedAt: at('12T07:00:00'),
+        outcome: 'cancelled',
+        reason: 'expired',
+      },
+      {
+        vault: V,
+        agent: 'process:scout',
+        admittedAt: at('13T08:00:00'),
+        finishedAt: at('13T08:30:00'),
+        outcome: 'cancelled',
+        reason: 'superseded',
+        detail: 'paused',
+      },
+      {
+        vault: V,
+        agent: 'process:scout',
+        admittedAt: at('13T08:00:00'),
+        finishedAt: at('13T08:30:00'),
+        outcome: 'succeeded',
+        runId: 'r1',
+      },
+      {
+        vault: V,
+        agent: 'process:scout',
+        admittedAt: at('01T06:00:00'),
+        finishedAt: at('01T07:00:00'),
+        outcome: 'skipped',
+        reason: 'cycle',
+      },
+      { vault: '/elsewhere', agent: 'process:scout', admittedAt: at('13T09:00:00') },
+    ]);
+    const listed = await mock.fleetWakes(V, null, NOW);
+    expect(listed.map((w) => [w.admittedAt.slice(8, 16), w.state])).toEqual([
+      ['13T09:00', 'pending'],
+      ['13T10:00', 'pending'],
+      ['13T06:00', 'skipped'],
+      ['05T06:00', 'expired'],
+    ]);
+    expect(listed[3].words).toBe('expired — waited more than 7 days');
+    expect(listed[0].cause?.why).toBe('a vault change matched its trigger');
+    expect(await mock.fleetWakes(V, 'process:other', NOW)).toEqual([]);
+  });
+
+  it('caps the list at 200', async () => {
+    mock.__seedWakes(
+      Array.from({ length: 210 }, (_, n) => ({
+        vault: V,
+        agent: 'process:scout',
+        admittedAt: new Date(NOW.getTime() - (210 - n) * 1000).toISOString(),
+      })),
+    );
+    expect(await mock.fleetWakes(V, null, NOW)).toHaveLength(200);
+  });
+
+  it('a null seed makes the read refuse, and a reset makes it read again', async () => {
+    const seed = (window as unknown as { __cerebroSeedWakes: typeof mock.__seedWakes })
+      .__cerebroSeedWakes;
+    seed(null);
+    await expect(mock.fleetWakes(V)).rejects.toThrow('no runtime database');
+    mock.resetMockFs();
+    expect(await mock.fleetWakes(V)).toEqual([]);
+  });
+});
+
+/**
+ * M60.6: the mock's batch writer mirrors batch.rs in its order, words and
+ * outcomes. The cases are the ones batch.rs replays; YAML bytes are never
+ * compared, only parsed frontmatter and exact bodies.
+ */
+describe('applyBatch — parity with batch.rs (M60.6)', () => {
+  const VAULT_PATH = '/demo-vault';
+  interface BatchCase {
+    name: string;
+    seed: Record<string, string>;
+    ops: unknown[];
+    journal?: boolean;
+    refused?: string;
+    written?: string[];
+    after?: Record<string, { frontmatter: unknown; body: string } | null>;
+    keys?: Record<string, unknown[]>;
+    trashed?: string[];
+  }
+  const disk = () =>
+    (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+  const parsed = (text: string) => {
+    const { yaml, body } = splitFrontmatter(text);
+    return { frontmatter: yaml === null ? null : (YAML.parse(yaml) ?? {}), body };
+  };
+
+  for (const c of BATCH_CASES.cases as BatchCase[]) {
+    it(c.name, async () => {
+      for (const [path, raw] of Object.entries(c.seed)) disk().set(path, raw);
+      if (c.journal === false) mock.__setMockJournal(false);
+      const ops = c.ops.map((op) => {
+        const named = (op as { expectHash?: unknown }).expectHash;
+        return typeof named === 'string' && named.startsWith('HASH:')
+          ? { ...(op as object), expectHash: sha256Hex(c.seed[named.slice(5)]) }
+          : op;
+      });
+      const before = new Map(disk());
+      const writesBefore = mockWrites().length;
+      if (c.refused !== undefined) {
+        await expect(mock.applyBatch(VAULT_PATH, ops)).rejects.toThrow(c.refused);
+        expect(new Map(disk())).toEqual(before);
+        expect(mockWrites()).toHaveLength(writesBefore);
+        return;
+      }
+      const applied = await mock.applyBatch(VAULT_PATH, ops);
+      expect(applied.files.map((f) => f.path)).toEqual(c.written);
+      for (const [path, want] of Object.entries(c.after ?? {})) {
+        const text = disk().get(path);
+        if (want === null) expect(text, path).toBeUndefined();
+        else expect(parsed(text ?? ''), path).toEqual(want);
+      }
+      for (const [path, keys] of Object.entries(c.keys ?? {})) {
+        expect(applied.files.find((f) => f.path === path)?.keys).toEqual(keys);
+      }
+      for (const path of c.trashed ?? []) {
+        const copies = [...disk()].filter(
+          ([key, raw]) =>
+            key.startsWith('.trash/') && key.endsWith(`/${path}`) && raw === c.seed[path],
+        );
+        expect(copies, path).toHaveLength(1);
+      }
+      const ids = new Set(
+        mockWrites()
+          .slice(writesBefore)
+          .map((w) => w.batchId),
+      );
+      expect([...ids]).toEqual([applied.batchId]);
+    });
+  }
+
+  it('holds the limits batch.rs holds, and refuses past them', async () => {
+    const one = { op: 'patch', path: 'records/a.md', set: { status: 'done' } };
+    disk().set('records/a.md', '---\nstatus: todo\n---\n\n# A\n');
+    await expect(
+      mock.applyBatch(
+        VAULT_PATH,
+        Array.from({ length: BATCH_CASES.limits.maxOps + 1 }, () => one),
+      ),
+    ).rejects.toThrow(`at most ${BATCH_CASES.limits.maxOps} steps; this one has 2001`);
+    await expect(
+      mock.applyBatch(VAULT_PATH, [
+        one,
+        { op: 'create', path: 'records/huge.md', content: 'x'.repeat(BATCH_CASES.limits.maxBytes) },
+      ]),
+    ).rejects.toThrow('at most 16 MiB of pages');
+    expect(disk().has('records/huge.md')).toBe(false);
+  });
+
+  it("the no-journal seam refuses in Rust's words, and a reset opens it again", async () => {
+    disk().set('records/a.md', '---\nstatus: todo\n---\n\n# A\n');
+    mock.__setMockJournal(false);
+    const op = { op: 'patch', path: 'records/a.md', set: { status: 'done' } };
+    await expect(mock.applyBatch(VAULT_PATH, [op])).rejects.toThrow(
+      "Couldn't start the change: the runtime database isn't open, so nothing was written.",
+    );
+    mock.resetMockFs();
+    disk().set('records/a.md', '---\nstatus: todo\n---\n\n# A\n');
+    await expect(mock.applyBatch(VAULT_PATH, [op])).resolves.toMatchObject({
+      files: [{ path: 'records/a.md' }],
+    });
+  });
+
+  it('logs every row of one change under one batch id', async () => {
+    disk().set('records/a.md', '---\nstatus: todo\n---\n\n# A\n');
+    disk().set('records/b.md', '---\nstatus: todo\n---\n\n# B\n');
+    const applied = await mock.applyBatch(VAULT_PATH, [
+      { op: 'patch', path: 'records/a.md', set: { status: 'done' } },
+      { op: 'delete', path: 'records/b.md' },
+    ]);
+    expect(mockWrites().map((w) => [w.kind, w.path, w.batchId])).toEqual([
+      ['vault.delete', 'records/b.md', applied.batchId],
+      ['vault.write', 'records/a.md', applied.batchId],
+    ]);
+    await mock.saveNote(VAULT_PATH, 'records/a.md', '\n# A\n');
+    expect(mockWrites().at(-1)).not.toHaveProperty('batchId');
+  });
+
+  it('opens with nothing to put back', async () => {
+    expect(await mock.startWatcher(VAULT_PATH)).toEqual({ unfinished: 0, restored: 0, kept: 0 });
+  });
+});
+
+/**
+ * M60.7: undo is a revert op built from each page's result, and the mock
+ * reverts as batch.rs does: back byte for byte while a page holds what the
+ * change wrote, key by key for a frontmatter-only change touched since, and
+ * refused as stale_content otherwise. The cases are batch.rs's `reverts`.
+ */
+describe('applyBatch revert — parity with batch.rs (M60.7)', () => {
+  const VAULT_PATH = '/demo-vault';
+  interface RevertCase {
+    name: string;
+    seed: Record<string, string>;
+    ops: unknown[];
+    between?: Record<string, string | null>;
+    emptyTrash?: boolean;
+    refused?: string;
+    written?: string[];
+    exact?: string[];
+    after?: Record<string, { frontmatter: unknown; body: string } | null>;
+    skipped?: Record<string, unknown>;
+    trashedAs?: Record<string, string>;
+    redo?: boolean;
+  }
+  const disk = () =>
+    (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+  const parsed = (text: string) => {
+    const { yaml, body } = splitFrontmatter(text);
+    return { frontmatter: yaml === null ? null : (YAML.parse(yaml) ?? {}), body };
+  };
+
+  for (const c of (BATCH_CASES as unknown as { reverts: RevertCase[] }).reverts) {
+    it(c.name, async () => {
+      for (const [path, raw] of Object.entries(c.seed)) disk().set(path, raw);
+      const first = await mock.applyBatch(VAULT_PATH, c.ops);
+      const changed = first.files.map((f) => [f.path, disk().get(f.path)] as const);
+      for (const [path, raw] of Object.entries(c.between ?? {})) {
+        if (raw === null) disk().delete(path);
+        else disk().set(path, raw);
+      }
+      if (c.emptyTrash === true) {
+        for (const key of [...disk().keys()]) if (key.startsWith('.trash/')) disk().delete(key);
+      }
+      const before = new Map(disk());
+      const writesBefore = mockWrites().length;
+      if (c.refused !== undefined) {
+        await expect(mock.applyBatch(VAULT_PATH, revertOps(first.files))).rejects.toThrow(
+          c.refused,
+        );
+        expect(new Map(disk())).toEqual(before);
+        expect(mockWrites()).toHaveLength(writesBefore);
+        return;
+      }
+      const undone = await mock.applyBatch(VAULT_PATH, revertOps(first.files));
+      expect(undone.files.map((f) => f.path)).toEqual(c.written);
+      for (const path of c.exact ?? []) expect(disk().get(path), path).toBe(c.seed[path]);
+      for (const [path, want] of Object.entries(c.after ?? {})) {
+        const text = disk().get(path);
+        if (want === null) expect(text, path).toBeUndefined();
+        else expect(parsed(text ?? ''), path).toEqual(want);
+      }
+      for (const [path, want] of Object.entries(c.skipped ?? {})) {
+        expect(undone.files.find((f) => f.path === path)?.skipped, path).toEqual(want);
+      }
+      for (const [path, bytes] of Object.entries(c.trashedAs ?? {})) {
+        const copies = [...disk()].filter(
+          ([key, raw]) => key.startsWith('.trash/') && key.endsWith(`/${path}`) && raw === bytes,
+        );
+        expect(copies, path).toHaveLength(1);
+      }
+      if (c.redo === true) {
+        await mock.applyBatch(VAULT_PATH, revertOps(undone.files));
+        for (const [path, bytes] of changed) expect(disk().get(path), path).toBe(bytes);
+      }
+    });
+  }
 });

@@ -3,14 +3,9 @@ import { useOpenPath } from '@/app/useOpenPath';
 import { EntryIcon, PageIconGlyph } from '@/components/PageIcon';
 import { Icon } from '@/components/ui/Icon';
 import { pageIconOf } from '@/engine/pageChrome';
-import {
-  isLinkablePage,
-  linkTargetsFor,
-  resolvePageRef,
-  statusFieldOf,
-  type PageRef,
-} from '@/engine/pageCard';
+import { isLinkablePage, resolvePageRef, statusFieldOf, type PageRef } from '@/engine/pageCard';
 import type { Entry, Schema } from '@/engine/types';
+import { linkTargetsFor } from '@/engine/wikilink';
 import { rankNames } from '@/lib/nameRank';
 import { useRecency } from '@/stores/openLogStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';

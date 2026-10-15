@@ -341,3 +341,95 @@ describe('CalendarView day-add is keyboard-reachable (M16.35)', () => {
     expect(onCreateOn).toHaveBeenCalledWith('Retro', '2026-08-05');
   });
 });
+
+/**
+ * Week and Day draw the hours (M61.8): an all-day row on top for records with
+ * no time of day, then the hours grid for the timed ones. Month is unchanged.
+ */
+describe('CalendarView hours (M61.8)', () => {
+  const hoursDays = () => screen.getAllByTestId('calendar-hours-day');
+
+  it('draws one column in Day, steps one day, and heads with the full date', async () => {
+    const user = userEvent.setup();
+    setup([], { calendarSpan: 'day' });
+    expect(screen.getByTestId('calendar-month').textContent).toBe('Wednesday, August 12, 2026');
+    expect(hoursDays()).toHaveLength(1);
+    expect(hoursDays()[0].getAttribute('data-day')).toBe('2026-08-12');
+    expect(dayCells()).toHaveLength(1);
+
+    await user.click(screen.getByRole('button', { name: 'Next day' }));
+    expect(screen.getByTestId('calendar-month').textContent).toBe('Thursday, August 13, 2026');
+    expect(hoursDays()[0].getAttribute('data-day')).toBe('2026-08-13');
+    // Today is a day off-screen, so the jump back is offered — and lands.
+    await user.click(screen.getByRole('button', { name: 'Today' }));
+    expect(hoursDays()[0].getAttribute('data-day')).toBe('2026-08-12');
+  });
+
+  it('switches to Day from the header', async () => {
+    const user = userEvent.setup();
+    setup([]);
+    await user.click(screen.getByTestId('calendar-span-day'));
+    expect(screen.getByTestId('calendar-view').getAttribute('data-span')).toBe('day');
+    expect(hoursDays()).toHaveLength(1);
+  });
+
+  it('keeps seven day cells in the Week all-day row, above seven hour columns', () => {
+    setup([], { calendarSpan: 'week' });
+    const allDay = screen.getByTestId('calendar-all-day');
+    expect(allDay.querySelectorAll('[data-testid="calendar-day"]')).toHaveLength(7);
+    expect(hoursDays()).toHaveLength(7);
+    expect(screen.getByTestId('calendar-zone')).toBeTruthy();
+  });
+
+  it('puts a timed record only in the hours, and a date-only one only in the all-day row', () => {
+    setup(
+      [
+        spanning('standup', '2026-08-12 10:00', '2026-08-12 11:00'),
+        spanning('offsite', '2026-08-13', '2026-08-14'),
+      ],
+      { calendarSpan: 'week' },
+    );
+    const block = screen.getByTestId('calendar-block');
+    expect(block.getAttribute('data-path')).toBe('records/campaigns/standup.md');
+    expect(block.getAttribute('data-start')).toBe('600');
+    const allDay = screen.getByTestId('calendar-all-day');
+    expect(allDay.textContent).not.toContain('standup');
+    expect(allDay.textContent).toContain('offsite');
+    expect(screen.getByTestId('calendar-hours').textContent).not.toContain('offsite');
+  });
+
+  it('keeps a midnight-ended record on its first day in Week and in Month', () => {
+    const late = spanning('late-deploy', '2026-08-12 22:00', '2026-08-13 00:00');
+    setup([late], { calendarSpan: 'week' });
+    const block = screen.getByTestId('calendar-block');
+    expect(block.getAttribute('data-day')).toBe('2026-08-12');
+    expect(block.getAttribute('data-end')).toBe('1440');
+    cleanup();
+    setup([late]);
+    expect(dayCell('2026-08-12').textContent).toContain('late-deploy');
+    expect(dayCell('2026-08-13').textContent).not.toContain('late-deploy');
+  });
+
+  it('draws the now line from the now prop', () => {
+    const entries = vault([]);
+    const schema = buildSchema(entries);
+    useVaultStore.setState({ entries });
+    render(
+      <CalendarView
+        entries={[]}
+        presentation={{ ...presentation, calendarSpan: 'week' }}
+        schema={schema}
+        fields={columnUniverse({ type: 'Campaign', project: null }, [], schema)}
+        today={TODAY}
+        now={new Date(2026, 7, 12, 9, 30)}
+      />,
+    );
+    expect(screen.getByTestId('calendar-now').getAttribute('data-minute')).toBe('570');
+  });
+
+  it('leaves Month without hours', () => {
+    setup([spanning('standup', '2026-08-12 10:00', '2026-08-12 11:00')]);
+    expect(screen.queryByTestId('calendar-hours')).toBeNull();
+    expect(dayCell('2026-08-12').textContent).toContain('standup');
+  });
+});

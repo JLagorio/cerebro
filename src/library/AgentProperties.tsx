@@ -4,6 +4,7 @@ import { Icon } from '@/components/ui/Icon';
 import { useEscapeLayer } from '@/components/ui/Popover';
 import { Select } from '@/components/ui/Select';
 import { PropertyRow } from '@/detail/PropertyRow';
+import { writesInWords } from '@/engine/agentAccess';
 import { agentHandle, askFirstOf } from '@/engine/agents';
 import { parseConnectors, type ConnectorSpec } from '@/engine/connectors';
 import { agentDraft, agentPatch, type AgentDraft, type AgentKey } from '@/engine/libraryDraft';
@@ -116,6 +117,8 @@ export function AgentProperties({ entry }: { entry: Entry }) {
   const draft = agentDraft(entry, '');
   // The Settings shell ceiling, which caps what the record declares (M57.2).
   const ceiling = useUiStore((s) => s.agentShell);
+  // And the web ceiling, which caps its `tools: web` (M57.7).
+  const webAccess = useUiStore((s) => s.agentWebAccess);
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const show = (key: string) => setOpen((s) => new Set(s).add(key));
   const hide = (key: string) =>
@@ -240,7 +243,10 @@ export function AgentProperties({ entry }: { entry: Entry }) {
         'Writes in',
         'pencil',
         ['scope'],
-        scopeWords(draft.scope, 'anywhere in the vault', 'nowhere — proposals only'),
+        // M58.6 — what its tools and shell actually reach, never the bare
+        // scope: an empty scope still writes Knowledge through its own doors,
+        // and the shell can reach past every folder.
+        writesInWords(draft, ceiling),
         (d, set) => (
           <GuardRow
             label="Limit where this agent can write"
@@ -459,6 +465,18 @@ export function AgentProperties({ entry }: { entry: Entry }) {
           />
         ),
       )}
+
+      {/* M57.7 — the web, its own row beside the shell. Both write `tools:`,
+          each from its own draft, so Done here writes only that key. */}
+      {boundary('web', 'Web', 'globe', ['web'], webWords(draft.web, webAccess), (d, set) => (
+        <GuardRow
+          label="Let this agent search and fetch the web"
+          hint="Still capped by Web access in Settings. A fetch can carry what the agent read to any site."
+          tone="warn"
+          checked={d.web}
+          onChange={(on) => set({ ...d, web: on })}
+        />
+      ))}
     </div>
   );
 }
@@ -491,6 +509,15 @@ export function shellWords(declared: boolean, readScoped: boolean, ceiling: Shel
     case 'off':
       return 'Off in Settings';
   }
+}
+
+/** The Web row's closed words (M57.7): what the agent's runs actually get,
+ * its declaration capped by Web access in Settings. */
+export function webWords(declared: boolean, webAccess: boolean): string {
+  if (!declared) return 'No web';
+  return webAccess
+    ? 'Searches and fetches the web'
+    : 'Web access is off in Settings, so it has none.';
 }
 
 /** What a stored value Rust would refuse reads as (M56.5). */

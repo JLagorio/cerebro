@@ -5,6 +5,7 @@ import {
   mockJournal,
   onAgentEvent,
   runAgent,
+  stopAgent,
   type RunHandle,
 } from './agentIpc';
 import { releaseHeldMockRuns } from './mockAgent';
@@ -31,7 +32,9 @@ async function start(message: string): Promise<RunHandle> {
     connectors: false,
     attended: true,
   });
-  if ('deferred' in handle) throw new Error('an attended run is never deferred');
+  if ('deferred' in handle || 'settled' in handle) {
+    throw new Error('an attended run is never deferred or settled');
+  }
   return handle;
 }
 
@@ -213,5 +216,78 @@ describe('a mock run commits what it wrote before its Done (M58.3)', () => {
     stop();
     expect(changeset).toEqual({ state: 'nothing', run_id: handle.attach, shell_unrecorded: false });
     expect(window.__cerebroMockGit?.commits.length).toBe(before);
+  });
+});
+
+describe('a mock woken run claims its wake (M63.1)', () => {
+  const offer = (key: string, subject: string) => ({
+    agent: 'process:scout',
+    wakeKey: key.repeat(64),
+    trigger: '1'.repeat(16),
+    cause: { kind: 'event', subject },
+  });
+  async function admitOne(key: string, subject = `records/risks/${key}.md`): Promise<string> {
+    await mock.admitWakes(VAULT, [offer(key, subject)]);
+    const pending = await mock.wakesPending(VAULT);
+    return pending.find((w) => w.wakeKey === key.repeat(64))!.wakeId;
+  }
+  const woken = (message: string, claim: string, attended = false) =>
+    runAgent(VAULT, {
+      message,
+      shell: 'off',
+      connectors: false,
+      attended,
+      actor: 'process:scout',
+      lane: 'agent',
+      wake: { claim, coalesce: [] },
+    });
+  const row = (id: string) =>
+    (window as unknown as { __cerebroMockWakes: () => mock.MockWake[] })
+      .__cerebroMockWakes()
+      .find((w) => w.wakeId === id);
+
+  it('finishes its wake succeeded on Done', async () => {
+    const id = await admitOne('a');
+    const start = await woken('hello', id);
+    if (!('run' in start)) throw new Error('a pending wake starts');
+    expect(row(id)).toMatchObject({ state: 'started', runId: start.attach });
+    await doneOf(start.run);
+    expect(row(id)).toMatchObject({ state: 'finished', outcome: 'succeeded' });
+  });
+
+  it('finishes it failed after an Error', async () => {
+    const id = await admitOne('a');
+    const start = await woken('fail: unknown', id);
+    if (!('run' in start)) throw new Error('a pending wake starts');
+    await doneOf(start.run);
+    expect(row(id)).toMatchObject({ state: 'finished', outcome: 'failed' });
+  });
+
+  it('finishes it interrupted when stopped, and a busy agent defers its next wake', async () => {
+    const id = await admitOne('a');
+    const next = await admitOne('b');
+    const start = await woken('wait for me', id);
+    if (!('run' in start)) throw new Error('a pending wake starts');
+    expect(await woken('hello', next)).toEqual({ deferred: ['agent_running'] });
+    expect(row(next)).toMatchObject({ state: 'pending', deferred: 'agent_running' });
+    const done = doneOf(start.run);
+    await stopAgent(start.run);
+    await done;
+    releaseHeldMockRuns();
+    expect(row(id)).toMatchObject({ state: 'finished', outcome: 'interrupted' });
+  });
+
+  it('a wake that is gone answers settled, and starts nothing', async () => {
+    const id = await admitOne('a');
+    await mock.setAgentPaused(VAULT, 'process:scout', true);
+    await mock.setAgentPaused(VAULT, 'process:scout', false);
+    expect(row(id)).toMatchObject({ outcome: 'cancelled', reason: 'superseded', detail: 'paused' });
+    expect(await woken('hello', id)).toEqual({ settled: 'gone' });
+  });
+
+  it('refuses a woken request Rust would refuse, in its words', async () => {
+    const id = await admitOne('a');
+    await expect(woken('hello', id, true)).rejects.toThrow(/a woken run is unattended/);
+    expect(row(id)).toMatchObject({ state: 'pending' });
   });
 });

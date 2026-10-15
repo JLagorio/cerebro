@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createElement, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CommentHighlights } from '@/editor/commentHighlights';
 import type { EditorReadyInfo } from '@/editor/MarkdownEditor';
 import { announceExternalWrites } from '@/editor/openPages';
 import { resetMockFs } from '@/lib/mockIpc';
@@ -990,6 +991,49 @@ describe('a comment thread is a place (M70.2b)', () => {
     expect(useUiStore.getState().docPanelOpen).toBe(true);
     expect(useUiStore.getState().docPanelTab).toBe('comments');
     expect(screen.getByTestId('doc-panel-comment-count').textContent).toBe('1');
+  });
+
+  // The editor on screen, once the page's mount has said it is ready, with
+  // its highlights' reveal watched: a dead editor must never be handed one.
+  // Each case clears `lastEditor.info` before the render it waits on.
+  const readyEditor = async () => {
+    await waitFor(() => expect(lastEditor.info).not.toBeNull(), { timeout: 5_000 });
+    const highlights = lastEditor.info!.editor.getExtension(CommentHighlights)!;
+    return vi.spyOn(highlights, 'reveal');
+  };
+
+  it('a deep link after the diff closes never reveals in the editor the diff destroyed', async () => {
+    lastEditor.info = null;
+    const { rerender } = render(<DocPage selection={{ kind: 'doc', path: DOC }} />);
+    const deadReveal = await readyEditor();
+    act(() => useUiStore.setState({ diffView: { path: DOC, commit: null } }));
+    expect(screen.queryByTestId('markdown-editor')).toBeNull();
+    // Navigating closes the diff (navStore) in the same step that names the thread.
+    lastEditor.info = null;
+    act(() => useUiStore.setState({ diffView: null }));
+    rerender(<DocPage selection={{ kind: 'doc', path: DOC, thread: THREAD }} />);
+    const card = await screen.findByTestId('comment-thread');
+    await waitFor(() => expect(card.dataset.focused).toBe('true'));
+    await waitFor(() => expect(lastEditor.info).not.toBeNull(), { timeout: 5_000 });
+    expect(deadReveal).not.toHaveBeenCalled();
+    expect(screen.getByTestId('doc-page')).toBeTruthy();
+  });
+
+  it("a deep link from another page never reveals in that page's editor", async () => {
+    useUiStore.setState({ docPanelOpen: true });
+    lastEditor.info = null;
+    const { rerender } = render(<DocPage selection={{ kind: 'doc', path: DOC }} />);
+    // The first visit leaves the slot cached, so the link is handled at once.
+    await screen.findByTestId('doc-panel-comment-count');
+    await readyEditor();
+    lastEditor.info = null;
+    rerender(<DocPage selection={{ kind: 'doc', path: 'delivery/how-we-schedule.md' }} />);
+    const previousReveal = await readyEditor();
+    rerender(<DocPage selection={{ kind: 'doc', path: DOC, thread: THREAD }} />);
+    const card = await screen.findByTestId('comment-thread');
+    await waitFor(() => expect(card.dataset.focused).toBe('true'));
+    expect(previousReveal).not.toHaveBeenCalled();
+    expect(screen.getByTestId('doc-page')).toBeTruthy();
   });
 
   it('a deep link to a thread that is gone says so once', async () => {

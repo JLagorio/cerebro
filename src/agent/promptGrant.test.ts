@@ -7,10 +7,11 @@ import {
   cliGrant,
   grantedTools,
   holdsShell,
+  holdsWeb,
   mentionedTools,
   type PromptGrant,
 } from '@/engine/toolGrant';
-import { SHELL_CEILINGS } from '@/lib/policy/toolApproval';
+import { SHELL_CEILINGS, WEB_CEILINGS } from '@/lib/policy/toolApproval';
 import {
   addressedAgentPrompt,
   agentRunPrompt,
@@ -153,7 +154,7 @@ function heard(text: string): string[] {
  * with every branch on: attended, shell, connectors, the knowledge capability,
  * a skill catalogue over budget, and every scope, read scope and trigger. */
 const NAMED: readonly string[] = (() => {
-  const full: PromptGrant = { tools: HOLDABLE, shell: true, attended: true };
+  const full: PromptGrant = { tools: HOLDABLE, shell: true, web: true, attended: true };
   const named = new Set<string>();
   for (const { text } of [...systemPrompts(full, true, ['knowledge']), ...agentPrompts(full)]) {
     for (const tool of mentionedTools(text)) named.add(tool);
@@ -194,6 +195,9 @@ describe('no prompt names a tool its run lacks', () => {
 
   it('holds for every subset of them, on every composer, under every axis', () => {
     const misses: string[] = [];
+    // M57.7: the web tools are the CLI's, not cerebro's, so they are checked
+    // by name: no prompt names them to a run that does not hold WebFetch.
+    const webMisses: string[] = [];
     let composed = 0;
     for (const tools of grantsOfNamed()) {
       const check = (grant: PromptGrant, prompts: { label: string; text: string }[]) => {
@@ -202,6 +206,9 @@ describe('no prompt names a tool its run lacks', () => {
           const lacked = heard(text).filter((tool) => !grant.tools.has(tool));
           if (lacked.length > 0) {
             misses.push(`${label}, holding [${[...grant.tools].sort().join(', ')}]: ${lacked}`);
+          }
+          if (grant.web !== true && /WebFetch|WebSearch/.test(`${SERVER_INSTRUCTIONS}\n${text}`)) {
+            webMisses.push(label);
           }
         }
       };
@@ -212,17 +219,20 @@ describe('no prompt names a tool its run lacks', () => {
       );
       for (const attended of [true, false]) {
         for (const shell of [true, false]) {
-          for (const connectors of [true, false]) {
-            for (const capabilities of [[], ['knowledge']]) {
-              const grant = { tools, shell, attended };
-              check(grant, systemPrompts(grant, connectors, capabilities));
+          for (const web of [true, false]) {
+            for (const connectors of [true, false]) {
+              for (const capabilities of [[], ['knowledge']]) {
+                const grant = { tools, shell, web, attended };
+                check(grant, systemPrompts(grant, connectors, capabilities));
+              }
             }
           }
         }
       }
     }
-    expect(composed).toBe(2 ** NAMED.length * (36 + 32));
+    expect(composed).toBe(2 ** NAMED.length * (36 + 64));
     expect(misses.slice(0, 5)).toEqual([]);
+    expect(webMisses.slice(0, 5)).toEqual([]);
   });
 
   it('never tells an unattended run to call open_note', () => {
@@ -251,6 +261,20 @@ describe('the surface prompts', () => {
     ['revise', reviseConceptPrompt('knowledge/systems/drain.md', 'Drain time')],
     ['schemaRecheck', schemaRecheckPrompt('knowledge/systems/drain.md', 'Drain time')],
     ['organize', organizePrompt('inbox/capture.md')],
+    [
+      'organizeMeeting',
+      organizePrompt('inbox/standup.md', {
+        title: 'Standup',
+        speakers: [
+          { label: 'Jo Nobody', kind: 'none' },
+          { label: 'Tom Keller', kind: 'ambiguous', count: 2 },
+        ],
+      }),
+    ],
+    [
+      'organizeMeetingNoSpeakers',
+      organizePrompt('inbox/standup.md', { title: 'Standup', speakers: [] }),
+    ],
     ['studioBuild', studioBuildPrompt('Checkout', 'studio/checkout')],
     ['refreshSource', refreshSourcePrompt('sources/kes-421.md', 'KES-421')],
     ['fetchRefs', fetchRefsPrompt('docs/prd.md', ['KES-421', 'OPS-7'])],
@@ -333,6 +357,38 @@ describe('the server instructions', () => {
     // A JS string's length counts UTF-16 units, as the cap does.
     expect(served.length).toBeLessThanOrEqual(2048);
     expect(mentionedTools(SERVER_INSTRUCTIONS)).toEqual([]);
+  });
+});
+
+describe('the web dimension (M57.7)', () => {
+  it('holds WebFetch exactly where the table pre-approves it', () => {
+    for (const shell of SHELL_CEILINGS) {
+      for (const web of WEB_CEILINGS) {
+        for (const attended of [true, false]) {
+          for (const readScoped of [true, false]) {
+            const input = { shell, web, attended, readScoped, narrowing: null };
+            expect(holdsWeb(input), `${shell} ${web} attended=${attended}`).toBe(web === 'on');
+            expect(cliGrant(input).cli.includes('WebSearch')).toBe(web === 'on');
+          }
+        }
+      }
+    }
+  });
+
+  it('names the web tools only to a run that holds them, and only beside cache_source', () => {
+    const tools = grantedTools(null);
+    const off: PromptGrant = { tools, shell: false, web: false, attended: true };
+    const on: PromptGrant = { ...off, web: true };
+    for (const [grant, named] of [
+      [off, false],
+      [on, true],
+      [{ ...on, tools: new Set([...tools].filter((t) => t !== 'cache_source')) }, false],
+    ] as const) {
+      for (const { label, text } of systemPrompts(grant, true, ['knowledge'])) {
+        expect(/WebFetch/.test(text), label).toBe(named);
+        expect(/WebSearch/.test(text), label).toBe(named);
+      }
+    }
   });
 });
 

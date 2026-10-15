@@ -59,6 +59,18 @@ const SELECTIONS = [
   { kind: 'type', name: 'Thing' },
 ];
 
+/** One speaker of each kind the meeting ask names (M64.7). */
+const MEETING_SPEAKERS = [
+  {
+    label: 'Sam Lee',
+    kind: 'matched' as const,
+    page: makeEntry({ path: 'people/sam-lee.md', title: 'Sam Lee' }),
+    link: '[[sam-lee]]',
+  },
+  { label: 'Ana Ray', kind: 'none' as const },
+  { label: 'Jo Kim', kind: 'ambiguous' as const, count: 2 },
+];
+
 const MEMORY = { recent: 'Read the boards.', preferences: 'Keep it short.' };
 const EMPTY_MEMORY = { recent: '', preferences: '' };
 const SCOPES: (string[] | null)[] = [null, [], ['notes']];
@@ -105,7 +117,12 @@ const BUILDERS: Record<string, () => string[]> = {
       return [ask.label, ask.text];
     }),
   schemaRecheckPrompt: () => [prompts.schemaRecheckPrompt('knowledge/c.md', 'A concept')],
-  organizePrompt: () => [prompts.organizePrompt('inbox/thought.md')],
+  organizePrompt: () => [
+    prompts.organizePrompt('inbox/thought.md'),
+    ...[null, [], MEETING_SPEAKERS].map((speakers) =>
+      prompts.organizePrompt('inbox/standup.md', { title: 'Standup', speakers }),
+    ),
+  ],
   studioBuildPrompt: () => [prompts.studioBuildPrompt('Checkout', 'studio/checkout')],
   currentStatePrompt: () =>
     [null, 'succeeded'].flatMap((lastOutcome) =>

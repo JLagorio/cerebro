@@ -198,11 +198,19 @@ const isLow = (text: string, i: number): boolean => {
  * Where `anchor` sits in `spans` now. The rule, in order:
  * 1. no valid match: detached, gone;
  * 2. the stored occurrence, if its context is identical;
- * 3. the best context score, if exactly one match holds it (the score is the
- *    common suffix with `before` plus the common prefix with `after`);
- * 4. the stored occurrence, if it is among the best;
- * 5. otherwise detached, ambiguous, with how many share the best score.
+ * 3. if the best context score is under half the stored context, detached,
+ *    gone (the score is the common suffix with `before` plus the common prefix
+ *    with `after`, against the code points of `before` and `after`): a copy
+ *    elsewhere on the page that shares a space or two is not the quote;
+ * 4. the best score, if exactly one match holds it;
+ * 5. the stored occurrence, if it is among the best;
+ * 6. otherwise detached, ambiguous, with how many share the best score.
  * The same spans and anchor always give the same answer.
+ *
+ * A limit context cannot see past: when the quoted block is deleted and the
+ * block just before it ends in another copy, that copy inherits the deleted
+ * quote's context after, and it attaches (moved) if that side is at least
+ * half the stored context.
  */
 export function resolveAnchor(spans: TextSpans, anchor: CommentAnchor): AnchorResolution {
   const { text } = spans;
@@ -229,6 +237,8 @@ export function resolveAnchor(spans: TextSpans, anchor: CommentAnchor): AnchorRe
       sharedBefore(text, start, anchor.before) + sharedAfter(text, start + len, anchor.after),
   );
   const best = Math.max(...scores);
+  const storedPoints = points(anchor.before).length + points(anchor.after).length;
+  if (best * 2 < storedPoints) return { kind: 'detached', reason: 'gone', count: 0 };
   const tops = scores.flatMap((score, i) => (score === best ? [i] : []));
   if (tops.length === 1) return attach(tops[0]);
   if (tops.includes(stored)) return attach(stored);

@@ -249,7 +249,7 @@ describe('RunDetailPanel', () => {
   it('a run whose shell could write never reads complete', () => {
     show(detail({ wrote: { state: 'partial', writes: [] } }));
     const pages = screen.getByTestId('run-detail-pages');
-    expect(pages.textContent).toContain('Wrote no pages');
+    expect(pages.textContent).not.toContain('Wrote no pages');
     expect(within(pages).getByTestId('run-detail-shell-unrecorded').textContent).toBe(
       'Shell changes not recorded',
     );

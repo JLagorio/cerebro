@@ -1,0 +1,1228 @@
+{
+  "format": 1,
+  "about": "set_fields' planner (M60.4), held by both twins: src-tauri/src/vault/set_fields.rs (replays_the_shared_set_fields_cases) and src/engine/setFields.ts (src/engine/setFields.test.ts). `corpus` is the vault the case runs in: its Type docs make the schema, and every entry answers links. A case plans `args` against `frontmatter`, the record's frontmatter as its bytes hold it now, for the record at `record` in `project`, with `unreadable` the paths the run may not read. It lands as `patch` (null removes a key) and `notes`, is `refused` with every problem, or is a parse `error`. `texts` pins the report and refusal words. Non-ASCII is written as \\u escapes. Judgment calls: ghosts are kept (M1); a link's type is checked only for a declared target and a page the run may read; links are never re-spelled.",
+  "corpus": [
+    {
+      "path": "types/task.md",
+      "title": "Task",
+      "type": "Type",
+      "properties": {
+        "fields": {
+          "status": {
+            "kind": "status"
+          },
+          "priority": {
+            "kind": "select",
+            "options": [
+              {
+                "id": "high",
+                "label": "High"
+              },
+              {
+                "id": "low",
+                "label": "Low"
+              },
+              {
+                "id": "med",
+                "label": "Middle"
+              }
+            ]
+          },
+          "phase": {
+            "kind": "select",
+            "options": [
+              {
+                "id": "soon",
+                "label": "Later"
+              },
+              {
+                "id": "later",
+                "label": "Soon"
+              }
+            ]
+          },
+          "tags": {
+            "kind": "multiselect",
+            "options": [
+              {
+                "id": "design",
+                "label": "Design"
+              },
+              {
+                "id": "urgent",
+                "label": "Urgent"
+              },
+              "later"
+            ]
+          },
+          "owner": {
+            "kind": "person"
+          },
+          "epic": {
+            "kind": "relation",
+            "target": "Epic",
+            "limit": 1
+          },
+          "related": {
+            "kind": "relation",
+            "target": "Epic"
+          },
+          "links": {
+            "kind": "relation"
+          },
+          "estimate": {
+            "kind": "number"
+          },
+          "due": {
+            "kind": "date"
+          },
+          "due_date": {
+            "kind": "date"
+          },
+          "attachments": {
+            "kind": "files"
+          },
+          "effort": {
+            "kind": "rollup",
+            "relation": "epic",
+            "property": "points",
+            "calculate": "sum"
+          },
+          "created": {
+            "kind": "created_time"
+          },
+          "edited": {
+            "kind": "last_edited_time"
+          },
+          "blocks": {
+            "kind": "relation",
+            "from": {
+              "type": "Task",
+              "field": "blocked_by"
+            }
+          }
+        }
+      }
+    },
+    {
+      "path": "types/epic.md",
+      "title": "Epic",
+      "type": "Type",
+      "properties": {
+        "statuses": [
+          {
+            "id": "open",
+            "label": "Open"
+          },
+          {
+            "id": "shipped",
+            "label": "Shipped",
+            "group": "done"
+          }
+        ],
+        "fields": {
+          "status": {
+            "kind": "status"
+          },
+          "points": {
+            "kind": "number"
+          }
+        }
+      }
+    },
+    {
+      "path": "types/secret.md",
+      "title": "Secret",
+      "type": "Type",
+      "properties": {
+        "statuses": [
+          {
+            "id": "hidden-one",
+            "label": "Hidden one"
+          }
+        ],
+        "fields": {
+          "level": {
+            "kind": "select",
+            "options": [
+              {
+                "id": "a",
+                "label": "Alpha"
+              }
+            ]
+          },
+          "state": {
+            "kind": "status"
+          }
+        }
+      }
+    },
+    {
+      "path": "projects/atlas/project.md",
+      "title": "Atlas",
+      "type": "Project",
+      "properties": {
+        "statuses": [
+          {
+            "id": "planned",
+            "label": "Planned"
+          },
+          {
+            "id": "shipping",
+            "label": "Shipping now"
+          }
+        ]
+      }
+    },
+    {
+      "path": "epics/launch.md",
+      "title": "Launch",
+      "type": "Epic",
+      "properties": {}
+    },
+    {
+      "path": "epics/secret-plan.md",
+      "title": "Secret plan",
+      "type": "Epic",
+      "properties": {}
+    },
+    {
+      "path": "people/alice.md",
+      "title": "Alice Smith",
+      "type": "Person",
+      "properties": {}
+    },
+    {
+      "path": "notes/scratch.md",
+      "title": "Scratch",
+      "type": null,
+      "properties": {}
+    },
+    {
+      "path": "tasks/write-copy.md",
+      "title": "Write copy",
+      "type": "Task",
+      "properties": {}
+    },
+    {
+      "path": "tasks/t1.md",
+      "title": "T1",
+      "type": "Task",
+      "properties": {}
+    },
+    {
+      "path": "projects/atlas/t2.md",
+      "title": "T2",
+      "type": "Task",
+      "properties": {}
+    }
+  ],
+  "cases": [
+    {
+      "name": "A request with no path is refused before anything is read.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "set": {
+          "status": "done"
+        }
+      },
+      "error": "set_fields needs a path"
+    },
+    {
+      "name": "A request with nothing to change is refused.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {}
+      },
+      "error": "set_fields needs set, add or remove"
+    },
+    {
+      "name": "set, add and remove must each be an object.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": ["status"]
+      },
+      "error": "set, add and remove must be objects"
+    },
+    {
+      "name": "A key sent in set and add is refused, naming both.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "tags": ["design"]
+        },
+        "add": {
+          "tags": "urgent"
+        }
+      },
+      "error": "tags appears in both set and add; send it once"
+    },
+    {
+      "name": "A key sent in add and remove is refused, naming both.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "add": {
+          "tags": "urgent"
+        },
+        "remove": {
+          "tags": "design"
+        }
+      },
+      "error": "tags appears in both add and remove; send it once"
+    },
+    {
+      "name": "An exact status id is stored as written.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "status": "done"
+        }
+      },
+      "patch": {
+        "status": "done"
+      },
+      "notes": ["status: set to done"]
+    },
+    {
+      "name": "A status label is stored as its id; a type with no statuses answers from the default set.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "status": "In Progress"
+        }
+      },
+      "patch": {
+        "status": "in-progress"
+      },
+      "notes": ["status: set to in-progress (from \"In Progress\")"]
+    },
+    {
+      "name": "A type's own statuses answer for its records.",
+      "record": "epics/launch.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Epic"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "epics/launch.md",
+        "set": {
+          "status": "Shipped"
+        }
+      },
+      "patch": {
+        "status": "shipped"
+      },
+      "notes": ["status: set to shipped (from \"Shipped\")"]
+    },
+    {
+      "name": "The project's statuses override wins over the default set.",
+      "record": "projects/atlas/t2.md",
+      "project": "projects/atlas/project.md",
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "projects/atlas/t2.md",
+        "set": {
+          "status": "shipping now"
+        }
+      },
+      "patch": {
+        "status": "shipping"
+      },
+      "notes": ["status: set to shipping (from \"shipping now\")"]
+    },
+    {
+      "name": "Under a project override a default status is a ghost, kept and named with the project's options.",
+      "record": "projects/atlas/t2.md",
+      "project": "projects/atlas/project.md",
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "projects/atlas/t2.md",
+        "set": {
+          "status": "done"
+        }
+      },
+      "patch": {
+        "status": "done"
+      },
+      "notes": [
+        "status: set to done; kept \"done\" as written, not one of its options (options: planned \"Planned\", shipping \"Shipping now\")"
+      ]
+    },
+    {
+      "name": "Under a project override the run cannot read, a ghost names no options.",
+      "record": "projects/atlas/t2.md",
+      "project": "projects/atlas/project.md",
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": ["projects/atlas/project.md"],
+      "args": {
+        "path": "projects/atlas/t2.md",
+        "set": {
+          "status": "done"
+        }
+      },
+      "patch": {
+        "status": "done"
+      },
+      "notes": ["status: set to done; kept \"done\" as written, not one of its options"]
+    },
+    {
+      "name": "A default-set ghost lists the default statuses, which the app holds.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "status": "Blocked "
+        }
+      },
+      "patch": {
+        "status": "Blocked"
+      },
+      "notes": [
+        "status: set to Blocked (from \"Blocked \"); kept \"Blocked\" as written, not one of its options (options: backlog \"Backlog\", todo \"Todo\", in-progress \"In progress\", done \"Done\", cancelled \"Cancelled\")"
+      ]
+    },
+    {
+      "name": "A select takes its label, ignoring case.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "priority": "middle"
+        }
+      },
+      "patch": {
+        "priority": "med"
+      },
+      "notes": ["priority: set to med (from \"middle\")"]
+    },
+    {
+      "name": "An unknown select value is kept as written and named, with the Type doc's options.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "priority": "Critical"
+        }
+      },
+      "patch": {
+        "priority": "Critical"
+      },
+      "notes": [
+        "priority: set to Critical; kept \"Critical\" as written, not one of its options (options: high \"High\", low \"Low\", med \"Middle\")"
+      ]
+    },
+    {
+      "name": "A ghost on a type whose Type doc the run cannot read names no options.",
+      "record": "vault/s.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Secret"
+      },
+      "unreadable": ["types/secret.md"],
+      "args": {
+        "path": "vault/s.md",
+        "set": {
+          "level": "Beta",
+          "state": "hidden one"
+        }
+      },
+      "patch": {
+        "level": "Beta",
+        "state": "hidden-one"
+      },
+      "notes": [
+        "level: set to Beta; kept \"Beta\" as written, not one of its options",
+        "state: set to hidden-one (from \"hidden one\")"
+      ]
+    },
+    {
+      "name": "Exact id, then optionId, then label: where the passes disagree, the earlier pass wins.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "phase": "Later"
+        }
+      },
+      "patch": {
+        "phase": "later"
+      },
+      "notes": ["phase: set to later (from \"Later\")"]
+    },
+    {
+      "name": "A multi-select takes labels and ids, stores ids deduped in first-seen order, always as a list.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "tags": ["Design", "urgent", "design", "LATER"]
+        }
+      },
+      "patch": {
+        "tags": ["design", "urgent", "later"]
+      },
+      "notes": ["tags: set to design, urgent, later (from \"Design, urgent, design, LATER\")"]
+    },
+    {
+      "name": "A single multi-select value is stored as a one-item list.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "tags": "urgent"
+        }
+      },
+      "patch": {
+        "tags": ["urgent"]
+      },
+      "notes": ["tags: set to urgent"]
+    },
+    {
+      "name": "A person value names a page; it is stored as a link, spelled as given.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "owner": "alice"
+        }
+      },
+      "patch": {
+        "owner": ["[[alice]]"]
+      },
+      "notes": ["owner: set to [[alice]] (from \"alice\")"]
+    },
+    {
+      "name": "One exact link is kept byte for byte, alias and section included.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "owner": " [[Alice Smith|Al]] ",
+          "links": "[[launch#Goals]]"
+        }
+      },
+      "patch": {
+        "owner": ["[[Alice Smith|Al]]"],
+        "links": ["[[launch#Goals]]"]
+      },
+      "notes": [
+        "owner: set to [[Alice Smith|Al]] (from \" [[Alice Smith|Al]] \")",
+        "links: set to [[launch#Goals]]"
+      ]
+    },
+    {
+      "name": "Two links in one value, an open bracket, an empty value and an empty link are each refused, all at once.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "owner": ["[[a]] [[b]]", "[[a", "", "[[]]"]
+        }
+      },
+      "refused": [
+        "owner takes page names or [[links]], one per value; \"[[a]] [[b]]\" is neither",
+        "owner takes page names or [[links]], one per value; \"[[a\" is neither",
+        "owner takes page names or [[links]], one per value; \"\" is neither",
+        "owner takes page names or [[links]], one per value; \"[[]]\" is neither"
+      ]
+    },
+    {
+      "name": "A link to a page of the declared target type is stored.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "epic": "launch"
+        }
+      },
+      "patch": {
+        "epic": ["[[launch]]"]
+      },
+      "notes": ["epic: set to [[launch]] (from \"launch\")"]
+    },
+    {
+      "name": "A section link resolves to its page for the target check.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "related": "[[Launch#Goals]]"
+        }
+      },
+      "patch": {
+        "related": ["[[Launch#Goals]]"]
+      },
+      "notes": ["related: set to [[Launch#Goals]]"]
+    },
+    {
+      "name": "A link to a record of another type is refused, naming the type the field expects.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "epic": "write-copy"
+        }
+      },
+      "refused": ["epic takes Epic records; [[write-copy]] is typed Task"]
+    },
+    {
+      "name": "A link to an untyped page is refused for a field with a target.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "related": ["[[scratch]]"]
+        }
+      },
+      "refused": ["related takes Epic records; [[scratch]] has no type"]
+    },
+    {
+      "name": "A link no page answers, or one the run cannot read, is kept and noted, not checked.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": ["epics/secret-plan.md"],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "related": ["nowhere", "secret-plan"]
+        }
+      },
+      "patch": {
+        "related": ["[[nowhere]]", "[[secret-plan]]"]
+      },
+      "notes": [
+        "related: set to [[nowhere]], [[secret-plan]] (from \"nowhere, secret-plan\"); [[nowhere]] not checked: no page you can read answers to it; [[secret-plan]] not checked: no page you can read answers to it"
+      ]
+    },
+    {
+      "name": "A field with no target takes a link to any page, unchecked and unnoted.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "links": ["scratch", "write-copy"]
+        }
+      },
+      "patch": {
+        "links": ["[[scratch]]", "[[write-copy]]"]
+      },
+      "notes": ["links: set to [[scratch]], [[write-copy]] (from \"scratch, write-copy\")"]
+    },
+    {
+      "name": "A limit: 1 relation refuses a second link.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "epic": ["launch", "secret-plan"]
+        }
+      },
+      "refused": ["epic links a single record"]
+    },
+    {
+      "name": "Links naming the same page are deduped.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "related": ["launch", "[[Launch]]"]
+        }
+      },
+      "patch": {
+        "related": ["[[launch]]"]
+      },
+      "notes": ["related: set to [[launch]] (from \"launch, [[Launch]]\")"]
+    },
+    {
+      "name": "add on a limit: 1 relation that already holds one is refused.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task",
+        "epic": ["[[secret-plan]]"]
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "add": {
+          "epic": "launch"
+        }
+      },
+      "refused": ["epic links a single record"]
+    },
+    {
+      "name": "add appends what is not held and names what already was.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task",
+        "tags": ["design"]
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "add": {
+          "tags": ["Design", "urgent"]
+        }
+      },
+      "patch": {
+        "tags": ["design", "urgent"]
+      },
+      "notes": ["tags: added urgent; already held design"]
+    },
+    {
+      "name": "add to a link list compares resolved pages, so another spelling of a held page is held.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task",
+        "related": ["[[launch]]"]
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "add": {
+          "related": ["Launch", "secret-plan"]
+        }
+      },
+      "patch": {
+        "related": ["[[launch]]", "[[secret-plan]]"]
+      },
+      "notes": ["related: added [[secret-plan]]; already held [[Launch]]"]
+    },
+    {
+      "name": "add on a scalar current value makes it a list.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task",
+        "tags": "design"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "add": {
+          "tags": "urgent"
+        }
+      },
+      "patch": {
+        "tags": ["design", "urgent"]
+      },
+      "notes": ["tags: added urgent"]
+    },
+    {
+      "name": "remove drops what is held and names what was not.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task",
+        "tags": ["design", "urgent"]
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "remove": {
+          "tags": ["Later", "urgent"]
+        }
+      },
+      "patch": {
+        "tags": ["design"]
+      },
+      "notes": ["tags: removed urgent; did not hold later"]
+    },
+    {
+      "name": "remove that empties a list removes the key.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task",
+        "tags": ["design"]
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "remove": {
+          "tags": "Design"
+        }
+      },
+      "patch": {
+        "tags": null
+      },
+      "notes": ["tags: removed design; now empty, so the key is gone"]
+    },
+    {
+      "name": "add with nothing new and remove with nothing held change nothing.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task",
+        "tags": ["design"]
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "add": {
+          "tags": "design"
+        },
+        "remove": {
+          "related": "launch"
+        }
+      },
+      "patch": {},
+      "notes": [
+        "tags: unchanged; already held design",
+        "related: unchanged; did not hold [[launch]]"
+      ]
+    },
+    {
+      "name": "add and remove apply only to list fields.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "add": {
+          "priority": "high"
+        },
+        "remove": {
+          "status": "done"
+        }
+      },
+      "refused": ["priority holds one value; use set", "status holds one value; use set"]
+    },
+    {
+      "name": "A rollup, a created and an edited time are computed and refused.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "effort": 3,
+          "created": "2026-10-01",
+          "edited": "2026-10-02"
+        }
+      },
+      "refused": [
+        "effort is computed and can't be edited",
+        "created is computed and can't be edited",
+        "edited is computed and can't be edited"
+      ]
+    },
+    {
+      "name": "The other side of a relation stores nothing and is refused, by set and by add.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "blocks": "write-copy"
+        }
+      },
+      "refused": ["blocks is the other side of a relation \u2014 edit it from the linked records"]
+    },
+    {
+      "name": "add on the other side of a relation is refused in the same words.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "add": {
+          "blocks": "launch"
+        }
+      },
+      "refused": ["blocks is the other side of a relation \u2014 edit it from the linked records"]
+    },
+    {
+      "name": "The type key is refused.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "type": "Epic"
+        }
+      },
+      "refused": [
+        "type is the record's database, not one of its fields; set_fields cannot change it"
+      ]
+    },
+    {
+      "name": "A key that matches a declared field ignoring case, or by normalizeFieldName, is refused naming it.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "Status": "done",
+          "due date": "2026-10-20"
+        }
+      },
+      "refused": [
+        "Status is not a field of Task; it declares status",
+        "due date is not a field of Task; it declares due_date"
+      ]
+    },
+    {
+      "name": "Undeclared keys pass as given and are named; their deltas compare by value.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task",
+        "labels": ["y"]
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "mood": "sunny"
+        },
+        "add": {
+          "labels": ["x", "y"]
+        }
+      },
+      "patch": {
+        "mood": "sunny",
+        "labels": ["y", "x"]
+      },
+      "notes": [
+        "mood: set to sunny; not declared on Task, written as given",
+        "labels: added x; already held y; not declared on Task, written as given"
+      ]
+    },
+    {
+      "name": "A note with no type is written unchecked, and says so first.",
+      "record": "notes/scratch.md",
+      "project": null,
+      "frontmatter": {
+        "title": "Scratch"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "notes/scratch.md",
+        "set": {
+          "status": "In Progress"
+        },
+        "add": {
+          "tags": "x"
+        }
+      },
+      "patch": {
+        "status": "In Progress",
+        "tags": ["x"]
+      },
+      "notes": [
+        "Nothing was checked: notes/scratch.md has no type.",
+        "status: set to In Progress",
+        "tags: added x"
+      ]
+    },
+    {
+      "name": "A type no Type doc declares is written unchecked, and says so first.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Ghost"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "status": "In Progress"
+        }
+      },
+      "patch": {
+        "status": "In Progress"
+      },
+      "notes": ["Nothing was checked: no Type doc declares Ghost.", "status: set to In Progress"]
+    },
+    {
+      "name": "Every problem is reported at once.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "type": "Epic",
+          "effort": 1,
+          "epic": "write-copy",
+          "estimate": "five"
+        }
+      },
+      "refused": [
+        "type is the record's database, not one of its fields; set_fields cannot change it",
+        "effort is computed and can't be edited",
+        "epic takes Epic records; [[write-copy]] is typed Task",
+        "estimate must be a number"
+      ]
+    },
+    {
+      "name": "A set that changes nothing writes nothing.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task",
+        "status": "done",
+        "tags": ["urgent"]
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "status": "Done",
+          "tags": ["urgent"]
+        }
+      },
+      "patch": {},
+      "notes": ["status: unchanged", "tags: unchanged"]
+    },
+    {
+      "name": "set null removes a key, and is unchanged where there is none.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task",
+        "due": "2026-10-20"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "due": null,
+          "estimate": null
+        }
+      },
+      "patch": {
+        "due": null
+      },
+      "notes": ["due: removed", "estimate: unchanged"]
+    },
+    {
+      "name": "Every final value meets the field's value check, in its words.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "due": "next week",
+          "attachments": [1]
+        }
+      },
+      "refused": [
+        "due must be a date (YYYY-MM-DD, optionally HH:MM)",
+        "attachments must be a list of files"
+      ]
+    },
+    {
+      "name": "Dates, numbers and files that fit are stored.",
+      "record": "tasks/t1.md",
+      "project": null,
+      "frontmatter": {
+        "type": "Task"
+      },
+      "unreadable": [],
+      "args": {
+        "path": "tasks/t1.md",
+        "set": {
+          "due": "2026-10-20",
+          "estimate": 5,
+          "attachments": "spec.pdf"
+        }
+      },
+      "patch": {
+        "due": "2026-10-20",
+        "estimate": 5,
+        "attachments": ["spec.pdf"]
+      },
+      "notes": ["due: set to 2026-10-20", "estimate: set to 5", "attachments: set to spec.pdf"]
+    }
+  ],
+  "texts": {
+    "reports": [
+      {
+        "path": "tasks/t1.md",
+        "notes": ["status: set to done"],
+        "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "changed": true,
+        "text": "Set fields on tasks/t1.md.\nstatus: set to done\nHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "path": "tasks/t1.md",
+        "notes": ["status: unchanged"],
+        "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "changed": false,
+        "text": "Nothing changed on tasks/t1.md.\nstatus: unchanged\nHash: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    ],
+    "refusals": [
+      {
+        "path": "tasks/t1.md",
+        "problems": ["epic links a single record", "estimate must be a number"],
+        "text": "schema_invalid: nothing was written to tasks/t1.md.\n- epic links a single record\n- estimate must be a number"
+      }
+    ]
+  }
+}

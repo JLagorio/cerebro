@@ -300,8 +300,8 @@ export function useSortableList({
       /**
        * Escape abandons the gesture (M46.2). Measured before this existed: the
        * key did not cancel, the gesture kept tracking, and the RELEASE THEN
-       * COMMITTED the move — the opposite of what the user asked for, and the
-       * app has no undo.
+       * COMMITTED the move — the opposite of what the user asked for, and a
+       * drop is not an undoable change.
        *
        * Cancelling is exactly the teardown without the commit. Everything the
        * drag has moved on screen is drawn from `drag` and from nothing else —

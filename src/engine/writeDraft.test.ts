@@ -26,6 +26,7 @@ describe('projectDraftForm', () => {
       'folder:text',
       'slug:text',
       'body:text',
+      'if_exists:choice',
       `${DRAFT_FIELD}:json`,
     ]);
     expect(form.required).toEqual(['folder', 'slug', 'body']);
@@ -34,6 +35,14 @@ describe('projectDraftForm', () => {
       value: '# Vendor delay\n',
       required: true,
       hint: 'Markdown body, starting with an H1',
+    });
+    // M61.6b: what a taken name gets is a choice the person can change,
+    // unset until the draft names it.
+    expect(form.fields.find((f) => f.key === 'if_exists')).toMatchObject({
+      kind: 'choice',
+      options: ['suffix', 'refuse'],
+      required: false,
+      value: undefined,
     });
     expect(form.fields.at(-1)?.value).toBe(JSON.stringify(args, null, 2));
   });
@@ -139,6 +148,7 @@ describe('draftRefusal', () => {
   it('admits a draft of the declared shape', () => {
     expect(draftRefusal(schema, good)).toBeNull();
     expect(draftRefusal(schema, { ...good, frontmatter: {} })).toBeNull();
+    expect(draftRefusal(schema, { ...good, if_exists: 'refuse' })).toBeNull();
   });
 
   it('refuses in Rust’s words, naming the key', () => {

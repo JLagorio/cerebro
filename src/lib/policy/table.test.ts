@@ -341,6 +341,18 @@ describe('the table answers the questions an interpreter asks', () => {
     expect(retryVerdict(POLICY, 'no_longer_waiting', 0)).toBe('not_retryable');
   });
 
+  it('declares note_exists an operational transport code, in no op row', () => {
+    // M61.6b. A create told to refuse a taken name stops at the write door
+    // before a byte, and no hash was named, so it is never stale_content.
+    // The twin of `note_exists_is_an_operational_transport_code` in table.rs.
+    expect(destiny(POLICY, 'note_exists')).toBe('operational');
+    expect(POLICY.transport_rejections).toContain('note_exists');
+    for (const [name, rule] of Object.entries(POLICY.ops)) {
+      expect(rule.possible_rejections, `${name}`).not.toContain('note_exists');
+    }
+    expect(retryVerdict(POLICY, 'note_exists', 0)).toBe('not_retryable');
+  });
+
   it('binds the preventive ancestry walk to the ops that change a belief basis', () => {
     // The walk is Rust-only — it reads reducer state the mock has no
     // counterpart for — but WHERE it runs is policy, and both loaders hold

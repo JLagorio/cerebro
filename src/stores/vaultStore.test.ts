@@ -12,13 +12,16 @@ vi.mock('@/engine/schema', () => ({
 vi.mock('@/lib/ipc', { spy: true });
 vi.mock('@tauri-apps/api/event', () => ({ listen: listenMock }));
 
+import { staleWords, type OpenReport } from '@/engine/batch';
 import { observeScan, type ScanBaseline } from '@/engine/events';
+import { onExternalWrite, registerFlush } from '@/editor/openPages';
 import { buildSchema } from '@/engine/schema';
 import * as ipc from '@/lib/ipc';
 import * as mockBackend from '@/lib/mockIpc';
 import { resetMockFs } from '@/lib/mockIpc';
 import { sha256Hex } from '@/lib/sha256';
 import { useUiStore } from '@/stores/uiStore';
+import { useUndoStore } from '@/stores/undoStore';
 import {
   __resetRescans,
   getSchema,
@@ -26,6 +29,9 @@ import {
   useVaultStore,
   WRITE_WAIT_MS,
 } from '@/stores/vaultStore';
+
+/** An open that put nothing back (M60.6). */
+const NOTHING_PUT_BACK: OpenReport = { unfinished: 0, restored: 0, kept: 0 };
 
 function findEntry(path: string) {
   return useVaultStore.getState().entries.find((e) => e.path === path);
@@ -173,8 +179,8 @@ describe('vaultStore', () => {
     vi.mocked(ipc.startWatcher).mockImplementation((vault) => {
       started.push(vault);
       return vault === '/first'
-        ? new Promise<void>((resolve) => (releaseFirst = resolve))
-        : Promise.resolve();
+        ? new Promise<OpenReport>((resolve) => (releaseFirst = () => resolve(NOTHING_PUT_BACK)))
+        : Promise.resolve(NOTHING_PUT_BACK);
     });
 
     const first = useVaultStore.getState().openVault('/first');
@@ -211,8 +217,8 @@ describe('vaultStore', () => {
     let releaseWatcher: () => void = () => undefined;
     vi.mocked(ipc.startWatcher).mockImplementation((vault) =>
       vault === '/second'
-        ? new Promise<void>((resolve) => (releaseWatcher = resolve))
-        : Promise.resolve(),
+        ? new Promise<OpenReport>((resolve) => (releaseWatcher = () => resolve(NOTHING_PUT_BACK)))
+        : Promise.resolve(NOTHING_PUT_BACK),
     );
     try {
       await useVaultStore.getState().openVault('/first');
@@ -248,8 +254,8 @@ describe('vaultStore', () => {
     vi.mocked(ipc.scanVault).mockImplementation(mockBackend.scanVault);
     vi.mocked(ipc.startWatcher).mockImplementation((vault) =>
       vault === '/second'
-        ? new Promise<void>((resolve) => (releaseWatcher = resolve))
-        : Promise.resolve(),
+        ? new Promise<OpenReport>((resolve) => (releaseWatcher = () => resolve(NOTHING_PUT_BACK)))
+        : Promise.resolve(NOTHING_PUT_BACK),
     );
     try {
       await useVaultStore.getState().openVault('/first');
@@ -333,8 +339,8 @@ describe('vaultStore', () => {
     vi.mocked(ipc.scanVault).mockImplementation(mockBackend.scanVault);
     vi.mocked(ipc.startWatcher).mockImplementation((vault) =>
       vault === '/second'
-        ? new Promise<void>((resolve) => (releaseWatcher = resolve))
-        : Promise.resolve(),
+        ? new Promise<OpenReport>((resolve) => (releaseWatcher = () => resolve(NOTHING_PUT_BACK)))
+        : Promise.resolve(NOTHING_PUT_BACK),
     );
     const scans = observeStoreScans();
     try {
@@ -405,6 +411,7 @@ describe('vaultStore', () => {
     );
     vi.mocked(ipc.startWatcher).mockImplementation(async (vault) => {
       started.push(vault);
+      return NOTHING_PUT_BACK;
     });
 
     const first = useVaultStore.getState().openVault('/first');
@@ -981,5 +988,177 @@ describe('vaultStore rescans (M58.2)', () => {
       scans.stop();
       cleanup();
     }
+  });
+});
+
+/**
+ * M60.6: a database-wide change is one batch. The store sends it in one IPC
+ * call, shows patch ops at once, announces the pages it wrote, and on a
+ * refusal toasts once and rescans; it never throws.
+ */
+describe('vaultStore.applyBatch (M60.6)', () => {
+  const ITEM = 'projects/guided-onboarding-ga/items/fld-1.md';
+  const OTHER = 'projects/guided-onboarding-ga/items/fld-2.md';
+
+  beforeEach(async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    useUiStore.setState({ toasts: [] });
+  });
+
+  it('sends one IPC call, and shows patch ops before it answers', async () => {
+    let answer: () => void = () => undefined;
+    vi.mocked(ipc.applyBatch).mockImplementationOnce(
+      (vault, ops) =>
+        new Promise((resolve) => {
+          answer = () => resolve(mockBackend.applyBatch(vault, ops));
+        }),
+    );
+    const pending = useVaultStore.getState().applyBatch([
+      { op: 'patch', path: ITEM, set: { status: 'done' } },
+      { op: 'patch', path: OTHER, set: { status: 'done' } },
+    ]);
+    await vi.waitFor(() => expect(vi.mocked(ipc.applyBatch)).toHaveBeenCalled());
+    expect(findEntry(ITEM)?.properties.status).toBe('done');
+    expect(findEntry(OTHER)?.properties.status).toBe('done');
+    expect(mockFsDisk().get(ITEM)).not.toMatch(/^status: done$/m);
+    answer();
+    const applied = await pending;
+    expect(vi.mocked(ipc.applyBatch)).toHaveBeenCalledTimes(1);
+    expect(applied?.files.map((f) => f.path)).toEqual([ITEM, OTHER]);
+    expect(mockFsDisk().get(ITEM)).toMatch(/^status: done$/m);
+    expect(useUiStore.getState().toasts).toEqual([]);
+  });
+
+  it('a refusal toasts once in the page title, rescans, and returns null', async () => {
+    const before = mockFsDisk().get(ITEM);
+    const title = findEntry(ITEM)?.title;
+    const scans = vi.mocked(ipc.scanVault).mock.calls.length;
+    const applied = await useVaultStore.getState().applyBatch([
+      { op: 'patch', path: OTHER, set: { status: 'done' } },
+      { op: 'patch', path: ITEM, set: { status: 'done' }, expectHash: '0'.repeat(64) },
+    ]);
+    expect(applied).toBeNull();
+    expect(mockFsDisk().get(ITEM)).toBe(before);
+    expect(findEntry(OTHER)?.properties.status).not.toBe('done');
+    expect(useUiStore.getState().toasts.map((t) => t.message)).toEqual([
+      `Nothing was changed: “${title}” changed while this was being prepared. Try again.`,
+    ]);
+    expect(vi.mocked(ipc.scanVault).mock.calls.length).toBeGreaterThan(scans);
+  });
+
+  it('never throws, whatever the backend rejects with', async () => {
+    vi.mocked(ipc.applyBatch).mockRejectedValueOnce('the disk went away');
+    await expect(
+      useVaultStore.getState().applyBatch([{ op: 'delete', path: ITEM }]),
+    ).resolves.toBeNull();
+    expect(useUiStore.getState().toasts.map((t) => t.message)).toEqual(['the disk went away']);
+  });
+
+  it('refuses across vaults and while no vault is open, sending nothing', async () => {
+    useVaultStore.setState({ vaultPath: '/elsewhere' });
+    expect(await useVaultStore.getState().applyBatch([{ op: 'delete', path: ITEM }])).toBeNull();
+    useVaultStore.setState({ vaultPath: null });
+    expect(await useVaultStore.getState().applyBatch([{ op: 'delete', path: ITEM }])).toBeNull();
+    expect(vi.mocked(ipc.applyBatch)).not.toHaveBeenCalled();
+    expect(mockFsDisk().has(ITEM)).toBe(true);
+  });
+
+  it('lands the open pages first, and announces the pages it wrote', async () => {
+    const order: string[] = [];
+    const unflush = registerFlush(async () => {
+      order.push('flush');
+    });
+    vi.mocked(ipc.applyBatch).mockImplementationOnce(async (vault, ops) => {
+      order.push('batch');
+      return mockBackend.applyBatch(vault, ops);
+    });
+    const heard: string[] = [];
+    const stop = onExternalWrite(ITEM, {
+      pending: () => heard.push('pending'),
+      settled: () => heard.push('settled'),
+    });
+    try {
+      await useVaultStore.getState().applyBatch([{ op: 'body', path: ITEM, body: '\n# New\n' }]);
+    } finally {
+      unflush();
+      stop();
+    }
+    expect(order).toEqual(['flush', 'batch']);
+    expect(heard).toEqual(['pending', 'settled']);
+  });
+
+  it('an open that put a stopped change back says so, and rescans', async () => {
+    vi.mocked(ipc.startWatcher).mockResolvedValueOnce({ unfinished: 3, restored: 2, kept: 1 });
+    const scans = vi.mocked(ipc.scanVault).mock.calls.length;
+    await useVaultStore.getState().openVault('/demo-vault');
+    expect(useUiStore.getState().toasts.map((t) => t.message)).toEqual([
+      'Cerebro stopped partway through a change to 3 pages, so it put them back as they were. ' +
+        '1 had changed since and were left alone.',
+    ]);
+    expect(vi.mocked(ipc.scanVault).mock.calls.length - scans).toBe(2);
+    expect(useVaultStore.getState().status).toBe('ready');
+  });
+});
+
+/**
+ * M60.7: a labelled batch is undoable. The store pushes it on the undo
+ * stack and toasts the label with Undo; an unlabelled one pushes nothing,
+ * and opening another vault clears the stack.
+ */
+describe('vaultStore.applyBatch undo (M60.7)', () => {
+  const ITEM = 'projects/guided-onboarding-ga/items/fld-1.md';
+
+  beforeEach(async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    useUndoStore.getState().clear();
+    useUiStore.setState({ toasts: [] });
+  });
+
+  it('a labelled batch pushes one entry and toasts its label with Undo', async () => {
+    const before = mockFsDisk().get(ITEM);
+    await useVaultStore
+      .getState()
+      .applyBatch([{ op: 'patch', path: ITEM, set: { status: 'done' } }], { undo: 'Set it' });
+    expect(useUndoStore.getState().past.map((e) => e.label)).toEqual(['Set it']);
+    const [toast] = useUiStore.getState().toasts;
+    expect(toast.message).toBe('Set it');
+    expect(toast.action?.label).toBe('Undo');
+    toast.action?.run();
+    await vi.waitFor(() => expect(mockFsDisk().get(ITEM)).toBe(before));
+    expect(useUndoStore.getState().past).toEqual([]);
+    expect(useUndoStore.getState().future).toHaveLength(1);
+  });
+
+  it('an unlabelled batch pushes nothing', async () => {
+    await useVaultStore
+      .getState()
+      .applyBatch([{ op: 'patch', path: ITEM, set: { status: 'done' } }]);
+    expect(useUndoStore.getState().past).toEqual([]);
+    expect(useUiStore.getState().toasts).toEqual([]);
+  });
+
+  it('opening another vault clears the stack; reopening the same keeps it', async () => {
+    await useVaultStore
+      .getState()
+      .applyBatch([{ op: 'patch', path: ITEM, set: { status: 'done' } }], { undo: 'Set it' });
+    await useVaultStore.getState().openVault('/demo-vault');
+    expect(useUndoStore.getState().past).toHaveLength(1);
+    await useVaultStore.getState().openVault('/another-vault');
+    expect(useUndoStore.getState().past).toEqual([]);
+  });
+
+  it('a refusal heard by the caller is not toasted by the store', async () => {
+    const heard: string[] = [];
+    const applied = await useVaultStore
+      .getState()
+      .applyBatch(
+        [{ op: 'patch', path: ITEM, set: { status: 'done' }, expectHash: '0'.repeat(64) }],
+        {
+          onRefused: (message) => heard.push(message),
+        },
+      );
+    expect(applied).toBeNull();
+    expect(heard).toEqual([staleWords(ITEM)]);
+    expect(useUiStore.getState().toasts).toEqual([]);
   });
 });

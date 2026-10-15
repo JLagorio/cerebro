@@ -3,6 +3,7 @@
   "input": {
     "kind": "attended",
     "shell": "ask",
+    "web": "off",
     "ask_first": false,
     "read_scoped": false,
     "narrowing": [
@@ -18,7 +19,11 @@
       "MultiEdit",
       "NotebookEdit",
       "Bash",
-      "AskUserQuestion"
+      "WebFetch",
+      "WebSearch",
+      "AskUserQuestion",
+      "Read(./.trash/**)",
+      "Edit(./.trash/**)"
     ],
     "matcher": [
       "ExitPlanMode"
@@ -33,13 +38,14 @@
       "Read": "cli",
       "Glob": "cli",
       "Grep": "cli",
-      "WebFetch": "cli",
-      "WebSearch": "cli",
+      "WebFetch": "deny",
+      "WebSearch": "deny",
       "Task": "cli",
       "AskUserQuestion": "deny",
       "ExitPlanMode": "refuse",
       "mcp__cerebro__create_note": "cli",
       "mcp__cerebro__update_frontmatter": "cli",
+      "mcp__cerebro__set_fields": "cli",
       "mcp__cerebro__append_to_note": "cli",
       "mcp__cerebro__edit_note": "cli"
     }

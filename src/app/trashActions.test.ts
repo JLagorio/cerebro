@@ -7,6 +7,7 @@ vi.mock('@/lib/ipc', { spy: true });
 import * as ipc from '@/lib/ipc';
 import { resetMockFs } from '@/lib/mockIpc';
 import { useUiStore } from '@/stores/uiStore';
+import { useUndoStore } from '@/stores/undoStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { loadTrash, restoreItem, trashPath } from './trashActions';
 
@@ -21,6 +22,7 @@ beforeEach(async () => {
   resetMockFs();
   vi.clearAllMocks();
   useUiStore.setState({ toasts: [] });
+  useUndoStore.getState().clear();
   fs().set(PAGE, BYTES);
   await useVaultStore.getState().openVault(VAULT);
 });
@@ -88,5 +90,32 @@ describe('loadTrash', () => {
   it('is unavailable with its reason when the read fails, never empty', async () => {
     vi.mocked(ipc.listTrash).mockRejectedValueOnce(new Error('permission denied'));
     expect(await loadTrash(VAULT)).toEqual({ kind: 'unavailable', reason: 'permission denied' });
+  });
+});
+
+describe('a Trash move is undoable (M60.7)', () => {
+  it('pushes an entry; Undo restores it; redo trashes it again under a new stamp', async () => {
+    const item = await trashPath(PAGE, 'Plan');
+    expect(useUndoStore.getState().past.map((e) => e.label)).toEqual(['Moved “Plan” to Trash']);
+    const [toast] = useUiStore.getState().toasts;
+    expect(toast.action?.label).toBe('Undo');
+    useUiStore.setState({ toasts: [] });
+    toast.action?.run();
+    await vi.waitFor(() => expect(toasts()).toEqual(['Undid: Moved “Plan” to Trash']));
+    expect(fs().get(PAGE)).toBe(BYTES);
+    expect(await useUndoStore.getState().redo()).toBe(true);
+    expect(fs().has(PAGE)).toBe(false);
+    const [back] = useUndoStore.getState().past;
+    const stamp = back.kind === 'trash' ? back.item.stamp : null;
+    expect(stamp).not.toBeNull();
+    expect(stamp).not.toBe(item?.stamp);
+    expect(fs().get(`.trash/${stamp}/${PAGE}`)).toBe(BYTES);
+  });
+
+  it('a quiet restore leaves the success toast to its caller', async () => {
+    const item = await trashPath(PAGE, 'Plan');
+    useUiStore.setState({ toasts: [] });
+    expect(await restoreItem(item!, { quiet: true })).toBe(PAGE);
+    expect(toasts()).toEqual([]);
   });
 });

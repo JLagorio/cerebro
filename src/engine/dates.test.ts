@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   addDays,
   chipPropsToDateValue,
@@ -6,9 +6,11 @@ import {
   formatDate,
   formatDateValue,
   formatTime,
+  localDateOf,
   makeDateValue,
   parseDateProperty,
   parseDateToken,
+  parseEndpoint,
   remindAt,
   serializeDateProperty,
   serializeDateValue,
@@ -162,6 +164,37 @@ describe('date properties', () => {
     expect(parseDateProperty({ end: '2026-08-09' })).toBeNull();
   });
 
+  // The narrow grammar (M60.3, dates.v1.json): a prefix is not a date.
+  it('is null for prose after a day, a day that does not exist, and zone-less seconds', () => {
+    expect(parseDateProperty('2026-08-02 junk')).toBeNull();
+    expect(parseDateProperty('2026-02-30')).toBeNull();
+    expect(parseDateProperty('2026-08-02T14:30:00')).toBeNull();
+  });
+
+  describe('an instant reads as local time', () => {
+    const tz = process.env.TZ;
+    afterEach(() => {
+      if (tz === undefined) delete process.env.TZ;
+      else process.env.TZ = tz;
+    });
+
+    it('in Los Angeles, the day before its UTC day', () => {
+      process.env.TZ = 'America/Los_Angeles';
+      const v = parseDateProperty('2026-07-28T03:00:00Z');
+      expect(v?.start).toBe('2026-07-27');
+      expect(v?.startTime).toBe('20:00');
+    });
+
+    it('in Sydney, through parseEndpoint too', () => {
+      process.env.TZ = 'Australia/Sydney';
+      expect(parseEndpoint('2026-07-28T09:20:00Z')).toEqual({
+        date: '2026-07-28',
+        time: '19:20',
+        instant: true,
+      });
+    });
+  });
+
   it('writes a space separator, matching the token grammar this app already uses', () => {
     const v = { ...makeDateValue('2026-08-02'), startTime: '14:30' };
     expect(serializeDateProperty(v, 'date')).toBe('2026-08-02 14:30');
@@ -185,5 +218,28 @@ describe('date properties', () => {
     }
     const range = { start: '2026-08-02 09:00', end: '2026-08-09' };
     expect(serializeDateProperty(parseDateProperty(range)!, 'daterange')).toEqual(range);
+  });
+});
+
+/** An instant's local date (M61.8): the day this machine's clock said. */
+describe('localDateOf', () => {
+  const tz = process.env.TZ;
+  afterEach(() => {
+    if (tz === undefined) delete process.env.TZ;
+    else process.env.TZ = tz;
+  });
+
+  it('gives an instant its local date in two zones', () => {
+    process.env.TZ = 'Australia/Sydney';
+    expect(localDateOf('2026-07-28T23:30:00Z')).toBe('2026-07-29');
+    process.env.TZ = 'America/Los_Angeles';
+    expect(localDateOf('2026-07-28T03:30:00.000Z')).toBe('2026-07-27');
+  });
+
+  it('leaves a plain date, a floating time and junk unchanged', () => {
+    process.env.TZ = 'Australia/Sydney';
+    expect(localDateOf('2026-07-28')).toBe('2026-07-28');
+    expect(localDateOf('2026-07-28 23:30')).toBe('2026-07-28 23:30');
+    expect(localDateOf('soon')).toBe('soon');
   });
 });

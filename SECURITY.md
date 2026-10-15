@@ -48,9 +48,17 @@ deliberately does not do — with your machine is most of its security story.
   Settings counts them beside the switch. A writer or the shell an agent's
   `allowed-tools:` leaves out is denied at every ceiling. A read-scoped run
   loses the shell and is denied the built-in readers (Read, Glob, Grep) too.
+  Inside the vault the readers need no approval, except in the Trash, which
+  every run's Read and Edit are denied (M60.8b, below).
   The plan tool is refused, by the gate or in argv; the question tool asks
   you only in a conversation you are watching (M57.3, below) and is denied in
-  argv everywhere else. Cerebro's
+  argv everywhere else. Web access is a second Settings ceiling, off by
+  default (M57.7). Off denies WebFetch and WebSearch in argv, even when your
+  own Claude Code settings allow them. On grants both to attended turns, and
+  to scheduled agents whose record declares `tools: web`. Cerebro's own
+  constructs and handed-off runs never get them. A fetch can carry vault text
+  in its URL, so give the web only to agents you trust with the outside
+  world. Cerebro's
   own internal runs (ingest, maintenance, synthesis) are denied every CLI
   tool, the web tools and Task included. Cerebro's MCP tools enforce the rest
   themselves: a run's write scope, its read scope, the knowledge guard, the
@@ -61,10 +69,20 @@ deliberately does not do — with your machine is most of its security story.
   Agent record, stays refused. A write that names `expect_hash` is also a read, and
   is held to the read scope. The one tool that rewrites note text in place,
   `edit_note`, needs read access to the note as well as write access, because
-  its refusals quote the note back. Both scopes bind where a note path lands
+  its refusals quote the note back, and so does `set_fields` (M60.4), whose
+  list changes and option labels read the record as it is. `set_fields` never
+  reaches `knowledge/`, a Type doc or an Agent record (its own `recent` key
+  included), and it names a Type doc's or a project's options, or checks a
+  linked page's type, only where the run may read them. `create_note` lists up to three similar
+  notes as advice, and only notes the run may read (M61.6b). Its refusing
+  form, `if_exists: "refuse"`, names a taken note in a folder the run may
+  write, which the numbered copy it lands otherwise already reveals. Both scopes bind where a note path lands
   as well as how it is spelled, so a symlink inside a scope cannot carry a
   read or a write out of it. A vault's `allowed-tools:` can only narrow
-  that grant, never widen it. The argv decides every call but one a run may
+  that grant, never widen it. A `scope:` or `read-scope:` that is present
+  but names no folder (a bare key, a number, a mapping, a `[[link]]`) scopes
+  the run to nothing, in a hand-off and a thread turn as in every other run
+  (M58.6). The argv decides every call but one a run may
   stop to ask you about (next item): that tool is left out of the allow list
   and meets Cerebro's gate instead.
 - **A run can wait for you, and only you can answer** (M57.1). A run that may
@@ -209,15 +227,29 @@ deliberately does not do — with your machine is most of its security story.
   itself. Git carries that folder like any other, so a pushed vault shares
   its comments. The scan, search and the agent's note tools never read or
   write it, and a sidecar linked out of the vault is refused like any escape.
+  A link inside the vault is refused too: when `.comments`, a folder in it or
+  a sidecar is a symlink (to `.git/`, `.cerebro/` or `knowledge/`, say),
+  comment reads and writes refuse, and a rename or delete leaves the comments
+  where they are rather than carry, clear or trash through the link.
 - **A deleted page waits in the vault's own Trash, `.trash/`** (M60.8). A
   delete moves the page and its comments to `.trash/<stamp>/`; nothing a
   person deletes is unlinked. `.trash/` is gitignored, so a pushed vault
   never carries a deleted page, and the scan, search and Cerebro's agent
-  tools never read or write it. Claude Code's own readers (Read, Glob, Grep)
-  can still open it until M60.8b denies them, and a shell-granted run always
-  can. Restore refuses to overwrite, a `.trash` linked out of the vault is
+  tools never read or write it. Neither do Claude Code's own (M60.8b): every
+  run a person or an agent starts denies `Read(./.trash/**)` and
+  `Edit(./.trash/**)` in `--disallowedTools`, from the tool-approval table's
+  `hidden_paths`, and a deny beats any allow, your own included. Claude Code
+  applies a Read rule to Glob and Grep as well. A shell-granted run can still
+  reach `.trash/` through Bash. Restore refuses to overwrite, a `.trash` linked out of the vault is
   refused like any escape, and at launch items past 30 days move to the
   macOS Trash.
+- **An unfinished change keeps its pages' previous bytes in `runtime.db`**
+  (M60.6). A database-wide change (a property rename, kind change or copy,
+  a bulk delete) writes a journal row holding every page's previous bytes,
+  in the app's data folder, never the vault, before it writes a page. The
+  row is deleted the moment the change commits, or once a rollback puts the
+  pages back, which the next launch does for a change that stopped partway.
+  A change refuses knowledge/, and refuses to start without that journal.
 - **Agents can comment on pages they can read** (M70.3). comment_on_note,
   reply_to_comment and resolve_comment write only the page's comment
   sidecar, never the page, and are held to read scope (a refusal lists where
@@ -261,7 +293,7 @@ deliberately does not do — with your machine is most of its security story.
   vault. A handle outside the slug grammar is refused before anything is
   written. A bound turn runs under that record's grant, like a turn that
   names it with `@`: its actor, write and read scope, tools and connectors,
-  under the Settings shell ceiling, and a paused agent's turn is refused. A
+  under the Settings shell and web ceilings, and a paused agent's turn is refused. A
   binding no record answers to sends as the plain assistant, and the panel
   says so.
 - **Open with opens two kinds of target, and nothing else.** A markdown note

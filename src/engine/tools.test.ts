@@ -157,11 +157,12 @@ describe('the read toolset (M59.5)', () => {
 });
 
 describe('the write toolset', () => {
-  it('is create_note, update_frontmatter, append_to_note and edit_note, in that order, all writing', () => {
+  it('is create_note, update_frontmatter, set_fields, append_to_note and edit_note, in that order, all writing', () => {
     const write = TOOLSETS.find((s) => s.id === 'write');
     expect(write?.tools.map((t) => t.name)).toEqual([
       'create_note',
       'update_frontmatter',
+      'set_fields',
       'append_to_note',
       'edit_note',
     ]);

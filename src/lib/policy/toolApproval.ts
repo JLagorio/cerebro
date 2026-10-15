@@ -9,9 +9,11 @@
  * since M57.4, is whether an ask-first agent's page write asks: the
  * manifest's `confirmable` rows resolve to the family the `ask_first` block
  * names, read by the agent's `ask-first:` instead of a ceiling (since M57.4c
- * an unattended one queues for Review, the `queue` decision), and, since
- * M57.3, whether AskUserQuestion asks the person with a question card. This
- * module is its second interpreter (the critical.ts precedent): the same
+ * an unattended one queues for Review, the `queue` decision), since M57.3,
+ * whether AskUserQuestion asks the person with a question card, and, since
+ * M57.7, whether a run holds WebFetch and WebSearch, by the web ceiling, and,
+ * since M60.8b, which vault folders (`hidden_paths`, the Trash) the CLI's own
+ * readers and editors may not open. This module is its second interpreter (the critical.ts precedent): the same
  * strict load, refusal for refusal and in the same words, `plan` for a run,
  * and `hostAnswer` for one call. Nothing here restates a decision; the
  * parity is the shared goldens in `shared/policy/goldens-tool-approval/`,
@@ -34,12 +36,21 @@ export const TOOL_APPROVAL_DIGEST_PATH = 'shared/policy/tool-approval.v1.sha256'
 export const FORMAT = 1;
 
 /** The longest subject a card names, in characters; a longer one is cut and
- * ends in an ellipsis. */
+ * ends in an ellipsis. A cut subject is for display only: no This
+ * conversation grant ever covers one (`subjectIsCut`), so two calls that
+ * share the first SUBJECT_CHARS characters never share a grant. */
 export const SUBJECT_CHARS = 2000;
 
 /** The Settings shell ceiling: off, ask or on. */
 export type ShellCeiling = 'off' | 'ask' | 'on';
 export const SHELL_CEILINGS: readonly ShellCeiling[] = ['off', 'ask', 'on'];
+
+/** The Settings web ceiling (M57.7): off or on, two states. */
+export type WebCeiling = 'off' | 'on';
+export const WEB_CEILINGS: readonly WebCeiling[] = ['off', 'on'];
+
+/** The axis the web family's grid is read by (M57.7). */
+export const WEB_AXIS = 'web';
 
 /** `queue` (M57.4c) holds an unattended ask-first page write for Review: the
  * ask-first family's alone. */
@@ -133,6 +144,15 @@ export interface AskFirstBlock {
   cases: AskFirstCase[];
 }
 
+/** The vault folders the CLI's own tools may not open (M60.8b): each folder
+ * one hidden, vault-relative name, each tool a manifest CLI row whose path
+ * rule Claude Code applies. Every attended and unattended run denies
+ * `Tool(./folder/**)` for each pair. */
+export interface HiddenPaths {
+  folders: string[];
+  tools: string[];
+}
+
 export interface ToolApproval {
   format: number;
   artifact_version: number;
@@ -144,6 +164,7 @@ export interface ToolApproval {
   decisions: Decision[];
   permission_modes: { internal: string; asks: string; otherwise: string };
   read_scope: Record<string, Decision>;
+  hidden_paths: HiddenPaths;
   families: Family[];
   unlisted: { decision: Decision };
   messages: Messages;
@@ -186,6 +207,7 @@ function checkShape(value: unknown): ToolApproval {
     'decisions',
     'permission_modes',
     'read_scope',
+    'hidden_paths',
     'families',
     'unlisted',
     'messages',
@@ -204,6 +226,13 @@ function checkShape(value: unknown): ToolApproval {
   exactly(top.permission_modes, 'permission_modes', ['internal', 'asks', 'otherwise']);
   if (!isRecord(top.read_scope)) throw new Error(`${TOOL_APPROVAL_PATH}: read_scope`);
   Object.values(top.read_scope).forEach(decision);
+  const hidden = exactly(top.hidden_paths, 'hidden_paths', ['folders', 'tools']);
+  for (const key of ['folders', 'tools'] as const) {
+    const list = hidden[key];
+    if (!Array.isArray(list) || !list.every((item) => typeof item === 'string')) {
+      throw new Error(`${TOOL_APPROVAL_PATH}: hidden_paths.${key} must be a list of names`);
+    }
+  }
   if (!Array.isArray(top.families)) throw new Error(`${TOOL_APPROVAL_PATH}: families`);
   for (const family of top.families) {
     const row = exactly(family, 'a family', [
@@ -392,15 +421,16 @@ function validate(table: ToolApproval, manifest: ToolsManifest): void {
   }
   const ceilingKeys = sortedKeys(table.ceilings);
   if (
-    !same(ceilingKeys, [ASK_FIRST_AXIS, 'none', 'shell']) ||
+    !same(ceilingKeys, [ASK_FIRST_AXIS, 'none', 'shell', WEB_AXIS]) ||
     !same(table.ceilings.none, ['any']) ||
     !same(table.ceilings.shell, SHELL_CEILINGS) ||
-    !same(table.ceilings[ASK_FIRST_AXIS], ['yes', 'no'])
+    !same(table.ceilings[ASK_FIRST_AXIS], ['yes', 'no']) ||
+    !same(table.ceilings[WEB_AXIS], WEB_CEILINGS)
   ) {
     throw refusal(
       'table',
       'ceilings',
-      'must be none: [any], shell: [off, ask, on] and ask_first: [yes, no]',
+      'must be none: [any], shell: [off, ask, on], ask_first: [yes, no] and web: [off, on]',
     );
   }
   if (
@@ -445,11 +475,60 @@ function validate(table: ToolApproval, manifest: ToolsManifest): void {
   if (table.unlisted.decision !== 'cli' && table.unlisted.decision !== 'refuse') {
     throw refusal('unlisted', 'decision', 'must be cli or refuse');
   }
+  checkHiddenPaths(table, manifest);
   for (const family of table.families) checkFamily(table, family, manifest);
   for (const field of ['open_per_actor', 'input_bytes'] as const) {
     if (table.queue_limits[field] === 0) throw refusal('queue_limits', field, 'must be at least 1');
   }
   checkAskFirst(table, manifest);
+}
+
+/** The hidden folders (M60.8b), as tool_approval.rs's `check_hidden_paths`:
+ * each one hidden, vault-relative name whose rule rides argv intact, and
+ * each tool a manifest CLI row, none twice. */
+function checkHiddenPaths(table: ToolApproval, manifest: ToolsManifest): void {
+  const hidden = table.hidden_paths;
+  hidden.folders.forEach((name, at) => {
+    const problem =
+      name === ''
+        ? 'must not be empty'
+        : /^[/\\]/.test(name) || [...name][1] === ':'
+          ? 'must be relative to the vault, never absolute'
+          : name.split(/[/\\]/).includes('..')
+            ? 'must not climb out of the vault with ..'
+            : /[/\\]/.test(name)
+              ? 'must be one folder name, without a slash'
+              : !name.startsWith('.') || name === '.'
+                ? "must be a hidden name: a dot, then the folder's name"
+                : !/^[A-Za-z0-9._-]+$/.test(name)
+                  ? 'must hold only letters, digits, dots, dashes and underscores'
+                  : hidden.folders.slice(0, at).includes(name)
+                    ? 'is named twice'
+                    : null;
+    if (problem !== null) {
+      throw refusal(`hidden path ${JSON.stringify(name)}`, 'hidden_paths.folders', problem);
+    }
+  });
+  if (hidden.folders.length > 0 && hidden.tools.length === 0) {
+    throw refusal('hidden_paths', 'tools', 'must name a tool when a folder is hidden');
+  }
+  hidden.tools.forEach((tool, at) => {
+    const subject = `hidden path tool ${JSON.stringify(tool)}`;
+    if (!manifest.cli_tools.some((row) => row.name === tool)) {
+      throw refusal(subject, 'hidden_paths.tools', 'is no CLI tool in the manifest');
+    }
+    if (hidden.tools.slice(0, at).includes(tool)) {
+      throw refusal(subject, 'hidden_paths.tools', 'is named twice');
+    }
+  });
+}
+
+/** The path rules every attended and unattended run denies (M60.8b), as
+ * tool_approval.rs's `hidden_path_rules`: `Tool(./folder/**)` for each hidden
+ * folder, then each of its tools. */
+export function hiddenPathRules(table: ToolApproval = TOOL_APPROVAL): string[] {
+  const { folders, tools } = table.hidden_paths;
+  return folders.flatMap((folder) => tools.map((tool) => `${tool}(./${folder}/**)`));
 }
 
 /** The ask-first block (M57.4), as tool_approval.rs's `check_ask_first`. */
@@ -524,6 +603,12 @@ export function parseShellCeiling(value: unknown): ShellCeiling {
   return value === 'ask' || value === 'on' ? value : 'off';
 }
 
+/** A stored or wire web ceiling (M57.7): true or "on" is on, and anything
+ * else is off. */
+export function parseWebCeiling(value: unknown): WebCeiling {
+  return value === true || value === 'on' ? 'on' : 'off';
+}
+
 /** What an agent's run may hold: `declared` is whether its record declares
  * the shell (`tools: shell`), null for a run with no record. No record runs
  * at the ceiling; a record that does not declare it gets off; one that does
@@ -548,6 +633,10 @@ export function offersConversation(family: string, table: ToolApproval = TOOL_AP
 export interface ApprovalInput {
   kind: RunKind;
   shell: ShellCeiling;
+  /** The web ceiling (M57.7). Absent reads off, as Rust's `web: None` does.
+   * Read scope leaves it alone: a read limit bounds vault folders, not the
+   * outside world. */
+  web?: WebCeiling;
   /** Does the run's agent ask before its page writes (M57.4)? Absent reads
    * as no, as for a run no agent answers (the prompt grant's plan). */
   askFirst?: boolean;
@@ -583,7 +672,9 @@ export function matcherOf(approval: RunApproval): string[] {
  * manifest's confirmable rows follow the CLI's by the same steps, read by
  * `askFirst` (M57.4); only their asks reach the lists, a queued one rides
  * neither (M57.4c), a narrowed-out one is denied rather than queued, and a
- * run that cannot ask withholds nothing for them. */
+ * run that cannot ask withholds nothing for them. An attended or unattended
+ * run's `disallowed` ends with the hidden folders' path rules (M60.8b); an
+ * internal run's needs none, since it is denied every CLI tool. */
 export function plan(input: ApprovalInput, table: ToolApproval = TOOL_APPROVAL): RunApproval {
   const canAsk = table.run_kinds.find((kind) => kind.id === input.kind)?.can_ask ?? false;
   const approval: RunApproval = {
@@ -599,7 +690,12 @@ export function plan(input: ApprovalInput, table: ToolApproval = TOOL_APPROVAL):
   for (const tool of TOOLS.cli_tools) {
     const family = table.families.find((row) => row.id === tool.family);
     if (family === undefined) continue;
-    const value = family.ceiling === 'shell' ? input.shell : 'any';
+    const value =
+      family.ceiling === 'shell'
+        ? input.shell
+        : family.ceiling === WEB_AXIS
+          ? (input.web ?? 'off')
+          : 'any';
     let decision = family.grid[input.kind][value];
     if (input.readScoped && table.read_scope[family.id] !== undefined) {
       decision = table.read_scope[family.id];
@@ -625,6 +721,7 @@ export function plan(input: ApprovalInput, table: ToolApproval = TOOL_APPROVAL):
     if (decision === 'refuse') approval.refused.push(tool.name);
     approval.decisions.push({ tool: tool.name, family: family.id, decision });
   }
+  if (input.kind !== 'internal') approval.disallowed.push(...hiddenPathRules(table));
   const askFamily = table.families.find((row) => row.id === table.ask_first.family);
   if (askFamily !== undefined) {
     const value = input.askFirst === true ? 'yes' : 'no';
@@ -671,11 +768,21 @@ export function subjectOf(tool: string, input: unknown): string {
   return chars.length <= SUBJECT_CHARS ? text : `${chars.slice(0, SUBJECT_CHARS).join('')}…`;
 }
 
+/** Was `subject` cut by `subjectOf`? Only a cut subject runs past
+ * SUBJECT_CHARS characters (it is SUBJECT_CHARS plus the ellipsis), so the
+ * text alone says. A cut subject names only a prefix of the call, so it is
+ * never granted, remembered or matched for This conversation, as
+ * tool_approval.rs's `subject_is_cut` says. */
+export function subjectIsCut(subject: string): boolean {
+  return [...subject].length > SUBJECT_CHARS;
+}
+
 /** The gate's answer for a call to `tool` with `input`, under `approval`:
  * allow, cli and queue pass (dispatch queues, M57.4c); deny says the
  * family's message where it has one (the question family's says nobody is
- * watching, M57.3), else that the settings forbid it; refuse says the family's message; ask allows only on a grant
- * for this exact subject, where the family's card offers This conversation. */
+ * watching, M57.3), else that the settings forbid it; refuse says the
+ * family's message; ask allows only on a grant for this exact subject, where
+ * the family's card offers This conversation and the subject was not cut. */
 export function hostAnswer(
   approval: RunApproval,
   granted: (family: string, subject: string) => boolean,
@@ -699,7 +806,7 @@ export function hostAnswer(
     case 'ask': {
       const family = row?.family ?? 'unlisted';
       const subject = subjectOf(tool, input);
-      return offersConversation(family, table) && granted(family, subject)
+      return !subjectIsCut(subject) && offersConversation(family, table) && granted(family, subject)
         ? { kind: 'allow' }
         : { kind: 'ask', family, subject };
     }

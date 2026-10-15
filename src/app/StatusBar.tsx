@@ -124,6 +124,8 @@ export function StatusBar() {
   return (
     <footer
       data-testid="status-bar"
+      // Neutral chrome (M65.1): a click here leaves the keymap's scope alone.
+      data-key-neutral
       className="flex h-7 flex-none items-center gap-1 border-t border-n-200 bg-n-25 px-2"
     >
       <Segment

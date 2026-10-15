@@ -1,4 +1,5 @@
 import { isTemplate } from '@/lib/templates';
+import { isDateText } from './dateGrammar';
 import { isKnowledgePath } from './okf';
 import { coerceValueToKind, inferTarget, isSystemProperty, validateValue } from './properties';
 import type { Entry, FieldKind, Schema } from './types';
@@ -48,8 +49,6 @@ export interface TypeProposal {
   fields: FieldProposal[];
 }
 
-const ISO_DATE_PREFIX = /^\d{4}-\d{2}-\d{2}/;
-
 /** Adoptable records: content with a type, minus schema/scaffolding/corpus. */
 function isAdoptable(e: Entry): boolean {
   return (
@@ -75,7 +74,9 @@ export function inferKind(keyName: string, values: unknown[]): FieldKind {
   if (flat.some((v) => Array.isArray(v))) return 'multiselect';
   if (share((v) => typeof v === 'boolean') >= 2 / 3) return 'checkbox';
   if (share((v) => typeof v === 'number') >= 2 / 3) return 'number';
-  if (share((v) => typeof v === 'string' && ISO_DATE_PREFIX.test(v)) >= 2 / 3) return 'date';
+  // Date text by the shared grammar (dates.v1.json), not a prefix: a value
+  // that merely starts with a day ("2026-07-28 kickoff") is prose.
+  if (share(isDateText) >= 2 / 3) return 'date';
   if (keyName.toLowerCase() === 'status') return 'status';
   // A small vocabulary of short scalar values reads as a select — the
   // Tolaria display-mode heuristic, hardened to need real repetition.

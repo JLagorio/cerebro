@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "artifact_version": 10,
+  "artifact_version": 13,
   "rule_version": "tools/2026-10-14",
   "server": "cerebro",
   "tokens": {
@@ -361,7 +361,7 @@
         "properties": {
           "target": {
             "type": "string",
-            "description": "A vault path (records/risks/r-1.md) or a bare wikilink target (rq-84b-kestrel, atlas). Resolved the way the app resolves a wikilink: filename stem, then project folder, then exact title, case-insensitively."
+            "description": "A vault path (records/risks/r-1.md) or a bare wikilink target (rq-84b-kestrel, atlas). Resolved the way the app resolves a wikilink: filename stem, then project folder, then an item key such as FLD-13, then exact title, case-insensitively."
           },
           "limit": {
             "type": "number",
@@ -575,7 +575,7 @@
       "always_load": false,
       "confirmable": true,
       "search_hint": "create a new note",
-      "description": "Create a note. Use for ordinary vault content, not knowledge concepts (use write_concept for those).",
+      "description": "Create a note. Use for ordinary vault content, not knowledge concepts (use write_concept for those). The answer may list up to three existing notes of the same type with matching titles, as advice; nothing is merged.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -594,6 +594,14 @@
           "body": {
             "type": "string",
             "description": "Markdown body, starting with an H1"
+          },
+          "if_exists": {
+            "type": "string",
+            "enum": [
+              "suffix",
+              "refuse"
+            ],
+            "description": "What to do when <folder>/<slug>.md already exists: \"suffix\" (the default) writes a numbered copy beside it; \"refuse\" writes nothing and names the existing note."
           }
         },
         "required": [
@@ -644,6 +652,57 @@
         "required": [
           "path",
           "patch"
+        ]
+      }
+    },
+    {
+      "name": "set_fields",
+      "surface": "base",
+      "title": "Set record fields",
+      "summary": "Set a record’s fields, checked against its database",
+      "toolset": "write",
+      "kind": "destructive",
+      "idempotent": true,
+      "open_world": false,
+      "door": "note",
+      "axis": "read_write",
+      "target": {
+        "arg": "path",
+        "kind": "note"
+      },
+      "exempt": null,
+      "renderer": "change",
+      "fold": null,
+      "icon": "list-checks",
+      "always_load": false,
+      "confirmable": true,
+      "search_hint": "set status, options, people or links on a record",
+      "description": "Change a record's fields, checked against its database's schema (its `type: Type` doc). `set` replaces values (null removes the field). `add` and `remove` change list fields (multi-select, person, relation, files) item by item against the record as it is now, so they never overwrite another change. Choices take an option's label or id and store the id; an unknown option is kept as written and named in the reply. Person and relation values take a page name or a [[link]] and are stored as [[links]]; a link to a record of another type is refused naming the type the field expects. Computed fields (rollups, created and edited time, the other side of a relation) and `type` are refused. Undeclared keys are written as given and named. Pass `expect_hash` (the `Hash:` line a note read prints) to write only if the record is unchanged; a mismatch writes nothing. A refusal writes nothing.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "set": {
+            "type": "object",
+            "description": "Fields to replace, by name; null removes one"
+          },
+          "add": {
+            "type": "object",
+            "description": "List fields to add items to, by name: one value or a list"
+          },
+          "remove": {
+            "type": "object",
+            "description": "List fields to remove items from, by name: one value or a list"
+          },
+          "expect_hash": {
+            "type": "string",
+            "description": "The hash from get_note's Hash line for this note. If the note has changed since, nothing is written."
+          }
+        },
+        "required": [
+          "path"
         ]
       }
     },

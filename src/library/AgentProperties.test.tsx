@@ -6,7 +6,7 @@ import type { Entry } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { makeEntry } from '@/test/factories';
-import { AgentProperties, shellWords } from './AgentProperties';
+import { AgentProperties, shellWords, webWords } from './AgentProperties';
 
 /**
  * An agent page's properties (M55.12; the M18 editor's tests moved here).
@@ -291,6 +291,7 @@ describe('AgentProperties', () => {
     expect(row('read-scope').textContent).toContain('everything');
     expect(row('tools').textContent).toContain('unrestricted');
     expect(row('shell').textContent).toContain('off');
+    expect(row('web').textContent).toContain('No web');
     expect(row('schedule').textContent).toContain('weekdays 08:30');
   });
 
@@ -313,6 +314,44 @@ describe('AgentProperties', () => {
       expect(row('shell').textContent).toContain(words);
     }
     useUiStore.setState({ agentShell: 'off' });
+  });
+
+  // M57.7: the Web row writes `tools:` on Done and nothing before, keeping a
+  // declared shell beside it, and says when Settings leaves it no web.
+  it('the Web row writes only tools, on Done', async () => {
+    setup([shellAgent], shellAgent.path);
+    const editor = openRow('web');
+    fireEvent.click(within(editor).getByRole('checkbox'));
+    expect(patch).not.toHaveBeenCalled();
+    done(editor);
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    expect(lastPatch()).toEqual({ tools: ['shell', 'web'] });
+  });
+
+  it('the Web row words what Web access in Settings leaves the agent (M57.7)', () => {
+    expect(webWords(false, true)).toBe('No web');
+    expect(webWords(true, true)).toBe('Searches and fetches the web');
+    expect(webWords(true, false)).toBe('Web access is off in Settings, so it has none.');
+    const webAgent = makeEntry({
+      path: 'records/agents/web-scout.md',
+      folder: 'records/agents',
+      title: 'Web scout',
+      type: 'Agent',
+      properties: { slug: 'web-scout', tools: 'web' } as never,
+    });
+    useUiStore.setState({ agentWebAccess: false });
+    setup([webAgent], webAgent.path);
+    expect(row('web').textContent).toContain('Web access is off in Settings, so it has none.');
+    cleanup();
+    useUiStore.setState({ agentWebAccess: true });
+    setup([webAgent], webAgent.path);
+    expect(row('web').textContent).toContain('Searches and fetches the web');
+    const editor = openRow('web');
+    expect(editor.textContent).toContain('Let this agent search and fetch the web');
+    expect(editor.textContent).toContain(
+      'Still capped by Web access in Settings. A fetch can carry what the agent read to any site.',
+    );
+    useUiStore.setState({ agentWebAccess: false });
   });
 
   it('a refused write keeps the editor open with its draft', async () => {
@@ -590,6 +629,44 @@ describe('AgentProperties model and effort (M56.5)', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByTestId('agent-editor-effort')).toBeNull();
     expect(patch).not.toHaveBeenCalled();
+  });
+});
+
+describe('AgentProperties Writes in (M58.6)', () => {
+  const withProps = (props: Record<string, unknown>) =>
+    makeEntry({ ...AGENT, properties: { ...AGENT.properties, ...props } as never });
+  const writesIn = (props: Record<string, unknown>) => {
+    cleanup();
+    setup([withProps(props), RISK]);
+    return row('scope').textContent;
+  };
+
+  afterEach(() => useUiStore.setState({ agentShell: 'off' }));
+
+  it('words what its tools reach', () => {
+    useUiStore.setState({ agentShell: 'off' });
+    expect(writesIn({})).toContain('records/risks/; Knowledge and sources through their own tools');
+    expect(writesIn({ scope: undefined })).toContain('any page but Type docs and Agent pages');
+    expect(writesIn({ scope: [], 'allowed-tools': ['get_note', 'write_concept'] })).toContain(
+      'Knowledge and sources only, through their own tools',
+    );
+    expect(writesIn({ scope: [], 'allowed-tools': ['append_to_note'] })).toMatch(/no page$/);
+    expect(writesIn({ 'allowed-tools': ['get_note', 'search_notes'] })).toContain(
+      'no page — none of its tools change one',
+    );
+    expect(writesIn({})).not.toContain('proposals only');
+  });
+
+  it('adds the shell where Settings lets it widen reach', () => {
+    useUiStore.setState({ agentShell: 'on' });
+    const tail = 'records/risks/; Knowledge and sources through their own tools';
+    expect(writesIn({ tools: 'shell' })).toContain(`${tail} · any file with the shell`);
+    useUiStore.setState({ agentShell: 'ask' });
+    expect(writesIn({ tools: 'shell' })).toContain(
+      `${tail} · any file with the shell, once you allow it`,
+    );
+    useUiStore.setState({ agentShell: 'on' });
+    expect(writesIn({})).not.toContain('shell');
   });
 });
 

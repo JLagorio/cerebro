@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TableView } from '@/views/TableView';
 import { ownsEscape, pushLayer, resetLayers } from '@/components/ui/layers';
@@ -9,6 +9,7 @@ import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { fixtureVault, makeEntry } from '@/test/factories';
+import type { BatchOp } from '@/engine/batch';
 import type { ColumnDef } from '@/engine/columns';
 import type { Entry, Presentation } from '@/engine/types';
 
@@ -661,6 +662,58 @@ describe('TableView row gutter (M16.16)', () => {
     expect(screen.getByText(`Delete "${items[0].title}"?`)).toBeTruthy();
   });
 
+  // M60.6: a delete is one batch of delete ops, for one row or many.
+  // M60.7: the label rides the batch; the store toasts it with Undo.
+  it('deleting one row sends one undoable batch, labelled where it went', async () => {
+    const applyBatch = vi.fn(async () => ({ batchId: 'b'.repeat(32), files: [] }));
+    useVaultStore.setState({ applyBatch });
+    const user = userEvent.setup();
+    const { items } = grid();
+    await user.click(screen.getAllByLabelText(`Actions for ${items[0].title}`)[0]);
+    await user.click(screen.getByTestId('row-delete'));
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(applyBatch).toHaveBeenCalledTimes(1));
+    expect(applyBatch).toHaveBeenCalledWith([{ op: 'delete', path: items[0].path }], {
+      undo: `Moved “${items[0].title}” to Trash`,
+    });
+  });
+
+  it('deleting checked rows sends them all in one batch', async () => {
+    const applyBatch = vi.fn(async () => ({ batchId: 'b'.repeat(32), files: [] }));
+    useVaultStore.setState({ applyBatch });
+    const user = userEvent.setup();
+    const { items } = grid();
+    await user.click(screen.getByLabelText(`Select ${items[0].title}`));
+    await user.click(screen.getByLabelText(`Select ${items[1].title}`));
+    await user.click(
+      within(screen.getByTestId('bulk-bar')).getByRole('button', { name: 'Delete' }),
+    );
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(applyBatch).toHaveBeenCalledTimes(1));
+    expect(applyBatch).toHaveBeenCalledWith(
+      [
+        { op: 'delete', path: items[0].path },
+        { op: 'delete', path: items[1].path },
+      ],
+      { undo: 'Moved 2 records to Trash' },
+    );
+  });
+
+  it('a refused delete adds no toast of its own and keeps the selection', async () => {
+    const applyBatch = vi.fn(async () => null);
+    useVaultStore.setState({ applyBatch });
+    const user = userEvent.setup();
+    const { items } = grid();
+    await user.click(screen.getByLabelText(`Select ${items[0].title}`));
+    await user.click(
+      within(screen.getByTestId('bulk-bar')).getByRole('button', { name: 'Delete' }),
+    );
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(applyBatch).toHaveBeenCalledTimes(1));
+    expect(useUiStore.getState().toasts).toEqual([]);
+    expect(screen.getByTestId('bulk-bar')).toBeTruthy();
+  });
+
   it('offers no insert affordance on a surface that cannot create', () => {
     grid();
     expect(screen.queryByTestId('row-insert')).toBeNull();
@@ -851,8 +904,8 @@ describe('TableView header settings (M16.18)', () => {
 
   /**
    * Deleting a property destroys a schema declaration and, with it, the way
-   * every record of the type is read. There is no undo in the app — recovery
-   * is git. `PropertyMenu` and `PropertyEditor` were given a confirmation;
+   * every record of the type is read. `PropertyMenu` and `PropertyEditor`
+   * were given a confirmation;
    * THIS menu has its own `Delete property` item, which called
    * `removeFieldFromType` on the single click, from a surface that already
    * tells you it edits N records. Third call site, same dialog.
@@ -883,6 +936,30 @@ describe('TableView header settings (M16.18)', () => {
     await user.click(screen.getByRole('menuitem', { name: /Delete property/ }));
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('dialog')).toBeNull();
+    expect(onColumnsChange).not.toHaveBeenCalled();
+  });
+
+  // M60.2: the rename's batch renames every stored view's column, so the
+  // header no longer rewrites the open view from its pre-rename props.
+  it('a rename from the header menu goes through the batch and never rewrites the open view', async () => {
+    const user = userEvent.setup();
+    const batches: BatchOp[][] = [];
+    useVaultStore.setState({
+      entries: fixtureVault(),
+      views: [],
+      applyBatch: vi.fn(async (ops: BatchOp[]) => {
+        batches.push(ops);
+        return { batchId: 'b'.repeat(32), files: [] };
+      }),
+    });
+    const { onColumnsChange } = grid();
+    await user.click(screen.getByLabelText('Priority column menu'));
+    const rename = screen.getByLabelText('Rename Priority');
+    await user.clear(rename);
+    await user.type(rename, 'Urgency{Enter}');
+    await waitFor(() => expect(batches).toHaveLength(1));
+    const doc = batches[0].find((op) => op.path === 'types/work-item.md');
+    expect(doc?.op === 'patch' && Object.keys(doc.set.fields as object)).toContain('urgency');
     expect(onColumnsChange).not.toHaveBeenCalled();
   });
 
@@ -1871,5 +1948,85 @@ describe('TableView column drag (M46.2)', () => {
     // A leaked gesture layer sits on the stack forever, and every later Escape
     // in the app finds it there instead of the surface it was aimed at.
     expect(ownsEscape('panel')).toBe(true);
+  });
+});
+
+/**
+ * M60.5: the header menu's Change type is the same KindChangeList the property
+ * editor shows, so it says per kind what changing would do, and a lossy change
+ * becomes Convert into a new property, whose column lands after the old one.
+ */
+describe('TableView Change type (M60.5)', () => {
+  const betDoc = makeEntry({
+    path: 'types/bet.md',
+    title: 'Bet',
+    type: 'Type',
+    properties: {
+      fields: { stake: { kind: 'text' }, odds: { kind: 'number' } },
+    } as unknown as Entry['properties'],
+  });
+  const bets = ['12', 'abc', 'n/a', 'TBD'].map((stake, i) =>
+    makeEntry({
+      path: `records/bets/bet-${i + 1}.md`,
+      title: `Bet ${i + 1}`,
+      type: 'Bet',
+      properties: { stake } as Entry['properties'],
+    }),
+  );
+
+  function betTable() {
+    const entries = [betDoc, ...bets];
+    const patches: { path: string; patch: Record<string, unknown> }[] = [];
+    useVaultStore.setState({
+      entries,
+      views: [],
+      // M60.6: the conversion lands as one batch; its patch ops are the writes.
+      applyBatch: vi.fn(async (ops: BatchOp[]) => {
+        for (const op of ops) if (op.op === 'patch') patches.push({ path: op.path, patch: op.set });
+        return { batchId: 'b'.repeat(32), files: [] };
+      }),
+    });
+    const schema = buildSchema(entries);
+    const onColumnsChange = vi.fn();
+    render(
+      <TableView
+        entries={bets}
+        presentation={{ ...presentation, columns: [{ field: 'stake' }, { field: 'odds' }] }}
+        schema={schema}
+        fields={columnUniverse({ type: 'Bet', project: null }, entries, schema)}
+        sourceType="Bet"
+        onColumnsChange={onColumnsChange}
+        onPresentationChange={vi.fn()}
+      />,
+    );
+    return { patches, onColumnsChange };
+  }
+
+  it("reads 3 won't convert on the Number row", async () => {
+    const user = userEvent.setup();
+    betTable();
+    await user.click(screen.getByLabelText('Stake column menu'));
+    await user.click(screen.getByTestId('change-type'));
+    expect(screen.getByTestId('change-type-hint-number').textContent).toBe(
+      "3 won't convert · Converts into a new property",
+    );
+    expect(screen.getByTestId('change-type-number').getAttribute('role')).toBe('menuitem');
+  });
+
+  it('converts into a new property and inserts its column after the old one', async () => {
+    const user = userEvent.setup();
+    const { patches, onColumnsChange } = betTable();
+    await user.click(screen.getByLabelText('Stake column menu'));
+    await user.click(screen.getByTestId('change-type'));
+    await user.click(screen.getByTestId('change-type-number'));
+    await user.click(screen.getByRole('button', { name: 'Convert into a new property' }));
+    await waitFor(() =>
+      expect(onColumnsChange).toHaveBeenCalledWith([
+        { field: 'stake' },
+        { field: 'stake_number' },
+        { field: 'odds' },
+      ]),
+    );
+    expect(patches.map((p) => p.path)).toEqual(['types/bet.md', 'records/bets/bet-1.md']);
   });
 });

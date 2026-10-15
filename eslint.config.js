@@ -31,8 +31,10 @@ const ENGINE_IMPORTS = new RegExp(
     // viewTab.ts's one edge into views, deliberate: capability data over
     // engine types with no React in it (its comment says why).
     '@/views/viewKinds$',
-    // okf.ts reads the staleness table the backends share.
-    '\\.\\./\\.\\./shared/policy/[\\w.-]+\\.json$',
+    // Tables the backends share: okf.ts reads staleness, M60.3's readers the
+    // field kinds (shared/schema) and the date grammar (shared/calendar), and
+    // fileKinds.ts the file kinds (shared/files, M66.1).
+    '\\.\\./\\.\\./shared/(?:policy|schema|calendar|files)/[\\w.-]+\\.json$',
     // The whiteboard scene core's two pinned upstream libraries (M68.1), bare
     // names only; src/engine/scene/boundary.test.ts pins the one file that
     // loads each (ink.ts, order.ts).
@@ -70,7 +72,7 @@ const RAILS = {
     // `typeof import('…')` names a module too, so the engine checks types.
     types: true,
     message:
-      'engine/ is the pure core: it imports engine modules, yaml, the lib leaves slug, templates, sha256, policy/table, policy/tools and policy/toolApproval, views/viewKinds, shared/policy JSON, and the scene libraries perfect-freehand and fractional-indexing. Move the code into engine/, or have the caller pass the value in.',
+      'engine/ is the pure core: it imports engine modules, yaml, the lib leaves slug, templates, sha256, policy/table, policy/tools and policy/toolApproval, views/viewKinds, JSON tables under shared/policy, shared/schema, shared/calendar and shared/files, and the scene libraries perfect-freehand and fractional-indexing. Move the code into engine/, or have the caller pass the value in.',
   },
 };
 

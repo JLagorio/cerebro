@@ -153,9 +153,11 @@ fn request(session: &Session, url: &str) -> AgentRequest {
         system_prompt: None,
         session_id: None,
         model: None,
-        // No shell ceiling (M57.2): an internal run's tool-approval plan
-        // denies every CLI tool whatever the ceiling, so none is sent.
+        // No shell or web ceiling (M57.2, M57.7): an internal run's
+        // tool-approval plan denies every CLI tool whatever the ceilings, so
+        // none is sent.
         shell: None,
+        web: None,
         // Every one of these is an absence a missing field would GRANT. See
         // the module note; none of them is a default worth inheriting.
         connectors: Some(false),
@@ -212,6 +214,7 @@ mod tests {
         // is why every one is stated rather than left off.
         let request = request(&session(), "http://127.0.0.1:1/mcp");
         assert_eq!(request.shell, None, "no ceiling reaches it");
+        assert_eq!(request.web, None, "nor the web's");
         let plan = crate::policy::tool_approval::plan_for(&request, false);
         assert!(plan.allowed.is_empty(), "it does not write files");
         assert_eq!(plan.disallowed, crate::policy::tools::cli_names(|_| true));

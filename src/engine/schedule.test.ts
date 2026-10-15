@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   axisSpan,
   axisTicks,
@@ -9,6 +9,7 @@ import {
   dateFieldOptions,
   dateKindOf,
   dayCount,
+  dayLabel,
   dayOffset,
   dependenciesOf,
   eachDay,
@@ -92,6 +93,27 @@ describe('spanOf', () => {
   it('strips a time component', () => {
     const e = makeEntry({ properties: { due: '2026-07-29 16:00' } });
     expect(spanOf(e, 'due')).toEqual({ start: '2026-07-29', end: '2026-07-29' });
+  });
+
+  describe('an instant lands on its local day (M60.3)', () => {
+    const tz = process.env.TZ;
+    afterEach(() => {
+      if (tz === undefined) delete process.env.TZ;
+      else process.env.TZ = tz;
+    });
+
+    it('in Sydney, 23:00 UTC is the next morning', () => {
+      process.env.TZ = 'Australia/Sydney';
+      const e = makeEntry({ properties: { due: '2026-07-28T23:00:00Z' } });
+      expect(spanOf(e, 'due')).toEqual({ start: '2026-07-29', end: '2026-07-29' });
+    });
+
+    it('a range of instants across Sydney midnight spans two days', () => {
+      process.env.TZ = 'Australia/Sydney';
+      const window = { start: '2026-07-28T13:00:00Z', end: '2026-07-28T15:00:00Z' };
+      const e = makeEntry({ properties: { window } });
+      expect(spanOf(e, 'window')).toEqual({ start: '2026-07-28', end: '2026-07-29' });
+    });
   });
 
   it('reads a daterange from the nested mapping the parser passes through', () => {
@@ -684,5 +706,66 @@ describe('dependencies', () => {
         { start: '2026-07-05', end: '2026-07-20' },
       ),
     ).toBe(false);
+  });
+});
+
+/**
+ * Midnight ends (M61.8). A 22:00 → 00:00 deploy is a Tuesday evening: its
+ * end is where Tuesday stops, not a minute of Wednesday. It used to cover
+ * both days in every date view.
+ */
+describe('a range that ends at midnight', () => {
+  const late = makeEntry({
+    properties: { window: { start: '2026-07-28 22:00', end: '2026-07-29 00:00' } },
+  });
+
+  it('ends on the day before its midnight', () => {
+    expect(spanOf(late, 'window')).toEqual({ start: '2026-07-28', end: '2026-07-28' });
+    const multi = makeEntry({
+      properties: { window: { start: '2026-07-28', end: '2026-07-31 00:00' } },
+    });
+    expect(spanOf(multi, 'window')).toEqual({ start: '2026-07-28', end: '2026-07-30' });
+  });
+
+  it('never ends before its start', () => {
+    const same = makeEntry({
+      properties: { window: { start: '2026-07-28 00:00', end: '2026-07-28 00:00' } },
+    });
+    expect(spanOf(same, 'window')).toEqual({ start: '2026-07-28', end: '2026-07-28' });
+  });
+
+  it('is left out of the next day', () => {
+    expect(onDay([late], 'window', '2026-07-28')).toEqual([late]);
+    expect(onDay([late], 'window', '2026-07-29')).toEqual([]);
+  });
+
+  it('keeps 00:00 when a whole-day move shifts it by a day', () => {
+    const raw = late.properties.window;
+    const span = spanOf(late, 'window')!;
+    expect(rescheduleValue(raw, 'daterange', shiftSpan(span, 1))).toEqual({
+      start: '2026-07-29 22:00',
+      end: '2026-07-30 00:00',
+    });
+  });
+
+  it('keeps 00:00 through a timeline resize, and never writes it backwards', () => {
+    const raw = late.properties.window;
+    const span = spanOf(late, 'window')!;
+    expect(rescheduleValue(raw, 'daterange', resizeSpan(span, 'end', 2))).toEqual({
+      start: '2026-07-28 22:00',
+      end: '2026-07-31 00:00',
+    });
+    // Clamped at its start, the end is still the midnight after that day.
+    expect(rescheduleValue(raw, 'daterange', resizeSpan(span, 'end', -5))).toEqual({
+      start: '2026-07-28 22:00',
+      end: '2026-07-29 00:00',
+    });
+  });
+});
+
+describe('dayLabel', () => {
+  it('names the weekday, month and year', () => {
+    expect(dayLabel('2026-07-28')).toBe('Tuesday, July 28, 2026');
+    expect(dayLabel('2026-08-12')).toBe('Wednesday, August 12, 2026');
   });
 });

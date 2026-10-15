@@ -96,10 +96,14 @@ async function select(page: Page, text: string, length: number, fromEnd = false)
   const mac = process.platform === 'darwin';
   if (fromEnd) {
     await page.keyboard.press(mac ? 'Meta+ArrowRight' : 'End');
+    // A frame between moves too: under load the ArrowLeft was lost and the
+    // selection took the trailing period.
+    await frame(page);
     await page.keyboard.press('ArrowLeft');
   } else {
     await page.keyboard.press(mac ? 'Meta+ArrowLeft' : 'Home');
   }
+  await frame(page);
   for (let i = 0; i < length; i++) {
     await page.keyboard.press(fromEnd ? 'Shift+ArrowLeft' : 'Shift+ArrowRight');
     // One frame per key: ProseMirror reads the browser's selection on

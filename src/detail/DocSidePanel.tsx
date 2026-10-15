@@ -3,6 +3,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { DocProperties } from '@/detail/DocProperties';
 import { LastChange } from '@/detail/LastChange';
+import { PageAccess } from '@/detail/PageAccess';
 import { OutlineTab } from '@/editor/DocOutline';
 import type { CerebroEditor } from '@/editor/MarkdownEditor';
 import { agentRef, isAgentEntry } from '@/engine/agents';
@@ -14,7 +15,7 @@ import { typeStyle } from '@/engine/typeCatalog';
 import { ConceptDetailsTab } from '@/knowledge/ConceptDetailsTab';
 import { CommentsTab } from '@/detail/CommentsTab';
 import type { PageCommentsController } from '@/detail/usePageComments';
-import { GitHistoryPanel } from '@/git/GitHistoryPanel';
+import { PageHistory } from '@/history/PageHistory';
 import { FileNote } from '@/library/chrome';
 import { PageKnowledge } from '@/knowledge/PageKnowledge';
 import {
@@ -35,7 +36,8 @@ const TABS: { id: DocPanelTab; label: string }[] = [
   { id: 'knowledge', label: 'Knowledge' },
   // M70.2b — the page's threads: on its text, and about the whole page.
   { id: 'comments', label: 'Comments' },
-  // M58.4 (D18) — the page's versions, as prose, with Restore.
+  // M58.4 (D18) — the page's versions, as prose, with Restore, merged with
+  // its recorded edits (M64.2b).
   { id: 'history', label: 'History' },
 ];
 
@@ -48,7 +50,8 @@ const CONCEPT_TABS: { id: ConceptPanelTab; label: string }[] = [
   // A concept takes comments like any page (M70.2b, Q5): the sidecar sits
   // outside the bundle, and a thread can neither write nor verify it.
   { id: 'comments', label: 'Comments' },
-  // Its versions read like any page's (M58.4); Restore is not offered there.
+  // Its versions read like any page's (M58.4), beside what the ledger
+  // recorded about it (M64.2b); Restore is not offered there.
   { id: 'history', label: 'History' },
 ];
 
@@ -138,11 +141,14 @@ function AgentInfo({ entry }: { entry: Entry }) {
 /**
  * Right-hand doc side panel (M2.x docs polish — Plane's pane pattern): one
  * panel, its tabs in TABS (CONCEPT_TABS on a concept). Outline replaces the
- * old floating TOC; Info leads with who last changed the page (M58.1b) and
- * hosts the properties editor (on an agent page, a read-only note — M55.12);
- * Links shows resolved connections and backlinks;
- * Comments holds the page's threads (M70.2b); History lists its versions,
- * each opening the version lens in place of the editor (M58.4, D18).
+ * old floating TOC; Info leads with who last changed the page (M58.1b),
+ * hosts the properties editor (on an agent page, a read-only note — M55.12)
+ * and ends with who else can change it (M58.6); a concept's panel has no
+ * Info; Links shows resolved connections and backlinks;
+ * Comments holds the page's threads (M70.2b); History is `PageHistory`
+ * (M64.2b): its versions, each opening the version lens in place of the
+ * editor (M58.4, D18), merged with its recorded edits, the runs that wrote
+ * it and, on a concept, the ledger's events.
  */
 export function DocSidePanel({
   entry,
@@ -250,11 +256,12 @@ export function DocSidePanel({
             ) : (
               <DocProperties entry={entry} schema={schema} />
             )}
+            <PageAccess entry={entry} />
           </>
         )}
         {tab === 'links' && <LinksTab entry={entry} />}
         {tab === 'comments' && comments !== null && <CommentsTab controller={comments} />}
-        {tab === 'history' && <GitHistoryPanel path={entry.path} variant="tab" />}
+        {tab === 'history' && <PageHistory path={entry.path} />}
         {/* The record peek's Knowledge, component for component (M52.3).
             What this note gave Knowledge comes before what Knowledge can give
             the note: every doc is a candidate source, not just the ones that

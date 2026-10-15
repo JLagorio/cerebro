@@ -12,7 +12,8 @@
  *
  * Cerebro's own tools are reckoned by name. The CLI's are reckoned by the
  * tool-approval table (M57.2, `cliGrant`): `PromptGrant.shell` says whether
- * the run can change files itself, pre-approved or by asking the person. A
+ * the run can change files itself, pre-approved or by asking the person, and
+ * `PromptGrant.web` whether it holds WebFetch (M57.7). A
  * run the app's TS starts never holds a window or an answer tool, which
  * belong to Rust's own runs, and TS cannot read the proposal switch, so the
  * generated proposal tools count as not held and no prompt names them (fail
@@ -23,7 +24,7 @@
  */
 
 import { TOOLS, toolFacts } from '@/lib/policy/tools';
-import { plan, TOOL_APPROVAL, type ShellCeiling } from '@/lib/policy/toolApproval';
+import { plan, TOOL_APPROVAL, type ShellCeiling, type WebCeiling } from '@/lib/policy/toolApproval';
 import { ALL_TOOLS, TOOLSETS } from './tools';
 
 /** What a prompt is composed against. */
@@ -35,6 +36,10 @@ export interface PromptGrant {
    * plans it (`holdsShell`), less what its record withholds and what a read
    * limit withdraws (M53.5). */
   shell: boolean;
+  /** Whether it holds Claude Code's WebFetch (M57.7): the web ceiling as the
+   * tool-approval table plans it (`holdsWeb`), less what its record leaves
+   * out. Absent reads as no web, so no prompt names the web tools. */
+  web?: boolean;
   /** Whether a person is watching it: a panel turn, never a background job. */
   attended: boolean;
 }
@@ -100,6 +105,9 @@ export function namesTool(declared: string, tool: string): boolean {
 export interface CliGrantInput {
   /** Its effective shell ceiling (`effectiveCeiling`). */
   shell: ShellCeiling;
+  /** Its web ceiling (M57.7): the Settings switch, less what its record
+   * leaves out. Absent reads off. */
+  web?: WebCeiling;
   /** A person watches it, in the panel: its gate can ask. */
   attended: boolean;
   /** Its record draws a read limit. */
@@ -117,6 +125,7 @@ export function cliGrant(input: CliGrantInput): { cli: string[]; asks: string[] 
   const approval = plan({
     kind: input.attended ? 'attended' : 'unattended',
     shell: input.shell,
+    web: input.web ?? 'off',
     readScoped: input.readScoped,
     narrowing:
       narrowing === null ? null : (tool) => narrowing.some((entry) => namesTool(entry, tool)),
@@ -140,6 +149,12 @@ export function holdsShell(input: CliGrantInput): boolean {
   });
 }
 
+/** Does the run hold Claude Code's WebFetch (M57.7), pre-approved? The web
+ * never asks, so held is allowed. */
+export function holdsWeb(input: CliGrantInput): boolean {
+  return cliGrant(input).cli.includes('WebFetch');
+}
+
 /** Does the run hold every one of `names`? */
 export function holds(grant: PromptGrant, ...names: readonly string[]): boolean {
   return names.every((name) => grant.tools.has(name));
@@ -147,8 +162,8 @@ export function holds(grant: PromptGrant, ...names: readonly string[]): boolean 
 
 /**
  * The tools that change a note already on disk: the manifest's rows that
- * write and are aimed at a note (today update_frontmatter, append_to_note and
- * edit_note).
+ * write and are aimed at a note (today update_frontmatter, set_fields,
+ * append_to_note and edit_note).
  * Read off the manifest, so a new note editor joins without an edit here.
  */
 export const NOTE_EDITORS: readonly string[] = HOLDABLE.filter((name) => {

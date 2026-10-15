@@ -1,3 +1,4 @@
+import type { ActivityWrite, AppSessionSpan, ConceptEvent } from '@/engine/activity';
 import type {
   ChangesView,
   FleetRun,
@@ -812,5 +813,156 @@ export function demoChanges(): ChangesView {
         lines: [],
       },
     ],
+  };
+}
+
+/** The demo's History lanes (M64.2), as runtime.db's `vault_writes` and
+ * `app_sessions` would hold them. `content` is left to the mock, which sets
+ * it from `CONTENT_KINDS` as Rust does. */
+export interface DemoActivity {
+  writes: Omit<ActivityWrite, 'content'>[];
+  sessions: AppSessionSpan[];
+}
+
+/**
+ * When Cerebro had the demo vault open, and who wrote what (M64.2).
+ *
+ * Each row is here because History has a branch for it:
+ *
+ * - Cerebro open 2026-07-20 to 07-24 and on 07-27, 08:00–18:00Z, and on
+ *   07-28 from 08:00Z, still open (the mock reads it up to its clock), so
+ *   07-25 and 07-26 read "not recorded";
+ * - recording begins 07-21 with an edit whose writer nobody stamped (a row
+ *   from before M58.1), so 07-20 reads "not recorded" though Cerebro was open,
+ *   and 07-22 to 07-24 read "no edits";
+ * - two of your sessions on 07-27, eight minutes apart, so the fold splits
+ *   them;
+ * - on 07-28 the Knowledge agent's addressed turn (run-ingest-2) writes its
+ *   two concepts at the times `demoFleetRuns` gives them, and the release
+ *   scout's run (run-scout-1) writes the risk page its run detail names.
+ *
+ * These rows stay out of the mock's live write log (`__cerebroMockWrites`),
+ * so a page's last change (M58.1b) reads only what a spec wrote.
+ */
+export function demoActivity(): DemoActivity {
+  const row = (
+    path: string,
+    actor: string | null,
+    runId: string | null,
+    firstAt: string,
+    at: string,
+  ): Omit<ActivityWrite, 'content'> => ({
+    kind: 'vault.write',
+    path,
+    to: null,
+    actor,
+    run_id: runId,
+    approved_by: null,
+    first_at: firstAt,
+    at,
+  });
+  const span = (day: string): AppSessionSpan => ({
+    opened_at: `${day}T08:00:00.000Z`,
+    until: `${day}T18:00:00.000Z`,
+    precision: 'clean_exact',
+  });
+  return {
+    writes: [
+      row(
+        'records/risks/risk-scanner-delivery.md',
+        'process:release-scout',
+        'run-scout-1',
+        '2026-07-28T09:16:00.000Z',
+        '2026-07-28T09:18:00.000Z',
+      ),
+      row(
+        'knowledge/systems/pick-queue-drain.md',
+        'process:knowledge',
+        'run-ingest-2',
+        '2026-07-28T09:26:00.000Z',
+        '2026-07-28T09:26:00.000Z',
+      ),
+      row(
+        'knowledge/playbooks/warehouse-cutover.md',
+        'process:knowledge',
+        'run-ingest-2',
+        '2026-07-28T09:05:00.000Z',
+        '2026-07-28T09:05:00.000Z',
+      ),
+      row(
+        'delivery/delivery.md',
+        'human:me',
+        null,
+        '2026-07-27T14:20:00.000Z',
+        '2026-07-27T14:31:00.000Z',
+      ),
+      row(
+        'records/risks/risk-rollback-unrehearsed.md',
+        'human:me',
+        null,
+        '2026-07-27T14:00:00.000Z',
+        '2026-07-27T14:12:00.000Z',
+      ),
+      row(
+        'delivery/how-we-schedule.md',
+        null,
+        null,
+        '2026-07-21T10:00:00.000Z',
+        '2026-07-21T10:04:00.000Z',
+      ),
+    ],
+    sessions: [
+      {
+        opened_at: '2026-07-28T08:00:00.000Z',
+        until: '2026-07-28T08:00:00.000Z',
+        precision: 'open',
+      },
+      span('2026-07-27'),
+      span('2026-07-24'),
+      span('2026-07-23'),
+      span('2026-07-22'),
+      span('2026-07-21'),
+      span('2026-07-20'),
+    ],
+  };
+}
+
+/**
+ * What the demo's ledger recorded about two concepts (M64.2b), for a
+ * concept page's History. The browser keeps no ledger, so these stand in for
+ * `page_activity`'s Knowledge lane: the Knowledge agent's addressed turn
+ * (run-ingest-2) created both, at the times `demoActivity` writes them, and
+ * its proposals applied. Every other bundle path reads not recorded.
+ */
+export function demoConceptHistory(): Record<string, ConceptEvent[]> {
+  const created = (id: string, at: string): ConceptEvent[] => [
+    {
+      event_id: `demo-created-${id}`,
+      kind: 'created',
+      revision: null,
+      state: null,
+      actor: 'process:knowledge',
+      run_id: 'run-ingest-2',
+      at,
+    },
+    {
+      event_id: `demo-proposal-${id}`,
+      kind: 'proposal',
+      revision: null,
+      state: 'applied',
+      actor: 'process:knowledge',
+      run_id: 'run-ingest-2',
+      at,
+    },
+  ];
+  return {
+    'knowledge/playbooks/warehouse-cutover.md': created(
+      'warehouse-cutover',
+      '2026-07-28T09:05:00.000Z',
+    ),
+    'knowledge/systems/pick-queue-drain.md': created(
+      'pick-queue-drain',
+      '2026-07-28T09:26:00.000Z',
+    ),
   };
 }

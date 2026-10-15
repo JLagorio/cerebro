@@ -6,15 +6,14 @@ import {
   parseEndpoint,
   toIsoDate,
 } from './dates';
+import { FAMILY_OPS } from './fieldKindTable';
 import { kindMeta } from './properties';
 import { searchableFields } from './searchable';
-import { FILTER_OPS } from './types';
 import type {
   Entry,
   FieldDef,
   FieldKind,
   FieldOption,
-  FilterFamily,
   FilterGroup,
   FilterOp,
   FilterRule,
@@ -70,47 +69,22 @@ export const filterOpLabel = (op: FilterOp): string => OP_META[op].label;
 export const filterOpArity = (op: FilterOp): FilterArity => OP_META[op].arity;
 
 /**
- * Every kind offers these two, including `checkbox`.
+ * The operators a filter may offer on a field of this kind (M16.25).
  *
+ * Which operators each family offers, in menu order, is `filter_families` in
+ * shared/schema/field-kinds.v1.json, and each kind's family is its `filters`
+ * fact there. Neither half restates the other, and neither is a second copy
+ * of the kind list.
+ *
+ * Every family ends in `is_empty` and `is_not_empty`, `boolean` included.
  * Notion's checkbox filter is is/is-not only, but a frontmatter key can be
  * genuinely ABSENT, which is a state neither of those describes — and every
  * surface that seeds a rule seeds `is_not_empty` on purpose, because it is the
  * one operator that excludes nothing (M15: `equals ''` blanked the canvas the
- * instant "Add filter" was pressed). A kind that cannot express it would need
- * a seed that hides records before the user has chosen anything.
+ * instant "Add filter" was pressed). `any` is the rollup's family and offers
+ * every operator: what a rollup holds depends on its `calculate`, which the
+ * kind alone cannot say.
  */
-const UNIVERSAL: FilterOp[] = ['is_empty', 'is_not_empty'];
-
-/**
- * Which operators each family offers, in menu order.
- *
- * The family→operators half of the answer; the kind→family half is a flag on
- * `KIND_META` so `satisfies Record<FieldKind, …>` forces every new kind to
- * declare one. Neither half restates the other, and neither is a second copy
- * of the kind list.
- */
-const FAMILY_OPS = {
-  text: [
-    'contains',
-    'does_not_contain',
-    'equals',
-    'not_equals',
-    'starts_with',
-    'ends_with',
-    ...UNIVERSAL,
-  ],
-  number: ['equals', 'not_equals', 'gt', 'gte', 'lt', 'lte', 'is_between', ...UNIVERSAL],
-  date: ['equals', 'before', 'after', 'on_or_before', 'on_or_after', 'is_between', ...UNIVERSAL],
-  choice: ['equals', 'not_equals', 'any_of', 'none_of', ...UNIVERSAL],
-  multi: ['contains', 'does_not_contain', 'any_of', 'none_of', ...UNIVERSAL],
-  boolean: ['equals', 'not_equals', ...UNIVERSAL],
-  // A rollup's values are whatever its `calculate` produces — a count is a
-  // number, `earliest` is a date, `show` is prose. The kind alone cannot say,
-  // so it offers everything rather than guessing wrong in one direction.
-  any: [...FILTER_OPS],
-} satisfies Record<FilterFamily, FilterOp[]>;
-
-/** The operators a filter may offer on a field of this kind (M16.25). */
 export function filterOpsFor(kind: FieldKind): FilterOp[] {
   return [...FAMILY_OPS[kindMeta(kind).filters]];
 }

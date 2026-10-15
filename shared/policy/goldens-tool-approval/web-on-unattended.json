@@ -1,0 +1,51 @@
+{
+  "why": "A scheduled run of an agent that declares tools: web, with Web access On (M57.7): the web is pre-approved as attended, and a read limit would leave it so, since it bounds vault folders, not the outside world.",
+  "input": {
+    "kind": "unattended",
+    "shell": "off",
+    "web": "on",
+    "ask_first": false,
+    "read_scoped": false,
+    "narrowing": null
+  },
+  "expected": {
+    "permission_mode": "acceptEdits",
+    "allowed": [
+      "WebFetch",
+      "WebSearch"
+    ],
+    "disallowed": [
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "NotebookEdit",
+      "Bash",
+      "AskUserQuestion",
+      "ExitPlanMode",
+      "Read(./.trash/**)",
+      "Edit(./.trash/**)"
+    ],
+    "matcher": [],
+    "withheld": [],
+    "decisions": {
+      "Write": "deny",
+      "Edit": "deny",
+      "MultiEdit": "deny",
+      "NotebookEdit": "deny",
+      "Bash": "deny",
+      "Read": "cli",
+      "Glob": "cli",
+      "Grep": "cli",
+      "WebFetch": "allow",
+      "WebSearch": "allow",
+      "Task": "cli",
+      "AskUserQuestion": "deny",
+      "ExitPlanMode": "deny",
+      "mcp__cerebro__create_note": "allow",
+      "mcp__cerebro__update_frontmatter": "allow",
+      "mcp__cerebro__set_fields": "allow",
+      "mcp__cerebro__append_to_note": "allow",
+      "mcp__cerebro__edit_note": "allow"
+    }
+  }
+}

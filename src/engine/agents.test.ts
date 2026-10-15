@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { TOOL_APPROVAL } from '@/lib/policy/toolApproval';
-import { agentRef, askFirstOf, linkedTiers, listAgents, narrowTools, readAddress } from './agents';
+import {
+  agentRef,
+  askFirstOf,
+  isPaused,
+  linkedTiers,
+  listAgents,
+  narrowTools,
+  readAddress,
+} from './agents';
+import { isPaused as reexported } from './jobs';
 import { makeEntry } from './testHelpers';
 
 const agent = (title: string, patch: Parameters<typeof makeEntry>[0] = {}) =>
@@ -36,6 +45,28 @@ describe('listAgents', () => {
     expect(wide?.memory.recent).toBe('knows a thing');
     expect(bare?.shell).toBe(false);
     expect(bare?.memory).toEqual({ recent: '', preferences: '' });
+  });
+
+  // M57.7: `tools:` takes shell, web or both, as a word or a list, and
+  // anything else declares nothing.
+  it('reads the host grants tools: declares', () => {
+    const grants = (tools: unknown) => {
+      const [ref] = listAgents([agent('Case', { properties: { tools } })]);
+      return { shell: ref.shell, web: ref.web };
+    };
+    expect(grants('web')).toEqual({ shell: false, web: true });
+    expect(grants(['shell', 'web'])).toEqual({ shell: true, web: true });
+    expect(grants(['web'])).toEqual({ shell: false, web: true });
+    expect(grants('shell')).toEqual({ shell: true, web: false });
+    expect(grants('safe')).toEqual({ shell: false, web: false });
+    expect(grants(undefined)).toEqual({ shell: false, web: false });
+    // Unknown words, other shapes and wrong case are ignored, so an odd
+    // value grants nothing.
+    expect(grants(['web', 'everything', 3])).toEqual({ shell: false, web: true });
+    expect(grants('Web')).toEqual({ shell: false, web: false });
+    expect(grants('shell, web')).toEqual({ shell: false, web: false });
+    expect(grants({ web: true })).toEqual({ shell: false, web: false });
+    expect(grants(true)).toEqual({ shell: false, web: false });
   });
 
   it('skips unparseable records', () => {
@@ -450,5 +481,17 @@ describe('askFirstOf (M57.4)', () => {
     expect(odd(true)).toBeNull();
     expect(odd(false)).toBeNull();
     expect(agentRef(agent('Scout')).askFirst).toBe(false);
+  });
+});
+
+describe('isPaused (M18; here since M63.1)', () => {
+  it('reads paused: true only', () => {
+    const agent = (paused: unknown) =>
+      makeEntry({ type: 'Agent', properties: paused === undefined ? {} : { paused } });
+    expect(isPaused(agent(true))).toBe(true);
+    for (const off of [undefined, false, 'true', 'yes', 1, null]) {
+      expect(isPaused(agent(off))).toBe(false);
+    }
+    expect(reexported).toBe(isPaused);
   });
 });

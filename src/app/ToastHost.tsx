@@ -8,6 +8,13 @@ import { useUiStore } from '@/stores/uiStore';
  */
 const AUTO_DISMISS_MS = 6000;
 
+/**
+ * A toast with an action (M60.7: Undo, Redo) stays longer: reading it and
+ * then reaching for its button takes more than reading alone. Clicking the
+ * button runs the action and dismisses the toast; hovering still pauses.
+ */
+export const ACTION_DISMISS_MS = 10_000;
+
 export function ToastHost() {
   const toasts = useUiStore((s) => s.toasts);
   const dismissToast = useUiStore((s) => s.dismissToast);
@@ -30,10 +37,13 @@ export function ToastHost() {
       if (!timers.current.has(t.id)) {
         timers.current.set(
           t.id,
-          setTimeout(() => {
-            timers.current.delete(t.id);
-            dismissToast(t.id);
-          }, AUTO_DISMISS_MS),
+          setTimeout(
+            () => {
+              timers.current.delete(t.id);
+              dismissToast(t.id);
+            },
+            t.action === undefined ? AUTO_DISMISS_MS : ACTION_DISMISS_MS,
+          ),
         );
       }
     }
@@ -60,6 +70,9 @@ export function ToastHost() {
     // (fix round I1).
     <div
       data-testid="toast-host"
+      // Neutral chrome (M65.1): pressing a toast's action leaves the keymap's
+      // scope on the page it came from.
+      data-key-neutral
       role="status"
       aria-live="polite"
       aria-atomic="false"
@@ -71,7 +84,22 @@ export function ToastHost() {
       style={{ pointerEvents: toasts.length === 0 ? 'none' : undefined }}
     >
       {toasts.map((t) => (
-        <Toast key={t.id} title={t.message} onDismiss={() => dismissToast(t.id)} />
+        <Toast
+          key={t.id}
+          title={t.message}
+          action={
+            t.action === undefined
+              ? undefined
+              : {
+                  label: t.action.label,
+                  onClick: () => {
+                    dismissToast(t.id);
+                    t.action?.run();
+                  },
+                }
+          }
+          onDismiss={() => dismissToast(t.id)}
+        />
       ))}
     </div>
   );

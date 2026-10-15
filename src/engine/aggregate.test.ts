@@ -18,7 +18,7 @@ const cells = (...values: unknown[]): AggregateCell[] => values.map((v) => cell(
 
 describe('aggregatesFor (capability gating)', () => {
   it('offers the numeric calculations only where the values are numbers', () => {
-    // The gate is KIND_META.numeric, not a Set<FieldKind> living here — two
+    // The gate is the kind's `numeric` fact, not a Set<FieldKind> living here — two
     // hand-maintained lists of one fact is the bug class M16.13 closed.
     expect(aggregatesFor('number').map((a) => a.calc)).toContain('sum');
     expect(aggregatesFor('select').map((a) => a.calc)).not.toContain('sum');

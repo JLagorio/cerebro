@@ -4,6 +4,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PropertyMenu } from '@/detail/PropertyMenu';
 import { RecordProperties } from '@/detail/RecordProperties';
+import type { BatchOp } from '@/engine/batch';
 import { buildSchema } from '@/engine/schema';
 import type { Entry } from '@/engine/types';
 import { resetLayers } from '@/components/ui/layers';
@@ -24,7 +25,13 @@ function setup(recordPartial: Partial<Entry> = {}) {
   });
   const all = [...fixtureVault(), record];
   const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
-  useVaultStore.setState({ entries: all, vaultPath: '/vault', patchFrontmatter });
+  // M60.6: a rename or a copy lands as one batch; its patch ops reach the
+  // same spy, so `writtenFields` reads either door.
+  const applyBatch = vi.fn(async (ops: BatchOp[]) => {
+    for (const op of ops) if (op.op === 'patch') await patchFrontmatter(op.path, op.set);
+    return { batchId: 'b'.repeat(32), files: [] };
+  });
+  useVaultStore.setState({ entries: all, vaultPath: '/vault', patchFrontmatter, applyBatch });
   render(<RecordProperties entry={record} schema={buildSchema(all)} />);
   return { patchFrontmatter };
 }

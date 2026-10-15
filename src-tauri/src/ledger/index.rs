@@ -34,6 +34,14 @@ pub fn index_path(config_dir: &Path, store_id: &str) -> PathBuf {
         .join(format!("{store_id}.sqlite"))
 }
 
+/// One event as the index holds it (M64.2b, [`Index::event_rows`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventFacts {
+    pub kind: String,
+    pub ingested_at: String,
+    pub actor: Option<String>,
+}
+
 #[derive(Debug)]
 pub struct Index {
     conn: Connection,
@@ -464,6 +472,54 @@ impl Index {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// What the index holds about each of `ids` (M64.2b): its kind, when the
+    /// store took it in, and its actor, read from the body as the reducer
+    /// decodes it (`actor.id`), None when the body carries none. An id the
+    /// index has not replayed yet is absent, never guessed: the index is a
+    /// cache that can lag the ledger. A SELECT only, so it works on
+    /// [`Index::open_read_only`].
+    pub fn event_rows(
+        &self,
+        ids: &[String],
+    ) -> Result<std::collections::BTreeMap<String, EventFacts>, String> {
+        let mut statement = self
+            .conn
+            .prepare("SELECT kind, ingested_at, body FROM events WHERE event_id = ?1")
+            .map_err(|e| e.to_string())?;
+        let mut facts = std::collections::BTreeMap::new();
+        for id in ids {
+            if facts.contains_key(id) {
+                continue;
+            }
+            let row = statement.query_row([id], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            });
+            let (kind, ingested_at, body) = match row {
+                Ok(row) => row,
+                Err(rusqlite::Error::QueryReturnedNoRows) => continue,
+                Err(e) => return Err(e.to_string()),
+            };
+            let actor = serde_json::from_str::<serde_json::Value>(&body)
+                .map_err(|e| format!("event {id}: {e}"))?
+                .pointer("/actor/id")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            facts.insert(
+                id.clone(),
+                EventFacts {
+                    kind,
+                    ingested_at,
+                    actor,
+                },
+            );
+        }
+        Ok(facts)
     }
 
     /// Deterministic text dump of EVERY epistemic table — the
@@ -1104,6 +1160,84 @@ mod tests {
             first, second,
             "epistemic rebuild-from-zero is deterministic"
         );
+        let _ = std::fs::remove_dir_all(&vault);
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    /// The kind, time and actor a page's History reads for a concept event
+    /// (M64.2b), through the read-only handle a question uses.
+    #[test]
+    fn event_rows_reads_kind_time_and_actor() {
+        use crate::ledger::schema::{self, tests as schema_tests};
+        let vault = testutil::temp_vault("idx-event-rows");
+        let config = testutil::temp_vault("idx-event-rows-config");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        let mut belief = schema_tests::belief_created();
+        belief.basis = schema::BeliefBasis::Unsupported {
+            reason: "index fixture without observations".into(),
+        };
+        let created = writer
+            .append(
+                schema::KIND_BELIEF_CREATED,
+                serde_json::to_value(&belief).unwrap(),
+            )
+            .unwrap();
+        let plain = writer
+            .append("vault.write", serde_json::json!({ "path": "a.md" }))
+            .unwrap();
+        drop(writer);
+        let read = read_ledger(&ledger_dir(&vault)).unwrap();
+        let mut index = Index::open(&config, &read.store.store_id).unwrap();
+        index.replay(&read, WRITER).unwrap();
+        drop(index);
+
+        let index = Index::open_read_only(&config, &read.store.store_id)
+            .unwrap()
+            .expect("the index exists");
+        let facts = index
+            .event_rows(&[created.event_id.clone(), plain.event_id.clone()])
+            .unwrap();
+        let frame = |id: &str| read.frames.iter().find(|f| f.event_id == id).unwrap();
+        assert_eq!(
+            facts[&created.event_id],
+            EventFacts {
+                kind: schema::KIND_BELIEF_CREATED.into(),
+                ingested_at: frame(&created.event_id).ingested_at.clone(),
+                actor: Some("agent:run-1".into()),
+            }
+        );
+        assert_eq!(facts[&plain.event_id].kind, "vault.write");
+        assert_eq!(
+            facts[&plain.event_id].actor, None,
+            "a body with no actor names none"
+        );
+        drop(index);
+        let _ = std::fs::remove_dir_all(&vault);
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn an_id_the_index_lacks_is_absent() {
+        let (vault, config) = seeded("idx-event-rows-absent", 2);
+        let read = read_ledger(&ledger_dir(&vault)).unwrap();
+        let mut index = Index::open(&config, &read.store.store_id).unwrap();
+        index.replay(&read, WRITER).unwrap();
+        drop(index);
+        // Appended after the replay: the ledger has it, the index does not.
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        let late = writer
+            .append("vault.write", serde_json::json!({ "path": "late.md" }))
+            .unwrap();
+        drop(writer);
+        let index = Index::open_read_only(&config, &read.store.store_id)
+            .unwrap()
+            .expect("the index exists");
+        let known = read.frames[0].event_id.clone();
+        let facts = index
+            .event_rows(&[known.clone(), late.event_id.clone(), "f".repeat(32)])
+            .unwrap();
+        assert_eq!(facts.keys().cloned().collect::<Vec<_>>(), vec![known]);
+        drop(index);
         let _ = std::fs::remove_dir_all(&vault);
         let _ = std::fs::remove_dir_all(&config);
     }

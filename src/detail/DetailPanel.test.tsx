@@ -3,7 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DetailPanel } from '@/detail/DetailPanel';
-import { hasLayers, popLayer, pushLayer, resetLayers } from '@/components/ui/layers';
+import {
+  hasLayers,
+  hasModalLayers,
+  popLayer,
+  pushLayer,
+  resetLayers,
+} from '@/components/ui/layers';
 import { Popover } from '@/components/ui/Popover';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { FieldEditor } from '@/detail/FieldEditor';
@@ -201,6 +207,39 @@ describe('DetailPanel', () => {
     expect(line.textContent).toContain('fetch not recorded');
   });
 
+  // M61.8: an instant prints the day this machine's clock said, not UTC's.
+  describe('stamps print the local date', () => {
+    const tz = process.env.TZ;
+    afterEach(() => {
+      if (tz === undefined) delete process.env.TZ;
+      else process.env.TZ = tz;
+    });
+
+    it('fetched, Created and Modified in Sydney', () => {
+      process.env.TZ = 'Australia/Sydney';
+      useVaultStore.setState({
+        entries: [
+          ...fixtureVault(),
+          makeEntry({
+            path: 'sources/web/late.md',
+            title: 'Late',
+            // 22:00Z is 08:00 the NEXT day in Sydney.
+            properties: { fetched_at: '2026-08-20T22:00:00Z' },
+            createdAt: '2026-07-01T22:00:00Z',
+            modifiedAt: '2026-07-02T22:00:00Z',
+          }),
+        ],
+      });
+      useUiStore.setState({ detailPath: 'sources/web/late.md' });
+      render(<DetailPanel />);
+      expect(screen.getByTestId('detail-source-freshness').textContent).toContain(
+        'fetched 2026-08-21',
+      );
+      expect(screen.getByText('Created 2026-07-02')).toBeTruthy();
+      expect(screen.getByText('Modified 2026-07-03')).toBeTruthy();
+    });
+  });
+
   it('a record without fetch bookkeeping gets no freshness line at all', () => {
     render(<DetailPanel />);
     expect(screen.queryByTestId('detail-source-freshness')).toBeNull();
@@ -208,6 +247,17 @@ describe('DetailPanel', () => {
 
   it('closes on Escape', () => {
     render(<DetailPanel />);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(useUiStore.getState().detailPath).toBeNull();
+  });
+
+  // M65.1: the peek docks beside the page, so it is a layer the keymap's
+  // letters do not stand down for — and still the one Escape closes.
+  it('registers a non-modal layer, and Escape still closes it', () => {
+    render(<DetailPanel />);
+    expect(hasLayers()).toBe(true);
+    expect(hasModalLayers()).toBe(false);
+    expect(screen.getByTestId('detail-panel').getAttribute('data-key-scope')).toBe('peek');
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(useUiStore.getState().detailPath).toBeNull();
   });

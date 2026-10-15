@@ -1,12 +1,25 @@
 {
   "format": 1,
-  "about": "What a wikilink target names (M55.8). A name resolves by filename stem first, then by the folder of a project.md, then by exact title, all case-insensitive and trimmed, each pass taking the first entry in order; an empty name resolves nothing. A target is read whole first. Only when that names nothing and the target holds a #, the text before its FIRST # is resolved as the page, and the text after it, trimmed, is the section (none when empty). So nothing that resolved before section links changes, and a title that holds a # stays a title link. The fragment is never cut from the file or from outgoingLinks. Replayed by replays_the_shared_target_cases in src-tauri/src/vault/link.rs, which checks path only, and by src/engine/wikilink.test.ts, which checks path and section. `why` is for the reader.",
+  "about": "What a wikilink target names (M55.8, M60.9). A name resolves in four passes: filename stem, then the folder of a project.md, then an item key, then exact title, all case-insensitive and trimmed, each pass taking the first entry in order; an empty name resolves nothing. An item key is an entry's key property when it is a string shaped PREFIX-N after an ASCII trim: one or more ASCII letter-or-digit segments joined by -, then - and ASCII digits (FLD-13, MY-TEAM-12). A project's own key: FLD, any other shape, and a number are no key. An entry's optional key here becomes its properties.key in both replayers. A target is read whole first. Only when that names nothing and the target holds a #, the text before its FIRST # is resolved as the page, and the text after it, trimmed, is the section (none when empty). So nothing that resolved before section links changes, and a title that holds a # stays a title link. The fragment is never cut from the file or from outgoingLinks. Replayed by replays_the_shared_target_cases in src-tauri/src/vault/link.rs, which checks path only, and by src/engine/wikilink.test.ts, which checks path and section. `why` is for the reader.",
   "entries": [
     { "path": "projects/atlas/project.md", "title": "Atlas rollout" },
     { "path": "docs/notes.md", "title": "Atlas" },
     { "path": "docs/c-sharp.md", "title": "C# notes" },
     { "path": "strategy/plan.md", "title": "Q3 plan" },
-    { "path": "records/risks/rq-84b-kestrel.md", "title": "RQ-84B Kestrel" }
+    { "path": "records/risks/rq-84b-kestrel.md", "title": "RQ-84B Kestrel" },
+    { "path": "records/work/ship-docs.md", "title": "Ship docs", "key": "FLD-13" },
+    { "path": "records/team/standup.md", "title": "Standup", "key": "MY-TEAM-12" },
+    { "path": "items/fld-14.md", "title": "Item fourteen" },
+    { "path": "records/work/review.md", "title": "Review", "key": "FLD-14" },
+    { "path": "projects/opx-1/project.md", "title": "Opx rollout" },
+    { "path": "records/work/opx-start.md", "title": "Opx start", "key": "OPX-1" },
+    { "path": "docs/fifteen-notes.md", "title": "FLD-15" },
+    { "path": "records/work/fifteen.md", "title": "Fifteen", "key": "FLD-15" },
+    { "path": "projects/field/project.md", "title": "Field app", "key": "FLD" },
+    { "path": "records/misc/alpha-note.md", "title": "Alpha note", "key": "alpha" },
+    { "path": "records/misc/numbered.md", "title": "Numbered", "key": 12 },
+    { "path": "records/work/first.md", "title": "First", "key": "FLD-16" },
+    { "path": "records/work/second.md", "title": "Second", "key": "FLD-16" }
   ],
   "cases": [
     {
@@ -85,6 +98,78 @@
       "path": "docs/notes.md",
       "section": "^b1",
       "why": "Resolves to the page; the editor lands only on headings."
+    },
+    {
+      "target": "fld-13",
+      "path": "records/work/ship-docs.md",
+      "section": null,
+      "why": "No stem, folder or title answers, so the item key does."
+    },
+    {
+      "target": "FLD-13",
+      "path": "records/work/ship-docs.md",
+      "section": null,
+      "why": "Case never decides the key."
+    },
+    {
+      "target": " fld-13 ",
+      "path": "records/work/ship-docs.md",
+      "section": null,
+      "why": "The name is trimmed before the key pass."
+    },
+    {
+      "target": "fld-13#Notes",
+      "path": "records/work/ship-docs.md",
+      "section": "Notes",
+      "why": "The page half runs the key pass like any name."
+    },
+    {
+      "target": "my-team-12",
+      "path": "records/team/standup.md",
+      "section": null,
+      "why": "A prefix may hold dashes; only the tail must be a number."
+    },
+    {
+      "target": "fld-14",
+      "path": "items/fld-14.md",
+      "section": null,
+      "why": "A stem beats a key."
+    },
+    {
+      "target": "opx-1",
+      "path": "projects/opx-1/project.md",
+      "section": null,
+      "why": "A project folder beats a key."
+    },
+    {
+      "target": "fld-15",
+      "path": "records/work/fifteen.md",
+      "section": null,
+      "why": "A key beats a title, even one earlier in order: the only target the key pass moved."
+    },
+    {
+      "target": "fld",
+      "path": null,
+      "section": null,
+      "why": "A project's own key is a prefix, not an item key."
+    },
+    {
+      "target": "alpha",
+      "path": null,
+      "section": null,
+      "why": "A key with no -number tail is no key."
+    },
+    {
+      "target": "12",
+      "path": null,
+      "section": null,
+      "why": "A number is no key."
+    },
+    {
+      "target": "fld-16",
+      "path": "records/work/first.md",
+      "section": null,
+      "why": "Two entries share a key: the earlier one wins."
     }
   ]
 }

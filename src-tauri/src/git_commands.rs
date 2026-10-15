@@ -237,3 +237,45 @@ pub fn git_abort_conflict(vault: String) -> Result<(), String> {
 pub fn git_provider_status() -> GitProviderStatus {
     git::provider::probe()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::git::command;
+
+    /// Discard is a person's write (M58.1, Q2): `knowledge/x.md` is refused,
+    /// and so is a glob that would match it, which git now reads literally,
+    /// so the concept keeps its edit either way.
+    #[test]
+    fn discard_refuses_the_bundle_by_any_spelling() {
+        let dir = crate::vault::testutil::temp_vault("discard-bundle");
+        crate::git::commit::init_repo(&dir).unwrap();
+        let ws = crate::git::workspace::resolve(&dir);
+        command::run_str(&ws.dir(), &["config", "user.email", "t@example.com"]).unwrap();
+        command::run_str(&ws.dir(), &["config", "user.name", "t"]).unwrap();
+        crate::vault::testutil::write(&dir, "knowledge/x.md", "# X\n");
+        command::run_str(&ws.dir(), &["add", "knowledge/x.md"]).unwrap();
+        command::run_str(&ws.dir(), &["commit", "-m", "seed"]).unwrap();
+        crate::vault::testutil::write(&dir, "knowledge/x.md", "# X\n\nLedgered.\n");
+        let vault = dir.to_string_lossy().to_string();
+
+        let refused = git_discard_file(vault.clone(), "knowledge/x.md".into()).unwrap_err();
+        assert!(refused.contains("read-only"), "{refused}");
+        for glob in [
+            "kn?wledge/x.md",
+            "knowledg[e]/x.md",
+            "knowledge/*.md",
+            "k*/x.md",
+        ] {
+            assert!(
+                git_discard_file(vault.clone(), glob.into()).is_err(),
+                "{glob} was not refused"
+            );
+        }
+        assert_eq!(
+            std::fs::read_to_string(dir.join("knowledge/x.md")).unwrap(),
+            "# X\n\nLedgered.\n"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

@@ -501,6 +501,9 @@ export function Sidebar({
     <nav
       aria-label="Sidebar rail"
       data-testid="sidebar-rail"
+      // Neutral chrome (M65.1): a click here leaves the page's key scope
+      // where it was, so ⌘E or ⌘\ after a nav click still reach the page.
+      data-key-neutral
       inert={drawer}
       className={`${band.rail} flex-none flex-col items-center gap-1 border-r border-n-200 bg-surface-sunken pt-3`}
       style={{ width: SIDEBAR_RAIL_WIDTH }}
@@ -521,6 +524,8 @@ export function Sidebar({
       ref={drawerRef}
       aria-label="Sidebar"
       data-testid="sidebar"
+      // Neutral chrome for the keymap, like the rail above (M65.1).
+      data-key-neutral
       data-overlay={drawer || undefined}
       tabIndex={drawer ? -1 : undefined}
       // `relative` hosts the drag handle; the width is a stored preference

@@ -68,6 +68,10 @@ export const SHELL_HINTS: Record<ShellCeiling, string> = {
   on: 'The assistant runs commands and edits files directly in the vault folder without asking, and so do scheduled agents that declare the shell.',
 };
 
+/** The Web access hint (M57.7, Appendix C): a second ceiling, two states. */
+export const WEB_HINT =
+  "Let the assistant search the web and fetch pages with Claude Code's WebSearch and WebFetch. Pages it fetches are written down under sources/. Off — no web, even if your own Claude Code settings allow it. Cerebro's background upkeep never gets it.";
+
 /** What the person's own settings act with, as a sentence (M57.2). Never a
  * promise that every command asks: their rules and hooks act first. */
 export function userRulesSentence(settings: ClaudeUserSettings): string {
@@ -243,6 +247,8 @@ export function SettingsPage() {
   const setInboxAutoAdvance = useUiStore((s) => s.setInboxAutoAdvance);
   const actorId = useUiStore((s) => s.actorId);
   const setActorId = useUiStore((s) => s.setActorId);
+  const webAccess = useUiStore((s) => s.agentWebAccess);
+  const setWebAccess = useUiStore((s) => s.setAgentWebAccess);
   const connectors = useUiStore((s) => s.agentConnectors);
   const setConnectors = useUiStore((s) => s.setAgentConnectors);
   const issuePrefixes = useUiStore((s) => s.issuePrefixes);
@@ -376,6 +382,12 @@ export function SettingsPage() {
           <ClaudeCodeRow />
           {vaultPath !== null && <PanelAgentRow vaultPath={vaultPath} entries={entries} />}
           <ShellAccessRow vaultPath={vaultPath} />
+          <SettingRow
+            label="Web access"
+            hint={WEB_HINT}
+            checked={webAccess}
+            onChange={setWebAccess}
+          />
           <SettingRow
             label="Connectors"
             hint="Let the assistant use MCP servers — Jira, Confluence — to fetch what a note refers to. Anything it fetches is written down under sources/, so the same ticket is only ever fetched once. A cached copy past its refresh date is marked stale; ask for a fresh one when you need it."

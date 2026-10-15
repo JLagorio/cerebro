@@ -13,6 +13,8 @@
  * unchanged.
  */
 
+import { parseDateText, readDateValue, type DateEndpoint } from './dateGrammar';
+
 /** Derived unions (M16.14): these became persistable property config, and a
  * hand-written union with no runtime list means every parser validating one
  * writes its own copy of the members. */
@@ -227,54 +229,52 @@ export function remindAt(v: DateValue): string | null {
 }
 
 // --- Date PROPERTIES (M16.14) ----------------------------------------------
-// The chip grammar above serializes into a note BODY. A date property lives in
-// frontmatter, where the shape has to stay readable YAML and — crucially —
-// has to keep parsing every date already written before this existed.
-
-/** `2026-08-02 14:30` → date + time; `2026-08-02` → date + null. */
-const SCALAR_RE = /^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}))?/;
+// The chip grammar above serializes into a note BODY and stays TS-only. A date
+// property lives in frontmatter, where the shape has to stay readable YAML,
+// and its grammar is shared/calendar/dates.v1.json, which Rust reads too
+// (M60.3): a value only one language could read would be a date to one side
+// and prose to the other.
 
 /**
  * The stored form of one endpoint: a bare ISO date, or a date and a 24h time
  * separated by a space.
  *
  * A space, not a `T`: `📅 2026-07-26 16:00` is already the token grammar this
- * app writes into note bodies, and one app should spell a timestamp one way.
- * Both are accepted on read — `T` is what a paste from anywhere else looks
- * like. Verified against serde_yaml 0.9: all three spellings deserialize as
- * plain strings, so nothing here becomes a YAML timestamp behind our backs.
+ * app writes into note bodies, and one app should spell a timestamp one way
+ * (dates.v1.json's `written_separator`). What a read accepts is that file's
+ * grammar, `T` and instants included. Verified against serde_yaml 0.9: all
+ * three spellings deserialize as plain strings, so nothing here becomes a
+ * YAML timestamp behind our backs.
  */
 export function serializeEndpoint(date: string, time: string | null): string {
   return time === null ? date : `${date} ${time}`;
 }
 
-export function parseEndpoint(raw: unknown): { date: string; time: string | null } | null {
-  if (typeof raw !== 'string') return null;
-  const m = SCALAR_RE.exec(raw.trim());
-  return m === null ? null : { date: m[1], time: m[2] ?? null };
+/**
+ * One endpoint out of a stored or typed value, read leniently by the shared
+ * grammar (`parseDateText`, dates.v1.json). An instant arrives as its local
+ * day and wall time, flagged `instant`; anything that is not date text is
+ * null, never a prefix of one.
+ */
+export function parseEndpoint(raw: unknown): DateEndpoint | null {
+  return typeof raw === 'string' ? parseDateText(raw) : null;
 }
 
 /**
- * A `date` or `daterange` property's frontmatter → the picker's value model.
+ * A `date` or `daterange` property's frontmatter → the picker's value model,
+ * through the shared grammar's lenient read (`readDateValue`).
  *
  * Returns null for anything that is not a date, which is how an empty or
  * malformed field stays empty rather than silently becoming today.
  */
 export function parseDateProperty(raw: unknown): DateValue | null {
-  const scalar = parseEndpoint(raw);
-  if (scalar !== null) {
-    return { ...makeDateValue(scalar.date), startTime: scalar.time };
-  }
-  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const r = raw as { start?: unknown; end?: unknown };
-  const start = parseEndpoint(r.start);
-  if (start === null) return null;
-  const end = parseEndpoint(r.end);
+  const read = readDateValue(raw);
+  if (read === null) return null;
   return {
-    ...makeDateValue(start.date),
-    startTime: start.time,
-    end: end?.date ?? null,
-    endTime: end?.time ?? null,
+    ...makeDateValue(read.start.date),
+    startTime: read.start.time,
+    end: read.end?.date ?? null,
+    endTime: read.end?.time ?? null,
   };
 }
 
@@ -346,6 +346,17 @@ const FORMAT_FLAGS_BY_VALUE: Record<string, true> = {
   ymd: true,
   relative: true,
 };
+
+/**
+ * The local calendar date of an instant (M61.8): `2026-07-28T23:30:00Z` is
+ * the 29th in Sydney and the 28th in Los Angeles. Read through the shared
+ * grammar's endpoint reader, so an instant lands on the day this machine's
+ * clock said; any other text — a floating date, junk — comes back unchanged.
+ */
+export function localDateOf(iso: string): string {
+  const read = parseDateText(iso);
+  return read !== null && read.instant ? read.date : iso;
+}
 
 /** Local timezone name pair, e.g. { zone: 'America/Los_Angeles', short: 'PDT' }. */
 export function localTimezone(): { zone: string; short: string } {

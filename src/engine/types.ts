@@ -39,8 +39,9 @@ export interface Entry {
  * resolve the kind to `text`, so a declared Select rendered as a text box and
  * the YAML that said otherwise was ignored.
  *
- * Order here is irrelevant; the "+ Add property" catalog order is declaration
- * order in properties.ts.
+ * Order here is the order of `kinds` in shared/schema/field-kinds.v1.json,
+ * which fieldKindTable.test.ts holds it to; the "+ Add property" catalog
+ * order is `KIND_UI`'s declaration order in properties.ts.
  */
 export const FIELD_KINDS = [
   'text',
@@ -425,7 +426,7 @@ export interface ColumnSpec {
  * - `table`     — spreadsheet grid with inline-editable cells (M3.4)
  * - `list`      — banded rows
  * - `board`     — kanban columns from the first band level
- * - `calendar`  — month grid, records on their date
+ * - `calendar`  — month grid, or a week or one day drawn in hours
  * - `timeline`  — records as bars on a horizontal date axis
  * - `gantt`     — timeline plus scheduling: nested WBS rows, dependency arrows
  * - `gallery`   — a card grid, cards optionally covered by a files property
@@ -766,8 +767,11 @@ export interface Presentation {
    * layout block follows.
    */
   whiteboard?: { file: string | null };
-  /** How much of the calendar one screen holds. Omitted = a month (M16.23). */
-  calendarSpan?: 'month' | 'week';
+  /**
+   * How much of the calendar one screen holds: a month (omitted, M16.23), a
+   * week, or one day (M61.8). Week and Day draw the hours.
+   */
+  calendarSpan?: 'month' | 'week' | 'day';
   /** False drops Saturday and Sunday from the grid. Stored only when false. */
   showWeekends?: boolean;
   /**
@@ -811,7 +815,8 @@ export type ChildrenSpec =
  * quietly showed records it had been configured to hide. Same shape as
  * `FIELD_KINDS` and `VIEW_TYPES`, for the same reason.
  *
- * Order here is menu order.
+ * Order here is menu order, and the order of `filter_ops` in
+ * shared/schema/field-kinds.v1.json, which fieldKindTable.test.ts holds it to.
  */
 export const FILTER_OPS = [
   'equals',
@@ -845,11 +850,12 @@ export type FilterOp = (typeof FILTER_OPS)[number];
  * what the builder did, meant "Status is before High" was one click away and
  * evaluated to a string comparison nobody asked for.
  *
- * The kind→family answer is a flag on `KIND_META` (properties.ts) so
- * `satisfies Record<FieldKind, …>` forces every new kind to answer it; the
- * family→operators answer lives in `viewFilters.ts` beside the evaluator that
- * implements them. `any` is the rollup's honest answer: what a rollup holds
- * depends on its `calculate`, which is not knowable from the kind alone.
+ * Both halves of the answer are data in shared/schema/field-kinds.v1.json:
+ * each kind's `filters` names its family, and `filter_families` lists each
+ * family's operators in menu order. This list stays a literal because it
+ * defines the union, and fieldKindTable.test.ts holds it to the artifact.
+ * `any` is the rollup's honest answer: what a rollup holds depends on its
+ * `calculate`, which is not knowable from the kind alone.
  */
 export const FILTER_FAMILIES = [
   'text',
@@ -1038,11 +1044,12 @@ export interface Schema {
   /** Reverse link index (M3.5) — see engine/relations.ts. */
   relations: RelationIndex;
   projectForEntry(e: Entry): Entry | null; // containment: Entry.project → project.md entry
-  // Status resolution chain (v2, locked decision 4): project.md `statuses:`
-  // override → Work item Type doc `statuses:` → DEFAULT_STATUSES.
+  // A project's `statuses:` override, else DEFAULT_STATUSES.
   statusSetForProject(projectPath: string | null): StatusDef[];
-  // M3.1: the same chain with the entry's OWN type consulted before the
-  // Work item fallback, so every type can carry its own status set.
+  // The status chain, `status_chain` in shared/schema/field-kinds.v1.json:
+  // the project.md `statuses:` override, then the entry's OWN type's
+  // `statuses:`, then DEFAULT_STATUSES. Rust's VaultSchema walks the same
+  // chain over the same cases.
   statusSetFor(entry: Entry): StatusDef[];
   /** Which link in that chain answered — the inline status creator needs to
    * know, because writing to the type is a silent no-op under a project

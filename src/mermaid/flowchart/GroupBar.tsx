@@ -64,8 +64,7 @@ export function GroupBar({
       onClick={(e) => e.stopPropagation()}
       // Backspace on any control in here would otherwise reach the editor's own
       // key handler and delete the selected node (the M29.33 leak) — but only
-      // the keys the canvas claims, since React's synthetic stopPropagation
-      // also kills the native event the app's ⌘K listens for (M29.53).
+      // the keys the canvas claims (M29.53).
       onKeyDown={(e) => {
         if (claimedByHostEditor(e)) e.stopPropagation();
       }}

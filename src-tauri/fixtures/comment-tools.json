@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "about": "The agent comment tools' rules (M70.3), replayed by src-tauri/src/comment_tools.rs (replays_the_shared_quote_filter, replays_the_shared_comment_tool_cases) and by src/lib/mockIpc.test.ts, so the packaged app and the browser mock find, refuse and post alike. `quotes`: the markdown a comment quote may not hold, named as its refusal names it (null: none). `matches`: where a quote reads as text on the page, as quote.rs's comment_matches and quote.ts's commentMatches keep the one finder's matches: the 1-based body line of each, in order, and the context its anchor stores (`before` and `after`, from its own line, cut at markdown and at 40 code points). `calls`: one tool call on `page`, whose file holds `bytes`, with its sidecar absent (none), holding `sidecar` (seeded) or holding these raw bytes; the answer `text` and whether it is an error, `{id}` standing for the new thread's id. A refused call changes no byte of the page or its sidecar. `posted` is the thread the call wrote: its anchor, how many comments it holds, whether it is resolved and its last comment's body; a comment the call posted is the run's actor's (claude-code), with its run id. The page's bytes never change. The per-run cap is Rust's alone, so it has no case here.",
+  "about": "The agent comment tools' rules (M70.3), replayed by src-tauri/src/comment_tools.rs (replays_the_shared_quote_filter, replays_the_shared_comment_tool_cases) and by src/lib/mockIpc.test.ts, so the packaged app and the browser mock find, refuse and post alike. `quotes`: the markdown a comment quote may not hold, named as its refusal names it (null: none). `matches`: where a quote reads as text on the page, as quote.rs's comment_matches and quote.ts's commentMatches keep the one finder's matches: the 1-based body line of each, in order, and the context its anchor stores (`before` and `after`, from its own line, cut at markdown and at 40 code points). `calls`: one tool call on `page`, whose file holds `bytes` (or the call's own `bytes`), with its sidecar absent (none), holding `sidecar` (seeded) or holding these raw bytes; the answer `text` and whether it is an error, `{id}` standing for the new thread's id. A refused call changes no byte of the page or its sidecar. `posted` is the thread the call wrote: its anchor, how many comments it holds, whether it is resolved and its last comment's body; a comment the call posted is the run's actor's (claude-code), with its run id. The page's bytes never change. The per-run cap is Rust's alone, so it has no case here.",
   "limits": {
     "max_chars": 8000,
     "per_run": 20,
@@ -230,6 +230,78 @@
         {
           "before": "long run of plain words before the word ",
           "after": " and after it more words than forty code"
+        }
+      ]
+    },
+    {
+      "why": "an aliased wikilink, an assignee and a footnote are chips the editor draws as one atom, so a word inside one is no page text",
+      "body": "Owner: [[jane-doe|Jane Doe]], @[[Jane Doe]] and [^Jane]; Jane signs off.\n",
+      "quote": "Jane",
+      "lines": [1],
+      "anchors": [
+        {
+          "before": "; ",
+          "after": " signs off."
+        }
+      ]
+    },
+    {
+      "why": "a word in a wikilink's stem is no page text",
+      "body": "The theory behind [[epic-offline-conflict-model]]: most conflicts are silent.\n",
+      "quote": "conflict",
+      "lines": [1],
+      "anchors": [
+        {
+          "before": ": most ",
+          "after": "s are silent."
+        }
+      ]
+    },
+    {
+      "why": "an image's alt text and its target are no page text",
+      "body": "![freeze chart](freeze.png)\nThe freeze starts on Wednesday.\n",
+      "quote": "freeze",
+      "lines": [2],
+      "anchors": [
+        {
+          "before": "The ",
+          "after": " starts on Wednesday."
+        }
+      ]
+    },
+    {
+      "why": "a date token is a chip, through its time, its end and its flags",
+      "body": "In 2026 the freeze runs 📅 2026-10-15 09:00 → 2026-10-16 ((weekly)), weekly.\n",
+      "quote": "weekly",
+      "lines": [1],
+      "anchors": [
+        {
+          "before": ", ",
+          "after": "."
+        }
+      ]
+    },
+    {
+      "why": "text beside a date token is page text, and a context stops where the token starts",
+      "body": "In 2026 the freeze runs 📅 2026-10-15 09:00 → 2026-10-16 ((weekly)), weekly.\n",
+      "quote": "2026",
+      "lines": [1],
+      "anchors": [
+        {
+          "before": "In ",
+          "after": " the freeze runs "
+        }
+      ]
+    },
+    {
+      "why": "brackets that make no chip stay text",
+      "body": "Use [[]] or [^ x] or [[a|b] for Jane.\n",
+      "quote": "Jane",
+      "lines": [1],
+      "anchors": [
+        {
+          "before": " for ",
+          "after": "."
         }
       ]
     }
@@ -471,7 +543,7 @@
         "text": "x"
       },
       "sidecar": "none",
-      "text": "The quoted text appears only inside a fence, a `:::` line, a line's marker or a link's target, which the page doesn't show as text. Quote words the page shows. Nothing was posted.",
+      "text": "The quoted text appears only inside a fence, a `:::` line, a line's marker, a link's target, an image, a wikilink, a footnote or a date, which the page doesn't show as text. Quote words the page shows. Nothing was posted.",
       "is_error": true
     },
     {
@@ -483,7 +555,7 @@
         "text": "x"
       },
       "sidecar": "none",
-      "text": "The quoted text appears only inside a fence, a `:::` line, a line's marker or a link's target, which the page doesn't show as text. Quote words the page shows. Nothing was posted.",
+      "text": "The quoted text appears only inside a fence, a `:::` line, a line's marker, a link's target, an image, a wikilink, a footnote or a date, which the page doesn't show as text. Quote words the page shows. Nothing was posted.",
       "is_error": true
     },
     {
@@ -495,7 +567,7 @@
         "text": "x"
       },
       "sidecar": "none",
-      "text": "The quoted text appears only inside a fence, a `:::` line, a line's marker or a link's target, which the page doesn't show as text. Quote words the page shows. Nothing was posted.",
+      "text": "The quoted text appears only inside a fence, a `:::` line, a line's marker, a link's target, an image, a wikilink, a footnote or a date, which the page doesn't show as text. Quote words the page shows. Nothing was posted.",
       "is_error": true
     },
     {
@@ -808,6 +880,69 @@
       "sidecar": "seeded",
       "text": "`text` is empty. Write the comment to post. Nothing was posted.",
       "is_error": true
+    },
+    {
+      "why": "a quote inside an aliased wikilink is no page text, so it is not found",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "Jane Doe",
+        "text": "Who signs?"
+      },
+      "bytes": "Owner: [[jane-doe|Jane Doe]] signs off.\n",
+      "sidecar": "none",
+      "text": "The quoted text appears only inside a fence, a `:::` line, a line's marker, a link's target, an image, a wikilink, a footnote or a date, which the page doesn't show as text. Quote words the page shows. Nothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "a word in a wikilink's stem is not counted, so the one in the text is the only appearance",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "conflict",
+        "text": "Which kind?"
+      },
+      "bytes": "The theory behind [[epic-offline-conflict-model]]: most conflicts are silent.\n",
+      "sidecar": "none",
+      "text": "Commented on notes/plan.md as thread {id}, on line 1: \"…d [[epic-offline-conflict-model]]: most conflicts are silent.\\n\"",
+      "is_error": false,
+      "posted": {
+        "thread": "{id}",
+        "anchor": {
+          "quote": "conflict",
+          "occurrence": 1,
+          "before": ": most ",
+          "after": "s are silent."
+        },
+        "comments": 1,
+        "resolved": false,
+        "last_body": "Which kind?"
+      }
+    },
+    {
+      "why": "an image's alt text is not counted, so the text line's word is the only appearance",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "freeze",
+        "text": "How long?"
+      },
+      "bytes": "![freeze chart](freeze.png)\nThe freeze starts on Wednesday.\n",
+      "sidecar": "none",
+      "text": "Commented on notes/plan.md as thread {id}, on line 2: \"![freeze chart](freeze.png)\\nThe freeze starts on Wednesday.\\n\"",
+      "is_error": false,
+      "posted": {
+        "thread": "{id}",
+        "anchor": {
+          "quote": "freeze",
+          "occurrence": 1,
+          "before": "The ",
+          "after": " starts on Wednesday."
+        },
+        "comments": 1,
+        "resolved": false,
+        "last_body": "How long?"
+      }
     }
   ]
 }

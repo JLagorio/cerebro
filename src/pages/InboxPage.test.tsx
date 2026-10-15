@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ORGANIZED_KEY } from '@/engine/inbox';
@@ -7,6 +7,7 @@ import type { Entry } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import { sha256Hex } from '@/lib/sha256';
 import { makeEntry } from '@/test/factories';
 import { InboxPage } from './InboxPage';
 
@@ -49,13 +50,17 @@ const organized = makeEntry({
 });
 
 const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
+// The real create, put back before each case, since the paste case stubs it.
+const realCreateItem = useVaultStore.getState().createItem;
 
 beforeEach(() => {
   patchFrontmatter.mockClear();
   useVaultStore.setState({
     vaultPath: '/vault',
     entries: [TYPE_DOC, capture, older, organized],
+    entriesVault: null,
     patchFrontmatter,
+    createItem: realCreateItem,
   });
   useNavStore.setState({
     selection: { kind: 'inbox' },
@@ -109,6 +114,71 @@ describe('InboxPage', () => {
     expect(pending?.text).toContain('propose_organize');
   });
 
+  // M64.7 — a transcript gets the meeting ask, its speakers as matched now.
+  it('sends the meeting ask for a transcript, and the plain ask otherwise', async () => {
+    const user = userEvent.setup();
+    const person = makeEntry({
+      path: 'people/marcus-webb.md',
+      title: 'Marcus Webb',
+      type: 'Person',
+    });
+    const personType = makeEntry({ path: 'types/person.md', title: 'Person', type: 'Type' });
+    const standup = makeEntry({
+      path: 'inbox/standup.md',
+      title: 'Standup',
+      createdAt: '2026-07-28T09:00:00Z',
+      properties: { ingest_format: 'vtt', speakers: ['Marcus Webb', 'Jo Nobody'] },
+    });
+    useVaultStore.setState({ entries: [TYPE_DOC, personType, person, standup, capture] });
+    useUiStore.setState({ handoffs: [] });
+    render(<InboxPage />);
+    await user.click(screen.getByRole('button', { name: 'Ask the Assistant to file it' }));
+    const meeting = useUiStore.getState().handoffs.at(-1);
+    expect(meeting?.subject).toBe('inbox/standup.md');
+    expect(meeting?.text).toContain('File the meeting transcript at inbox/standup.md ("Standup").');
+    expect(meeting?.text).toContain('- "Marcus Webb" is [[marcus-webb]]');
+    expect(meeting?.text).toContain('- "Jo Nobody" has no page here');
+    expect(screen.getAllByTestId('speaker-row').map((r) => r.dataset.match)).toEqual([
+      'matched',
+      'none',
+    ]);
+
+    await user.click(screen.getByRole('option', { name: /Capture a/ }));
+    await user.click(screen.getByRole('button', { name: 'Ask the Assistant to file it' }));
+    expect(useUiStore.getState().handoffs.at(-1)?.text).toBe(
+      'Look at the Inbox capture at inbox/capture-a.md and propose how to file it. Use propose_organize.',
+    );
+    expect(screen.queryByTestId('transcript-speakers')).toBeNull();
+  });
+
+  it('names the filed copy when the same text is pasted again, and writes nothing', async () => {
+    const text = 'The rollback is written down, not rehearsed, and nobody owns it. '.repeat(5);
+    const filed = makeEntry({
+      path: 'records/notes/rollback.md',
+      title: 'Rollback is not rehearsed',
+      type: 'Risk',
+      properties: { source_sha256: sha256Hex(text) },
+    });
+    const createItem = vi.fn();
+    useVaultStore.setState({
+      entries: [TYPE_DOC, capture, older, filed],
+      entriesVault: '/vault',
+      createItem,
+    });
+    useUiStore.setState({ toasts: [] });
+    render(<InboxPage />);
+    fireEvent.paste(screen.getByTestId('inbox-page'), {
+      clipboardData: { getData: () => text },
+    });
+    await waitFor(() =>
+      expect(useUiStore.getState().toasts.map((t) => t.message)).toEqual([
+        'Already filed as Rollback is not rehearsed',
+      ]),
+    );
+    expect(createItem).not.toHaveBeenCalled();
+    expect(useUiStore.getState().inboxSelectedPath).not.toBe('records/notes/rollback.md');
+  });
+
   it('writes _organized when the note is marked organized', async () => {
     const user = userEvent.setup();
     render(<InboxPage />);
@@ -142,9 +212,18 @@ describe('InboxPage', () => {
       await user.keyboard('{Control>}e{/Control}');
       await user.keyboard('{Meta>}e{/Meta}');
       expect(patchFrontmatter).not.toHaveBeenCalled();
+      // Not prevented either: ⌃E stays end-of-line in the field (M65.1).
+      expect(fireEvent.keyDown(field, { key: 'e', metaKey: true })).toBe(true);
     } finally {
       field.remove();
     }
+  });
+
+  it('leaves Cmd+E alone, unprevented, with no capture open', () => {
+    useVaultStore.setState({ entries: [TYPE_DOC, organized] });
+    render(<InboxPage />);
+    expect(fireEvent.keyDown(document.body, { key: 'e', metaKey: true })).toBe(true);
+    expect(patchFrontmatter).not.toHaveBeenCalled();
   });
 
   it('offers an undo after filing, and it returns the note to the queue', async () => {

@@ -3,6 +3,7 @@
   "input": {
     "kind": "attended",
     "shell": "ask",
+    "web": "off",
     "ask_first": true,
     "read_scoped": false,
     "narrowing": null
@@ -10,7 +11,12 @@
   "expected": {
     "permission_mode": "default",
     "allowed": [],
-    "disallowed": [],
+    "disallowed": [
+      "WebFetch",
+      "WebSearch",
+      "Read(./.trash/**)",
+      "Edit(./.trash/**)"
+    ],
     "matcher": [
       "Write",
       "Edit",
@@ -20,6 +26,7 @@
       "AskUserQuestion",
       "mcp__cerebro__create_note",
       "mcp__cerebro__update_frontmatter",
+      "mcp__cerebro__set_fields",
       "mcp__cerebro__append_to_note",
       "mcp__cerebro__edit_note",
       "ExitPlanMode"
@@ -34,13 +41,14 @@
       "Read": "cli",
       "Glob": "cli",
       "Grep": "cli",
-      "WebFetch": "cli",
-      "WebSearch": "cli",
+      "WebFetch": "deny",
+      "WebSearch": "deny",
       "Task": "cli",
       "AskUserQuestion": "ask",
       "ExitPlanMode": "refuse",
       "mcp__cerebro__create_note": "ask",
       "mcp__cerebro__update_frontmatter": "ask",
+      "mcp__cerebro__set_fields": "ask",
       "mcp__cerebro__append_to_note": "ask",
       "mcp__cerebro__edit_note": "ask"
     }

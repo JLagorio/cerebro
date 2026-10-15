@@ -427,6 +427,9 @@ export function AiPanel({
 } = {}) {
   const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
   const shell = useUiStore((s) => s.agentShell);
+  // M57.7: Web access, the second ceiling; the chat hook caps it by the
+  // addressed or bound agent's record and hands the prompt its grant.
+  const web = useUiStore((s) => s.agentWebAccess);
   const connectors = useUiStore((s) => s.agentConnectors);
   const issuePrefixes = useUiStore((s) => s.issuePrefixes);
   const handoff = useUiStore((s) => s.handoffs[0] ?? null);
@@ -505,7 +508,7 @@ export function AiPanel({
     conversationId: null,
   });
   const getTurn = useCallback(() => turnRef.current, []);
-  const chat = useAgentChat(getTurn, { shell, connectors });
+  const chat = useAgentChat(getTurn, { shell, web, connectors });
   // M17.5: the SUBJECT of the current selection, with its lenses stripped —
   // the board tab and the table tab of one List are one place. A thread is
   // stamped with it at its first turn, which is what lets a thread be found

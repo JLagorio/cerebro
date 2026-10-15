@@ -19,10 +19,14 @@ import {
   visibilityDelta,
   visibleProperties,
 } from '@/engine/properties';
+import type { BatchOp } from '@/engine/batch';
+import { localDateOf } from '@/engine/dates';
 import { resolveLayout, revealableFields } from '@/engine/layout';
 import { useSortableList } from '@/hooks/useSortableList';
 import { typeStyle } from '@/engine/typeCatalog';
 import { LAYOUT_DEFAULTS } from '@/engine/types';
+import { isKnowledgePath } from '@/engine/okf';
+import { convertedLabel } from '@/engine/undoPlan';
 import type { Entry, FieldDef, FieldKind, Schema } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -105,6 +109,7 @@ function UndeclaredRow({ entry, name }: { entry: Entry; name: string }) {
  */
 export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema }) {
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
+  const applyBatch = useVaultStore((s) => s.applyBatch);
   const toast = useUiStore((s) => s.toast);
 
   const [adding, setAdding] = useState(false);
@@ -157,15 +162,24 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
   // M12.1: a doc's type is not a dropdown. Docs are docs — the only way out
   // is the explicit Convert action, which says what it does to the note.
   //
-  // M15: the type rows SELECT; the footer button commits. Conversion has no
-  // inverse anywhere in the app — the note leaves Docs and only hand-editing
-  // frontmatter brings it back — so a single stray click must not perform it.
+  // M15: the type rows SELECT; the footer button commits: the note leaves
+  // Docs, so a single stray click must not perform it. M60.7: one labelled
+  // batch, so the toast's Undo (or ⌘Z) brings the doc back; a page under
+  // knowledge/ keeps patchFrontmatter and is never undoable.
   const convertTo = (typeName: string) => {
     setConverting(false);
     setPendingType(null);
     void (async () => {
-      await patchFrontmatter(entry.path, { type: typeName });
-      toast(`Now a ${typeName} record — this note left Docs`);
+      if (isKnowledgePath(entry.path)) {
+        if (!(await patchFrontmatter(entry.path, { type: typeName }))) return;
+        toast(`Now a ${typeName} record — this note left Docs`);
+      } else {
+        const op: BatchOp =
+          entry.hash === null
+            ? { op: 'patch', path: entry.path, set: { type: typeName } }
+            : { op: 'patch', path: entry.path, set: { type: typeName }, expectHash: entry.hash };
+        if ((await applyBatch([op], { undo: convertedLabel(typeName) })) === null) return;
+      }
       openPath(entry.path);
     })();
   };
@@ -394,8 +408,8 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
         )}
       </div>
       <div className="mt-4 border-t border-n-100 pt-2 text-2xs text-n-400 [font-family:var(--font-mono)]">
-        <div>Created {entry.createdAt.slice(0, 10)}</div>
-        <div>Modified {entry.modifiedAt.slice(0, 10)}</div>
+        <div>Created {localDateOf(entry.createdAt).slice(0, 10)}</div>
+        <div>Modified {localDateOf(entry.modifiedAt).slice(0, 10)}</div>
       </div>
       {converting && (
         <>
@@ -407,7 +421,6 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
             onClose={closeConvert}
             title="Convert to record"
             width={420}
-            footerNote="This cannot be undone from the app."
             secondaryAction={{ label: 'Cancel', onClick: closeConvert }}
             primaryAction={{
               label: pendingType === null ? 'Convert' : `Convert to ${pendingType}`,

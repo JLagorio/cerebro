@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { __seedFleet, resetMockFs, type FleetRun } from '@/lib/mockIpc';
+import { __seedFleet, __seedWakes, resetMockFs, type FleetRun } from '@/lib/mockIpc';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { AgentsPage } from './AgentsPage';
@@ -59,6 +59,30 @@ describe('AgentsPage', () => {
     });
   });
 
+  it('the lobby names what is waiting to wake its agents, between the roster and the feed (M63.1b)', async () => {
+    __seedWakes([
+      {
+        vault: '/demo-vault',
+        agent: 'process:release-scout',
+        admittedAt: new Date(Date.now() - 60_000).toISOString(),
+        cause: { kind: 'event', subject: 'records/risks/gone.md' },
+      },
+    ]);
+    const { container } = render(<AgentsPage selection={{ kind: 'agents' }} />);
+    const row = await screen.findByTestId('agent-wake');
+    expect(row.getAttribute('data-state')).toBe('pending');
+    const section = container.querySelector('[data-section="wakes"]');
+    expect(section?.contains(row)).toBe(true);
+    // Nested in the fleet section, after the roster and before the feed.
+    const fleet = container.querySelector('[data-section="fleet"]');
+    expect(fleet?.contains(section ?? null)).toBe(true);
+    const order = [...(fleet?.querySelectorAll('[data-testid]') ?? [])]
+      .map((el) => el.getAttribute('data-testid'))
+      .filter((id) => id === 'agent-row' || id === 'agent-wakes' || id === 'fleet-section');
+    expect(order.indexOf('agent-wakes')).toBeGreaterThan(order.lastIndexOf('agent-row'));
+    expect(order.indexOf('agent-wakes')).toBeLessThan(order.indexOf('fleet-section'));
+  });
+
   it('an actor with a record forwards to its page, and Back returns to the lobby', async () => {
     const actor = { kind: 'agents' as const, actor: 'process:release-scout' };
     useNavStore.getState().navigate(actor);
@@ -89,6 +113,8 @@ describe('AgentsPage', () => {
     expect(page.textContent).not.toContain('agent:m26-ingest');
     expect(page.textContent).not.toContain('M35');
     expect(await screen.findByTestId('agent-run')).toBeTruthy();
+    // A construct is never woken, so its page lists no wakes.
+    expect(screen.queryByTestId('agent-wakes')).toBeNull();
   });
 
   it('a dangling actor is absent, said as absent', async () => {

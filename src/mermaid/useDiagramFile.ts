@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SaveState } from '@/editor/NoteBodyEditor';
 import { readNote, saveNote } from '@/lib/ipc';
+import { useCommands } from '@/lib/keys/useKeys';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -173,36 +174,21 @@ export function useDiagramFile(path: string): DiagramFile {
     applyCode(next, false);
   };
 
-  // Read through refs by the window listener below, which registers once.
-  const undoRef = useRef(undo);
-  undoRef.current = undo;
-  const redoRef = useRef(redo);
-  redoRef.current = redo;
-
   /**
-   * Cmd/Ctrl+Z anywhere on this surface, because the thing a user has just
+   * ⌘Z and ⇧⌘Z anywhere on this surface (M65.1: `diagram.undo/redo`, bound
+   * in the page or peek around the host), because the thing a user has just
    * clicked is a `<g>` in an svg and there is nowhere else for the key to go
    * (measured: a real Cmd+Z after `+ Node` left the node in the file). A
    * control with its OWN undo keeps it — the code overlay's textarea is a real
-   * text field and the browser's history there is better than ours.
+   * text field, its `editor` claim holds the keys back, and the browser's
+   * history there is better than ours. The binding shadows the app's own
+   * undo, so a diagram's undo stays the diagram's and never reverts a
+   * database change behind it.
    */
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z') return;
-      const t = e.target;
-      if (
-        t instanceof HTMLElement &&
-        (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName))
-      ) {
-        return;
-      }
-      e.preventDefault();
-      if (e.shiftKey) redoRef.current();
-      else undoRef.current();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  useCommands([
+    { id: 'diagram.undo', run: undo },
+    { id: 'diagram.redo', run: redo },
+  ]);
 
   // Load once per mount (the host's key makes a path change a fresh mount).
   useEffect(() => {

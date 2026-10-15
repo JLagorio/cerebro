@@ -185,14 +185,19 @@ export function ChangesPage() {
         </div>
       </div>
 
-      {conflicts.length > 0 && (
+      {/* Open while a merge or rebase is, not only while a file conflicts:
+          Keep mine on the last file leaves a clean tree and an open merge,
+          and Finish merge is the one way out short of a terminal (M58.3). */}
+      {(conflicts.length > 0 || conflictMode !== 'none') && (
         <div
           data-testid="conflict-banner"
           className="mx-5 mb-2 flex-none rounded-lg border border-danger-200 bg-danger-50 p-3"
         >
           <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-danger-700">
             <Icon name="triangle-alert" size={13} />
-            {conflicts.length} file{conflicts.length === 1 ? '' : 's'} conflict
+            {conflicts.length > 0
+              ? `${conflicts.length} file${conflicts.length === 1 ? '' : 's'} conflict`
+              : 'Every conflict is resolved'}
             {conflictMode !== 'none' && ` (${conflictMode} in progress)`}
           </div>
           {conflicts.map((path) => (

@@ -6,6 +6,7 @@
  * `scan_vault`. Keeping mounted roots a separate shape is what makes mounting
  * a repo a zero-blast-radius change to the vault surfaces.
  */
+import { kindFor } from './fileKinds';
 import type { RemoteOutcome, RemoteResult } from './git';
 
 export interface RootCaps {
@@ -161,18 +162,19 @@ export type FileText =
   | { kind: 'binary' }
   | { kind: 'notFound' };
 
+/** A markdown file, by the file-kind table's `kind` column (M66.1). */
 export function isMarkdownPath(path: string): boolean {
-  const lower = path.toLowerCase();
-  return lower.endsWith('.md') || lower.endsWith('.markdown');
+  return kindFor(path).kind === 'markdown';
 }
 
 /**
- * Which viewer renders this file. Unknown extensions go to the code viewer
- * rather than a refusal — a `Dockerfile.dev` or a `.env.example` is still
- * readable text, and refusing it would be a worse answer than monospace.
+ * Which viewer renders this file: the doc viewer for a `doc` row, the code
+ * viewer for everything else. The table's unknown row reads as code, so a
+ * `Dockerfile.dev` or a `.env.example` shows as monospace text, not a
+ * refusal.
  */
 export function viewerKindFor(path: string): 'doc' | 'code' {
-  return isMarkdownPath(path) ? 'doc' : 'code';
+  return kindFor(path).viewer === 'doc' ? 'doc' : 'code';
 }
 
 /** The containing directory, or `''` at the root. */

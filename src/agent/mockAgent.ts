@@ -11,6 +11,7 @@ import {
   APPROVAL_MESSAGES,
   familyCard,
   hostAnswer,
+  subjectIsCut,
   writeDeclined,
   type RunApproval,
 } from '@/lib/policy/toolApproval';
@@ -54,6 +55,9 @@ interface Script {
   appends?: { path: string; content: string }[];
   /** What its `edit_note` call replaces (M55.5) — another. */
   edit?: { path: string; edits: QuoteEdit[] };
+  /** What its `set_fields` call sets (M60.4) — another: one field, to one
+   * value, checked against the record's database. */
+  fields?: SetFieldsCall;
   /** Its comment tool's call (M70.3): it posts beside a page and changes no
    * file the vault lists, so a run of it announces the page's comments. */
   comment?: CommentCall;
@@ -66,6 +70,13 @@ interface Script {
   text: string;
 }
 
+/** The set script's call (M60.4): the record, the field and its value. */
+export interface SetFieldsCall {
+  path: string;
+  field: string;
+  value: string;
+}
+
 /** A comment script's call (M70.3): which comment tool, and its arguments. */
 export interface CommentCall {
   tool: CommentTool;
@@ -74,11 +85,13 @@ export interface CommentCall {
 
 export type CommentTool = 'comment_on_note' | 'reply_to_comment' | 'resolve_comment';
 
-/** `create_note`'s arguments as the create script sends them. */
+/** `create_note`'s arguments as the create script sends them; `if new`
+ * sends `if_exists: 'refuse'` (M61.6b). */
 export interface CreateArgs {
   folder: string;
   slug: string;
   body: string;
+  if_exists?: 'suffix' | 'refuse';
 }
 
 /** What the model reads after a write the person edited before allowing it
@@ -89,9 +102,11 @@ export function editedText(keys: string[]): string {
 
 /** `create "<title>" in <folder>` (M57.4), on the message's last line, a
  * leading `@handle ` stripped: the page write an ask-first agent asks about.
+ * A trailing `if new` (M61.6b) asks create_note to refuse a taken name.
  * Matched right after APPEND and before the keyword branches, because the
  * risk branch would catch `records/risks`. */
-const CREATE = /(?:^|\n)(?:@[A-Za-z0-9][A-Za-z0-9_-]*\s+)?create "([^"]+)" in ([^\s"]+)[ \t]*$/;
+const CREATE =
+  /(?:^|\n)(?:@[A-Za-z0-9][A-Za-z0-9_-]*\s+)?create "([^"]+)" in ([^\s"]+)(?:[ \t]+(if new))?[ \t]*$/;
 
 /** `append "<content>" to <note>.md`, as typed: a write script (M53.6).
  * Several, joined by " then ", append in turn (M58.3). */
@@ -102,6 +117,10 @@ const THEN = / then (?=append ")/;
  * (M55.5). Inside the quotes `\n` is a line break, and `<new>` may be empty,
  * which deletes the passage. */
 const EDIT = /^edit "([^"]+)" to "([^"]*)" in (\S+\.md)$/;
+
+/** `set <field> to "<value>" on <note>.md`, as typed: a write script
+ * (M60.4) that calls set_fields with `{path, set: {field: value}}`. */
+const SET_FIELDS = /^set (\S+) to "([^"]*)" on (\S+\.md)$/;
 
 /** The comment scripts (M70.3), as typed: `comment "<quote>" #<k> on
  * <note>.md: <text>` (the `#<k>` an occurrence, and optional), `comment on
@@ -154,6 +173,12 @@ function commentScript(message: string): Script | null {
 const RUN = /(?:^|\n)run "([^"]+)"[ \t]*(?=\n|$)/;
 const ASK_ME = /(?:^|\n)ask me "([^"]+)"[ \t]*(?=\n|$)/;
 
+/** `fetch "<url>"` (M57.7): a call to the CLI's own WebFetch, on a line of
+ * its own. The plan decides it like any CLI tool: under Web access On it
+ * fetches a canned page, and Off denies it in argv, so the run reads that it
+ * is not available. */
+const FETCH = /(?:^|\n)fetch "([^"]+)"[ \t]*(?=\n|$)/;
+
 /** `ask me which format` (M57.3): AskUserQuestion with two questions, one
  * single-select and one multi-select, as a card shows them. `ask me
  * "<question>"` above offers no options, so it is a set no card can show. */
@@ -204,6 +229,45 @@ const FIVE_NOTES = [
 
 /** A capture that exists in the demo vault, so the proposal has a real target. */
 const DEMO_CAPTURE = 'inbox/warehouse-cutover-thought.md';
+
+/** The meeting filing ask (M64.7, `organizePrompt` with a meeting): its path
+ * and its JSON-quoted title. */
+const MEETING = /^File the meeting transcript at (\S+) \("([^"]*)"\)/;
+/** A matched speaker's line in that ask: the quoted label, then its link. */
+const MATCHED_SPEAKER = /^- "(?:[^"\\]|\\.)*" is (\[\[[^\]]+\]\])$/gm;
+/** The one summary the meeting script proposes. */
+export const MOCK_MEETING_SUMMARY =
+  'The team agreed the rollback has to be rehearsed before cutover, and planned around a forty-minute queue drain.';
+
+/**
+ * The meeting script (M64.7): one get_note, then one propose_organize for the
+ * ask's path, filed as the demo vault's meeting type with a fixed summary and
+ * the attendees the ask linked. The type's name is the demo's word, here in
+ * the mock only; product code never names it.
+ */
+function meetingScript(message: string): Script | null {
+  const meeting = MEETING.exec(message.trim());
+  if (meeting === null) return null;
+  const [, path, title] = meeting;
+  const attendees = [...message.matchAll(MATCHED_SPEAKER)].map((m) => m[1]);
+  const properties: Record<string, unknown> = { summary: MOCK_MEETING_SUMMARY };
+  if (attendees.length > 0) properties.attendees = attendees;
+  return {
+    tools: [
+      { name: 'get_note', input: JSON.stringify({ path }) },
+      { name: 'propose_organize', input: JSON.stringify({ path }) },
+    ],
+    uiAction: {
+      action: 'propose_organize',
+      path,
+      type: 'Meeting',
+      title: `Meeting: ${title}`,
+      properties,
+      reasoning: 'It is a meeting transcript, so it reads as a meeting record with its attendees.',
+    },
+    text: `I read "${title}" and proposed filing it as a meeting with a summary and ${attendees.length} ${attendees.length === 1 ? 'attendee' : 'attendees'}. Nothing is written until you apply the card.`,
+  };
+}
 
 /**
  * What the default script says the vault is (M54.8), in the model the app has
@@ -422,12 +486,26 @@ function knowledgeScript(prompt: string, message: string, systemPrompt?: string)
   return null;
 }
 
-/** The CLI-tool scripts (M57.2), read off the message, then off a job's
- * standing instructions. */
+/** The CLI-tool scripts (M57.2, and M57.7's fetch), read off the message,
+ * then off a job's standing instructions. */
 function cliScript(message: string, systemPrompt?: string): Script | null {
   const at = systemPrompt?.indexOf(STANDING) ?? -1;
   const standing = systemPrompt !== undefined && at >= 0 ? systemPrompt.slice(at) : '';
   for (const text of [message.trim(), standing]) {
+    const fetched = FETCH.exec(text);
+    if (fetched !== null) {
+      const url = fetched[1];
+      return {
+        tools: [
+          {
+            name: 'WebFetch',
+            input: JSON.stringify({ url, prompt: 'Summarize the page' }),
+            output: `(mock) The page at ${url} says hello.`,
+          },
+        ],
+        text: `I fetched ${url}.`,
+      };
+    }
     const run = RUN.exec(text);
     if (run !== null) {
       const command = run[1];
@@ -528,6 +606,17 @@ function scriptFor(message: string, systemPrompt?: string): Script {
       text: `I edited ${path}.`,
     };
   }
+  // The set script, on the raw message too (M60.4): a value may name
+  // anything.
+  const fields = SET_FIELDS.exec(message.trim());
+  if (fields !== null) {
+    const [, field, value, path] = fields;
+    return {
+      tools: [{ name: 'set_fields', input: JSON.stringify({ path, set: { [field]: value } }) }],
+      fields: { path, field, value },
+      text: `I set ${field} on ${path}.`,
+    };
+  }
   // The comment scripts, on the raw message too (M70.3): a comment's text is
   // free, and may name an inbox or a risk.
   const comment = commentScript(message.trim());
@@ -552,8 +641,9 @@ function scriptFor(message: string, systemPrompt?: string): Script {
   }
   const create = CREATE.exec(message.trim());
   if (create !== null) {
-    const [, title, folder] = create;
+    const [, title, folder, ifNew] = create;
     const args: CreateArgs = { folder, slug: slugify(title), body: `# ${title}\n` };
+    if (ifNew !== undefined) args.if_exists = 'refuse';
     return {
       tools: [{ name: 'create_note', input: JSON.stringify(args) }],
       create: args,
@@ -574,6 +664,9 @@ function scriptFor(message: string, systemPrompt?: string): Script {
     };
   }
 
+  // The meeting ask names an `inbox/` path too, and wants its own filing.
+  const meeting = meetingScript(message);
+  if (meeting !== null) return meeting;
   // Checked before the Inbox branch: these prompts name the note they are
   // about, and a path containing `inbox/` would otherwise answer a question
   // about Knowledge with a filing proposal.
@@ -734,7 +827,8 @@ export interface MockDeferral {
 
 /** This conversation, per mock session (M57.2): the exact (family, subject)
  * pairs the person allowed, kept in memory as Rust's book keeps them. Only a
- * resumed run's answer writes it. */
+ * resumed run's answer writes it, and never for a cut subject
+ * (`subjectIsCut`), which names only a prefix of the call. */
 const conversationGrants = new Map<string, Set<string>>();
 
 const grantKey = (family: string, subject: string) => `${family}\u0000${subject}`;
@@ -775,6 +869,7 @@ export function runMockAgent(
     onUiAction,
     onAppend,
     onEdit,
+    onSetFields,
     onCreate,
     onComment,
     onReply,
@@ -797,10 +892,14 @@ export function runMockAgent(
      * `agentEdit`, which answers with the tool's report. Absent, the tool
      * refuses. */
     onEdit?: (path: string, edits: QuoteEdit[]) => Promise<string>;
+    /** Carries out the set script's `set_fields` (M60.4): the mock backend's
+     * `agentSetFields`, which answers with the tool's report. Absent, the
+     * tool refuses. */
+    onSetFields?: (path: string, args: Record<string, unknown>) => Promise<string>;
     /** Carries out the create script's `create_note` (M57.4): the mock
-     * backend's `agentCreate`, which answers with the tool's report.
-     * Absent, the tool refuses. */
-    onCreate?: (args: CreateArgs) => Promise<string>;
+     * backend's `agentCreate`, which answers with the path it landed and
+     * the tool's report (M61.6b). Absent, the tool refuses. */
+    onCreate?: (args: CreateArgs) => Promise<{ path: string; reply: string }>;
     /** Carry out the comment scripts' comment_on_note, reply_to_comment and
      * resolve_comment (M70.3): the mock backend's `agentComment`,
      * `agentReply` and `agentResolve`, which answer with the tool's report.
@@ -899,18 +998,22 @@ export function runMockAgent(
   const create = async (id: string, args: CreateArgs, edited: string[] = []) => {
     await writeGate();
     if (cancelled) return;
-    let output: string;
+    let landed: { path: string; reply: string };
+    // `if new` (M61.6b) replies with the tool's own text, landed or refused.
+    const ifNew = args.if_exists === 'refuse';
     try {
       if (onCreate === undefined) throw new Error('create_note is not available here');
-      output = await onCreate(args);
+      landed = await onCreate(args);
     } catch (err) {
       const refusal = err instanceof Error ? err.message : String(err);
-      reply = `I could not create that in ${args.folder}: ${refusal}`;
+      reply = ifNew ? refusal : `I could not create that in ${args.folder}: ${refusal}`;
       if (!cancelled) emit({ kind: 'ToolDone', tool_id: id, output: refusal, is_error: true });
       return;
     }
-    const path = output.replace(/^Created /, '');
+    let output = landed.reply;
+    const path = landed.path;
     onUiAction?.({ action: 'vault_changed', paths: [path] });
+    if (ifNew) reply = output;
     if (edited.length > 0) {
       output = `${output}\n${editedText(edited)}`;
       reply = `I created ${path} with your changes to ${edited.join(', ')}.`;
@@ -928,6 +1031,26 @@ export function runMockAgent(
       },
       (refusal) => `I could not edit ${target.path}: ${refusal}`,
     );
+
+  /** The set script's call (M60.4): its report comes from the tool, and a
+   * landed write announces the vault with no paths, as Rust's rescan branch
+   * does for the frontmatter writers. A refusal rewrites the reply. */
+  const setFields = async (id: string, call: SetFieldsCall) => {
+    await writeGate();
+    if (cancelled) return;
+    let output: string;
+    try {
+      if (onSetFields === undefined) throw new Error('set_fields is not available here');
+      output = await onSetFields(call.path, { set: { [call.field]: call.value } });
+    } catch (err) {
+      const refusal = err instanceof Error ? err.message : String(err);
+      reply = `I could not set ${call.field} on ${call.path}: ${refusal}`;
+      if (!cancelled) emit({ kind: 'ToolDone', tool_id: id, output: refusal, is_error: true });
+      return;
+    }
+    onUiAction?.({ action: 'vault_changed' });
+    if (!cancelled) emit({ kind: 'ToolDone', tool_id: id, output });
+  };
 
   /** A comment script's call (M70.3): the report comes from the tool, and a
    * post announces the page's comments, never the vault. A refusal rewrites
@@ -984,6 +1107,7 @@ export function runMockAgent(
     const appended = name === 'append_to_note' ? script.appends?.[appendAt++] : undefined;
     if (i < resumeAt) return;
     const edited = name === 'edit_note' ? script.edit : undefined;
+    const fielded = name === 'set_fields' ? script.fields : undefined;
     const created = name === 'create_note' ? script.create : undefined;
     const commented = name === script.comment?.tool ? script.comment : undefined;
     const completion: Step =
@@ -991,16 +1115,18 @@ export function runMockAgent(
         ? () => append(id, appended)
         : edited !== undefined
           ? () => edit(id, edited)
-          : created !== undefined
-            ? () => create(id, created)
-            : commented !== undefined
-              ? () => comment(id, commented)
-              : () =>
-                  emit(
-                    output === undefined
-                      ? { kind: 'ToolDone', tool_id: id }
-                      : { kind: 'ToolDone', tool_id: id, output },
-                  );
+          : fielded !== undefined
+            ? () => setFields(id, fielded)
+            : created !== undefined
+              ? () => create(id, created)
+              : commented !== undefined
+                ? () => comment(id, commented)
+                : () =>
+                    emit(
+                      output === undefined
+                        ? { kind: 'ToolDone', tool_id: id }
+                        : { kind: 'ToolDone', tool_id: id, output },
+                    );
     // M57.2: a CLI tool's call decides through the run's plan. Argv denies
     // what the plan disallows; the host answers the rest.
     const table = approval !== undefined && isCliTool(approval, name);
@@ -1036,7 +1162,12 @@ export function runMockAgent(
       // its exact subject for the rest of the session; deny refuses it in
       // Rust's words, and the reply says so rather than claim the work.
       const answer = resume.answer;
-      if (answer.kind === 'allow' && answer.remember === 'conversation' && host?.kind === 'ask') {
+      if (
+        answer.kind === 'allow' &&
+        answer.remember === 'conversation' &&
+        host?.kind === 'ask' &&
+        !subjectIsCut(host.subject)
+      ) {
         const held = conversationGrants.get(sessionId) ?? new Set<string>();
         held.add(grantKey(host.family, host.subject));
         conversationGrants.set(sessionId, held);

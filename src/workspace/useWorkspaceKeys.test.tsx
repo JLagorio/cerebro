@@ -1,12 +1,25 @@
 import { render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { useKeyScope } from '@/lib/keys/useKeys';
 import { resetMockRoots, seedRoot } from '@/lib/mockRoots';
 import { initialRootsState, selectActiveTab, useRootsStore } from '@/stores/rootsStore';
 import { useWorkspaceKeys } from './useWorkspaceKeys';
 
-function Host({ enabled = true }: { enabled?: boolean }) {
+function Keys({ enabled }: { enabled: boolean }) {
   useWorkspaceKeys(enabled);
   return <input data-testid="field" />;
+}
+
+/** The surface sits in a page key scope, as WorkspacePage does under <main>. */
+function Host({ enabled = true }: { enabled?: boolean }) {
+  const page = useKeyScope('page', { page: true });
+  return (
+    <div {...page.props}>
+      <page.Provider>
+        <Keys enabled={enabled} />
+      </page.Provider>
+    </div>
+  );
 }
 
 const TAURI = '__TAURI_INTERNALS__';

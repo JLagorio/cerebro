@@ -29,12 +29,19 @@ vi.mock('@/lib/gitIpc', async (importOriginal) => {
   };
 });
 
+import { resetVaultActivity } from '@/history/vaultActivityStore';
 import { commitRuns, getCommitDiff, getVaultPulse } from '@/lib/gitIpc';
+import { failNext, resetFaults } from '@/lib/mockFaults';
+import { resetMockFs } from '@/lib/mockIpc';
 import { PulsePage } from '@/pages/PulsePage';
 import { useVaultStore } from '@/stores/vaultStore';
 import { makeEntry } from '@/test/factories';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  resetFaults();
+  resetVaultActivity();
+});
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -47,6 +54,7 @@ function deferred<T>() {
 describe('PulsePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetMockFs();
     useVaultStore.setState({ vaultPath: '/demo-vault', entries: [] });
   });
 
@@ -75,47 +83,68 @@ describe('PulsePage', () => {
     expect(within(commit).getByLabelText('2 files changed')).toBeTruthy();
   });
 
-  // M53.15: a failed `git log` used to land as [] and read "No history yet" —
-  // a statement about the vault that nobody had been able to make.
-  it('says a failed read could not be read, never "No history yet", and tries again', async () => {
+  // M64.2: the year and the feed, with checkpoints as their own rows.
+  it('renders the heatmap and the feed, with the commit cards in it', async () => {
+    render(<PulsePage />);
+    expect(await screen.findByTestId('history-heatmap')).toBeTruthy();
+    const feed = await screen.findByTestId('history-feed');
+    expect(await within(feed).findAllByTestId('pulse-commit')).toHaveLength(1);
+    expect(within(feed).getAllByTestId('history-session').length).toBeGreaterThan(0);
+    expect(screen.getByTestId('pulse-page')).toBeTruthy();
+  });
+
+  // M53.15, M64.2: a failed `git log` is a line in the feed, never "No
+  // history yet", and never a blank page: the activity still reads.
+  it('says a failed checkpoint read in its line and tries again, while activity renders', async () => {
     vi.mocked(getVaultPulse).mockRejectedValueOnce(new Error('git log exited 128'));
     render(<PulsePage />);
-    expect(await screen.findByTestId('section-unavailable')).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'History', level: 1 })).toBeTruthy();
+    const feed = await screen.findByTestId('history-feed');
+    const line = await within(feed).findByText('Checkpoints could not be read.');
+    expect(line.dataset.lane).toBe('checkpoints');
+    expect(within(feed).getAllByTestId('history-session').length).toBeGreaterThan(0);
+    expect(
+      screen.getByTestId('history-heatmap').querySelector('[data-testid="heatmap-day"]'),
+    ).toBeTruthy();
     expect(screen.queryByText('No history yet')).toBeNull();
 
     fireEvent.click(screen.getByTestId('history-retry'));
     expect(await screen.findAllByTestId('pulse-commit')).toHaveLength(1);
     expect(getVaultPulse).toHaveBeenCalledTimes(2);
-    expect(screen.queryByTestId('section-unavailable')).toBeNull();
+    expect(screen.queryByText('Checkpoints could not be read.')).toBeNull();
   });
 
-  it('says History is off for a vault that is not tracked, and offers no button', async () => {
+  it('says a vault that keeps no checkpoints in a line, and the activity still reads', async () => {
     vi.mocked(getVaultPulse).mockResolvedValueOnce({ tracked: false, commits: [] });
     render(<PulsePage />);
-    expect(await screen.findByText('History is off')).toBeTruthy();
-    expect(screen.queryByText('No history yet')).toBeNull();
-    expect(screen.queryByTestId('section-unavailable')).toBeNull();
-    expect(screen.queryByRole('button')).toBeNull();
-  });
-
-  it('says No history yet for a tracked vault with nothing committed', async () => {
-    vi.mocked(getVaultPulse).mockResolvedValueOnce({ tracked: true, commits: [] });
-    render(<PulsePage />);
-    expect(await screen.findByText('No history yet')).toBeTruthy();
-    expect(screen.getByText('Nothing has been committed in this vault yet.')).toBeTruthy();
+    expect((await screen.findByTestId('history-untracked')).textContent).toBe(
+      'This vault keeps no checkpoints. Turn history on in Settings to keep every version of every page.',
+    );
+    expect(screen.getAllByTestId('history-session').length).toBeGreaterThan(0);
     expect(screen.queryByText('History is off')).toBeNull();
   });
 
-  it('says nothing at all before the read lands', async () => {
+  it('offers Retry when activity fails, while the checkpoints still render', async () => {
+    failNext('vault_activity');
+    render(<PulsePage />);
+    expect(await screen.findAllByTestId('pulse-commit')).toHaveLength(1);
+    const lanes = screen.getAllByTestId('section-unavailable').map((l) => l.dataset.lane);
+    expect(lanes).toEqual(['all', 'all']);
+    expect(screen.queryByTestId('history-session')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('activity-retry'));
+    expect(await screen.findAllByTestId('history-session')).not.toHaveLength(0);
+    expect(screen.queryByTestId('section-unavailable')).toBeNull();
+  });
+
+  it('says nothing in the feed before both reads land', async () => {
     const read = deferred<VaultPulse>();
     vi.mocked(getVaultPulse).mockReturnValueOnce(read.promise);
-    const { container } = render(<PulsePage />);
-    expect(container.textContent).toBe('');
-    expect(screen.queryByText('No history yet')).toBeNull();
+    render(<PulsePage />);
+    await screen.findByTestId('history-heatmap');
+    expect(screen.queryByTestId('history-feed')).toBeNull();
 
     await act(async () => read.resolve({ tracked: true, commits: [] }));
-    expect(screen.getByText('No history yet')).toBeTruthy();
+    expect(await screen.findByTestId('history-feed')).toBeTruthy();
   });
 
   it('says files unknown for a commit whose file list could not be read, never +0', async () => {

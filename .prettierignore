@@ -31,3 +31,14 @@ shared/runtime/
 
 # The model reads shared/prompt/ byte for byte from Rust and TS (M54.7): a reflow would change what every run is told.
 shared/prompt/
+
+# The field-kind table and the date grammar (M60.3) are hashed against their
+# committed .sha256 by Rust (include_str!) and by vitest: a reflow would change
+# the bytes both readers must agree on.
+shared/schema/
+shared/calendar/
+
+# The file-kind table (M66.1) is hashed against its committed .sha256 by Rust
+# (include_str!) and by vitest, and keeps one row per line: a reflow would
+# change the bytes both readers must agree on.
+shared/files/

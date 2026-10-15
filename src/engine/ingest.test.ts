@@ -3,6 +3,7 @@ import SOURCE_SLUGS from '../../src-tauri/fixtures/source-slugs.json';
 import {
   canonicalSourceId,
   detectFormat,
+  filedCopyOf,
   findExternalRefs,
   parseTranscript,
   sourceCachePath,
@@ -15,6 +16,7 @@ import {
   turnsToMarkdown,
   uncachedRefs,
 } from './ingest';
+import { sha256Hex } from '@/lib/sha256';
 import { makeEntry } from './testHelpers';
 
 const AT = '2026-07-28T14:00:00Z';
@@ -220,6 +222,60 @@ describe('toWorkingDoc', () => {
     const doc = toWorkingDoc({ filename: 'notes.txt', content: 'plain', at: AT });
     expect(doc.frontmatter.speakers).toBeUndefined();
     expect(doc.frontmatter.duration).toBeUndefined();
+  });
+
+  // M64.7 — absent reads "not recorded", so a transcript that names nobody
+  // says so with an empty list.
+  it('records speakers: [] for a transcript that names nobody', () => {
+    const vtt = 'WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nthe rollback is not rehearsed\n';
+    const doc = toWorkingDoc({ filename: 'call.vtt', content: vtt, at: AT });
+    expect(doc.frontmatter.speakers).toEqual([]);
+  });
+});
+
+describe('source_sha256 and repeats (M64.7)', () => {
+  it.each([
+    ['vtt', 'sync.vtt', VTT],
+    ['srt', 'sync.srt', SRT],
+    ['markdown', 'notes.md', '# Notes\n\nSome thoughts.'],
+    ['text', 'notes.txt', 'plain words'],
+    ['paste', '', 'A pasted wall of text.'],
+  ])('stamps the hash of the text on a %s inlet', (_kind, filename, content) => {
+    const doc = toWorkingDoc({ filename, content, at: AT });
+    expect(doc.frontmatter.source_sha256).toBe(sha256Hex(content));
+    expect(doc.frontmatter.source_sha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('gives equal content an equal hash, whatever the name or the moment', () => {
+    const a = toWorkingDoc({ filename: 'a.vtt', content: VTT, at: AT });
+    const b = toWorkingDoc({ filename: 'renamed.vtt', content: VTT, at: '2026-08-01T00:00:00Z' });
+    expect(a.frontmatter.source_sha256).toBe(b.frontmatter.source_sha256);
+    const c = toWorkingDoc({ filename: 'a.vtt', content: `${VTT} `, at: AT });
+    expect(c.frontmatter.source_sha256).not.toBe(a.frontmatter.source_sha256);
+  });
+
+  const SHA = sha256Hex(VTT);
+  const at = (path: string, sha: string | null = SHA) =>
+    makeEntry({ path, properties: sha === null ? {} : { source_sha256: sha } });
+
+  it('filedCopyOf finds a copy in any folder', () => {
+    const copy = at('records/meetings/sync.md');
+    expect(filedCopyOf([at('inbox/other.md', null), copy], SHA)).toBe(copy);
+  });
+
+  it('filedCopyOf skips the knowledge bundle', () => {
+    expect(filedCopyOf([at('knowledge/systems/sync.md')], SHA)).toBeNull();
+  });
+
+  it('filedCopyOf picks the first in path order', () => {
+    const first = at('archive/sync.md');
+    expect(filedCopyOf([at('inbox/sync.md'), first, at('records/sync.md')], SHA)).toBe(first);
+  });
+
+  it('filedCopyOf returns null when nothing holds the material', () => {
+    expect(
+      filedCopyOf([at('inbox/a.md', sha256Hex('other')), at('inbox/b.md', null)], SHA),
+    ).toBeNull();
   });
 });
 

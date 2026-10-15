@@ -1,0 +1,52 @@
+{
+  "why": "One of Cerebro's own constructs with Web access On (M57.7): the ceiling does not reach it, so WebFetch and WebSearch stay denied with every other CLI tool.",
+  "input": {
+    "kind": "internal",
+    "shell": "off",
+    "web": "on",
+    "ask_first": false,
+    "read_scoped": false,
+    "narrowing": null
+  },
+  "expected": {
+    "permission_mode": "default",
+    "allowed": [],
+    "disallowed": [
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "NotebookEdit",
+      "Bash",
+      "Read",
+      "Glob",
+      "Grep",
+      "WebFetch",
+      "WebSearch",
+      "Task",
+      "AskUserQuestion",
+      "ExitPlanMode"
+    ],
+    "matcher": [],
+    "withheld": [],
+    "decisions": {
+      "Write": "deny",
+      "Edit": "deny",
+      "MultiEdit": "deny",
+      "NotebookEdit": "deny",
+      "Bash": "deny",
+      "Read": "deny",
+      "Glob": "deny",
+      "Grep": "deny",
+      "WebFetch": "deny",
+      "WebSearch": "deny",
+      "Task": "deny",
+      "AskUserQuestion": "deny",
+      "ExitPlanMode": "deny",
+      "mcp__cerebro__create_note": "deny",
+      "mcp__cerebro__update_frontmatter": "deny",
+      "mcp__cerebro__set_fields": "deny",
+      "mcp__cerebro__append_to_note": "deny",
+      "mcp__cerebro__edit_note": "deny"
+    }
+  }
+}

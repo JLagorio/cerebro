@@ -4,7 +4,11 @@ import { cleanup, render, screen } from '@testing-library/react';
 import type { ModifiedFile } from '@/engine/git';
 
 const { git, gitIpc } = vi.hoisted(() => ({
-  git: { modified: [] as ModifiedFile[] },
+  git: {
+    modified: [] as ModifiedFile[],
+    conflicts: [] as string[],
+    conflictMode: 'none' as 'merge' | 'rebase' | 'none',
+  },
   gitIpc: {
     getFileDiff: vi.fn(async () => ''),
     gitCommit: vi.fn(async () => 'abc1234' as string | null),
@@ -22,8 +26,8 @@ vi.mock('@/git/useGit', async (importOriginal) => {
       ready: true,
       isRepo: true,
       modified: git.modified,
-      conflicts: [],
-      conflictMode: 'none',
+      conflicts: git.conflicts,
+      conflictMode: git.conflictMode,
       remote: null,
       sync: 'local-changes',
       refresh: async () => undefined,
@@ -43,6 +47,8 @@ const changed = (path: string, owner: ModifiedFile['owner'] = null): ModifiedFil
 
 beforeEach(() => {
   vi.clearAllMocks();
+  git.conflicts = [];
+  git.conflictMode = 'none';
   useVaultStore.setState({ vaultPath: '/v', entries: [] });
 });
 afterEach(cleanup);
@@ -109,5 +115,27 @@ describe('ChangesPage and a live run’s files', () => {
     expect(button.getAttribute('title')).toBe(
       'knowledge/ is maintained by the AI knowledge base and is read-only here. Verify the concept, or ask the agent to revise it.',
     );
+  });
+});
+
+/**
+ * Keep mine on the last conflicted file leaves a clean tree and an open
+ * merge (M58.3): the banner stays, with Finish merge, until the merge ends.
+ */
+describe('ChangesPage and an open merge', () => {
+  it('keeps Finish merge while a merge is in progress with nothing conflicted', () => {
+    git.modified = [];
+    git.conflictMode = 'merge';
+    render(<ChangesPage />);
+    expect(screen.getByTestId('conflict-banner').textContent).toContain(
+      'Every conflict is resolved (merge in progress)',
+    );
+    expect(screen.getByRole('button', { name: 'Finish merge' })).toBeTruthy();
+  });
+
+  it('shows no banner when no merge or rebase is open', () => {
+    git.modified = [];
+    render(<ChangesPage />);
+    expect(screen.queryByTestId('conflict-banner')).toBeNull();
   });
 });

@@ -22,8 +22,19 @@ import { __resetQuit, beginLeaving } from '@/app/quit';
 import * as ipc from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
+import { useUndoStore, type UndoEntry } from '@/stores/undoStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { fixtureVault } from '@/test/factories';
+
+/** One undo entry, for the undo keys to find (M60.7). */
+const UNDO_ENTRY: UndoEntry = {
+  id: 1,
+  label: 'Renamed',
+  vault: '/demo-vault',
+  at: 0,
+  kind: 'batch',
+  files: [],
+};
 
 const BET = 'records/bets/office-hours.md';
 /** A path fixtureVault actually holds, so DetailPanel has something to draw. */
@@ -514,6 +525,15 @@ describe('App boot flow', () => {
       expect(useUiStore.getState().detailPath).toBeNull();
       expect(screen.queryByTestId('right-panel-slot')).toBeNull();
     });
+
+    // M65.1: the canvas is the page key scope, the keymap's fallback.
+    it('makes <main> the page key scope', async () => {
+      render(<App />);
+      await screen.findByRole('navigation', { name: 'Sidebar' });
+      const main = screen.getByRole('main');
+      expect(main.getAttribute('data-key-scope')).toBe('page');
+      expect(main.hasAttribute('data-key-scope-page')).toBe(true);
+    });
   });
 
   // M15: the handler threw away the path it had just created, so you landed on
@@ -541,6 +561,21 @@ describe('App boot flow', () => {
     expect(useNavStore.getState().selection).toEqual({ kind: 'home' });
     fireEvent.keyDown(window, { key: ']', metaKey: true });
     expect(useNavStore.getState().selection).toEqual({ kind: 'pulse' });
+  });
+
+  // M60.7: the undo keys are mounted at the root, beside the other globals.
+  it('mounts the undo keys: cmd+z undoes the newest change', async () => {
+    render(<App />);
+    await screen.findByRole('navigation', { name: 'Sidebar' });
+    const undo = vi.fn(async () => true);
+    const before = useUndoStore.getState();
+    useUndoStore.setState({ undo, past: [{ ...UNDO_ENTRY }] });
+    try {
+      fireEvent.keyDown(window, { key: 'z', metaKey: true });
+      expect(undo).toHaveBeenCalledOnce();
+    } finally {
+      useUndoStore.setState({ undo: before.undo, past: [] });
+    }
   });
 
   it('leaves cmd+[ to the editor while text is being edited', async () => {

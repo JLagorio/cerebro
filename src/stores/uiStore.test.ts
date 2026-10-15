@@ -136,6 +136,19 @@ describe('uiStore', () => {
     expect(new Set(toasts.map((t) => t.id)).size).toBe(2);
   });
 
+  it('a toast carries its action, and a plain one carries none (M60.7)', () => {
+    const run = vi.fn();
+    useUiStore.getState().toast('Renamed “A” to “B” on 2 pages', {
+      action: { label: 'Undo', run },
+    });
+    useUiStore.getState().toast('Saved');
+    const [withAction, plain] = useUiStore.getState().toasts;
+    expect(withAction.action?.label).toBe('Undo');
+    withAction.action?.run();
+    expect(run).toHaveBeenCalledOnce();
+    expect(plain).not.toHaveProperty('action');
+  });
+
   /**
    * M16.21: this was the one member of the store's collapse family that never
    * wrote itself back — `expandedFolders`, `docPagesOpen`, `typesOpen` and the
@@ -233,6 +246,37 @@ describe('uiStore', () => {
       state.setAgentShell('ask');
       expect(window.localStorage.getItem('cerebro.agentShell')).toBe('ask');
       expect(window.localStorage.getItem('cerebro.agentShellAccess')).toBeNull();
+    });
+  });
+
+  /**
+   * M57.7. Web access is a second ceiling, two states, stored under
+   * `cerebro.agentWebAccess`: only 'true' reads on.
+   */
+  describe('web ceiling', () => {
+    const fresh = async () => {
+      vi.resetModules();
+      return (await import('./uiStore')).useUiStore.getState();
+    };
+
+    beforeEach(() => {
+      window.localStorage.removeItem('cerebro.agentWebAccess');
+    });
+
+    it('defaults to off, and reads anything but true as off', async () => {
+      expect((await fresh()).agentWebAccess).toBe(false);
+      for (const garbage of ['TRUE', 'on', '1', '']) {
+        window.localStorage.setItem('cerebro.agentWebAccess', garbage);
+        expect((await fresh()).agentWebAccess, garbage).toBe(false);
+      }
+    });
+
+    it('persists across a reload', async () => {
+      (await fresh()).setAgentWebAccess(true);
+      expect(window.localStorage.getItem('cerebro.agentWebAccess')).toBe('true');
+      expect((await fresh()).agentWebAccess).toBe(true);
+      (await fresh()).setAgentWebAccess(false);
+      expect((await fresh()).agentWebAccess).toBe(false);
     });
   });
 
@@ -473,6 +517,16 @@ describe('layout editor signal', () => {
     useUiStore.getState().openLayoutEditor('Work item');
     useUiStore.getState().openLayoutEditor('Meeting');
     expect(useUiStore.getState().layoutEditor).toEqual({ type: 'Meeting' });
+  });
+});
+
+describe('wakes revision (M63.1b)', () => {
+  it('noteWakesChanged bumps the revision the wake list reads again on', () => {
+    useUiStore.setState({ wakesRevision: 0 });
+    useUiStore.getState().noteWakesChanged();
+    expect(useUiStore.getState().wakesRevision).toBe(1);
+    useUiStore.getState().noteWakesChanged();
+    expect(useUiStore.getState().wakesRevision).toBe(2);
   });
 });
 

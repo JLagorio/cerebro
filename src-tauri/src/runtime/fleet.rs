@@ -2,8 +2,9 @@
 //!
 //! It reads `runs`, the two governance tables M31.6 writes, the
 //! `operational_log` rows recorded against a run (M56.9), what the run
-//! wrote (`write_log::run_writes`, M58.1b), and which run made which commit
-//! (`run_commits`, M58.4), and it reads them through
+//! wrote (`write_log::run_writes`, M58.1b), which run made which commit
+//! (`run_commits`, M58.4), and what is waiting to wake an agent
+//! (`agent_wakes`, M63.1b), and it reads them through
 //! [`ReadOnly`]: a handle SQLite refuses writes on, so this module
 //! cannot change a row even by mistake. It computes nothing the rows do not
 //! already say: every aggregate it serves is recomputable from the rows it
@@ -229,12 +230,15 @@ pub struct ActorSummary {
     pub last_started_at: Option<String>,
 }
 
-const RUN_COLUMNS: &str = "run_id, actor, vault_id, mode, lane, started_at, ended_at, outcome, \
+/// The run columns `map_run` reads, in its order. Shared with
+/// `activity::run_rows` (M64.2), so History reads a run as Fleet does.
+pub(crate) const RUN_COLUMNS: &str =
+    "run_id, actor, vault_id, mode, lane, started_at, ended_at, outcome, \
                            usage_state, input_tokens, output_tokens, proposals_submitted, \
                            applied, rejected, parent_run_id, counters_booked, cause, \
                            cli_session_id";
 
-fn map_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<FleetRun> {
+pub(crate) fn map_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<FleetRun> {
     let booked = row.get::<_, i64>(15)? != 0;
     let counter = |index: usize| -> rusqlite::Result<Option<u64>> {
         Ok(booked.then_some(row.get::<_, i64>(index)? as u64))
@@ -679,6 +683,112 @@ pub fn live_run_wrote(ro: &ReadOnly, vault_id: &str, path: &str) -> Result<bool,
         |row| row.get::<_, bool>(0),
     )
     .map_err(|e| e.to_string())
+}
+
+/// How far back the lobby lists wakes that were skipped or expired.
+pub const FINISHED_WAKES_DAYS: i64 = 7;
+
+/// One wake as the Agents lobby and an agent's Runs tab list it (M63.1b).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FleetWake {
+    pub wake_id: String,
+    pub agent: String,
+    /// `pending`, `skipped` or `expired`: the three kinds of row listed.
+    pub state: String,
+    /// The stored outcome, reason and cancel why; `None` while pending.
+    pub outcome: Option<String>,
+    pub reason: Option<String>,
+    pub detail: Option<String>,
+    /// [`super::wakes::words`]: how the row's end reads.
+    pub words: String,
+    /// The cause stored at admission, in Rust's words. `None` only for a
+    /// value the table's CHECK would never have let in.
+    pub cause: Option<CauseView>,
+    pub admitted_at: String,
+    /// When a deferred wake is tried again; `None` is now.
+    pub not_before: Option<String>,
+    /// The gate's reasons, comma-separated, from its last deferral.
+    pub deferred: Option<String>,
+    pub finished_at: Option<String>,
+    pub run_id: Option<String>,
+}
+
+const WAKE_COLUMNS: &str = "wake_id, agent, outcome, reason, detail, cause, admitted_at, \
+     not_before, deferred, finished_at, run_id";
+
+fn map_wake(row: &rusqlite::Row<'_>) -> rusqlite::Result<FleetWake> {
+    let outcome: Option<String> = row.get(2)?;
+    let reason: Option<String> = row.get(3)?;
+    let detail: Option<String> = row.get(4)?;
+    let cause: String = row.get(5)?;
+    let state = match (outcome.as_deref(), reason.as_deref()) {
+        (None, _) => "pending",
+        (Some("cancelled"), Some(super::wakes::EXPIRED)) => "expired",
+        _ => "skipped",
+    };
+    Ok(FleetWake {
+        wake_id: row.get(0)?,
+        agent: row.get(1)?,
+        state: state.into(),
+        words: super::wakes::words(outcome.as_deref(), reason.as_deref(), detail.as_deref()),
+        outcome,
+        reason,
+        detail,
+        cause: view_of_column(&cause),
+        admitted_at: row.get(6)?,
+        not_before: row.get(7)?,
+        deferred: row.get(8)?,
+        finished_at: row.get(9)?,
+        run_id: row.get(10)?,
+    })
+}
+
+/// What is waiting to wake this vault's agents, and what did not (M63.1b):
+/// every pending wake, oldest first, then the wakes skipped or expired in the
+/// last [`FINISHED_WAKES_DAYS`] days, newest first, at most [`MAX_LIMIT`] in
+/// all. `actor` narrows it to one agent. Wakes that ran (succeeded, failed,
+/// interrupted, coalesced) are their runs' to show, and superseded cancels
+/// the agent's own controls'.
+pub fn wakes(
+    ro: &ReadOnly,
+    vault_id: &str,
+    actor: Option<&str>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<Vec<FleetWake>, String> {
+    let read = |sql: String, params: &[&dyn rusqlite::ToSql]| -> Result<Vec<FleetWake>, String> {
+        let mut statement = ro.prepare(&sql).map_err(|e| format!("agent_wakes: {e}"))?;
+        let rows = statement
+            .query_map(params, map_wake)
+            .map_err(|e| format!("agent_wakes: {e}"))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("agent_wakes: {e}"))
+    };
+    let mut listed = read(
+        format!(
+            "SELECT {WAKE_COLUMNS} FROM agent_wakes WHERE vault_id = ?1 \
+             AND (?2 IS NULL OR agent = ?2) AND state = 'pending' \
+             ORDER BY admitted_at, rowid LIMIT {MAX_LIMIT}"
+        ),
+        &[&vault_id, &actor],
+    )?;
+    let room = MAX_LIMIT as usize - listed.len();
+    if room == 0 {
+        return Ok(listed);
+    }
+    let since = (now - chrono::Duration::days(FINISHED_WAKES_DAYS))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    listed.extend(read(
+        format!(
+            "SELECT {WAKE_COLUMNS} FROM agent_wakes WHERE vault_id = ?1 \
+             AND (?2 IS NULL OR agent = ?2) AND state = 'finished' \
+             AND (outcome = 'skipped' OR (outcome = 'cancelled' AND reason = ?3)) \
+             AND finished_at > ?4 \
+             ORDER BY finished_at DESC, rowid DESC LIMIT {room}"
+        ),
+        &[&vault_id, &actor, &super::wakes::EXPIRED, &since],
+    )?);
+    Ok(listed)
 }
 
 #[cfg(test)]
@@ -1847,5 +1957,197 @@ mod tests {
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
         Ok(())
+    }
+
+    // --- what is waiting to wake an agent (M63.1b) ----------------------------
+
+    /// A finished wake's (outcome, reason, detail, run_id).
+    type WakeEnd<'a> = (&'a str, Option<&'a str>, Option<&'a str>, Option<&'a str>);
+
+    struct WakeSeed<'a> {
+        id: char,
+        agent: &'a str,
+        admitted_at: &'a str,
+        /// `None` is pending.
+        end: Option<WakeEnd<'a>>,
+        finished_at: Option<&'a str>,
+    }
+
+    fn pending<'a>(id: char, agent: &'a str, admitted_at: &'a str) -> WakeSeed<'a> {
+        WakeSeed {
+            id,
+            agent,
+            admitted_at,
+            end: None,
+            finished_at: None,
+        }
+    }
+
+    fn seed_wakes(conn: &Connection, vault: &str, rows: &[WakeSeed<'_>]) {
+        for row in rows {
+            let id = row.id.to_string().repeat(32);
+            let (outcome, reason, detail, run_id) = row.end.unwrap_or(("", None, None, None));
+            let started = run_id.map(|_| row.admitted_at);
+            conn.execute(
+                "INSERT INTO agent_wakes (wake_id, vault_id, agent, wake_key, trigger_digest, \
+                 cause, admitted_at, state, run_id, started_at, finished_at, outcome, reason, \
+                 detail) VALUES (?1, ?2, ?3, ?4, '0123456789abcdef', ?5, ?6, ?7, ?8, ?9, ?10, \
+                 ?11, ?12, ?13)",
+                rusqlite::params![
+                    id,
+                    vault,
+                    row.agent,
+                    row.id.to_string().repeat(64),
+                    format!(
+                        r#"{{"kind":"event","subject":"records/risks/{}.md","detail":"it changes in records/risks"}}"#,
+                        row.id
+                    ),
+                    row.admitted_at,
+                    if row.end.is_none() { "pending" } else { "finished" },
+                    run_id,
+                    started,
+                    row.finished_at,
+                    row.end.map(|_| outcome),
+                    reason,
+                    detail,
+                ],
+            )
+            .unwrap();
+        }
+    }
+
+    const NOW: &str = "2026-10-13T12:00:00Z";
+
+    fn now() -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::parse_from_rfc3339(NOW)
+            .unwrap()
+            .with_timezone(&chrono::Utc)
+    }
+
+    #[test]
+    fn fleet_wakes_lists_pending_skipped_and_expired_but_not_succeeded_or_superseded() {
+        let (dir, conn, vault) = fixture("fleet-wakes");
+        seed_runs(
+            &conn,
+            &vault,
+            &[Seed::new(
+                "r1",
+                Some("process:scout"),
+                "2026-10-13T08:00:00Z",
+            )],
+        );
+        let scout = "process:scout";
+        seed_wakes(
+            &conn,
+            &vault,
+            &[
+                pending('b', scout, "2026-10-13T10:00:00Z"),
+                pending('a', scout, "2026-10-13T09:00:00Z"),
+                WakeSeed {
+                    end: Some(("skipped", Some("cycle"), None, None)),
+                    finished_at: Some("2026-10-13T07:00:00Z"),
+                    ..pending('c', scout, "2026-10-13T06:00:00Z")
+                },
+                WakeSeed {
+                    end: Some(("cancelled", Some("expired"), None, None)),
+                    finished_at: Some("2026-10-12T07:00:00Z"),
+                    ..pending('d', scout, "2026-10-05T06:00:00Z")
+                },
+                WakeSeed {
+                    end: Some(("succeeded", None, None, Some("r1"))),
+                    finished_at: Some("2026-10-13T08:30:00Z"),
+                    ..pending('e', scout, "2026-10-13T08:00:00Z")
+                },
+                WakeSeed {
+                    end: Some(("coalesced", None, None, Some("r1"))),
+                    finished_at: Some("2026-10-13T08:30:00Z"),
+                    ..pending('f', scout, "2026-10-13T08:00:00Z")
+                },
+                WakeSeed {
+                    end: Some(("cancelled", Some("superseded"), Some("paused"), None)),
+                    finished_at: Some("2026-10-13T08:30:00Z"),
+                    ..pending('1', scout, "2026-10-13T08:00:00Z")
+                },
+                // Skipped longer ago than the window: left out.
+                WakeSeed {
+                    end: Some(("skipped", Some("cycle"), None, None)),
+                    finished_at: Some("2026-10-01T07:00:00Z"),
+                    ..pending('2', scout, "2026-10-01T06:00:00Z")
+                },
+            ],
+        );
+        let listed = wakes(&read(&dir), &vault, None, now()).unwrap();
+        let ids: Vec<(char, &str)> = listed
+            .iter()
+            .map(|w| (w.wake_id.chars().next().unwrap(), w.state.as_str()))
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                ('a', "pending"),
+                ('b', "pending"),
+                ('c', "skipped"),
+                ('d', "expired")
+            ],
+            "pending oldest first, then skipped and expired newest first"
+        );
+        assert_eq!(listed[0].words, crate::runtime::wakes::WAITING_WORDS);
+        assert_eq!(
+            listed[0].cause.as_ref().and_then(|c| c.subject.as_deref()),
+            Some("records/risks/a.md")
+        );
+        assert_eq!(
+            listed[2].words,
+            "skipped (or cancelled) for a reason this version does not name (cycle)"
+        );
+        assert_eq!(listed[3].words, "expired — waited more than 7 days");
+        assert_eq!(
+            listed[3].finished_at.as_deref(),
+            Some("2026-10-12T07:00:00Z")
+        );
+        // Another vault's wakes never reach this one.
+        assert!(wakes(&read(&dir), "another-vault", None, now())
+            .unwrap()
+            .is_empty());
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fleet_wakes_filters_by_agent_and_caps_at_200() {
+        let (dir, conn, vault) = fixture("fleet-wakes-cap");
+        for n in 0..210u32 {
+            conn.execute(
+                "INSERT INTO agent_wakes (wake_id, vault_id, agent, wake_key, trigger_digest, \
+                 cause, admitted_at) VALUES (?1, ?2, 'process:scout', ?3, '0123456789abcdef', \
+                 '{\"kind\":\"event\"}', ?4)",
+                rusqlite::params![
+                    format!("{n:032x}"),
+                    vault,
+                    format!("{n:064x}"),
+                    format!("2026-10-13T09:{:02}:{:02}Z", n / 60, n % 60),
+                ],
+            )
+            .unwrap();
+        }
+        seed_wakes(
+            &conn,
+            &vault,
+            &[pending('e', "process:other", "2026-10-13T08:00:00Z")],
+        );
+        let all = wakes(&read(&dir), &vault, None, now()).unwrap();
+        assert_eq!(all.len(), 200, "at most 200, however many wait");
+        assert_eq!(all[0].agent, "process:other", "oldest first");
+        let other = wakes(&read(&dir), &vault, Some("process:other"), now()).unwrap();
+        assert_eq!(other.len(), 1);
+        assert_eq!(other[0].agent, "process:other");
+        let scout = wakes(&read(&dir), &vault, Some("process:scout"), now()).unwrap();
+        assert_eq!(scout.len(), 200);
+        assert!(scout.iter().all(|w| w.agent == "process:scout"));
+        assert!(wakes(&read(&dir), &vault, Some("process:nobody"), now())
+            .unwrap()
+            .is_empty());
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

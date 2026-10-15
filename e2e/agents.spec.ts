@@ -112,3 +112,87 @@ test('agents: a run, its agent and what it wrote tell one story', async ({ page 
     // The reason's word in the cell, its sentence on hover (M52.5).
   ).toHaveAttribute('title', /^New from Knowledge agent/);
 });
+
+// M63.1b — the lobby names what is waiting to wake an agent, and what was
+// skipped or expired this week; an agent's Runs tab names its own. Seeded
+// rows: M63.1's agent-wakes.spec proves the live path.
+const VAULT = '/demo-vault';
+const GA_ITEM = 'projects/guided-onboarding-ga/items/fld-1.md';
+const WAKES = [
+  {
+    vault: VAULT,
+    agent: 'process:release-scout',
+    admittedAt: '2026-07-28T11:50:00Z',
+    cause: { kind: 'event', subject: GA_ITEM, detail: 'it changes in projects' },
+  },
+  {
+    vault: VAULT,
+    agent: 'process:release-scout',
+    admittedAt: '2026-07-28T10:00:00Z',
+    finishedAt: '2026-07-28T10:05:00Z',
+    outcome: 'skipped',
+    reason: 'cycle',
+    cause: { kind: 'event', subject: 'records/risks/gone.md' },
+  },
+  {
+    vault: VAULT,
+    agent: 'process:knowledge',
+    admittedAt: '2026-07-20T09:00:00Z',
+    finishedAt: '2026-07-27T09:00:00Z',
+    outcome: 'cancelled',
+    reason: 'expired',
+    cause: { kind: 'event', subject: GA_ITEM },
+  },
+];
+
+test('agents: the lobby names what is waiting to wake an agent, and its Runs tab its own', async ({
+  page,
+}) => {
+  await seedBeforeBoot(page, '__cerebroSeedWakes', WAKES);
+  await boot(page);
+  await openAgents(page);
+
+  const section = page.locator('[data-section="wakes"]');
+  await expect(section).toContainText('Waiting to wake');
+  await expect(section).toContainText(
+    'Changes that arrive while an agent waits wake it once, together — up to 20 in one run.',
+  );
+  const rows = section.getByTestId('agent-wake');
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(0)).toHaveAttribute('data-state', 'pending');
+  await expect(rows.nth(0)).toContainText('Release scout');
+  await expect(rows.nth(0)).toContainText('waiting since 2026-07-28 11:50');
+  await expect(rows.nth(1)).toHaveAttribute('data-state', 'skipped');
+  await expect(rows.nth(1)).toContainText(
+    'skipped (or cancelled) for a reason this version does not name (cycle)',
+  );
+  await expect(rows.nth(2)).toHaveAttribute('data-state', 'expired');
+  await expect(rows.nth(2)).toContainText('Knowledge agent');
+  await expect(rows.nth(2)).toContainText('expired — waited more than 7 days');
+  // A gone page is plain text; a live one opens.
+  await expect(rows.nth(1).getByTestId('agent-wake-subject')).toHaveAttribute('data-gone', 'true');
+
+  // Release scout's own page lists only its wakes, above its runs.
+  await page.getByTestId('agent-row').filter({ hasText: 'Release scout' }).click();
+  await expect(page.getByTestId('record-tab-runs')).toHaveAttribute('aria-selected', 'true');
+  const own = page.getByTestId('agent-wake');
+  await expect(own).toHaveCount(2);
+  await expect(own.filter({ hasText: 'Knowledge agent' })).toHaveCount(0);
+
+  // Each row opens its page.
+  await own.nth(0).getByTestId('agent-wake-subject').click();
+  await expect(page.getByTestId('doc-title')).toContainText('First-run walkthrough GA');
+});
+
+test('agents: a wake list that cannot be read says so, never that nothing waits', async ({
+  page,
+}) => {
+  await seedBeforeBoot(page, '__cerebroSeedWakes', null);
+  await boot(page);
+  await openAgents(page);
+  const section = page.locator('[data-section="wakes"]');
+  await expect(section.getByTestId('agent-wakes-unavailable')).toHaveText(
+    "Couldn't read what is waiting to wake your agents.",
+  );
+  await expect(section.getByTestId('agent-wakes-empty')).toHaveCount(0);
+});

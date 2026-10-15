@@ -12,8 +12,8 @@ const MAX_RESULTS = 8;
 /**
  * Bind a node to a URL or a vault record (M29.38, spec D3/D8). One box, two
  * readings: a `https?://` string offers a URL link; anything else searches
- * records — `resolveTarget`'s exact hit first (stem > project folder > title,
- * the Tolaria rule), then the rest ranked over title and filename by the one
+ * records — `resolveTarget`'s exact hit first (stem > project folder > item
+ * key > title), then the rest ranked over title and filename by the one
  * name ranker (`src/lib/nameRank.ts`, M59.3). Picking a record
  * stores its vault-relative PATH in the click line, so the binding survives a
  * retitle.

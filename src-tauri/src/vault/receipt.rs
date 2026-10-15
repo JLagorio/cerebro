@@ -21,7 +21,8 @@
 //!   (Verify, the capture valve, a Review decision), or from
 //!   `mcp::cleared_for_concept` for a run.
 //! - [`System`]: the app's own janitors, from a closed list
-//!   ([`SystemWriter`]): the orphan-temp reaper and the Trash purge.
+//!   ([`SystemWriter`]): the orphan-temp reaper, the Trash purge and the
+//!   rollback of a batch a crash left unfinished (M60.6).
 //!
 //! Each proof holds a private `(())`, so only its guard's module can build
 //! one: a receipt is never a value a caller can write down. Not `Clone`
@@ -94,6 +95,9 @@ pub const ORPHAN_TEMPS_ACTOR: &str = "system:orphan-temps";
 
 /// Who the launch purge of the vault's Trash is stamped as (M60.8).
 pub const TRASH_PURGE_ACTOR: &str = "system:trash-purge";
+
+/// Who the launch rollback of an unfinished batch is stamped as (M60.6).
+pub const BATCH_RECOVERY_ACTOR: &str = "system:batch-recovery";
 
 mod sealed {
     /// Only this module's doors and proofs are doors and proofs.
@@ -173,6 +177,9 @@ pub enum SystemWriter {
     OrphanTemps,
     /// `start_watcher`'s purge of Trash items past their days (M60.8).
     TrashPurge,
+    /// `start_watcher`'s rollback of a batch an earlier process left
+    /// unfinished (M60.6).
+    BatchRecovery,
 }
 
 /// Proof that `D`'s guard cleared a write, and the stamp it records under.
@@ -238,6 +245,7 @@ impl WriteReceipt<System> {
         let actor = match writer {
             SystemWriter::OrphanTemps => ORPHAN_TEMPS_ACTOR,
             SystemWriter::TrashPurge => TRASH_PURGE_ACTOR,
+            SystemWriter::BatchRecovery => BATCH_RECOVERY_ACTOR,
         };
         Self::stamped(actor.to_string(), None, None)
     }
@@ -291,6 +299,8 @@ mod tests {
         assert_eq!((by.actor(), by.run_id()), (ORPHAN_TEMPS_ACTOR, None));
         let by = WriteReceipt::system(SystemWriter::TrashPurge);
         assert_eq!((by.actor(), by.run_id()), (TRASH_PURGE_ACTOR, None));
+        let by = WriteReceipt::system(SystemWriter::BatchRecovery);
+        assert_eq!((by.actor(), by.run_id()), (BATCH_RECOVERY_ACTOR, None));
     }
 
     /// The name of the last `fn` declared before byte `at` of `source`: the
@@ -359,15 +369,18 @@ mod tests {
                 }
             }
             // The app's own receipt: only scan_vault's janitor, and
-            // start_watcher's purge of the vault's Trash (M60.8).
+            // start_watcher's purge of the vault's Trash (M60.8) and its
+            // rollback of an unfinished batch (M60.6).
             for at in occurrences(code, "WriteReceipt::system(") {
                 let writer = code[at..].split(')').next().unwrap_or_default();
-                let door = match enclosing_fn(code, at).as_deref() {
-                    Some("scan_vault") => "SystemWriter::OrphanTemps",
-                    Some("start_watcher") => "SystemWriter::TrashPurge",
-                    _ => "no system writer",
+                let doors: &[&str] = match enclosing_fn(code, at).as_deref() {
+                    Some("scan_vault") => &["SystemWriter::OrphanTemps"],
+                    Some("start_watcher") => {
+                        &["SystemWriter::TrashPurge", "SystemWriter::BatchRecovery"]
+                    }
+                    _ => &[],
                 };
-                if rel != "lib.rs" || !writer.contains(door) {
+                if rel != "lib.rs" || !doors.iter().any(|door| writer.contains(door)) {
                     problems.push(format!("{rel}: WriteReceipt::system outside its door"));
                 }
             }

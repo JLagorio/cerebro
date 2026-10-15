@@ -34,9 +34,9 @@ export interface PageMedia {
 }
 
 /** BlockNote's own video list (`isVideoUrl`), so a video it parses is one here too. */
-const VIDEO = ['mp4', 'webm', 'ogg', 'mov', 'mkv', 'flv', 'avi', 'wmv', 'm4v'];
-const AUDIO = ['mp3', 'wav', 'm4a', 'aac', 'flac', 'oga', 'opus', 'weba'];
-const FILE = [
+export const VIDEO = ['mp4', 'webm', 'ogg', 'mov', 'mkv', 'flv', 'avi', 'wmv', 'm4v'];
+export const AUDIO = ['mp3', 'wav', 'm4a', 'aac', 'flac', 'oga', 'opus', 'weba'];
+export const FILE = [
   'pdf',
   'doc',
   'docx',

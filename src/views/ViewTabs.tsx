@@ -87,7 +87,7 @@ export function ViewTabs({
   // A ViewDefinition carries the tab's filters, its column set with widths and
   // order, its sort chain, its grouping chain and its chip style. Deleting it
   // was two clicks from an ordinary tab click, directly under "Duplicate", and
-  // unrecoverable — the app has no undo.
+  // unrecoverable — deleting a view tab has no undo.
   const [deleting, setDeleting] = useState<ViewDefinition | null>(null);
 
   // Horizontal, because the tabs are. The primitive's arrow keys follow the

@@ -47,7 +47,8 @@ import { RunWhy } from './RunWhy';
  * pages it wrote (M58.1b) follow its booked writes: a run from before they
  * were booked reads "Pages written: not recorded", never "Wrote no pages",
  * and a run whose plan let the shell write adds "Shell changes not
- * recorded", so it never reads complete.
+ * recorded", so it never reads complete — and never "Wrote no pages",
+ * since a shell write books no page row.
  *
  * **Refused is measured.** Refusals have been recorded with their run since
  * M54.9, so an empty list reads "No refusal recorded for this run." A code
@@ -123,7 +124,9 @@ function KnowledgeChanged({ runId }: { runId: string }) {
 /**
  * The pages the run wrote (M58.1b), each opening its page. Knowledge pages
  * stay in the Knowledge section below, and a comment changes no page. Only a
- * run whose writes were booked can say it wrote none.
+ * run whose writes were all booked (`recorded`) can say it wrote none; a
+ * `partial` run with no page rows says only that its shell changes were not
+ * recorded (CV-05).
  */
 function PagesWritten({ wrote }: { wrote: RunPageWrites }) {
   const entries = useVaultStore((s) => s.entries);
@@ -150,7 +153,7 @@ function PagesWritten({ wrote }: { wrote: RunPageWrites }) {
         Pages written
       </h5>
       {pages.length === 0 ? (
-        <p className="text-2xs text-n-500">{WROTE_NO_PAGES}</p>
+        wrote.state === 'recorded' && <p className="text-2xs text-n-500">{WROTE_NO_PAGES}</p>
       ) : (
         <ul className="m-0 flex list-none flex-col gap-px p-0">
           {pages.map((w) => {

@@ -1,0 +1,819 @@
+{
+  "format": 1,
+  "about": "M60.6: the batch writer. Each case runs in a fresh vault holding `seed`, applies `ops` as one change with the runtime journal open (unless `journal` is false), and either refuses with a message containing `refused`, leaving every seeded byte and no other file, or lands: `written` is the paths of the results, in order; `after` gives each path's parsed frontmatter (null: no block) and exact body, or null for a path that must be absent; `keys` gives a result's key changes; `trashed` names pages whose seeded bytes now sit, unchanged, in exactly one .trash/<stamp>/ under their path. An expectHash of HASH:<path> means the seeded bytes' SHA-256. YAML bytes are never compared: serde_yaml and the yaml package quote differently. `limits` are batch.rs MAX_BATCH_OPS and MAX_BATCH_BYTES. Replayed by src-tauri/src/vault/batch.rs and src/lib/mockIpc.test.ts. `reverts` (M60.7) hold undo: each lands `ops` on `seed`, then writes `between` straight to disk (null removes a file) and, with `emptyTrash`, removes .trash/, then applies one revert op per page the change wrote, built from its result as src/engine/undoPlan.ts `revertOps` builds it (a result whose hashes match and that moved nothing through the Trash is left out). It refuses with a message containing `refused` and changes nothing, or lands: `written` is the result paths, `exact` the pages whose bytes are the seed's byte for byte, `after` as above, `skipped` each result's skipped keys and reason, `trashedAs` pages whose given bytes sit in exactly one .trash/<stamp>/; with `redo`, the revert of undo's result puts every page back to the bytes the change wrote (absent where it trashed one).",
+  "limits": {
+    "maxOps": 2000,
+    "maxBytes": 16777216
+  },
+  "cases": [
+    {
+      "name": "patches on two pages land both",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n",
+        "records/b.md": "---\nstatus: todo\nestimate: S\n---\n\n# B\n"
+      },
+      "ops": [
+        {
+          "op": "patch",
+          "path": "records/a.md",
+          "set": {
+            "status": "done"
+          }
+        },
+        {
+          "op": "patch",
+          "path": "records/b.md",
+          "set": {
+            "estimate": null,
+            "size": "S"
+          }
+        }
+      ],
+      "written": ["records/a.md", "records/b.md"],
+      "after": {
+        "records/a.md": {
+          "frontmatter": {
+            "status": "done"
+          },
+          "body": "\n# A\n"
+        },
+        "records/b.md": {
+          "frontmatter": {
+            "status": "todo",
+            "size": "S"
+          },
+          "body": "\n# B\n"
+        }
+      },
+      "keys": {
+        "records/a.md": [
+          {
+            "key": "status",
+            "before": "todo",
+            "after": "done"
+          }
+        ],
+        "records/b.md": [
+          {
+            "key": "estimate",
+            "before": "S",
+            "after": null
+          },
+          {
+            "key": "size",
+            "before": null,
+            "after": "S"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a patch then a body on one page apply in order",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "ops": [
+        {
+          "op": "patch",
+          "path": "records/a.md",
+          "set": {
+            "status": "done"
+          }
+        },
+        {
+          "op": "body",
+          "path": "records/a.md",
+          "body": "\n# A\n\nNew body.\n"
+        }
+      ],
+      "written": ["records/a.md"],
+      "after": {
+        "records/a.md": {
+          "frontmatter": {
+            "status": "done"
+          },
+          "body": "\n# A\n\nNew body.\n"
+        }
+      }
+    },
+    {
+      "name": "a create, then a patch on what it made",
+      "seed": {},
+      "ops": [
+        {
+          "op": "create",
+          "path": "records/new.md",
+          "content": "---\ntype: Note\n---\n\n# New\n"
+        },
+        {
+          "op": "patch",
+          "path": "records/new.md",
+          "set": {
+            "status": "todo"
+          }
+        }
+      ],
+      "written": ["records/new.md"],
+      "after": {
+        "records/new.md": {
+          "frontmatter": {
+            "type": "Note",
+            "status": "todo"
+          },
+          "body": "\n# New\n"
+        }
+      },
+      "keys": {
+        "records/new.md": [
+          {
+            "key": "status",
+            "before": null,
+            "after": "todo"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a value outside ASCII lands as written",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "ops": [
+        {
+          "op": "patch",
+          "path": "records/a.md",
+          "set": {
+            "cuisine": "Caf\u00e9 \u2014 \u00e0 la carte"
+          }
+        }
+      ],
+      "written": ["records/a.md"],
+      "after": {
+        "records/a.md": {
+          "frontmatter": {
+            "status": "todo",
+            "cuisine": "Caf\u00e9 \u2014 \u00e0 la carte"
+          },
+          "body": "\n# A\n"
+        }
+      }
+    },
+    {
+      "name": "a page whose bytes would not change is not written",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n",
+        "records/b.md": "---\nstatus: todo\nestimate: S\n---\n\n# B\n"
+      },
+      "ops": [
+        {
+          "op": "patch",
+          "path": "records/a.md",
+          "set": {
+            "status": "todo"
+          }
+        },
+        {
+          "op": "patch",
+          "path": "records/b.md",
+          "set": {
+            "status": "done"
+          }
+        }
+      ],
+      "written": ["records/b.md"],
+      "after": {
+        "records/a.md": {
+          "frontmatter": {
+            "status": "todo"
+          },
+          "body": "\n# A\n"
+        }
+      }
+    },
+    {
+      "name": "deletes move each page to its own Trash stamp",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n",
+        "records/b.md": "---\nstatus: todo\nestimate: S\n---\n\n# B\n"
+      },
+      "ops": [
+        {
+          "op": "delete",
+          "path": "records/a.md"
+        },
+        {
+          "op": "delete",
+          "path": "records/b.md"
+        }
+      ],
+      "written": ["records/a.md", "records/b.md"],
+      "after": {
+        "records/a.md": null,
+        "records/b.md": null
+      },
+      "trashed": ["records/a.md", "records/b.md"]
+    },
+    {
+      "name": "a restore brings a Trash item back",
+      "seed": {
+        ".trash/20261014T093000Z-a1b2/records/a.md": "---\nstatus: todo\n---\n\n# A\n",
+        ".trash/20261014T093000Z-a1b2/.trashed.json": "{\n  \"format\": 1,\n  \"path\": \"records/a.md\",\n  \"kind\": \"file\",\n  \"title\": \"A\",\n  \"deleted_at\": \"2026-10-14T09:30:00Z\"\n}\n"
+      },
+      "ops": [
+        {
+          "op": "restore",
+          "path": "records/a.md",
+          "stamp": "20261014T093000Z-a1b2"
+        }
+      ],
+      "written": ["records/a.md"],
+      "after": {
+        "records/a.md": {
+          "frontmatter": {
+            "status": "todo"
+          },
+          "body": "\n# A\n"
+        },
+        ".trash/20261014T093000Z-a1b2/.trashed.json": null,
+        ".trash/20261014T093000Z-a1b2/records/a.md": null
+      }
+    },
+    {
+      "name": "a matching expectHash lands",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "ops": [
+        {
+          "op": "patch",
+          "path": "records/a.md",
+          "set": {
+            "status": "done"
+          },
+          "expectHash": "HASH:records/a.md"
+        }
+      ],
+      "written": ["records/a.md"],
+      "after": {
+        "records/a.md": {
+          "frontmatter": {
+            "status": "done"
+          },
+          "body": "\n# A\n"
+        }
+      }
+    },
+    {
+      "name": "a stale expectHash on one page refuses the whole change",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n",
+        "records/b.md": "---\nstatus: todo\nestimate: S\n---\n\n# B\n"
+      },
+      "ops": [
+        {
+          "op": "patch",
+          "path": "records/a.md",
+          "set": {
+            "status": "done"
+          }
+        },
+        {
+          "op": "patch",
+          "path": "records/b.md",
+          "set": {
+            "status": "done"
+          },
+          "expectHash": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "refused": "stale_content: records/b.md changed since this change was prepared, so nothing was written."
+    },
+    {
+      "name": "a step that is not an object",
+      "seed": {},
+      "ops": ["records/a.md"],
+      "refused": "Step 1 can't be read: it is not an object."
+    },
+    {
+      "name": "an op nobody knows",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "ops": [
+        {
+          "op": "patch",
+          "path": "records/a.md",
+          "set": {}
+        },
+        {
+          "op": "move",
+          "path": "records/a.md"
+        }
+      ],
+      "refused": "Step 2 can't be read: its op must be patch, create, body, delete, restore or revert."
+    },
+    {
+      "name": "a key no step takes",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "ops": [
+        {
+          "op": "patch",
+          "path": "records/a.md",
+          "set": {},
+          "extra": 1
+        }
+      ],
+      "refused": "Step 1 can't be read: extra is not part of a patch step."
+    },
+    {
+      "name": "a body that is not text",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "ops": [
+        {
+          "op": "body",
+          "path": "records/a.md"
+        }
+      ],
+      "refused": "Step 1 can't be read: body must be text."
+    },
+    {
+      "name": "a set that is not an object",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "ops": [
+        {
+          "op": "patch",
+          "path": "records/a.md",
+          "set": ["status"]
+        }
+      ],
+      "refused": "Step 1 can't be read: set must be an object."
+    },
+    {
+      "name": "a malformed expectHash",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "ops": [
+        {
+          "op": "delete",
+          "path": "records/a.md",
+          "expectHash": "abc"
+        }
+      ],
+      "refused": "Step 1 can't be read: expectHash must be a 64-character hash."
+    },
+    {
+      "name": "knowledge/ is refused",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n",
+        "knowledge/concepts/a.md": "# A\n"
+      },
+      "ops": [
+        {
+          "op": "patch",
+          "path": "records/a.md",
+          "set": {
+            "status": "done"
+          }
+        },
+        {
+          "op": "patch",
+          "path": "knowledge/concepts/a.md",
+          "set": {
+            "status": "done"
+          }
+        }
+      ],
+      "refused": "read-only"
+    },
+    {
+      "name": "a dot-folder holds no notes",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "ops": [
+        {
+          "op": "create",
+          "path": ".claude/agents/a.md",
+          "content": "# A\n"
+        }
+      ],
+      "refused": "not a note"
+    },
+    {
+      "name": "the Trash holds no notes",
+      "seed": {
+        ".trash/20261014T093000Z-a1b2/records/a.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "ops": [
+        {
+          "op": "delete",
+          "path": ".trash/20261014T093000Z-a1b2/records/a.md"
+        }
+      ],
+      "refused": "not a note"
+    },
+    {
+      "name": "only markdown is a note",
+      "seed": {
+        "records/a.txt": "a\n"
+      },
+      "ops": [
+        {
+          "op": "body",
+          "path": "records/a.txt",
+          "body": "b\n"
+        }
+      ],
+      "refused": "not a note"
+    },
+    {
+      "name": "a create after another step on its page",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "ops": [
+        {
+          "op": "patch",
+          "path": "records/a.md",
+          "set": {
+            "status": "done"
+          }
+        },
+        {
+          "op": "create",
+          "path": "records/a.md",
+          "content": "# A\n"
+        }
+      ],
+      "refused": "records/a.md: a create or restore must be the first step on its page, so nothing was written."
+    },
+    {
+      "name": "a delete beside another step on its page",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "ops": [
+        {
+          "op": "patch",
+          "path": "records/a.md",
+          "set": {
+            "status": "done"
+          }
+        },
+        {
+          "op": "delete",
+          "path": "records/a.md"
+        }
+      ],
+      "refused": "records/a.md: a delete must be the only step on its page, so nothing was written."
+    },
+    {
+      "name": "no journal, no change",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "journal": false,
+      "ops": [
+        {
+          "op": "patch",
+          "path": "records/a.md",
+          "set": {
+            "status": "done"
+          }
+        }
+      ],
+      "refused": "Couldn't start the change: the runtime database isn't open, so nothing was written."
+    },
+    {
+      "name": "a page that is not there",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "ops": [
+        {
+          "op": "patch",
+          "path": "records/a.md",
+          "set": {
+            "status": "done"
+          }
+        },
+        {
+          "op": "patch",
+          "path": "records/gone.md",
+          "set": {
+            "status": "done"
+          }
+        }
+      ],
+      "refused": "records/gone.md doesn't exist, so nothing was written."
+    },
+    {
+      "name": "a create over a page",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "ops": [
+        {
+          "op": "create",
+          "path": "records/a.md",
+          "content": "# A\n"
+        }
+      ],
+      "refused": "records/a.md already exists, so nothing was written."
+    },
+    {
+      "name": "a restore over a page",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\nestimate: S\n---\n\n# B\n",
+        ".trash/20261014T093000Z-a1b2/records/a.md": "---\nstatus: todo\n---\n\n# A\n",
+        ".trash/20261014T093000Z-a1b2/.trashed.json": "{\n  \"format\": 1,\n  \"path\": \"records/a.md\",\n  \"kind\": \"file\",\n  \"title\": \"A\",\n  \"deleted_at\": \"2026-10-14T09:30:00Z\"\n}\n"
+      },
+      "ops": [
+        {
+          "op": "restore",
+          "path": "records/a.md",
+          "stamp": "20261014T093000Z-a1b2"
+        }
+      ],
+      "refused": "records/a.md already exists, so nothing was restored. Move or rename that page first."
+    },
+    {
+      "name": "a restore naming another page",
+      "seed": {
+        ".trash/20261014T093000Z-a1b2/records/a.md": "---\nstatus: todo\n---\n\n# A\n",
+        ".trash/20261014T093000Z-a1b2/.trashed.json": "{\n  \"format\": 1,\n  \"path\": \"records/a.md\",\n  \"kind\": \"file\",\n  \"title\": \"A\",\n  \"deleted_at\": \"2026-10-14T09:30:00Z\"\n}\n"
+      },
+      "ops": [
+        {
+          "op": "restore",
+          "path": "records/b.md",
+          "stamp": "20261014T093000Z-a1b2"
+        }
+      ],
+      "refused": "The Trash item at 20261014T093000Z-a1b2 is records/a.md, not records/b.md, so nothing was written."
+    },
+    {
+      "name": "a restore from an empty stamp",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "ops": [
+        {
+          "op": "restore",
+          "path": "records/b.md",
+          "stamp": "20261014T093000Z-ffff"
+        }
+      ],
+      "refused": "Nothing in the Trash at 20261014T093000Z-ffff."
+    },
+    {
+      "name": "a revert beside another step on its page",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "ops": [
+        {
+          "op": "revert",
+          "path": "records/a.md",
+          "afterHash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "before": "---\nstatus: todo\n---\n\n# A\n",
+          "keys": []
+        },
+        {
+          "op": "patch",
+          "path": "records/a.md",
+          "set": {
+            "status": "done"
+          }
+        }
+      ],
+      "refused": "records/a.md: a revert must be the only step on its page, so nothing was written."
+    },
+    {
+      "name": "a revert of a rewrite names the bytes it expects",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "ops": [
+        {
+          "op": "revert",
+          "path": "records/a.md",
+          "before": "---\nstatus: todo\n---\n\n# A\n",
+          "keys": []
+        }
+      ],
+      "refused": "Step 1 can't be read: afterHash must be a 64-character hash."
+    }
+  ],
+  "reverts": [
+    {
+      "name": "undo puts every page back byte for byte when nothing changed since",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n",
+        "records/b.md": "---\nstatus: todo\nestimate: S\n---\n\n# B\n"
+      },
+      "ops": [
+        {
+          "op": "patch",
+          "path": "records/a.md",
+          "set": {
+            "status": "done"
+          }
+        },
+        {
+          "op": "patch",
+          "path": "records/b.md",
+          "set": {
+            "estimate": null,
+            "size": "S"
+          }
+        }
+      ],
+      "written": ["records/a.md", "records/b.md"],
+      "exact": ["records/a.md", "records/b.md"],
+      "redo": true
+    },
+    {
+      "name": "undo keeps a key changed since and reverts the rest",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "ops": [
+        {
+          "op": "patch",
+          "path": "records/a.md",
+          "set": {
+            "status": "done",
+            "size": "S"
+          }
+        }
+      ],
+      "between": {
+        "records/a.md": "---\nstatus: review\nsize: S\n---\n\n# A\n"
+      },
+      "written": ["records/a.md"],
+      "after": {
+        "records/a.md": {
+          "frontmatter": {
+            "status": "review"
+          },
+          "body": "\n# A\n"
+        }
+      },
+      "skipped": {
+        "records/a.md": {
+          "keys": ["status"],
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "undo skips a page that is gone",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n",
+        "records/b.md": "---\nstatus: todo\nestimate: S\n---\n\n# B\n"
+      },
+      "ops": [
+        {
+          "op": "patch",
+          "path": "records/a.md",
+          "set": {
+            "status": "done"
+          }
+        },
+        {
+          "op": "patch",
+          "path": "records/b.md",
+          "set": {
+            "status": "done"
+          }
+        }
+      ],
+      "between": {
+        "records/a.md": null
+      },
+      "written": ["records/a.md", "records/b.md"],
+      "exact": ["records/b.md"],
+      "after": {
+        "records/a.md": null
+      },
+      "skipped": {
+        "records/a.md": {
+          "keys": ["status"],
+          "reason": "gone"
+        }
+      }
+    },
+    {
+      "name": "undo of a body changed since refuses as stale_content",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n",
+        "records/b.md": "---\nstatus: todo\nestimate: S\n---\n\n# B\n"
+      },
+      "ops": [
+        {
+          "op": "patch",
+          "path": "records/b.md",
+          "set": {
+            "status": "done"
+          }
+        },
+        {
+          "op": "body",
+          "path": "records/a.md",
+          "body": "\n# A\n\nNew.\n"
+        }
+      ],
+      "between": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n\nMine.\n"
+      },
+      "refused": "stale_content: records/a.md changed since this change was prepared, so nothing was written."
+    },
+    {
+      "name": "undo of a create sends it to the Trash",
+      "seed": {},
+      "ops": [
+        {
+          "op": "create",
+          "path": "records/new.md",
+          "content": "---\ntype: Note\n---\n\n# New\n"
+        }
+      ],
+      "written": ["records/new.md"],
+      "after": {
+        "records/new.md": null
+      },
+      "trashedAs": {
+        "records/new.md": "---\ntype: Note\n---\n\n# New\n"
+      },
+      "redo": true
+    },
+    {
+      "name": "undo of a create changed since refuses as stale_content",
+      "seed": {},
+      "ops": [
+        {
+          "op": "create",
+          "path": "records/new.md",
+          "content": "---\ntype: Note\n---\n\n# New\n"
+        }
+      ],
+      "between": {
+        "records/new.md": "---\ntype: Note\n---\n\n# New\n\nMine.\n"
+      },
+      "refused": "stale_content: records/new.md changed since"
+    },
+    {
+      "name": "undo of a delete brings the page back",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "ops": [
+        {
+          "op": "delete",
+          "path": "records/a.md"
+        }
+      ],
+      "written": ["records/a.md"],
+      "exact": ["records/a.md"],
+      "redo": true
+    },
+    {
+      "name": "undo of a delete refuses when its path is taken",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "ops": [
+        {
+          "op": "delete",
+          "path": "records/a.md"
+        }
+      ],
+      "between": {
+        "records/a.md": "# Someone else\n"
+      },
+      "refused": "records/a.md already exists, so nothing was restored."
+    },
+    {
+      "name": "undo of a delete refuses when the item left the Trash",
+      "seed": {
+        "records/a.md": "---\nstatus: todo\n---\n\n# A\n"
+      },
+      "ops": [
+        {
+          "op": "delete",
+          "path": "records/a.md"
+        }
+      ],
+      "emptyTrash": true,
+      "refused": "Nothing in the Trash at "
+    }
+  ]
+}

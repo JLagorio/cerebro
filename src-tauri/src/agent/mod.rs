@@ -308,6 +308,13 @@ pub struct AgentRequest {
     /// to say (`policy::tool_approval::plan_for`). Absent, or any value but
     /// "ask" and "on", reads as off: a missing field must never widen access.
     pub shell: Option<crate::policy::tool_approval::ShellCeiling>,
+    /// The Settings web ceiling (M57.7): may this run hold Claude Code's
+    /// WebFetch and WebSearch? The table plans it
+    /// (`policy::tool_approval::plan_for`): on allows both, off denies them
+    /// in argv, even against the person's own allow rules, and an internal
+    /// run is denied them either way. Absent reads as false: a missing field
+    /// must never widen access.
+    pub web: Option<bool>,
     /// Let the agent reach the user's own MCP servers (M8.2) — Atlassian and
     /// friends — so the connector inlet has something to connect with.
     /// Absent reads as false, for the same reason.
@@ -437,6 +444,7 @@ impl std::fmt::Debug for AgentRequest {
             .field("model", &self.model)
             .field("effort", &self.effort)
             .field("shell", &self.shell)
+            .field("web", &self.web)
             .field("connectors", &self.connectors)
             .field("connector_names", &self.connector_names)
             .field("attended", &self.attended)
@@ -1617,8 +1625,10 @@ pub(crate) fn build_args(
     // M57.2: the tool-approval table decides the CLI's own tools. An
     // INTERNAL run (M31.1a) executes vault-authored content on cerebro's own
     // schedule, so its plan denies every one of them and starts it in
-    // `default` mode; a user-authored run's plan follows its ceiling, less
-    // what its read limit and its record withdraw. An ask meets the gate
+    // `default` mode; a user-authored run's plan follows its ceilings (the
+    // shell's and, since M57.7, the web's), less
+    // what its read limit and its record withdraw, and since M60.8b its deny
+    // list ends with the table's path rules closing the Trash. An ask meets the gate
     // (M57.1) and rides neither list; so does an ask-first agent's page
     // write (M57.4), which leaves `tools` above with the gate's asks and
     // still lands only on an Allow dispatch takes. The denials go in ONE flag, with the
@@ -1873,11 +1883,20 @@ pub fn stream(
         .and_then(|_| interaction::cached_cli_version());
     let can_ask = seat.is_some() && interaction::supports_gate(version.as_deref());
     let approval = crate::policy::tool_approval::plan_for(&req, can_ask);
+    // M58.3: the call a resumed session's deferral holds, read once for the
+    // seat's settle and for the run's CLI-write watch, which notes its path
+    // when the resumed call completes.
+    let pending = match (&seat, &session) {
+        (Some(_), CliSession::Resume(id)) => transcript::pending_deferral(vault, id),
+        _ => None,
+    };
+    let held = pending.as_ref().and_then(|marker| {
+        cli_writes::held_call(
+            &transcript::session_file(vault, &session_id)?,
+            &marker.tool_use_id,
+        )
+    });
     if let Some(run_id) = &seat {
-        let pending = match &session {
-            CliSession::Resume(id) => transcript::pending_deferral(vault, id),
-            CliSession::New(_) => None,
-        };
         state.interactions.open_seat(
             interaction::Seat::new(run_id, &session_id, &vault_key(vault), &req)
                 .with_approval(approval.clone()),
@@ -1989,9 +2008,10 @@ pub fn stream(
             seq += 1;
             let _ = app.emit(AGENT_EVENT, tag(&journal, journaled, run, seq, event));
         };
-        // M58.3: each path the run's own Write and Edit calls name is noted
-        // on its claim, for its commit.
-        let mut cli_writes = cli_writes::CliWrites::new(&run_vault);
+        // M58.3: each path the run's own Write and Edit calls wrote is noted
+        // on its claim, for its commit, once the call completes; a resumed
+        // run starts holding the call its deferral held.
+        let mut cli_writes = cli_writes::CliWrites::new(&run_vault).holding(held.as_ref());
         // M70.4: the reply a waiter posts, read off the folded events this
         // closure emits, the stderr Error included.
         let reply = std::cell::RefCell::new(ReplyCollector::default());
@@ -2851,6 +2871,7 @@ mod tests {
                 session_id: None,
                 model: None,
                 shell: Some(shell),
+                web: None,
                 connectors: None,
                 connector_names: None,
                 attended: None,
@@ -2896,6 +2917,7 @@ mod tests {
             session_id: None,
             model: None,
             shell: None,
+            web: None,
             connectors: None,
             connector_names: None,
             attended: None,
@@ -2967,6 +2989,18 @@ mod tests {
     }
 
     const WRITERS_AND_BASH: [&str; 5] = ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"];
+
+    /// The web family (M57.7), in argv order.
+    const WEB: [&str; 2] = ["WebFetch", "WebSearch"];
+
+    /// The hidden folders' path rules (M60.8b), which end every attended
+    /// and unattended run's deny list: the Trash, closed to Read and Edit.
+    const TRASH: [&str; 2] = ["Read(./.trash/**)", "Edit(./.trash/**)"];
+
+    /// `head` then the Trash's rules: an attended or unattended deny list.
+    fn then_trash<'a>(head: &[&'a str]) -> Vec<&'a str> {
+        head.iter().copied().chain(TRASH).collect()
+    }
 
     // --- Ask-first page writes (M57.4) -------------------------------------
 
@@ -3068,11 +3102,16 @@ mod tests {
                 assert!(allowed.iter().any(|t| t == tool), "{tool} under On");
             }
             assert_eq!(mode_of(&args), "acceptEdits");
+            // With Web access off, the web tools are denied too (M57.7), and
+            // the Trash is closed to Read and Edit (M60.8b).
             let denied = listed(&args, "--disallowedTools");
             if seated {
-                assert!(denied.is_empty(), "{denied:?}");
+                assert_eq!(denied, then_trash(&WEB), "{denied:?}");
             } else {
-                assert_eq!(denied, ["AskUserQuestion", "ExitPlanMode"]);
+                assert_eq!(
+                    denied,
+                    then_trash(&["WebFetch", "WebSearch", "AskUserQuestion", "ExitPlanMode"])
+                );
             }
         }
     }
@@ -3116,7 +3155,9 @@ mod tests {
             assert!(!allowed.iter().any(|t| t == tool), "{tool} pre-approved");
             assert!(!denied.iter().any(|t| t == tool), "{tool} denied");
         }
-        assert!(denied.is_empty(), "{denied:?}");
+        // Only the web, which Web access Off denies (M57.7), and the Trash's
+        // path rules (M60.8b).
+        assert_eq!(denied, then_trash(&WEB), "{denied:?}");
         let settings = args.iter().position(|a| a == "--settings").unwrap();
         assert_eq!(args[settings + 1], "/tmp/run-settings-1.json");
         let plan = plan_for(&req, true);
@@ -3188,11 +3229,13 @@ mod tests {
                     }
                 }
             }
-            // The hand_to shape (mcp.rs tool_hand_to): shell and connectors
-            // failed closed, unattended, the callee's own declarations.
+            // The hand_to shape (mcp.rs tool_hand_to): shell, web and
+            // connectors failed closed, unattended, the callee's own
+            // declarations.
             let mut req = panel_style_request();
             req.read_scope = Some(read_scope.clone());
             req.shell = Some(ShellCeiling::Off);
+            req.web = Some(false);
             req.connectors = Some(false);
             req.connector_names = Some(vec![]);
             req.attended = Some(false);
@@ -3254,7 +3297,9 @@ mod tests {
     // shell-less run shipped with — the five writers denied, no reader among
     // them, the served catalog granted — plus the plan and question tools,
     // denied in argv where no gate sits and matched by the gate where one
-    // does (which refuses the plan tool and asks the questions, M57.3).
+    // does (which refuses the plan tool and asks the questions, M57.3), and
+    // since M57.7 the web tools, denied while Web access is off, and since
+    // M60.8b the Trash's Read and Edit path rules.
     #[test]
     fn off_keeps_its_argv() {
         let granted = cerebro_tools().join(",");
@@ -3264,10 +3309,15 @@ mod tests {
                 req.shell = shell;
                 req.attended = Some(seated);
                 let args = planned_args(&req, seated);
+                // M57.7: Web access Off denies the web tools too, so the
+                // seated deny list now ends WebFetch,WebSearch; M60.8b then
+                // closes the Trash to Read and Edit on every such run.
                 let denied = if seated {
-                    "Write,Edit,MultiEdit,NotebookEdit,Bash"
+                    "Write,Edit,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,\
+                     Read(./.trash/**),Edit(./.trash/**)"
                 } else {
-                    "Write,Edit,MultiEdit,NotebookEdit,Bash,AskUserQuestion,ExitPlanMode"
+                    "Write,Edit,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,AskUserQuestion,\
+                     ExitPlanMode,Read(./.trash/**),Edit(./.trash/**)"
                 };
                 let mut expected = vec![
                     "-p",
@@ -3380,7 +3430,8 @@ mod tests {
 
     // The table is the one decider: every CLI built-in in --allowedTools is
     // the plan's allow list and every one in --disallowedTools its deny list,
-    // for every ceiling, run kind, read limit and narrowing.
+    // the hidden folders' path rules (M60.8b) among them, for every ceiling,
+    // run kind, read limit and narrowing.
     #[test]
     fn the_cli_lists_are_the_approval_table() {
         let cli = crate::policy::tools::cli_names(|_| true);
@@ -3402,7 +3453,9 @@ mod tests {
                             let args = planned_args(&req, seated);
                             let in_cli = |list: Vec<String>| -> Vec<String> {
                                 list.into_iter()
-                                    .filter(|t| cli.contains(&t.as_str()))
+                                    .filter(|t| {
+                                        cli.contains(&t.as_str()) || TRASH.contains(&t.as_str())
+                                    })
                                     .collect()
                             };
                             assert_eq!(in_cli(listed(&args, "--allowedTools")), plan.allowed);
@@ -3415,9 +3468,56 @@ mod tests {
         }
     }
 
+    // M60.8b: the Trash is the table's to close. Every attended and
+    // unattended run, seated or not, at off, ask and on, ends its one
+    // --disallowedTools with Read and Edit path rules on `.trash/`, which the
+    // CLI honours over any allow, so no CLI reader or editor opens a deleted
+    // page; an internal run's list stays the CLI rows alone.
+    #[test]
+    fn argv_closes_the_trash_to_the_cli_at_every_shell_ceiling() {
+        assert_eq!(
+            crate::policy::tool_approval::table().hidden_path_rules(),
+            TRASH
+        );
+        for shell in ShellCeiling::ALL {
+            for (attended, seated) in [(true, true), (true, false), (false, false)] {
+                let mut req = panel_style_request();
+                req.shell = Some(shell);
+                req.attended = Some(attended);
+                let args = planned_args(&req, seated);
+                let label = format!("shell={shell:?} attended={attended} seated={seated}");
+                assert_eq!(
+                    args.iter().filter(|a| *a == "--disallowedTools").count(),
+                    1,
+                    "{label}"
+                );
+                let denied = listed(&args, "--disallowedTools");
+                assert!(
+                    denied.ends_with(&TRASH.map(String::from)),
+                    "{label}: {denied:?}"
+                );
+                let allowed = listed(&args, "--allowedTools");
+                assert!(!TRASH.iter().any(|rule| allowed.iter().any(|t| t == rule)));
+            }
+            let mut internal = panel_style_request();
+            internal.internal = true;
+            internal.shell = Some(shell);
+            let args = args_without_trash(&planned_args(&internal, false));
+            assert!(args, "an internal run needs no path rule at {shell:?}");
+        }
+    }
+
+    /// Does argv carry no Trash path rule?
+    fn args_without_trash(args: &[String]) -> bool {
+        !args
+            .iter()
+            .any(|arg| TRASH.iter().any(|rule| arg.contains(rule)))
+    }
+
     // M31.1a: an internal run is denied every CLI row, in argv order, and
     // starts in default mode, whatever its ceiling; M57.2 only adds the two
-    // new rows to its list.
+    // new rows to its list, and M60.8b no path rule, since the readers and
+    // editors are denied whole.
     #[test]
     fn internal_argv_is_unchanged() {
         for shell in [
@@ -3452,6 +3552,122 @@ mod tests {
             assert_eq!(listed(&args, "--allowedTools"), cerebro_tools());
             assert!(!args.iter().any(|a| a == "--settings"));
         }
+    }
+
+    // --- Web access (M57.7) ------------------------------------------------
+
+    #[test]
+    fn web_on_allows_fetch_and_search() {
+        for (attended, seated) in [
+            (Some(true), true),
+            (Some(true), false),
+            (Some(false), false),
+        ] {
+            for shell in ShellCeiling::ALL {
+                let mut req = panel_style_request();
+                req.attended = attended;
+                req.shell = Some(shell);
+                req.web = Some(true);
+                let args = planned_args(&req, seated);
+                let allowed = listed(&args, "--allowedTools");
+                let denied = listed(&args, "--disallowedTools");
+                for tool in WEB {
+                    assert!(allowed.iter().any(|t| t == tool), "{tool} {shell:?}");
+                    assert!(!denied.iter().any(|t| t == tool), "{tool} {shell:?}");
+                }
+                // The web never asks, so it moves neither the mode nor the gate.
+                let off = AgentRequest {
+                    web: None,
+                    ..req.clone()
+                };
+                assert_eq!(mode_of(&args), mode_of(&planned_args(&off, seated)));
+                assert_eq!(
+                    plan_for(&req, seated).matcher(),
+                    plan_for(&off, seated).matcher()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn web_off_denies_them_in_argv() {
+        // A deny in argv, not a silence the person's own allow rules could
+        // fill (Q28): off binds whatever their Claude Code settings say.
+        for (attended, seated) in [
+            (Some(true), true),
+            (Some(true), false),
+            (Some(false), false),
+        ] {
+            for shell in ShellCeiling::ALL {
+                let mut req = panel_style_request();
+                req.attended = attended;
+                req.shell = Some(shell);
+                req.web = Some(false);
+                let args = planned_args(&req, seated);
+                let denied = listed(&args, "--disallowedTools");
+                for tool in WEB {
+                    assert!(denied.iter().any(|t| t == tool), "{tool} {shell:?}");
+                    assert!(!listed(&args, "--allowedTools").iter().any(|t| t == tool));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn an_absent_web_field_reads_off() {
+        let absent: AgentRequest =
+            serde_json::from_value(json!({ "message": "hi", "attended": true })).unwrap();
+        assert_eq!(absent.web, None);
+        let mut off = absent.clone();
+        off.web = Some(false);
+        for seated in [false, true] {
+            assert_eq!(planned_args(&absent, seated), planned_args(&off, seated));
+        }
+        let on: AgentRequest =
+            serde_json::from_value(json!({ "message": "hi", "attended": true, "web": true }))
+                .unwrap();
+        assert_eq!(on.web, Some(true));
+        // And the hand-written Debug names it.
+        assert!(format!("{on:?}").contains("web: Some(true)"));
+    }
+
+    #[test]
+    fn a_handoff_never_gets_the_web() {
+        // The hand_to shape (mcp.rs tool_hand_to): web failed closed, so even
+        // a callee whose record declares it is denied both tools.
+        let mut req = panel_style_request();
+        req.shell = Some(ShellCeiling::Off);
+        req.web = Some(false);
+        req.attended = Some(false);
+        req.actor = Some("process:callee".into());
+        let denied = listed(&planned_args(&req, false), "--disallowedTools");
+        for tool in WEB {
+            assert!(denied.iter().any(|t| t == tool), "{tool}");
+        }
+        // And an internal run is denied them even with the web on.
+        let mut internal = panel_style_request();
+        internal.internal = true;
+        internal.web = Some(true);
+        let denied = listed(&planned_args(&internal, false), "--disallowedTools");
+        for tool in WEB {
+            assert!(denied.iter().any(|t| t == tool), "{tool}");
+        }
+    }
+
+    #[test]
+    fn a_narrowing_keeps_only_the_named_web_tool() {
+        let mut req = panel_style_request();
+        req.attended = Some(true);
+        req.web = Some(true);
+        req.allowed_tools = Some(vec!["WebFetch".into(), "get_note".into()]);
+        let args = planned_args(&req, true);
+        let allowed = listed(&args, "--allowedTools");
+        assert!(allowed.iter().any(|t| t == "WebFetch"));
+        assert!(!allowed.iter().any(|t| t == "WebSearch"));
+        // Left out, it rides neither list: the CLI's own rule decides it.
+        assert!(!listed(&args, "--disallowedTools")
+            .iter()
+            .any(|t| t == "WebSearch"));
     }
 
     #[test]
@@ -4064,6 +4280,7 @@ mod tests {
                 session_id: None,
                 model: None,
                 shell: None,
+                web: None,
                 connectors: None,
                 connector_names: None,
                 attended: None,
@@ -4101,6 +4318,7 @@ mod tests {
                 session_id: None,
                 model: None,
                 shell: Some(shell),
+                web: None,
                 connectors: None,
                 connector_names: None,
                 attended: None,
@@ -4495,7 +4713,7 @@ mod tests {
     // cases say both languages plan them.
     #[test]
     fn cli_grants_match_the_shared_cases() {
-        use crate::policy::tool_approval::{plan, ApprovalInput, RunKind};
+        use crate::policy::tool_approval::{plan, ApprovalInput, RunKind, WebCeiling};
         const TOOL_GRANTS: &str = include_str!("../../fixtures/tool-grants.json");
         let file: Value = serde_json::from_str(TOOL_GRANTS).expect("tool-grants.json parses");
         let names = |value: &Value| -> Vec<String> {
@@ -4517,6 +4735,8 @@ mod tests {
             let approval = plan(&ApprovalInput {
                 kind,
                 shell: ShellCeiling::read(&case["shell"]),
+                // M57.7: a case without `web` runs with the web off.
+                web: WebCeiling::read(&case["web"]),
                 // The grant cases name no agent, so none asks first (M57.4).
                 ask_first: false,
                 read_scoped: case["read_scoped"].as_bool().unwrap(),
@@ -4591,6 +4811,7 @@ mod tests {
                 session_id: None,
                 model: None,
                 shell: None,
+                web: None,
                 connectors: Some(true),
                 connector_names: None,
                 attended: None,
@@ -5041,7 +5262,12 @@ mod tests {
         req.disallowed_tools = Some(smuggled);
         let args = build_args(&req, Path::new("/tmp/x.json"), true, &reach);
         for flag in ["--allowedTools", "--disallowedTools"] {
-            for entry in flag_entries(&args, flag) {
+            // The Trash's path rules (M60.8b) are the table's, never a
+            // record's, so they are the one shape beside a bare name.
+            for entry in flag_entries(&args, flag)
+                .into_iter()
+                .filter(|entry| !TRASH.contains(&entry.as_str()))
+            {
                 assert!(
                     entry
                         .bytes()
@@ -6877,6 +7103,100 @@ mod tests {
             message.contains("Cerebro-Actor: process:scout"),
             "{message}"
         );
+        repo.done();
+    }
+
+    /// Shell set to Ask (M57.1): the run that deferred a Write claims
+    /// nothing, since the call never ran, and commits nothing. The run that
+    /// resumes it sees only the tool_result, so it starts holding the call
+    /// the session file recorded, and commits exactly that page, leaving the
+    /// person's typing for their own checkpoint.
+    #[test]
+    fn a_deferred_write_commits_with_the_run_that_resumes_it() {
+        let repo = run_repo("m58-run-deferred", "run-deferred");
+        crate::vault::testutil::write(&repo.vault, "b.md", "# b\n\nYou, typing.\n");
+        let page = repo.vault.join("notes/held.md");
+        let call = json!({ "type": "tool_use", "id": "toolu_held", "name": "Write",
+            "input": { "file_path": page, "content": "# Held\n" } });
+        let feed = |lines: &[Value],
+                    watch: &mut cli_writes::CliWrites,
+                    claim: &crate::git::changeset::RunClaim| {
+            let stream: String = lines.iter().map(|line| format!("{line}\n")).collect();
+            read_stream(
+                stream.as_bytes(),
+                InitGate::new(1, false),
+                &mut no_connectors(),
+                &mut |event| {
+                    if let Some(path) = watch.observe(&event) {
+                        claim.note_cli_write(&path);
+                    }
+                },
+                &mut || {},
+            );
+        };
+        let head = repo.git(&["rev-parse", "HEAD"]);
+
+        let deferring = repo.claim();
+        let mut watch = cli_writes::CliWrites::new(&repo.vault);
+        feed(
+            &[
+                json!({ "type": "system", "subtype": "init", "session_id": "s-1", "mcp_servers": [] }),
+                json!({ "type": "assistant", "message": { "content": [call.clone()] } }),
+                json!({ "type": "result", "subtype": "success", "is_error": false, "result": "",
+                    "stop_reason": "tool_deferred", "session_id": "s-1",
+                    "usage": { "input_tokens": 1, "output_tokens": 1 } }),
+            ],
+            &mut watch,
+            &deferring,
+        );
+        let events = repo.close(Some(&deferring), false);
+        drop(deferring);
+        assert!(
+            matches!(
+                changeset_of(&events),
+                crate::git::changeset::RunChangeset::Nothing { .. }
+            ),
+            "{events:?}"
+        );
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+
+        // The answer allowed it: the resumed CLI writes the page, and its
+        // stream opens with the held call's result.
+        let session = [
+            json!({ "type": "assistant", "isSidechain": false, "message": { "content": [call] } }),
+            json!({ "type": "attachment", "isSidechain": false, "attachment": {
+                "type": "hook_deferred_tool", "toolUseID": "toolu_held", "toolName": "Write" } }),
+        ]
+        .iter()
+        .map(|line| format!("{line}\n"))
+        .collect::<String>();
+        let held = cli_writes::held_call_in(&session, "toolu_held");
+        assert!(held.is_some(), "the session file holds the call");
+        crate::vault::testutil::write(&repo.vault, "notes/held.md", "# Held\n");
+        let resuming = repo.claim();
+        let mut watch = cli_writes::CliWrites::new(&repo.vault).holding(held.as_ref());
+        feed(
+            &[
+                json!({ "type": "system", "subtype": "init", "session_id": "s-1", "mcp_servers": [] }),
+                json!({ "type": "user", "message": { "content": [
+                    { "type": "tool_result", "tool_use_id": "toolu_held", "content": "written" }
+                ] } }),
+                json!({ "type": "result", "subtype": "success", "is_error": false,
+                    "result": "Done.", "session_id": "s-1",
+                    "usage": { "input_tokens": 1, "output_tokens": 1 } }),
+            ],
+            &mut watch,
+            &resuming,
+        );
+        let events = repo.close(Some(&resuming), false);
+        drop(resuming);
+        let crate::git::changeset::RunChangeset::Committed { commit, .. } = changeset_of(&events)
+        else {
+            panic!("the resumed run commits: {events:?}");
+        };
+        let named = repo.git(&["show", "--name-only", "--format=", commit]);
+        assert_eq!(named.trim(), "notes/held.md");
+        assert_eq!(repo.git(&["status", "--porcelain"]).trim(), "M b.md");
         repo.done();
     }
 

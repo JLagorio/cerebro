@@ -5,6 +5,7 @@ import { Icon } from '@/components/ui/Icon';
 import { Select } from '@/components/ui/Select';
 import { HeadingProperties, stripCells } from '@/detail/HeadingProperties';
 import { RecordProperties } from '@/detail/RecordProperties';
+import { TranscriptSpeakers } from '@/detail/TranscriptSpeakers';
 import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
 import {
   hasRealTitle,
@@ -23,6 +24,7 @@ import { ProposalCard } from '@/agent/ProposalCard';
 import type { Entry, Schema } from '@/engine/types';
 import { useInboxQueue } from '@/hooks/useInboxQueue';
 import { captureNote } from '@/lib/capture';
+import { useCommand } from '@/lib/keys/useKeys';
 import { describeIngest, ingestFiles, ingestOne, INGESTIBLE_EXTENSIONS } from '@/lib/ingest';
 import {
   askedAbout,
@@ -32,6 +34,7 @@ import {
   organizePrompt,
 } from '@/lib/prompts';
 import { parseIssuePrefixes, uncachedRefs } from '@/engine/ingest';
+import { matchSpeakers, transcriptFacts } from '@/engine/transcripts';
 import { KnowledgeCommit } from '@/knowledge/KnowledgeCommit';
 import { todayIso } from '@/lib/templates';
 import { useNavStore } from '@/stores/navStore';
@@ -255,6 +258,10 @@ function OrganizePanel({
         />
       </label>
 
+      {/* M64.7 — a transcript's speakers, matched to people. Read-only until
+          its Add button or the filing card's Apply. */}
+      <TranscriptSpeakers path={entry.path} />
+
       {/* Once typed, the type's declared fields are the rest of the form —
           the same strip-and-stack the record surfaces mount, not a second
           form. A laid-out type leads with its heading strip (the triage
@@ -311,8 +318,21 @@ function OrganizePanel({
               variant="secondary"
               icon="sparkles"
               onClick={() => {
+                // A transcript gets the meeting ask, with its speakers as
+                // matched now (M64.7); any other capture, the plain one.
+                const facts = transcriptFacts(entry);
+                const meeting =
+                  facts === null
+                    ? undefined
+                    : {
+                        title: entry.title,
+                        speakers:
+                          facts.speakers === null
+                            ? null
+                            : matchSpeakers(facts.speakers, schema, allEntries),
+                      };
                 askAgent(
-                  organizePrompt(entry.path),
+                  organizePrompt(entry.path, meeting),
                   entry.path,
                   askedAbout(ORGANIZE_LABEL, entry.title),
                 );
@@ -399,10 +419,6 @@ export function InboxPage() {
       setLastFiled({ path, title });
     })();
   };
-  // Read through a ref by the keydown effect below, which must not re-bind on
-  // every render: fileNote closes over the entry list and so is new each time.
-  const fileRef = useRef(fileNote);
-  fileRef.current = fileNote;
 
   useEffect(() => {
     if (!refocusRow.current) return;
@@ -412,26 +428,15 @@ export function InboxPage() {
   }, [selectedPath]);
 
   // Cmd/Ctrl+E organizes the open capture — the whole loop is meant to run
-  // from the keyboard, so this is the one binding that matters here.
-  // Bound once per selection: fileRef keeps the handler out of the deps, and
-  // re-binding a window listener on every render is how a single keystroke
-  // ends up firing twice.
-  useEffect(() => {
-    if (selectedPath === null) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'e') return;
-      // The same guard the paste handler uses. ⌘E/Ctrl+E is end-of-line in
-      // every text field on this screen — including the capture body right
-      // beside the list — and filing what you are typing into is not
-      // recoverable from the keyboard.
-      const target = e.target as HTMLElement | null;
-      if (target?.closest('input, textarea, [contenteditable="true"]') != null) return;
-      e.preventDefault();
-      fileRef.current(selectedPath);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [selectedPath]);
+  // from the keyboard, so this is the one binding that matters here. The
+  // keymap holds the latest handler, so the binding outlives every render.
+  useCommand(
+    'inbox.file',
+    () => {
+      if (selectedPath !== null) fileNote(selectedPath);
+    },
+    { when: () => selectedPath !== null },
+  );
 
   // Arrow keys walk the queue. The rows are a roving tabindex — only the open
   // one is a tab stop, so Tab crosses the list instead of stepping through
@@ -476,9 +481,11 @@ export function InboxPage() {
     })();
   };
 
-  // M8.2 — the ingest inlet. Transcripts, exports, and pasted walls of text
-  // arrive here as untyped working docs, which is the same object a fetched
-  // ticket becomes, so the distiller only ever reads one shape.
+  // M8.2 — the ingest inlet. New transcripts, exports, and pasted walls of
+  // text arrive here as untyped working docs, which is the same object a
+  // fetched ticket becomes, so the distiller only ever reads one shape. A
+  // repeat of material already filed writes nothing and is named in the
+  // toast by its filed page's title (M64.7).
   const takeFiles = (files: readonly File[]) => {
     if (files.length === 0) return;
     void (async () => {
@@ -504,8 +511,12 @@ export function InboxPage() {
     event.preventDefault();
     void (async () => {
       try {
-        const path = await ingestOne('', text);
-        queue.select(path);
+        const outcome = await ingestOne('', text);
+        if (outcome.kind === 'duplicate') {
+          toast(`Already filed as ${outcome.title}`);
+          return;
+        }
+        queue.select(outcome.path);
         toast('Filed the pasted text to the Inbox');
       } catch (err) {
         toast(`Couldn't ingest: ${err instanceof Error ? err.message : String(err)}`);

@@ -6,6 +6,7 @@
       "input": {
         "kind": "unattended",
         "shell": "off",
+        "web": "off",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null
@@ -41,6 +42,7 @@
       "input": {
         "kind": "unattended",
         "shell": "ask",
+        "web": "off",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null
@@ -76,6 +78,7 @@
       "input": {
         "kind": "unattended",
         "shell": "on",
+        "web": "off",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null
@@ -111,6 +114,7 @@
       "input": {
         "kind": "internal",
         "shell": "off",
+        "web": "off",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null
@@ -146,6 +150,7 @@
       "input": {
         "kind": "internal",
         "shell": "ask",
+        "web": "off",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null
@@ -181,6 +186,7 @@
       "input": {
         "kind": "internal",
         "shell": "on",
+        "web": "off",
         "ask_first": false,
         "read_scoped": false,
         "narrowing": null

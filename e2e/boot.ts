@@ -107,6 +107,14 @@ export async function openAgents(page: Page) {
   await page.getByRole('button', { name: 'Open all agents' }).click();
 }
 
+/** The History destination (M64.2): the year heatmap, then the feed. Waits
+ * for both sections to land. */
+export async function openHistory(page: Page) {
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'History' }).click();
+  await expect(page.getByTestId('history-heatmap')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId('history-feed')).toBeVisible({ timeout: 10_000 });
+}
+
 /** Read a file's full text (frontmatter + body) from the mock filesystem. */
 export async function readMockFile(page: Page, path: string): Promise<string> {
   const text = await page.evaluate((p) => window.__cerebroMockFs.get(p), path);
@@ -179,6 +187,20 @@ declare global {
      * commits, newest first, each with the bytes its files held and, for a
      * run's commit, the run runtime.db's record names. */
     __cerebroSeedGitHistory: (commits: E2eSeedCommit[]) => void;
+    /** The M64.2 activity seam (src/lib/mockIpc.ts `__seedActivity`):
+     * replace History's demo write rows or app-session spans; null fails
+     * that lane. */
+    __cerebroSeedActivity: (seed: {
+      writes?: unknown[] | null;
+      sessions?: unknown[] | null;
+    }) => void;
+    /** The M64.2b concept seam (src/lib/mockIpc.ts `__seedConceptHistory`):
+     * set one concept's Knowledge lane in its page's History — its ledger
+     * events, `'not_recorded'`, or null to fail it. The browser keeps no
+     * ledger. */
+    __cerebroSeedConceptHistory: (path: string, seed: unknown[] | 'not_recorded' | null) => void;
+    /** The M58.1 write log: every door's row, with its stamp. */
+    __cerebroMockWrites: { kind: string; path: string; to: string | null; actor: string }[];
     /** The M55.6 write gate. While it holds a promise, the mock agent's write
      * steps wait for it, so a spec can type into the open page between the
      * ask and the write. */
@@ -194,6 +216,43 @@ declare global {
     /** The M57.2 disclosure seam: what Settings reads as the person's own
      * Claude Code settings. Unset, the browser answers `browser`. */
     __cerebroSeedClaudeSettings?: unknown;
+    /** The M63.1 wake store: every durable wake the mock holds, with
+     * `agent_wakes`' columns by name (src/lib/mockIpc.ts `MockWake`). */
+    __cerebroMockWakes: () => {
+      wakeId: string;
+      agent: string;
+      wakeKey: string;
+      trigger: string;
+      cause: { kind: string; subject?: string; detail?: string };
+      admittedAt: string;
+      notBefore: string | null;
+      deferred: string | null;
+      state: 'pending' | 'started' | 'finished';
+      runId: string | null;
+      outcome: string | null;
+      reason: string | null;
+      detail: string | null;
+    }[];
+    /** The M63.1b seam: replace the wake store with these rows (each needs
+     * its vault, agent and admission time; the rest default as a pending
+     * wake), or make the lobby's wake list refuse with `null`
+     * (src/lib/mockIpc.ts `SeedWake`). */
+    __cerebroSeedWakes: (
+      rows:
+        | {
+            vault: string;
+            agent: string;
+            admittedAt: string;
+            cause?: { kind: string; subject?: string; detail?: string };
+            notBefore?: string | null;
+            deferred?: string | null;
+            finishedAt?: string | null;
+            outcome?: string | null;
+            reason?: string | null;
+            detail?: string | null;
+          }[]
+        | null,
+    ) => void;
     /** The M57.4c unattended seam: start a run of `actor` nobody watches, as
      * a schedule would, so its ask-first page writes wait in Review. */
     __cerebroRunUnattended: (

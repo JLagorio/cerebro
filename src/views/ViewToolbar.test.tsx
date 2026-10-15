@@ -185,3 +185,29 @@ describe('reordering the sort chain (M16.26)', () => {
     expect(screen.getByText(new RegExp(`${MAX_SORT_KEYS} levels is the maximum`))).toBeTruthy();
   });
 });
+
+describe('ViewToolbar passes the view’s problems to its chips (M60.2b)', () => {
+  afterEach(cleanup);
+
+  it('marks the chip the problem names, worded against the source type', async () => {
+    render(
+      <ViewToolbar
+        presentation={presentation}
+        onChange={vi.fn()}
+        sourceType="Work item"
+        schema={emptySchema()}
+        filters={{ all: [{ field: 'ghost_field', op: 'is_not_empty' }] }}
+        onFiltersChange={vi.fn()}
+        problems={[
+          { code: 'unknown_field', name: 'ghost_field', position: 'filter', filterPath: [0] },
+        ]}
+      />,
+    );
+    const chip = screen.getByTestId('filter-chip-0');
+    expect(chip.parentElement?.getAttribute('data-problem')).toBe('unknown_field');
+    fireEvent.pointerEnter(chip);
+    expect((await screen.findByRole('tooltip')).textContent).toBe(
+      '“ghost_field” in the filter: Work item has no property by that name.',
+    );
+  });
+});

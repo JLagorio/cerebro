@@ -1,0 +1,279 @@
+{
+  "format": 1,
+  "about": "How an Agent record's `scope:` and `read-scope:` read, and which paths a scope admits (M58.6). `parse`: a key filed under relationships (a [[link]], CV-09) names no folder, so it is []; an absent key is null, which is unrestricted; a present key that is null, a number, a boolean or a mapping is [] (fail closed: a missing field must never widen access); a string is one folder and an array keeps its strings; each folder is trimmed, loses every leading ./ and its leading and trailing /, and an empty one is dropped. `admits`: null admits every path and [] none; a folder admits itself and its descendants, matched at a separator, after the path loses every leading ./ and then its leading /, and the folder its outer /; an empty folder admits every path; case and Unicode form compare exactly, and .. compares as written, since the note door refuses it before any scope is asked. Replayed by replays_the_shared_scope_cases and a_handed_off_run_reads_its_folders_as_the_page_does in src-tauri/src/mcp.rs, a_thread_turn_reads_its_folders_as_the_page_does in src-tauri/src/agent/thread_turn.rs, and src/engine/agentAccess.test.ts. `name` is for the reader.",
+  "parse": [
+    {
+      "name": "an absent scope is unrestricted",
+      "key": "scope",
+      "properties": {},
+      "relationships": {},
+      "folders": null
+    },
+    {
+      "name": "a bare key scopes to nothing",
+      "key": "scope",
+      "properties": { "scope": null },
+      "relationships": {},
+      "folders": []
+    },
+    {
+      "name": "one folder as a string",
+      "key": "scope",
+      "properties": { "scope": "records/risks" },
+      "relationships": {},
+      "folders": ["records/risks"]
+    },
+    {
+      "name": "a list keeps its folders in order",
+      "key": "scope",
+      "properties": { "scope": ["records/risks", "delivery"] },
+      "relationships": {},
+      "folders": ["records/risks", "delivery"]
+    },
+    {
+      "name": "spelling around a folder is not part of it",
+      "key": "scope",
+      "properties": { "scope": ["/projects/atlas/", "./inbox", " sources/ ", ".//x", "././x"] },
+      "relationships": {},
+      "folders": ["projects/atlas", "inbox", "sources", "x", "x"]
+    },
+    {
+      "name": "a folder that trims to nothing is dropped",
+      "key": "scope",
+      "properties": { "scope": ["", "/", "./"] },
+      "relationships": {},
+      "folders": []
+    },
+    {
+      "name": "the vault folder spelled . is kept as written",
+      "key": "scope",
+      "properties": { "scope": "." },
+      "relationships": {},
+      "folders": ["."]
+    },
+    {
+      "name": "a number scopes to nothing",
+      "key": "scope",
+      "properties": { "scope": 5 },
+      "relationships": {},
+      "folders": []
+    },
+    {
+      "name": "a boolean scopes to nothing",
+      "key": "scope",
+      "properties": { "scope": true },
+      "relationships": {},
+      "folders": []
+    },
+    {
+      "name": "a mapping scopes to nothing",
+      "key": "scope",
+      "properties": { "scope": {} },
+      "relationships": {},
+      "folders": []
+    },
+    {
+      "name": "a list keeps only its strings",
+      "key": "scope",
+      "properties": { "scope": ["records", 5, null] },
+      "relationships": {},
+      "folders": ["records"]
+    },
+    {
+      "name": "a list with no string scopes to nothing",
+      "key": "scope",
+      "properties": { "scope": [5] },
+      "relationships": {},
+      "folders": []
+    },
+    {
+      "name": "an empty list scopes to nothing",
+      "key": "scope",
+      "properties": { "scope": [] },
+      "relationships": {},
+      "folders": []
+    },
+    {
+      "name": "a [[link]] is a relation, not a folder",
+      "key": "scope",
+      "properties": {},
+      "relationships": { "scope": ["Product"] },
+      "folders": []
+    },
+    {
+      "name": "the read axis reads the same grammar",
+      "key": "read-scope",
+      "properties": { "read-scope": ["sources/", "./knowledge"] },
+      "relationships": {},
+      "folders": ["sources", "knowledge"]
+    },
+    {
+      "name": "an absent read scope reads everywhere",
+      "key": "read-scope",
+      "properties": {},
+      "relationships": {},
+      "folders": null
+    },
+    {
+      "name": "an empty read scope reads nowhere",
+      "key": "read-scope",
+      "properties": { "read-scope": [] },
+      "relationships": {},
+      "folders": []
+    },
+    {
+      "name": "a bare read scope reads nowhere",
+      "key": "read-scope",
+      "properties": { "read-scope": null },
+      "relationships": {},
+      "folders": []
+    },
+    {
+      "name": "one axis never reads the other's key",
+      "key": "read-scope",
+      "properties": { "scope": ["records"] },
+      "relationships": {},
+      "folders": null
+    }
+  ],
+  "admits": [
+    {
+      "name": "no scope admits every path",
+      "scope": null,
+      "path": "records/risks/x.md",
+      "admits": true
+    },
+    {
+      "name": "an empty scope admits nothing",
+      "scope": [],
+      "path": "records/risks/x.md",
+      "admits": false
+    },
+    {
+      "name": "a folder admits itself, which create_note targets",
+      "scope": ["work"],
+      "path": "work",
+      "admits": true
+    },
+    {
+      "name": "a folder admits what sits in it",
+      "scope": ["work"],
+      "path": "work/a.md",
+      "admits": true
+    },
+    {
+      "name": "and what sits deeper",
+      "scope": ["work"],
+      "path": "work/deep/er/a.md",
+      "admits": true
+    },
+    {
+      "name": "a longer folder name is another folder",
+      "scope": ["work"],
+      "path": "workspace/a.md",
+      "admits": false
+    },
+    {
+      "name": "a file named like the folder is not in it",
+      "scope": ["work"],
+      "path": "work.md",
+      "admits": false
+    },
+    {
+      "name": "a sibling sharing a prefix is not in it",
+      "scope": ["work"],
+      "path": "worker/x.md",
+      "admits": false
+    },
+    {
+      "name": "a path spelled with ./ is the same path",
+      "scope": ["work"],
+      "path": "./work/a.md",
+      "admits": true
+    },
+    {
+      "name": "a path spelled with a leading / is the same path",
+      "scope": ["work"],
+      "path": "/work/a.md",
+      "admits": true
+    },
+    {
+      "name": "a folder written with a trailing /",
+      "scope": ["work/"],
+      "path": "work/a.md",
+      "admits": true
+    },
+    {
+      "name": "a folder written with a leading /",
+      "scope": ["/work"],
+      "path": "work/a.md",
+      "admits": true
+    },
+    {
+      "name": "case compares exactly",
+      "scope": ["Work"],
+      "path": "work/a.md",
+      "admits": false
+    },
+    {
+      "name": "Unicode form compares exactly",
+      "scope": ["Café"],
+      "path": "Café/a.md",
+      "admits": false
+    },
+    {
+      "name": "a nested folder admits its own pages",
+      "scope": ["records/risks"],
+      "path": "records/risks/risk-rollback-unrehearsed.md",
+      "admits": true
+    },
+    {
+      "name": "a nested folder's prefix sibling is outside",
+      "scope": ["records/risks"],
+      "path": "records/risks-old/a.md",
+      "admits": false
+    },
+    {
+      "name": "a nested folder's parent is outside",
+      "scope": ["records/risks"],
+      "path": "records/a.md",
+      "admits": false
+    },
+    {
+      "name": "two folders admit either",
+      "scope": ["records/risks", "delivery"],
+      "path": "delivery/how-we-schedule.md",
+      "admits": true
+    },
+    {
+      "name": "two folders admit nothing else",
+      "scope": ["records/risks", "delivery"],
+      "path": "strategy/plan.md",
+      "admits": false
+    },
+    {
+      "name": "the vault root is outside a folder",
+      "scope": ["work"],
+      "path": "",
+      "admits": false
+    },
+    {
+      "name": "the vault root is inside no scope",
+      "scope": null,
+      "path": "",
+      "admits": true
+    },
+    {
+      "name": "an empty folder admits every path, though no parser emits one",
+      "scope": [""],
+      "path": "anywhere/x.md",
+      "admits": true
+    },
+    {
+      "name": ".. compares as written; the note door refuses it first",
+      "scope": ["records"],
+      "path": "records/../secrets/x.md",
+      "admits": true
+    }
+  ]
+}

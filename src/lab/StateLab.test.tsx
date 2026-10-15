@@ -4,7 +4,13 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { __seedFleet } from '@/lib/mockIpc';
 import { resetFaults } from '@/lib/mockFaults';
 import { LAB_NOW, unpin } from './clock';
-import { LAB_STATES, labSections, unmetExpectations, type LabState } from './presets';
+import {
+  failableCommands,
+  LAB_STATES,
+  labSections,
+  unmetExpectations,
+  type LabState,
+} from './presets';
 import { mountStateLab, REFUSAL, StateLab } from './StateLab';
 
 /** The lab page itself (M64.1): listing, links, Reset, the fail box, the gate. */
@@ -150,7 +156,10 @@ describe('StateLab', () => {
     const options = [...document.querySelectorAll('#lab-fail-commands option')].map(
       (o) => (o as HTMLOptionElement).value,
     );
-    expect(options).toEqual(['fleet_actor_summaries', 'fleet_runs']);
+    // Sections register by file, so the list grows with them (M64.2 adds
+    // vault_activity); the seed sections' two are always there.
+    expect(options).toEqual(failableCommands());
+    expect(options).toEqual(expect.arrayContaining(['fleet_actor_summaries', 'fleet_runs']));
   });
 
   it('toggles this document between light and dark without touching storage', () => {

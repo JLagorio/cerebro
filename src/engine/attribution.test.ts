@@ -48,6 +48,12 @@ describe('writerWords (M58.1b)', () => {
     expect(writerWords('human:me', entries)).toBe('You');
   });
 
+  // M58 Q5, closed by M64.2: your comments are stamped `human:owner` (M70),
+  // and they are yours too.
+  it('reads your comments as You', () => {
+    expect(writerWords('human:owner', entries)).toBe('You');
+  });
+
   it("reads an agent's stamp as its page's title", () => {
     expect(writerWords('process:release-scout', entries)).toBe('Release scout');
   });

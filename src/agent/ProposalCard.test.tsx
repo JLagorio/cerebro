@@ -392,3 +392,76 @@ describe('ProposalCard on the real store over the mock disk (M53.18)', () => {
     }
   });
 });
+
+describe('ProposalCard plans the filing it writes (M64.7)', () => {
+  const STANDUP = 'inbox/phoenix-cutover-standup.md';
+  const SUMMARY = 'The rollback is written down, not rehearsed. Drain time is forty minutes.';
+  const MEETING: OrganizeProposal = {
+    path: STANDUP,
+    type: 'Meeting',
+    title: 'Meeting: Phoenix cutover standup',
+    properties: { summary: `  ${SUMMARY}  `, attendees: ['[[marcus-webb]]', 'Jo Nobody'] },
+    reasoning: 'It is a meeting transcript.',
+  };
+  const disk = () =>
+    (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+
+  beforeEach(async () => {
+    resetMockFs();
+    await useVaultStore.getState().openVault('/demo-vault');
+  });
+
+  it('shows Type, Title, Summary, the attendees by title, and what it will not file', () => {
+    propose(MEETING);
+    const card = screen.getByTestId('proposal-card');
+    expect(card.textContent).toContain('Meeting: Phoenix cutover standup');
+    expect(screen.getByTestId('proposal-summary').textContent).toBe(SUMMARY);
+    expect(screen.getByText('Marcus Webb, Priya Nair, Tom Keller')).toBeTruthy();
+    expect(screen.getByTestId('proposal-unfiled').textContent).toContain(
+      'Jo Nobody in Attendees: no page',
+    );
+    expect(screen.getByTestId('proposal-speakers-note').textContent).toBe(
+      'Adds 2 matched speakers to Attendees: Priya Nair, Tom Keller.',
+    );
+  });
+
+  it('writes nothing before Apply, then the planned frontmatter and the H1, never the unfiled', async () => {
+    const before = disk().get(STANDUP);
+    const apply = propose(MEETING);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(disk().get(STANDUP)).toBe(before);
+    fireEvent.click(apply);
+    await waitFor(() => expect(held(STANDUP)).toBeUndefined());
+    const raw = disk().get(STANDUP) ?? '';
+    expect(raw).toContain('type: Meeting');
+    expect(raw).toContain(`summary: ${SUMMARY}`);
+    for (const link of ['[[marcus-webb]]', '[[priya-nair]]', '[[tom-keller]]']) {
+      expect(raw).toContain(link);
+    }
+    expect(raw).not.toContain('Jo Nobody');
+    expect(raw).toContain('# Meeting: Phoenix cutover standup');
+  });
+
+  it('says Nothing to summarize, and writes no summary key, when the summary is blank', async () => {
+    const apply = propose({ ...MEETING, properties: { summary: '   ' } });
+    expect(screen.getByTestId('proposal-summary').textContent).toBe('Nothing to summarize');
+    expect(screen.getByTestId('proposal-speakers-note').textContent).toBe(
+      'Matched speakers are not added: this filing fills no person field.',
+    );
+    fireEvent.click(apply);
+    await waitFor(() => expect(held(STANDUP)).toBeUndefined());
+    expect(disk().get(STANDUP)).not.toContain('summary:');
+  });
+
+  it('shows no Summary row or speakers note for a capture that is not a transcript', () => {
+    propose({
+      path: 'inbox/warehouse-cutover-thought.md',
+      type: 'Work item',
+      properties: { status: 'todo' },
+      reasoning: 'A task.',
+    });
+    expect(screen.queryByTestId('proposal-summary')).toBeNull();
+    expect(screen.queryByTestId('proposal-speakers-note')).toBeNull();
+    expect(screen.queryByTestId('proposal-unfiled')).toBeNull();
+  });
+});

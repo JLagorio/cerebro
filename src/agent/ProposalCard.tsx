@@ -1,11 +1,90 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import type { OrganizeProposal } from '@/agent/types';
 import { humanize } from '@/detail/FieldEditor';
 import { announceExternalWrites, flushOpenPages } from '@/editor/openPages';
+import { filingPlan, type FilingPlan } from '@/engine/filing';
+import type { Entry } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
-import { useVaultStore } from '@/stores/vaultStore';
+import { useSchema, useVaultStore } from '@/stores/vaultStore';
+
+/** The capture as the plan reads it: the scanned entry, or a bare one when the
+ * scan has not caught up with it (no type, no properties, nothing linked). */
+function captureOf(entries: Entry[], path: string): Entry {
+  const found = entries.find((e) => e.path === path);
+  if (found !== undefined) return found;
+  const slash = path.lastIndexOf('/');
+  return {
+    path,
+    filename: path.slice(slash + 1),
+    folder: slash === -1 ? '' : path.slice(0, slash),
+    project: null,
+    title: '',
+    type: null,
+    properties: {},
+    relationships: {},
+    outgoingLinks: [],
+    snippet: '',
+    createdAt: '',
+    modifiedAt: '',
+    parseError: null,
+    hash: null,
+  };
+}
+
+type Row = [label: string, value: string];
+
+/** The card's rows, from the plan: what Apply writes, as a person reads it.
+ * `head` is Type and Title; `rest` is each link field, then the others. */
+function rowsOf(plan: FilingPlan): { head: Row[]; rest: Row[] } {
+  const head: Row[] = [];
+  if (plan.type !== null) head.push(['Type', plan.type]);
+  if (plan.title !== '') head.push(['Title', plan.title]);
+  const rows: Row[] = [];
+  const linked = new Set(plan.links.map((l) => l.field));
+  for (const link of plan.links) {
+    rows.push([humanize(link.field), link.pages.map((p) => p.title).join(', ')]);
+  }
+  for (const [key, value] of Object.entries(plan.patch)) {
+    if (key === 'type' || linked.has(key)) continue;
+    if (plan.transcript !== null && key === 'summary') continue;
+    rows.push([humanize(key), Array.isArray(value) ? value.join(', ') : String(value)]);
+  }
+  return { head, rest: rows };
+}
+
+function Rows({ rows }: { rows: Row[] }) {
+  return rows.map(([label, value]) => (
+    <div key={label} className="contents">
+      <dt className="text-2xs text-n-500">{label}</dt>
+      <dd className="m-0 min-w-0 truncate text-xs font-medium text-n-800">{value}</dd>
+    </div>
+  ));
+}
+
+const UNFILED_WORDS = {
+  'no page': 'no page',
+  'not allowed here': 'not allowed here',
+  'over the limit': 'over the limit',
+} as const;
+
+/** What the card says about a transcript's matched speakers, or null. */
+function speakersNote(plan: FilingPlan): string | null {
+  const t = plan.transcript;
+  if (t === null) return null;
+  if (t.why === 'no person field') {
+    return 'Matched speakers are not added: this filing fills no person field.';
+  }
+  if (t.why === 'several person fields') {
+    return 'Matched speakers are not added: this filing fills several person fields.';
+  }
+  if (t.field !== null && t.joined.length > 0) {
+    const names = t.joined.map((p) => p.title).join(', ');
+    return `Adds ${t.joined.length} matched ${t.joined.length === 1 ? 'speaker' : 'speakers'} to ${humanize(t.field)}: ${names}.`;
+  }
+  return null;
+}
 
 /**
  * A filing the agent suggests for a capture (M7).
@@ -19,26 +98,26 @@ export function ProposalCard({ proposal }: { proposal: OrganizeProposal }) {
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
   const setTitle = useVaultStore((s) => s.setTitle);
   const rescan = useVaultStore((s) => s.rescan);
+  const entries = useVaultStore((s) => s.entries);
+  const schema = useSchema();
   const dismissProposal = useUiStore((s) => s.dismissProposal);
   const [applying, setApplying] = useState(false);
 
-  // The H1 this filing proposes, on one line as the row below shows it: a
-  // newline in the agent's title would write body lines the card never
-  // displayed. Blank proposes nothing, so it is not listed. `typeof`, since
-  // the title is the agent's JSON and a number would throw mid-render.
-  const title =
-    typeof proposal.title === 'string' ? proposal.title.replace(/\s+/g, ' ').trim() : '';
-
-  const changes: [string, string][] = [];
-  if (proposal.type !== undefined) changes.push(['Type', proposal.type]);
-  if (title !== '') changes.push(['Title', title]);
-  for (const [key, value] of Object.entries(proposal.properties ?? {})) {
-    if (value === null || value === undefined) continue;
-    changes.push([humanize(key), Array.isArray(value) ? value.join(', ') : String(value)]);
-  }
+  // What Apply writes (M64.7): only links that reach a page their field
+  // allows, the title on one line, and a transcript's summary and matched
+  // speakers. Blank titles propose nothing, so they are not listed.
+  const plan = useMemo(
+    () => filingPlan(proposal, captureOf(entries, proposal.path), schema, entries),
+    [proposal, entries, schema],
+  );
+  const { title } = plan;
+  const { head, rest } = rowsOf(plan);
+  const note = speakersNote(plan);
 
   /**
-   * Writes the whole filing: the frontmatter, then the title as the H1 (M53.18).
+   * Writes the planned filing: the frontmatter the plan kept, then the title
+   * as the H1 (M53.18). Proposed links that name no page, or a page their
+   * field does not allow, are listed on the card and never written (M64.7).
    * Each store write answers whether it landed and toasts its own failure, so
    * the card adds no message: a write that did not land stops here and leaves
    * the card up to retry.
@@ -54,8 +133,7 @@ export function ProposalCard({ proposal }: { proposal: OrganizeProposal }) {
     // A save still on its debounce would otherwise land after the H1 below
     // and write the old one back.
     await flushOpenPages();
-    const patch: Record<string, unknown> = { ...(proposal.properties ?? {}) };
-    if (proposal.type !== undefined) patch.type = proposal.type;
+    const { patch } = plan;
     // A title-only proposal has no frontmatter to write.
     const patched = Object.keys(patch).length > 0;
     if (patched && !(await patchFrontmatter(proposal.path, patch))) return false;
@@ -99,15 +177,47 @@ export function ProposalCard({ proposal }: { proposal: OrganizeProposal }) {
         </span>
       </div>
       <p className="m-0 mb-2 text-xs leading-[17px] text-n-700">{proposal.reasoning}</p>
-      {changes.length > 0 && (
+      {(head.length > 0 || rest.length > 0 || plan.transcript !== null) && (
         <dl className="m-0 mb-2.5 grid grid-cols-[72px_1fr] gap-x-2 gap-y-1">
-          {changes.map(([label, value]) => (
-            <div key={label} className="contents">
-              <dt className="text-2xs text-n-500">{label}</dt>
-              <dd className="m-0 min-w-0 truncate text-xs font-medium text-n-800">{value}</dd>
+          <Rows rows={head} />
+          {plan.transcript !== null && (
+            <div className="contents">
+              <dt className="text-2xs text-n-500">Summary</dt>
+              <dd
+                data-testid="proposal-summary"
+                className={
+                  plan.transcript.summary === null
+                    ? 'm-0 min-w-0 text-xs italic text-n-500'
+                    : 'm-0 min-w-0 whitespace-pre-wrap text-xs text-n-800'
+                }
+              >
+                {plan.transcript.summary ?? 'Nothing to summarize'}
+              </dd>
             </div>
-          ))}
+          )}
+          <Rows rows={rest} />
         </dl>
+      )}
+      {note !== null && (
+        <p data-testid="proposal-speakers-note" className="m-0 mb-2 text-2xs text-n-600">
+          {note}
+        </p>
+      )}
+      {plan.unfiled.length > 0 && (
+        <div data-testid="proposal-unfiled" className="mb-2.5">
+          <div className="text-2xs font-semibold text-n-600">Not filed</div>
+          <ul className="m-0 list-none p-0">
+            {plan.unfiled.map((u) => (
+              <li
+                key={`${u.field}:${u.target}:${u.why}`}
+                className="text-2xs text-n-600"
+                data-why={u.why}
+              >
+                {u.target} in {humanize(u.field)}: {UNFILED_WORDS[u.why]}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
       <div className="flex gap-2">
         <Button

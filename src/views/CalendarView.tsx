@@ -4,10 +4,11 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
-import { addDays, toIsoDate } from '@/engine/dates';
+import { addDays, DEFAULT_TIME_FORMAT, fromIsoDate, toIsoDate } from '@/engine/dates';
 import {
   addMonths,
   dateKindOf,
+  dayLabel,
   dayOffset,
   isSameMonth,
   monthGrid,
@@ -25,11 +26,18 @@ import {
   weekStartIndex,
   weekdayLabels,
 } from '@/engine/schedule';
+import { placementOf, type Placement } from '@/engine/timeGrid';
 import { typeStyle } from '@/engine/typeCatalog';
 import type { ColumnDef } from '@/engine/columns';
 import type { Scheduled } from '@/engine/schedule';
 import type { Entry, Presentation, Schema } from '@/engine/types';
 import { useVaultStore } from '@/stores/vaultStore';
+import {
+  CalendarTimeGrid,
+  HOURS_GUTTER_PX,
+  ZoneCorner,
+  type TimeGridItem,
+} from '@/views/CalendarTimeGrid';
 import { useTimeDrag } from '@/views/useTimeDrag';
 
 /** Single-day chips beyond this in one cell collapse into a "+N more" row. */
@@ -38,8 +46,14 @@ const MAX_CHIPS = 3;
 const LANE_H = 18;
 /** Bar lanes a week will draw before the rest fall into the day overflow. */
 const MAX_LANES = 3;
-/** Minimum cell height, per span. A week has one row to fill, a month six. */
-const CELL_H = { month: 92, week: 420 };
+/**
+ * Minimum cell height, per span. A month's six rows share the screen; Week
+ * and Day keep one short all-day row above the hours.
+ */
+const CELL_H = { month: 92, week: 56, day: 56 };
+const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+type CalendarSpan = NonNullable<Presentation['calendarSpan']>;
 
 export interface CalendarViewProps {
   entries: Entry[];
@@ -49,12 +63,19 @@ export interface CalendarViewProps {
   fields: ColumnDef[];
   /** Overridable for tests; defaults to the real today. */
   today?: string;
+  /** Pins the hours grid's now line for tests; omitted, it follows the clock. */
+  now?: Date;
   /** Create a record dated to the clicked day. */
   onCreateOn?: (title: string, day: string) => Promise<boolean>;
 }
 
 /**
- * Calendar (M10): the month grid, and — since M16.23 — the week grid.
+ * Calendar (M10): Month, Week (M16.23) and Day (M61.8).
+ *
+ * Month is the date overview: a grid of days, records on every day they
+ * cover. Week and Day draw the HOURS (M61.8): one all-day row on top for
+ * records with no time of day, then `CalendarTimeGrid`, where a timed record
+ * is a block at its hours and an open-ended one a point chip.
  *
  * A record appears on every day its span covers, so a two-week range reads as a
  * band across the weeks rather than as a single chip on its start date — which
@@ -70,6 +91,7 @@ export function CalendarView({
   schema,
   fields,
   today = toIsoDate(new Date()),
+  now,
   onCreateOn,
 }: CalendarViewProps) {
   const dateField = resolveDateField(presentation, fields);
@@ -83,17 +105,28 @@ export function CalendarView({
   // means the in-view control goes dead the moment the value is persisted;
   // this calendar has no way to persist at all (ViewCanvas hands it no
   // presentation writer), so that shape would have made the toggle one-way.
-  const [spanOverride, setSpanOverride] = useState<'month' | 'week' | null>(null);
+  const [spanOverride, setSpanOverride] = useState<CalendarSpan | null>(null);
   const span = spanOverride ?? presentation.calendarSpan ?? 'month';
+  const hours = span !== 'month';
   const weekStart = weekStartIndex(presentation);
   const showWeekends = presentation.showWeekends !== false;
 
   const weeks = useMemo(() => {
+    if (span === 'day') return [[anchor]];
     if (span === 'week') return [weekGrid(anchor, weekStart)];
     const days = monthGrid(anchor, weekStart);
     return Array.from({ length: days.length / 7 }, (_, i) => days.slice(i * 7, i * 7 + 7));
   }, [span, anchor, weekStart]);
-  const columns = useMemo(() => weekdayLabels(weekStart, showWeekends), [weekStart, showWeekends]);
+  // A Day is the day asked for, weekend or not: hiding weekends narrows a
+  // week, and a Saturday opened on its own would otherwise draw nothing.
+  const visibleOf = (week: string[]) => (span === 'day' ? week : visibleDays(week, showWeekends));
+  const columns = useMemo(
+    () =>
+      span === 'day'
+        ? [WEEKDAY_SHORT[fromIsoDate(anchor).getDay()]]
+        : weekdayLabels(weekStart, showWeekends),
+    [span, anchor, weekStart, showWeekends],
+  );
 
   const dated = useMemo(
     () => entries.filter((e) => spanOf(e, dateField) !== null),
@@ -123,23 +156,60 @@ export function CalendarView({
     },
   });
 
-  /** Each dated entry with its span resolved once, with the drag previewed. */
+  /** Where each dated entry sits once Week and Day draw the hours. */
+  const placements = useMemo(() => {
+    const out = new Map<string, Placement>();
+    for (const entry of dated) {
+      const placed = placementOf(entry, dateField);
+      if (placed !== null) out.set(entry.path, placed);
+    }
+    return out;
+  }, [dated, dateField]);
+
+  /** Each dated entry with its span resolved once, with the drag previewed.
+   * In Week and Day only the all-day ones: the rest are in the hours. */
   const spans: Scheduled[] = useMemo(() => {
     const active = drag.drag;
     return dated.flatMap((entry) => {
       const resolved = spanOf(entry, dateField);
       if (resolved === null) return [];
+      if (hours && placements.get(entry.path)?.kind !== 'allDay') return [];
       const preview =
         active !== null && active.id === entry.path ? shiftSpan(resolved, active.days) : resolved;
       return [{ entry, span: preview }];
     });
-  }, [dated, dateField, drag.drag]);
+  }, [dated, dateField, drag.drag, hours, placements]);
+
+  /** The timed and point records of the visible days, for the hours grid. */
+  const timedItems: TimeGridItem[] = useMemo(() => {
+    if (!hours) return [];
+    const shown = new Set(
+      weeks.flatMap((week) => (span === 'day' ? week : visibleDays(week, showWeekends))),
+    );
+    return dated.flatMap((entry) => {
+      const placement = placements.get(entry.path);
+      if (placement === undefined || placement.kind === 'allDay') return [];
+      return shown.has(placement.day) ? [{ entry, placement }] : [];
+    });
+  }, [hours, weeks, dated, placements, span, showWeekends]);
+  const timeFormat = fields.find((f) => f.name === dateField)?.timeFormat ?? DEFAULT_TIME_FORMAT;
 
   /** Move the grid by one screenful of whatever it is showing. */
   const step = (direction: -1 | 1) =>
-    setAnchor(span === 'week' ? addDays(anchor, direction * 7) : addMonths(anchor, direction));
+    setAnchor(
+      span === 'day'
+        ? addDays(anchor, direction)
+        : span === 'week'
+          ? addDays(anchor, direction * 7)
+          : addMonths(anchor, direction),
+    );
   const onScreen =
-    span === 'week' ? weekGrid(anchor, weekStart).includes(today) : isSameMonth(anchor, today);
+    span === 'day'
+      ? anchor === today
+      : span === 'week'
+        ? weekGrid(anchor, weekStart).includes(today)
+        : isSameMonth(anchor, today);
+  const unit = span === 'day' ? 'day' : span === 'week' ? 'week' : 'month';
 
   // No date property anywhere on this collection's type — the view cannot be
   // made to work by paging months, so say what would fix it.
@@ -175,6 +245,171 @@ export function CalendarView({
     openPath(path);
   };
 
+  /** One week row of day cells and bars: every Month row, and the all-day
+   * row above the hours in Week and Day. */
+  const weekRow = (week: string[]) => {
+    const visible = visibleOf(week);
+    const segments = packWeek(spans, week, visible);
+    const drawn = segments.filter((s) => s.lane < MAX_LANES);
+    const spilled = segments.filter((s) => s.lane >= MAX_LANES);
+    const lanes = Math.min(
+      segments.reduce((max, s) => Math.max(max, s.lane + 1), 0),
+      MAX_LANES,
+    );
+    return (
+      <div
+        key={week[0]}
+        className="relative grid"
+        style={{ gridTemplateColumns: `repeat(${visible.length}, minmax(0, 1fr))` }}
+      >
+        {visible.map((day, col) => {
+          const inMonth = hours || isSameMonth(day, anchor);
+          // The cell stack is single-day items ONLY, plus whatever
+          // spilled past the lane cap — a bar is not repeated as a chip.
+          const singles = spans
+            .filter((s) => s.span.start === s.span.end && s.span.start === day)
+            .map((s) => s.entry);
+          const overflowed = spilled
+            .filter((s) => s.startCol <= col && s.endCol >= col)
+            .map((s) => s.entry);
+          const stack = [...singles, ...overflowed];
+          const showAll = expanded === day;
+          const shown = showAll ? stack : stack.slice(0, MAX_CHIPS);
+          return (
+            <div
+              key={day}
+              data-testid="calendar-day"
+              data-day={day}
+              data-count={onDay(dated, dateField, day).length}
+              // Where a release would land. `pointerover` and not
+              // `pointerenter`: React derives enter from over/out at the
+              // root, so a dispatched `pointerenter` reaches no handler.
+              onPointerOver={() => {
+                if (grabDay.current === null) return;
+                drag.hover(dayOffset({ start: grabDay.current, end: grabDay.current }, day));
+              }}
+              className={[
+                'group/day flex min-w-0 flex-col gap-0.5 border-b border-r border-n-100 p-1',
+                inMonth ? '' : 'bg-n-25',
+                drag.drag !== null ? 'hover:bg-cortex-50' : '',
+              ].join(' ')}
+              style={{ minHeight: CELL_H[span] }}
+            >
+              <div className="flex flex-none items-center gap-1">
+                <span
+                  className={[
+                    'inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-2xs',
+                    day === today
+                      ? 'bg-cortex-500 font-semibold text-n-0'
+                      : inMonth
+                        ? 'text-n-700'
+                        : 'text-n-400',
+                  ].join(' ')}
+                >
+                  {Number(day.slice(8, 10))}
+                </span>
+                <span className="flex-1" />
+                {onCreateOn !== undefined && <DayAdd day={day} onCreate={onCreateOn} />}
+              </div>
+              {/* Reserved lane space. Every cell in the week reserves the
+                  same height, so the bars painted over the row land in
+                  the gap rather than on top of a chip. */}
+              <div aria-hidden className="flex-none" style={{ height: lanes * LANE_H }} />
+              {shown.map((entry) => {
+                const style = typeStyle(entry.type, schema);
+                return (
+                  <button
+                    key={entry.path}
+                    type="button"
+                    data-testid="calendar-chip"
+                    data-path={entry.path}
+                    {...grabProps(entry.path, day)}
+                    onClick={openUnlessDragged(entry.path)}
+                    title={entry.title}
+                    aria-label={`${entry.title} on ${day}. Arrow keys move it.`}
+                    className={[
+                      'flex min-w-0 touch-none select-none items-center gap-1 rounded-xs border-0 bg-n-50 px-1 py-px text-left text-xs text-n-800 hover:bg-n-100',
+                      drag.drag?.id === entry.path ? 'opacity-60 ring-1 ring-cortex-500' : '',
+                    ].join(' ')}
+                  >
+                    <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-400)'} />
+                    <span className="min-w-0 flex-1 truncate">{entry.title}</span>
+                  </button>
+                );
+              })}
+              {stack.length > shown.length && (
+                <button
+                  type="button"
+                  onClick={() => setExpanded(day)}
+                  className="rounded-xs border-0 bg-transparent px-1 text-left text-2xs text-n-500 hover:text-n-800"
+                >
+                  {`+${stack.length - shown.length} more`}
+                </button>
+              )}
+              {showAll && stack.length > MAX_CHIPS && (
+                <button
+                  type="button"
+                  onClick={() => setExpanded(null)}
+                  className="rounded-xs border-0 bg-transparent px-1 text-left text-2xs text-n-500 hover:text-n-800"
+                >
+                  Show less
+                </button>
+              )}
+            </div>
+          );
+        })}
+        {/* One bar per span per week row, drawn over the reserved lanes.
+            Square ends mean "this continues" — rounded ends are the real
+            start and the real finish. */}
+        <div
+          className="pointer-events-none absolute inset-x-0"
+          // 4px cell padding + the 18px day-number row + the 2px gap.
+          style={{ top: 24 }}
+          data-testid="calendar-lanes"
+        >
+          {drawn.map((seg) => {
+            const style = typeStyle(seg.entry.type, schema);
+            return (
+              <button
+                key={`${seg.entry.path}:${week[0]}`}
+                type="button"
+                data-testid="calendar-bar"
+                data-path={seg.entry.path}
+                {...grabProps(seg.entry.path, visible[seg.startCol])}
+                onClick={openUnlessDragged(seg.entry.path)}
+                title={`${seg.entry.title} · ${seg.span.start} → ${seg.span.end}`}
+                aria-label={`${seg.entry.title}, ${seg.span.start} to ${seg.span.end}. Arrow keys move it.`}
+                className={[
+                  'pointer-events-auto absolute flex touch-none select-none items-center gap-1 overflow-hidden border border-cortex-500 bg-cortex-50 px-1 text-left text-xs text-n-900 hover:bg-cortex-100',
+                  seg.continuesLeft ? 'border-l-0' : 'rounded-l-sm',
+                  seg.continuesRight ? 'border-r-0' : 'rounded-r-sm',
+                  drag.drag?.id === seg.entry.path ? 'opacity-70' : '',
+                ].join(' ')}
+                style={{
+                  left: `calc(${(seg.startCol / visible.length) * 100}% + 3px)`,
+                  width: `calc(${((seg.endCol - seg.startCol + 1) / visible.length) * 100}% - 6px)`,
+                  top: seg.lane * LANE_H,
+                  height: LANE_H - 3,
+                }}
+              >
+                {seg.continuesLeft && (
+                  <Icon name="chevron-left" size={10} color="var(--cortex-600)" />
+                )}
+                {!seg.continuesLeft && (
+                  <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-400)'} />
+                )}
+                <span className="min-w-0 flex-1 truncate">{seg.entry.title}</span>
+                {seg.continuesRight && (
+                  <Icon name="chevron-right" size={10} color="var(--cortex-600)" />
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div
       data-testid="calendar-view"
@@ -184,18 +419,14 @@ export function CalendarView({
       className="flex min-h-0 min-w-0 flex-1 flex-col"
     >
       <div className="flex flex-none items-center gap-2 border-b border-n-200 px-5 py-2">
-        <IconButton
-          icon="chevron-left"
-          label={span === 'week' ? 'Previous week' : 'Previous month'}
-          onClick={() => step(-1)}
-        />
-        <IconButton
-          icon="chevron-right"
-          label={span === 'week' ? 'Next week' : 'Next month'}
-          onClick={() => step(1)}
-        />
+        <IconButton icon="chevron-left" label={`Previous ${unit}`} onClick={() => step(-1)} />
+        <IconButton icon="chevron-right" label={`Next ${unit}`} onClick={() => step(1)} />
         <span data-testid="calendar-month" className="ml-1 text-sm font-semibold text-n-900">
-          {span === 'week' ? weekLabel(weekGrid(anchor, weekStart)) : monthLabel(anchor)}
+          {span === 'day'
+            ? dayLabel(anchor)
+            : span === 'week'
+              ? weekLabel(weekGrid(anchor, weekStart))
+              : monthLabel(anchor)}
         </span>
         {!onScreen && (
           <button
@@ -213,9 +444,10 @@ export function CalendarView({
           options={[
             { value: 'month', label: 'Month', testId: 'calendar-span-month' },
             { value: 'week', label: 'Week', testId: 'calendar-span-week' },
+            { value: 'day', label: 'Day', testId: 'calendar-span-day' },
           ]}
           value={span}
-          onChange={(v) => setSpanOverride(v as 'month' | 'week')}
+          onChange={(v) => setSpanOverride(v as CalendarSpan)}
         />
         {/* Honest about coverage: a calendar that silently omits a third of
             the collection looks complete and is not. */}
@@ -240,184 +472,48 @@ export function CalendarView({
         )}
       </div>
 
-      <div
-        className="grid flex-none border-b border-n-200"
-        style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}
-      >
-        {columns.map((label) => (
-          <div
-            key={label}
-            className="px-2 py-1 text-2xs font-medium uppercase tracking-[0.04em] text-n-500"
-          >
-            {label}
-          </div>
-        ))}
+      <div className="flex flex-none border-b border-n-200">
+        {/* The hours' gutter starts here, so the columns line up with it. */}
+        {hours && <ZoneCorner />}
+        <div
+          className="grid min-w-0 flex-1"
+          style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}
+        >
+          {columns.map((label) => (
+            <div
+              key={label}
+              className="px-2 py-1 text-2xs font-medium uppercase tracking-[0.04em] text-n-500"
+            >
+              {label}
+            </div>
+          ))}
+        </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto">
-        {weeks.map((week) => {
-          const visible = visibleDays(week, showWeekends);
-          const segments = packWeek(spans, week, visible);
-          const drawn = segments.filter((s) => s.lane < MAX_LANES);
-          const spilled = segments.filter((s) => s.lane >= MAX_LANES);
-          const lanes = Math.min(
-            segments.reduce((max, s) => Math.max(max, s.lane + 1), 0),
-            MAX_LANES,
-          );
-          return (
+      {hours ? (
+        <>
+          <div data-testid="calendar-all-day" className="flex flex-none border-b border-n-200">
             <div
-              key={week[0]}
-              className="relative grid"
-              style={{ gridTemplateColumns: `repeat(${visible.length}, minmax(0, 1fr))` }}
+              aria-hidden
+              className="flex-none px-1 pt-1 text-right text-2xs text-n-400"
+              style={{ width: HOURS_GUTTER_PX }}
             >
-              {visible.map((day, col) => {
-                const inMonth = span === 'week' || isSameMonth(day, anchor);
-                // The cell stack is single-day items ONLY, plus whatever
-                // spilled past the lane cap — a bar is not repeated as a chip.
-                const singles = spans
-                  .filter((s) => s.span.start === s.span.end && s.span.start === day)
-                  .map((s) => s.entry);
-                const overflowed = spilled
-                  .filter((s) => s.startCol <= col && s.endCol >= col)
-                  .map((s) => s.entry);
-                const stack = [...singles, ...overflowed];
-                const showAll = expanded === day;
-                const shown = showAll ? stack : stack.slice(0, MAX_CHIPS);
-                return (
-                  <div
-                    key={day}
-                    data-testid="calendar-day"
-                    data-day={day}
-                    data-count={onDay(dated, dateField, day).length}
-                    // Where a release would land. `pointerover` and not
-                    // `pointerenter`: React derives enter from over/out at the
-                    // root, so a dispatched `pointerenter` reaches no handler.
-                    onPointerOver={() => {
-                      if (grabDay.current === null) return;
-                      drag.hover(dayOffset({ start: grabDay.current, end: grabDay.current }, day));
-                    }}
-                    className={[
-                      'group/day flex min-w-0 flex-col gap-0.5 border-b border-r border-n-100 p-1',
-                      inMonth ? '' : 'bg-n-25',
-                      drag.drag !== null ? 'hover:bg-cortex-50' : '',
-                    ].join(' ')}
-                    style={{ minHeight: CELL_H[span] }}
-                  >
-                    <div className="flex flex-none items-center gap-1">
-                      <span
-                        className={[
-                          'inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-2xs',
-                          day === today
-                            ? 'bg-cortex-500 font-semibold text-n-0'
-                            : inMonth
-                              ? 'text-n-700'
-                              : 'text-n-400',
-                        ].join(' ')}
-                      >
-                        {Number(day.slice(8, 10))}
-                      </span>
-                      <span className="flex-1" />
-                      {onCreateOn !== undefined && <DayAdd day={day} onCreate={onCreateOn} />}
-                    </div>
-                    {/* Reserved lane space. Every cell in the week reserves the
-                        same height, so the bars painted over the row land in
-                        the gap rather than on top of a chip. */}
-                    <div aria-hidden className="flex-none" style={{ height: lanes * LANE_H }} />
-                    {shown.map((entry) => {
-                      const style = typeStyle(entry.type, schema);
-                      return (
-                        <button
-                          key={entry.path}
-                          type="button"
-                          data-testid="calendar-chip"
-                          data-path={entry.path}
-                          {...grabProps(entry.path, day)}
-                          onClick={openUnlessDragged(entry.path)}
-                          title={entry.title}
-                          aria-label={`${entry.title} on ${day}. Arrow keys move it.`}
-                          className={[
-                            'flex min-w-0 touch-none select-none items-center gap-1 rounded-xs border-0 bg-n-50 px-1 py-px text-left text-xs text-n-800 hover:bg-n-100',
-                            drag.drag?.id === entry.path ? 'opacity-60 ring-1 ring-cortex-500' : '',
-                          ].join(' ')}
-                        >
-                          <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-400)'} />
-                          <span className="min-w-0 flex-1 truncate">{entry.title}</span>
-                        </button>
-                      );
-                    })}
-                    {stack.length > shown.length && (
-                      <button
-                        type="button"
-                        onClick={() => setExpanded(day)}
-                        className="rounded-xs border-0 bg-transparent px-1 text-left text-2xs text-n-500 hover:text-n-800"
-                      >
-                        {`+${stack.length - shown.length} more`}
-                      </button>
-                    )}
-                    {showAll && stack.length > MAX_CHIPS && (
-                      <button
-                        type="button"
-                        onClick={() => setExpanded(null)}
-                        className="rounded-xs border-0 bg-transparent px-1 text-left text-2xs text-n-500 hover:text-n-800"
-                      >
-                        Show less
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-              {/* One bar per span per week row, drawn over the reserved lanes.
-                  Square ends mean "this continues" — rounded ends are the real
-                  start and the real finish. */}
-              <div
-                className="pointer-events-none absolute inset-x-0"
-                // 4px cell padding + the 18px day-number row + the 2px gap.
-                style={{ top: 24 }}
-                data-testid="calendar-lanes"
-              >
-                {drawn.map((seg) => {
-                  const style = typeStyle(seg.entry.type, schema);
-                  return (
-                    <button
-                      key={`${seg.entry.path}:${week[0]}`}
-                      type="button"
-                      data-testid="calendar-bar"
-                      data-path={seg.entry.path}
-                      {...grabProps(seg.entry.path, visible[seg.startCol])}
-                      onClick={openUnlessDragged(seg.entry.path)}
-                      title={`${seg.entry.title} · ${seg.span.start} → ${seg.span.end}`}
-                      aria-label={`${seg.entry.title}, ${seg.span.start} to ${seg.span.end}. Arrow keys move it.`}
-                      className={[
-                        'pointer-events-auto absolute flex touch-none select-none items-center gap-1 overflow-hidden border border-cortex-500 bg-cortex-50 px-1 text-left text-xs text-n-900 hover:bg-cortex-100',
-                        seg.continuesLeft ? 'border-l-0' : 'rounded-l-sm',
-                        seg.continuesRight ? 'border-r-0' : 'rounded-r-sm',
-                        drag.drag?.id === seg.entry.path ? 'opacity-70' : '',
-                      ].join(' ')}
-                      style={{
-                        left: `calc(${(seg.startCol / visible.length) * 100}% + 3px)`,
-                        width: `calc(${((seg.endCol - seg.startCol + 1) / visible.length) * 100}% - 6px)`,
-                        top: seg.lane * LANE_H,
-                        height: LANE_H - 3,
-                      }}
-                    >
-                      {seg.continuesLeft && (
-                        <Icon name="chevron-left" size={10} color="var(--cortex-600)" />
-                      )}
-                      {!seg.continuesLeft && (
-                        <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-400)'} />
-                      )}
-                      <span className="min-w-0 flex-1 truncate">{seg.entry.title}</span>
-                      {seg.continuesRight && (
-                        <Icon name="chevron-right" size={10} color="var(--cortex-600)" />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+              all-day
             </div>
-          );
-        })}
-      </div>
+            <div className="min-w-0 flex-1">{weeks.map(weekRow)}</div>
+          </div>
+          <CalendarTimeGrid
+            days={weeks.flatMap((week) => visibleOf(week))}
+            items={timedItems}
+            today={today}
+            timeFormat={timeFormat}
+            schema={schema}
+            {...(now !== undefined ? { now } : {})}
+          />
+        </>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-auto">{weeks.map(weekRow)}</div>
+      )}
       {showUndated && undated.length > 0 && (
         <div
           data-testid="calendar-undated"

@@ -15,6 +15,8 @@
  * pair.
  */
 
+import { DATE_TOKEN_SOURCE } from './dates';
+
 export const QUOTE_LIMITS = {
   /** The most edits one call may carry. */
   maxEdits: 100,
@@ -195,7 +197,8 @@ function refused(lines: string[]): QuotePlan {
 // words as get_note prints the body; a quote with markdown is refused and the
 // finder's matches are kept only where the page shows them as text: not
 // inside a fence, not on a `:::` line (a toggle's title excepted), not in a
-// line's marker and not in a link's target.
+// line's marker, a link's target, an image or a chip (a wikilink, an
+// assignee, a footnote or a date, which the editor draws as one atom).
 
 /** The characters a comment quote may not hold; a context stops at one. */
 const QUOTE_MARKDOWN = new Set(['*', '_', '`', '~', '[', ']', '<', '>', '\\', '|']);
@@ -264,23 +267,51 @@ function markerLength(line: string): number {
   return at;
 }
 
-/** `from..to` of `body` less every link target in it (`](` to its `)`). */
-function withoutLinkTargets(body: string, from: number, to: number, out: [number, number][]) {
-  let at = from;
-  for (;;) {
-    const open = body.slice(at, to).indexOf('](');
-    if (open === -1) break;
-    const target = at + open + 1;
-    if (target > at) out.push([at, target]);
-    const close = body.slice(target, to).indexOf(')');
-    at = close === -1 ? to : target + close + 1;
+/** What the page draws as no text where it starts: an image (`![alt](target)`)
+ * or a chip, as `src/editor/markdown.ts`'s CHIP_PATTERN finds one
+ * (`@[[target|alias]]`, `[[target|alias]]`, `[^id]` or a date token). The
+ * editor draws a chip as one atom, and M70.1 counts no match inside an atom.
+ * quote.rs spells the same grammar by hand. */
+const NOT_TEXT = new RegExp(
+  String.raw`!\[[^\]]*\]\([^)]*\)|@?\[\[[^\][|]+(?:\|[^\][]*)?\]\]|\[\^[^\]\s]+\]|${DATE_TOKEN_SOURCE}`,
+  'uy',
+);
+
+/** The characters a match of `NOT_TEXT` can start with (📅 by its first unit). */
+const NOT_TEXT_STARTS = new Set(['!', '@', '[', '\uD83D']);
+
+/** `from..to` of `body` less what the page does not show as text there: every
+ * link target (`](` to its `)`), every image and every chip. */
+function pageTextIn(body: string, from: number, to: number, out: [number, number][]) {
+  const line = body.slice(from, to);
+  let kept = 0;
+  let at = 0;
+  while (at < line.length) {
+    let cut: [number, number] | null = null;
+    if (line.startsWith('](', at)) {
+      // A link's text keeps its `]`; its target goes.
+      const close = line.indexOf(')', at + 1);
+      cut = [at + 1, close === -1 ? line.length : close + 1];
+    } else if (NOT_TEXT_STARTS.has(line[at])) {
+      NOT_TEXT.lastIndex = at;
+      const m = NOT_TEXT.exec(line);
+      if (m !== null) cut = [at, at + m[0].length];
+    }
+    if (cut === null) {
+      at++;
+      continue;
+    }
+    if (cut[0] > kept) out.push([from + kept, from + cut[0]]);
+    kept = cut[1];
+    at = cut[1];
   }
-  if (at < to) out.push([at, to]);
+  if (kept < line.length) out.push([from + kept, to]);
 }
 
 /** The ranges of `body` the page shows as text, in order: each line's own
- * text, less its marker and its link targets, outside every fence and every
- * `:::` line but a toggle's title. A line's `\r` is never text. */
+ * text, less its marker, its link targets, its images and its chips, outside
+ * every fence and every `:::` line but a toggle's title. A line's `\r` is
+ * never text. */
 function textRanges(body: string): [number, number][] {
   const out: [number, number][] = [];
   let fence: { c: string; n: number } | null = null;
@@ -309,11 +340,11 @@ function textRanges(body: string): [number, number][] {
       const after = directive.slice(runOf(directive, ':'));
       if (after.startsWith('toggle ')) {
         const title = after.slice('toggle '.length);
-        withoutLinkTargets(body, end - title.length, end, out);
+        pageTextIn(body, end - title.length, end, out);
       }
       continue;
     }
-    withoutLinkTargets(body, from + markerLength(line), end, out);
+    pageTextIn(body, from + markerLength(line), end, out);
   }
   return out;
 }

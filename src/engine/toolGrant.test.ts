@@ -2,13 +2,14 @@ import { describe, expect, it } from 'vitest';
 import TOOL_GRANTS from '../../src-tauri/fixtures/tool-grants.json';
 import { agentFacingOps, POLICY } from '@/lib/policy/table';
 import { TOOLS } from '@/lib/policy/tools';
-import { parseShellCeiling } from '@/lib/policy/toolApproval';
+import { parseShellCeiling, parseWebCeiling } from '@/lib/policy/toolApproval';
 import {
   cliGrant,
   editsNotes,
   grantedTools,
   holds,
   holdsShell,
+  holdsWeb,
   mentionedTools,
   namesTool,
   NOTE_EDITORS,
@@ -63,6 +64,7 @@ describe('cliGrant replays tool-grants.json cli_cases', () => {
     for (const c of TOOL_GRANTS.cli_cases) {
       const got = cliGrant({
         shell: parseShellCeiling(c.shell),
+        web: parseWebCeiling('web' in c ? c.web : undefined),
         attended: c.kind === 'attended',
         readScoped: c.read_scoped,
         narrowing: c.allowed_tools,
@@ -89,6 +91,25 @@ describe('cliGrant replays tool-grants.json cli_cases', () => {
     ).toBe(false);
   });
 
+  it('holds the web only under Web access On, and only the web tool a record names (M57.7)', () => {
+    const at = (web: 'off' | 'on' | undefined, narrowing: string[] | null = null) =>
+      holdsWeb({ shell: 'off', web, attended: true, readScoped: false, narrowing });
+    expect(at(undefined)).toBe(false);
+    expect(at('off')).toBe(false);
+    expect(at('on')).toBe(true);
+    expect(at('on', ['WebFetch'])).toBe(true);
+    expect(at('on', ['WebSearch'])).toBe(false);
+    expect(at('on', ['get_note'])).toBe(false);
+    // Unattended too, and a read limit leaves it alone.
+    expect(
+      holdsWeb({ shell: 'on', web: 'on', attended: false, readScoped: true, narrowing: null }),
+    ).toBe(true);
+    // The web changes nothing, so it never counts as the shell.
+    expect(
+      holdsShell({ shell: 'off', web: 'on', attended: true, readScoped: false, narrowing: null }),
+    ).toBe(false);
+  });
+
   it('hears a name as names_tool does', () => {
     expect(namesTool(' bash ', 'Bash')).toBe(true);
     expect(namesTool('mcp__cerebro__get_note', 'mcp__cerebro__get_note')).toBe(true);
@@ -112,7 +133,12 @@ describe('holds and editsNotes', () => {
   });
 
   it('reads the note editors off the manifest', () => {
-    expect(sorted(NOTE_EDITORS)).toEqual(['append_to_note', 'edit_note', 'update_frontmatter']);
+    expect(sorted(NOTE_EDITORS)).toEqual([
+      'append_to_note',
+      'edit_note',
+      'set_fields',
+      'update_frontmatter',
+    ]);
   });
 
   it('edits notes through a note editor or the shell, and through nothing else', () => {

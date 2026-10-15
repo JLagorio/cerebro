@@ -876,6 +876,34 @@ describe('serializeList', () => {
       }
     });
 
+    // M61.8: Day is a third span. Month stays the omitted default.
+    it('round-trips a day span, and still omits month', () => {
+      const p = parse('presentation:\n  type: calendar\n  calendarSpan: day\n');
+      expect(p.calendarSpan).toBe('day');
+      const def = oneView(
+        {
+          name: 'Today',
+          icon: null,
+          color: null,
+          order: null,
+          source: { type: 'Campaign', project: null },
+        },
+        {
+          type: 'calendar',
+          group: [],
+          sort: [{ field: 'due', dir: 'asc' }],
+          columns: [],
+          calendarSpan: 'day',
+        },
+      );
+      const yaml = serializeList(def);
+      expect(yaml).toContain('calendarSpan: day');
+      expect(parseListYaml('s', yaml).definition).toEqual(def);
+      expect(parse('presentation:\n  type: calendar\n  calendarSpan: month\n').calendarSpan).toBe(
+        undefined,
+      );
+    });
+
     it('ignores grid settings it does not recognize', () => {
       const p = parse(
         'presentation:\n  type: calendar\n  calendarSpan: fortnight\n  weekStart: tuesday\n',

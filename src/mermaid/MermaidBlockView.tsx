@@ -4,6 +4,7 @@ import { Icon } from '@/components/ui/Icon';
 import { writeTextFile } from '@/lib/ipc';
 import { slugify } from '@/lib/slug';
 import { useOpenPath } from '@/app/useOpenPath';
+import { useCommands, useKeyScope } from '@/lib/keys/useKeys';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { detectDiagramType } from './detect';
@@ -72,9 +73,9 @@ export function MermaidBlockView({
    * the node in the file (activeElement was the button), a rename committed
    * with Enter left focus on BODY and ⌘Z did nothing there either, and even
    * pressing the block's own Done did not restore it. Clicking a paragraph
-   * first worked — an undiscoverable extra step. So the block routes the key
-   * itself while it is editing, exactly as `useDiagramFile` does for the
-   * standalone .mmd canvas.
+   * first worked — an undiscoverable extra step. So while it is editing the
+   * block binds `diagram.undo/redo` in its own `block` key scope, as
+   * `useDiagramFile` does in its page (M65.1).
    */
   onUndo?: () => void;
   onRedo?: () => void;
@@ -176,6 +177,23 @@ export function MermaidBlockView({
     };
   }, []);
 
+  // ⌘Z with focus on BODY reaches the block through the keymap: the pointerdown on
+  // Edit recorded this block's scope, and its binding shadows the app's own
+  // undo, so a block's ⌘Z never also reverts a database change. Its own scope
+  // per block, so one block never eclipses another. Inside the block, or on
+  // ProseMirror's root, the editing root's `editor` claim holds ⌘Z back from
+  // the keymap and the document listener below answers it instead.
+  const keyScope = useKeyScope('block');
+  useCommands(
+    editing
+      ? [
+          { id: 'diagram.undo', run: () => onUndo?.() },
+          { id: 'diagram.redo', run: () => onRedo?.() },
+        ]
+      : [],
+    { scope: keyScope },
+  );
+
   /**
    * The block's own keyboard while it is editing (M29.53).
    *
@@ -241,6 +259,8 @@ export function MermaidBlockView({
     <div
       ref={blockRef}
       data-testid="mermaid-block"
+      {...keyScope.props}
+      data-key-claim={editing ? 'editor' : undefined}
       contentEditable={false}
       className="my-1 w-full rounded-lg border border-n-200 bg-n-0"
     >
@@ -350,11 +370,9 @@ export function MermaidBlockView({
             placeholder={'graph TD\n  A[Idea] --> B[Shipped]'}
             onChange={setDraft}
             onKeyDown={(e) => {
-              // BlockNote hotkeys must not fire while typing in the source box
-              // — but the APP's must (⌘K, ⌘J, ⌘⇧L). A blanket stop killed both,
-              // because React's synthetic stopPropagation also stops the native
-              // event at the React root, where App.tsx's window listener never
-              // sees it (MEASURED: document-capture saw ⌘K, window saw nothing).
+              // BlockNote hotkeys must not fire while typing in the source box;
+              // only the keys the editor claims stop here. The app's (⌘K, ⌘J,
+              // ⌘⇧L) reach the keymap in the capture phase, before this runs.
               if (claimedByHostEditor(e)) e.stopPropagation();
               if (e.key === 'Escape') {
                 e.preventDefault();

@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "about": "What a note writer may touch (PLATFORM-API-1). A note is a .md file, or a .mmd for the doors that edit diagrams, with no path component starting with '.' as HFS+ hears it (its ignorables dropped), and, for markdown, in no folder the scanner skips: exactly views/ or attachments/, at any depth, matched as the scanner matches them, so Views/ and Attachments/, which it lists, hold notes. The scanner hides what the dot rule refuses, Obsidian-style, so a note it lists is a note the writers take. Nor may a note reach knowledge/ by another name: a first component a folding disk hears as `knowledge` (Unicode case folded, HFS+ ignorables dropped) that is not exactly `knowledge`. The bundle's guards hear those names as the bundle too (M53.28), and a note door refuses them without leaning on the guards: it reaches the bundle by its own name or not at all. Only filesystem-independent cases live here; what a disk folds or a symlink reaches is write.rs's own tests. Replayed through the real doors by note_targets_replay_the_shared_cases in src-tauri/src/vault/write.rs and by src/lib/mockIpc.test.ts. A case whose door edits an existing file is seeded with `seed` first unless it says \"seed\": false. `refused` is a fragment both backends' refusals carry, and a refused case must leave every byte where it was; `lands` is the vault-relative path the door wrote; `why` is for the reader.",
+  "about": "What a note writer may touch (PLATFORM-API-1). A note is a .md file, or a .mmd for the doors that edit diagrams, with no path component starting with '.' as HFS+ hears it (its ignorables dropped), and, for markdown, in no folder the scanner skips: exactly views/ or attachments/, at any depth, matched as the scanner matches them, so Views/ and Attachments/, which it lists, hold notes. The scanner hides what the dot rule refuses, Obsidian-style, so a note it lists is a note the writers take. Nor may a note reach knowledge/ by another name: a first component a folding disk hears as `knowledge` (Unicode case folded, HFS+ ignorables dropped) that is not exactly `knowledge`. The bundle's guards hear those names as the bundle too (M53.28), and a note door refuses them without leaning on the guards: it reaches the bundle by its own name or not at all. Only filesystem-independent cases live here; what a disk folds or a symlink reaches is write.rs's own tests. Replayed through the real doors by note_targets_replay_the_shared_cases in src-tauri/src/vault/write.rs and by src/lib/mockIpc.test.ts. The batch_patch, batch_body and batch_create doors are one op of a batch (M60.6), whose writer judges every op's path as these doors do. The set_fields door is the agent's schema-checked field write (M60.4), setting status on the seeded note. A case whose door edits an existing file is seeded with `seed` first unless it says \"seed\": false. `refused` is a fragment both backends' refusals carry, and a refused case must leave every byte where it was; `lands` is the vault-relative path the door wrote; `why` is for the reader.",
   "seed": "---\ntype: Note\n---\n\n# Seed\n",
   "cases": [
     { "door": "save_note", "path": ".git/config", "refused": "not a note" },
@@ -188,6 +188,20 @@
       "why": "edit_note edits markdown only (Q10): a diagram's whole file is its source."
     },
     { "door": "edit_note", "path": "notes/edit-target.md", "lands": "notes/edit-target.md" },
+    { "door": "set_fields", "path": ".git/config", "refused": "not a note" },
+    { "door": "set_fields", "path": "views/x.md", "refused": "not a note" },
+    { "door": "set_fields", "path": "attachments/x.md", "refused": "not a note" },
+    {
+      "door": "set_fields",
+      "path": "diagrams/flow.mmd",
+      "refused": "raw diagram source",
+      "why": "set_fields patches frontmatter, and a .mmd's leading block is mermaid config (M29.23)."
+    },
+    {
+      "door": "set_fields",
+      "path": "records/fields-target.md",
+      "lands": "records/fields-target.md"
+    },
     { "door": "restore_version", "path": ".git/config", "refused": "not a note" },
     { "door": "restore_version", "path": "views/x.md", "refused": "not a note" },
     { "door": "restore_version", "path": "data/table.csv", "refused": "not a note" },
@@ -218,6 +232,48 @@
       "door": "set_note_title",
       "path": ".trash/20261014T093000Z-a1b2/notes/a.md",
       "refused": "not a note"
+    },
+    { "door": "batch_patch", "path": ".git/config", "refused": "not a note" },
+    {
+      "door": "batch_patch",
+      "path": "\u200c.claude/agents/note-target-probe.md",
+      "seed": false,
+      "refused": "not a note"
+    },
+    {
+      "door": "batch_patch",
+      "path": "records/batch-target.md",
+      "lands": "records/batch-target.md"
+    },
+    { "door": "batch_body", "path": "views/batch-target.md", "refused": "not a note" },
+    {
+      "door": "batch_body",
+      "path": ".trash/20261014T093000Z-a1b2/records/batch-target.md",
+      "refused": "not a note",
+      "why": "M60.6: the Trash is a dot-folder, so no batch op writes inside it."
+    },
+    {
+      "door": "batch_body",
+      "path": "Attachments/batch-target.md",
+      "lands": "Attachments/batch-target.md"
+    },
+    {
+      "door": "batch_create",
+      "path": "records/batch-target.canvas",
+      "seed": false,
+      "refused": "not a note"
+    },
+    {
+      "door": "batch_create",
+      "path": ".cerebro/batch-target.md",
+      "seed": false,
+      "refused": "not a note"
+    },
+    {
+      "door": "batch_create",
+      "path": "records/batch-fresh.md",
+      "seed": false,
+      "lands": "records/batch-fresh.md"
     }
   ]
 }

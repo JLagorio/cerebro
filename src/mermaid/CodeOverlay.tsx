@@ -131,11 +131,8 @@ export function CodeOverlay({
       // textarea, and a real click at Fit's own pixels left the zoom at 100%
       // and put the caret in the source.
       className="absolute left-3 top-3 z-20 flex max-h-[calc(100%-62px)] w-[340px] flex-col overflow-hidden rounded-lg border border-n-200 bg-n-0 shadow-[var(--shadow-lg)]"
-      // Only the keys the surrounding editor would claim (M29.53). The blanket
-      // stop this used to be also killed the app's own window-level shortcuts —
-      // MEASURED: ⌘K and ⌘J were dead in this panel on the .mmd canvas, where
-      // BlockNote is not even mounted, so the guard's stated reason could not
-      // apply. React's synthetic stopPropagation stops the native event too.
+      // Only the keys the surrounding editor would claim (M29.53). The app's
+      // own shortcuts reach the keymap in the capture phase, before this runs.
       onKeyDown={(e) => {
         if (claimedByHostEditor(e)) e.stopPropagation();
         // …and Escape closes THIS, not the dialog three layers up (M29.53).

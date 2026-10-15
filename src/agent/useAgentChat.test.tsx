@@ -883,6 +883,29 @@ describe('useAgentChat cannot be widened by who it is addressed to', () => {
     expect(await shellOf('ask', 'shell')).toBe('ask');
   });
 
+  // M57.7: the web follows Web access in Settings, and for an addressed or
+  // bound agent only its record's `tools: web`.
+  it('sends the web only under Web access, and to an agent that declares it', async () => {
+    const webOf = async (web: boolean, tools: unknown, message = '@release-scout fetch it') => {
+      vi.mocked(agentIpc.runAgent).mockClear();
+      useVaultStore.setState({ vaultPath: '/vault', entries: [agentEntry({ tools })] });
+      const { result } = renderHook(() =>
+        useAgentChat(turn('sys'), { shell: 'off', web, connectors: false }),
+      );
+      act(() => result.current.send(message));
+      await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+      return vi.mocked(agentIpc.runAgent).mock.calls[0][1].web;
+    };
+    expect(await webOf(true, 'web')).toBe(true);
+    expect(await webOf(true, ['shell', 'web'])).toBe(true);
+    expect(await webOf(true, 'shell')).toBe(false);
+    expect(await webOf(true, 'safe')).toBe(false);
+    expect(await webOf(false, 'web')).toBe(false);
+    // An unaddressed turn runs at the Settings ceiling.
+    expect(await webOf(true, 'safe', 'plain question')).toBe(true);
+    expect(await webOf(false, 'safe', 'plain question')).toBe(false);
+  });
+
   it('leaves an unaddressed turn on the Settings ceiling', async () => {
     vi.mocked(agentIpc.runAgent).mockClear();
     useVaultStore.setState({ vaultPath: '/vault', entries: [] });
@@ -1687,6 +1710,86 @@ describe('useAgentChat waits on a card (M57.1)', () => {
     // And the next send goes.
     act(() => result.current.send('next'));
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(2));
+  });
+
+  /** An answer Rust has taken and not yet answered for. */
+  function answerInFlight() {
+    let settle: (value: Awaited<ReturnType<typeof agentIpc.answerInteraction>>) => void = () =>
+      undefined;
+    let fail: (err: Error) => void = () => undefined;
+    vi.mocked(agentIpc.answerInteraction).mockImplementationOnce(
+      () =>
+        new Promise((resolve, reject) => {
+          settle = resolve;
+          fail = reject;
+        }),
+    );
+    const resumed = {
+      resumed: {
+        run: 9,
+        durableId: 'durable-chat-9',
+        sessionId: 'session-1',
+        attach: 'durable-chat-9',
+      },
+    };
+    return {
+      resume: () => act(async () => settle(resumed)),
+      fail: (err: Error) => act(async () => fail(err)),
+    };
+  }
+
+  it('stops the resumed run when Stop came while the answer was in flight', async () => {
+    const pending = answerInFlight();
+    const { result } = await held();
+    act(() => result.current.answer({ kind: 'allow' }));
+    act(() => result.current.stop());
+    // Rust holds the card Answering: cancelling it would refuse, and the
+    // row would read cancelled for a call that runs.
+    expect(vi.mocked(agentIpc.cancelInteraction)).not.toHaveBeenCalled();
+    expect(result.current.stopping).toBe(true);
+    expect(result.current.messages[1].tools[0].cancelled).toBeUndefined();
+    await pending.resume();
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.stopAgent)).toHaveBeenCalledWith(9));
+    expect(useUiStore.getState().runs[0]?.run).toBe(9);
+    emit({ run: 9, kind: 'Cancelled' });
+    emit({ run: 9, kind: 'Done' });
+    expect(result.current.stopping).toBe(false);
+    expect(result.current.streaming).toBe(false);
+    expect(result.current.messages[1].cancelled).toBe(true);
+    expect(result.current.messages[1].tools[0].paused).toBeUndefined();
+    act(() => result.current.send('next'));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(2));
+  });
+
+  it('cancels the card when Stop came and the answer then failed', async () => {
+    const pending = answerInFlight();
+    const { result } = await held();
+    act(() => result.current.answer({ kind: 'allow' }));
+    act(() => result.current.stop());
+    await pending.fail(new Error('the CLI is gone'));
+    expect(vi.mocked(agentIpc.cancelInteraction)).toHaveBeenCalledWith(card.id);
+    expect(vi.mocked(agentIpc.stopAgent)).not.toHaveBeenCalled();
+    expect(result.current.interaction).toBeNull();
+    expect(result.current.stopping).toBe(false);
+    expect(result.current.streaming).toBe(false);
+    expect(result.current.messages[1].cancelled).toBe(true);
+  });
+
+  it('leaves a resume New conversation detached from to ChatTurnsHost (M57.6)', async () => {
+    const pending = answerInFlight();
+    const { result } = await held();
+    act(() => result.current.answer({ kind: 'allow' }));
+    act(() => result.current.reset());
+    useUiStore.setState({ runs: [] });
+    await pending.resume();
+    expect(vi.mocked(agentIpc.stopAgent)).not.toHaveBeenCalled();
+    expect(useUiStore.getState().runs).toEqual([
+      expect.objectContaining({ run: 9, attach: 'durable-chat-9', label: 'append it' }),
+    ]);
+    // The new conversation follows nothing of it.
+    expect(handlers).toHaveLength(0);
+    expect(result.current.live).toBeNull();
+    expect(result.current.messages).toEqual([]);
   });
 
   it('leaves the card waiting on New conversation (M57.6)', async () => {

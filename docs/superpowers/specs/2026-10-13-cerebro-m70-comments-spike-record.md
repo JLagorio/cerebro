@@ -94,12 +94,26 @@ chip. `anchorAt` widens a range over any chip it splits, trims its edges, refuse
 
 1. no valid match: detached, `gone`;
 2. the stored occurrence, if its context is identical;
-3. the best context score, if exactly one match holds it (common suffix with `before` plus common
-   prefix with `after`, in code points);
-4. the stored occurrence, if it is among the best;
-5. otherwise detached, `ambiguous`, with how many share the best.
+3. if the best context score (common suffix with `before` plus common prefix with `after`, in code
+   points) is under half the code points of `before` and `after`, detached, `gone`;
+4. the best score, if exactly one match holds it;
+5. the stored occurrence, if it is among the best;
+6. otherwise detached, `ambiguous`, with how many share the best.
 
 `moved` is true when the match is not the stored occurrence. The result is deterministic.
+
+Step 3 is the floor M70's review added: without it, deleting a quoted sentence moved the thread to
+any other copy of the quote on the page (commenting on "the plan" in one sentence and deleting it
+landed the thread on "Nobody liked the plan", with `moved: false`). A copy that shares a space or
+two of context is not the quote.
+
+**Limit.** Context cannot see past one case: when the quoted block is deleted and the block just
+before it ends in another copy, that copy inherits the deleted quote's context after. If that side
+is at least half the stored context, the thread attaches there (`moved: true` when the occurrence
+shifted). `Owner: TBD.` / `Deadline: TBD.` / `Notes follow here.` with the deadline's TBD quoted and
+its line deleted lands on the owner's TBD (pinned in `commentAnchor.test.ts` as a limit). On a short
+page, where the context after is a period, it reads gone. Only a stored count of copies or a
+position could tell the two apart, and an anchor holds neither.
 
 ## The API M70.2b wires
 

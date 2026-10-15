@@ -1,6 +1,6 @@
 {
   "format": 3,
-  "artifact_version": 10,
+  "artifact_version": 11,
   "target_classes": [
     "belief",
     "comparison",
@@ -77,6 +77,7 @@
     "ledger_writer_unavailable": "operational",
     "malformed_arguments": "operational",
     "no_longer_waiting": "operational",
+    "note_exists": "operational",
     "policy_precondition_stale": "ledger",
     "projection_disk_changed": "operational",
     "qualification_missing": "ledger",
@@ -111,6 +112,7 @@
   "transport_rejections": [
     "malformed_arguments",
     "no_longer_waiting",
+    "note_exists",
     "read_outside_scope",
     "run_actor_mismatch",
     "schema_invalid",

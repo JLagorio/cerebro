@@ -5,7 +5,8 @@ import { boot, openAgents } from './boot';
  * Shell access is off, ask or on (M57.2), and the tool-approval table
  * decides what each run does with the CLI's own tools. In the browser the
  * mock agent plans every run by the same table (src/lib/policy/toolApproval.ts):
- * `run "<command>"` calls Bash, deciding as the table says. AskUserQuestion's
+ * `run "<command>"` calls Bash, deciding as the table says, and since M57.7
+ * `fetch "<url>"` calls WebFetch, which Web access decides. AskUserQuestion's
  * cases live in agent-questions.spec.ts (M57.3).
  */
 
@@ -170,4 +171,34 @@ test('tool approval: Settings counts the person’s own rules and hook events', 
   await expect(rules).toContainText('201 allow rules');
   await expect(rules).toContainText('hooks on 7 events');
   await expect(rules).toContainText('A command they allow runs without a card.');
+});
+
+test('tool approval: Web access gates WebFetch, and the switch survives a reload (M57.7)', async ({
+  page,
+}) => {
+  await boot(page);
+  await openPanel(page);
+  // Off by default: argv denies the web, so the run reads it is not there.
+  await send(page, 'fetch "https://example.com"');
+  await expect(replies(page, 'WebFetch is not available in this run.')).toHaveCount(1, {
+    timeout: 10_000,
+  });
+
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Settings' }).click();
+  const web = page.getByRole('switch', { name: 'Web access' });
+  await expect(web).not.toBeChecked();
+  // The checkbox itself is 0×0 by design; the label is what a user clicks.
+  await page.locator('label.cb-switch').filter({ has: web }).click();
+  await expect(web).toBeChecked();
+
+  await page.reload();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Settings' }).click();
+  await expect(page.getByRole('switch', { name: 'Web access' })).toBeChecked();
+
+  // The panel was open before the reload, and it remembers that.
+  await expect(page.getByTestId('ai-panel')).toBeVisible();
+  await send(page, 'fetch "https://example.com"');
+  await expect(replies(page, 'I fetched https://example.com.')).toHaveCount(1, {
+    timeout: 10_000,
+  });
 });

@@ -463,10 +463,10 @@ describe('filterOpsFor — operators are a property of the KIND (M16.25)', () =>
   });
 
   /**
-   * The catalog is derived from `KIND_META.filters`, which `satisfies
-   * Record<FieldKind, …>` forces every kind to declare. This is the runtime
-   * half: a family whose operator list went empty would leave a kind with an
-   * operator menu that cannot be opened.
+   * The catalog is derived from each kind's `filters` fact in
+   * field-kinds.v1.json, whose loader refuses a table that leaves a kind out.
+   * This is the runtime half: a family whose operator list went empty would
+   * leave a kind with an operator menu that cannot be opened.
    */
   it('every kind offers at least the two universal operators', () => {
     for (const kind of FIELD_KINDS) {

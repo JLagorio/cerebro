@@ -32,6 +32,7 @@ import { runOptionsRefusal, storedChoice } from '@/engine/runOptions';
 import { parseAllowedTools } from '@/engine/skills';
 import { diskFolded, hfsHeard, isKnowledgePath, KNOWLEDGE_DIR } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
+import type { AdmitReport, PendingWake, WakeCancel, WakeCause, WakeOffer } from '@/engine/wakes';
 import {
   MANIFEST,
   TRASH_DIR,
@@ -50,6 +51,28 @@ import {
   type TrashedItem,
 } from '@/engine/trash';
 import type { AgentStreamEvent, TranscriptRead } from '@/agent/types';
+import {
+  MAX_BATCH_BYTES,
+  MAX_BATCH_OPS,
+  NO_JOURNAL,
+  missingPage,
+  notAlone,
+  notFirst,
+  pageExists,
+  parseBatchOps,
+  revertNotAlone,
+  staleWords,
+  TOO_LARGE,
+  tooMany,
+  wrongItem,
+  type BatchApplied,
+  type BatchOp,
+  type FileResult,
+  type KeyChange,
+  type OpenReport,
+  type Skipped,
+} from '@/engine/batch';
+import { deepEqual } from './deepEqual';
 import { normalizeAliasV1 } from './epistemic/normalize';
 import { validateFieldPath, validateOverridePointer } from './epistemic/schema';
 import { humanize, splitFrontmatter } from '@/engine/frontmatter';
@@ -65,15 +88,32 @@ import {
   type QuoteEdit,
 } from '@/engine/quote';
 import { firstH1LineIndex, parseNote } from './mockParse';
+import { buildSchema } from '@/engine/schema';
+import {
+  parseSetFieldsRequest,
+  planSetFields,
+  setFieldsRefusal,
+  setFieldsReport,
+} from '@/engine/setFields';
 import { sha256Hex } from './sha256';
 import { draftRefusal } from '@/engine/writeDraft';
 import type { PageAttribution, RunPageWrites } from '@/engine/attribution';
+import {
+  CONTENT_KINDS,
+  type ActivityWrite,
+  type AppSessionSpan,
+  type ConceptEvent,
+  type PageActivity,
+  type VaultActivity,
+} from '@/engine/activity';
 import { APPROVAL_MESSAGES, QUEUE_LIMITS } from './policy/toolApproval';
 import { toolSchema } from './policy/tools';
 import {
   AMBIENT_CONCURRENCY_DEFAULT,
   AMBIENT_CONCURRENCY_MAX,
+  demoActivity,
   demoChanges,
+  demoConceptHistory,
   demoFleetDetails,
   demoRunWrites,
   demoFleetRuns,
@@ -149,6 +189,9 @@ export interface MockWrite {
   actor: string;
   runId: string | null;
   approvedBy: string | null;
+  /** The batch a row belongs to (M60.6), only on a batch's rows, so e2e can
+   * count one change. Rust keeps no such column: a batch is a door. */
+  batchId?: string;
 }
 
 /** An agent write's stamp (M58.1): the run's actor and id, and who allowed
@@ -164,6 +207,18 @@ export interface WriteStamp {
  * with the mock fs. Every door logs its write, as Rust's records it, under
  * Rust's kinds; unlike Rust, nothing coalesces. */
 const writes: MockWrite[] = [];
+
+/** The batch being applied (M60.6), whose id each row it logs carries. */
+let currentBatch: string | null = null;
+
+/** Whether the mock's batch journal is open (M60.6): runtime.db armed, in
+ * Rust. `__setMockJournal(false)` is the no-journal case; a reset opens it. */
+let mockJournal = true;
+
+/** Open or close the mock's batch journal, for the no-journal refusal. */
+export function __setMockJournal(available: boolean): void {
+  mockJournal = available;
+}
 
 /** What Rust's row holds beside a logged write's stamp (M58.1b): the hash of
  * the bytes it wrote and when. Kept off `MockWrite`, whose shape the door
@@ -190,6 +245,7 @@ function logWrite(
     runId: stamp?.runId ?? null,
     approvedBy: stamp?.approvedBy ?? null,
   };
+  if (currentBatch !== null) logged.batchId = currentBatch;
   writes.push(logged);
   if (before !== undefined) {
     const { additions, deletions } = diffLines(before, files.get(path) ?? null);
@@ -413,9 +469,12 @@ export function resetOperational(): void {
   runWrites = demoRunWrites();
   runTranscripts = demoRunTranscripts();
   fleetAvailable = true;
+  resetActivity();
+  resetConceptHistory();
   connectorStatusRows = [];
   connectorStatusFails = false;
   resetAgentPauses();
+  resetWakes();
   resetPanelAgents();
   resetCliTranscripts();
   resetPendingWrites();
@@ -430,6 +489,7 @@ function seedFiles(): void {
   folders.clear();
   writes.length = 0;
   liveRuns.clear();
+  mockJournal = true;
   connectorsJson = '';
   for (const [absPath, raw] of Object.entries({
     ...seededNotes,
@@ -967,28 +1027,188 @@ export async function agentEdit(
 }
 
 /**
+ * The agent's `set_fields` (mcp.rs `set_fields_write`, M60.4), for the
+ * browser-mode mock agent: a record's fields, checked against its database
+ * by the TS twin of Rust's planner (`planSetFields`). `args` is the tool's
+ * input beside `path`. Refuses what Rust refuses, in Rust's order and words,
+ * before writing or logging a byte: the request (`parse_request`), a
+ * malformed `expect_hash`, the bundle (`guard_agent_write`), a `.mmd`, then
+ * anything that is not a markdown note (`note_join`), a missing note, bytes
+ * other than the ones `expect_hash` names (`stale_content`), a Type doc or
+ * an Agent record as the note stands, a malformed frontmatter block, the
+ * plan (`schema_invalid`, planned over `scanVault` and `buildSchema`, the
+ * project from the record's entry), and bytes the patch would make a Type
+ * doc or an Agent record. The mock agent has no read scope, so every page is
+ * readable. A landed write is logged under the run's `stamp` (M58.1);
+ * identical bytes write and log nothing. Returns the tool's report.
+ */
+export async function agentSetFields(
+  _vault: string,
+  path: string,
+  args: Record<string, unknown>,
+  stamp: WriteStamp,
+): Promise<string> {
+  const parsed = parseSetFieldsRequest({ ...args, path });
+  if ('error' in parsed) throw new Error(parsed.error);
+  const expected = parseExpectHash(args.expect_hash);
+  if (isKnowledgePath(path)) throw new Error(AGENT_USE_WRITE_CONCEPT);
+  if (path.endsWith('.mmd')) {
+    throw new Error(`${path}: a .mmd is raw diagram source and has no frontmatter to update`);
+  }
+  guardNoteTarget(path, MARKDOWN);
+  const entries = await scanVault('');
+  const current = files.get(path);
+  if (current === undefined) throw new Error(`no note at ${path}`);
+  if (expected !== null && sha256Hex(current) !== expected) {
+    throw new Error(staleContentMessage(path));
+  }
+  const governed = governedTypeRefusal(declaredType(path, current));
+  if (governed !== null) throw new Error(governed);
+  const { yaml } = splitFrontmatter(current);
+  let frontmatter: Record<string, unknown>;
+  try {
+    const read: unknown = yaml === null ? null : YAML.parse(yaml);
+    frontmatter =
+      read !== null && typeof read === 'object' && !Array.isArray(read)
+        ? (read as Record<string, unknown>)
+        : {};
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`${path}: cannot patch malformed frontmatter: ${reason}`, { cause: err });
+  }
+  const plan = planSetFields(
+    {
+      entries,
+      schema: buildSchema(entries),
+      recordPath: path,
+      project: entries.find((e) => e.path === path)?.project ?? null,
+      mayRead: () => true,
+    },
+    frontmatter,
+    parsed.ok,
+  );
+  if ('refused' in plan) throw new Error(setFieldsRefusal(path, plan.refused));
+  const saved =
+    Object.keys(plan.patch).length === 0 ? current : patchedFrontmatter(current, plan.patch);
+  if (saved === current) return setFieldsReport(path, plan.notes, sha256Hex(current), false);
+  const minted = governedTypeRefusal(declaredType(path, saved));
+  if (minted !== null) throw new Error(minted);
+  files.set(path, saved);
+  touch(path);
+  logWrite('vault.write', path, stamp, null, current);
+  return setFieldsReport(path, plan.notes, sha256Hex(saved), true);
+}
+
+/** What the model reads when `if_exists` is neither word (mcp.rs
+ * `IF_EXISTS_VALUES`, M61.6b). */
+const IF_EXISTS_VALUES = 'if_exists must be "suffix" or "refuse"';
+
+/** mcp.rs `note_exists_message` (M61.6b), word for word. */
+function noteExistsMessage(path: string): string {
+  return (
+    `note_exists: ${path} already exists, so nothing was written. Read it and change it ` +
+    'there, or call again with if_exists "suffix" for a numbered copy beside it.'
+  );
+}
+
+/** One note a create's answer lists as similar (M61.6b). */
+export interface SimilarNote {
+  path: string;
+  title: string;
+}
+
+/** What the mock's `create_note` landed (M61.6b): the path, the taken name
+ * it numbered a copy beside (null when it took the name it was given), the
+ * similar notes it listed, and the report the tool answers with. */
+export interface AgentCreated {
+  path: string;
+  taken: string | null;
+  similar: SimilarNote[];
+  reply: string;
+}
+
+/**
+ * The notes a new note may duplicate, for the mock (M61.6b): at most three,
+ * in scan order, never templates, `knowledge/` or the planned path. A note
+ * with a type is compared with notes of that type, ignoring ASCII case; one
+ * without, with its own folder; one without at the vault root, with nothing.
+ * A note matches when its title or body contains the new note's whole title,
+ * ignoring case. Containment only, so it is no ranker twin (M59.4's rule):
+ * Rust ranks titles with BM25 and keeps only strict hits.
+ */
+async function similarNotes(
+  folder: string,
+  kind: string | null,
+  title: string,
+  planned: string,
+): Promise<SimilarNote[]> {
+  const home = folder.replace(/\/+$/, '');
+  if (kind === null && home === '') return [];
+  const wanted = title.trim().toLowerCase();
+  if (wanted === '') return [];
+  const out: SimilarNote[] = [];
+  for (const entry of await scanVault('')) {
+    if (out.length === 3) break;
+    if (entry.path === planned || entry.path.startsWith('templates/')) continue;
+    if (isKnowledgePath(entry.path)) continue;
+    const sameKind =
+      kind === null
+        ? entry.folder === home
+        : (entry.type ?? '').trim().toLowerCase() === kind.trim().toLowerCase();
+    if (!sameKind) continue;
+    const { body } = splitFrontmatter(files.get(entry.path) ?? '');
+    if (entry.title.toLowerCase().includes(wanted) || body.toLowerCase().includes(wanted)) {
+      out.push({ path: entry.path, title: entry.title });
+    }
+  }
+  return out;
+}
+
+/** The block a create's answer ends with (mcp.rs `similar_block`). */
+function similarBlock(similar: readonly SimilarNote[]): string {
+  if (similar.length === 0) return '';
+  return [
+    '\n\nSimilar notes already in the vault (advice only; nothing was merged):',
+    ...similar.map((note) => `- ${note.path}: ${note.title}`),
+  ].join('\n');
+}
+
+/**
  * The agent's `create_note` (mcp.rs `tool_create_note`), for the
  * browser-mode mock agent (M57.4): a new note in `folder` named by `slug`,
- * `-2`, `-3` and so on when the name is taken, holding `body` under no
- * frontmatter. Refuses what Rust refuses, in Rust's order and words, before
- * writing a byte: the bundle (`guard_agent_write`), a slug that is not one
- * name (`safe_component`), then anything the planned file would be that is
- * no note (`judge_new_note`). A governed type in its frontmatter stays
- * Rust's to refuse (M53.6): the mock agent writes none. The new note is
- * logged under the run's `stamp` (M58.1). Returns the report the tool answers
- * with.
+ * holding `body` under no frontmatter. A taken name gets `-2`, `-3` and so
+ * on, or, with `ifExists` `refuse` (M61.6b), nothing at all and the
+ * `note_exists` refusal. Refuses what Rust refuses, in Rust's order and
+ * words, before writing a byte: an `ifExists` that is neither word, the
+ * bundle (`guard_agent_write`), a slug that is not one name
+ * (`safe_component`), anything the planned file would be that is no note
+ * (`judge_new_note`), then a taken name it was told to keep. A governed type
+ * in its frontmatter stays Rust's to refuse (M53.6): the mock agent writes
+ * none. The new note is logged under the run's `stamp` (M58.1); a refusal
+ * logs nothing. Returns what landed and the report the tool answers with,
+ * which, like the refusal, ends with the similar notes (`similarNotes`).
  */
 export async function agentCreate(
   _vault: string,
   args: { folder: string; slug: string; body: string },
   stamp: WriteStamp,
-): Promise<string> {
+  ifExists: string | null = 'suffix',
+): Promise<AgentCreated> {
   const { folder, slug, body } = args;
+  const refuse = ifExists === 'refuse';
+  if (ifExists !== null && ifExists !== 'suffix' && !refuse) throw new Error(IF_EXISTS_VALUES);
   if (isKnowledgePath(folder)) throw new Error(AGENT_USE_WRITE_CONCEPT);
   if (slug === '' || slug === '.' || slug === '..' || /[/\\]/.test(slug)) {
     throw new Error(`invalid slug: ${JSON.stringify(slug)}`);
   }
   const prefix = folder === '' ? '' : `${folder}/`;
+  const planned = `${prefix}${slug}.md`;
+  const title = parseNote(planned, body, SEED_TIME, SEED_TIME).title;
+  const similar = await similarNotes(folder, null, title, planned);
+  if (refuse) {
+    guardNoteTarget(planned, MARKDOWN);
+    if (files.has(planned)) throw new Error(noteExistsMessage(planned) + similarBlock(similar));
+  }
   let name = slug;
   for (let n = 2; files.has(`${prefix}${name}.md`); n++) name = `${slug}-${n}`;
   const path = `${prefix}${name}.md`;
@@ -996,7 +1216,9 @@ export async function agentCreate(
   files.set(path, body);
   touch(path);
   logWrite('vault.create', path, stamp, null, null);
-  return `Created ${path}`;
+  const taken = path === planned ? null : planned;
+  const numbered = taken === null ? '' : ` (${taken} was taken, so this note is ${path})`;
+  return { path, taken, similar, reply: `Created ${path}${numbered}${similarBlock(similar)}` };
 }
 
 export async function updateFrontmatter(
@@ -1174,7 +1396,14 @@ function applyCaptureOps(path: string, ops: Record<string, unknown>[]): void {
 }
 
 async function writeFrontmatter(path: string, patch: Record<string, unknown>): Promise<void> {
-  const { yaml, body } = splitFrontmatter(mustGet(path));
+  files.set(path, patchedFrontmatter(mustGet(path), patch));
+  touch(path);
+}
+
+/** The bytes a frontmatter patch turns `raw` into (write.rs `patch_bytes`):
+ * null deletes a key, existing keys keep their place, new keys append. */
+function patchedFrontmatter(raw: string, patch: Record<string, unknown>): string {
+  const { yaml, body } = splitFrontmatter(raw);
   // parseDocument preserves key order and untouched keys on round-trip.
   // Typed as plain Document so the null-contents fallback assignment
   // typechecks (the Parsed narrowing would reject createNode's Node).
@@ -1188,8 +1417,7 @@ async function writeFrontmatter(path: string, patch: Record<string, unknown>): P
   // leaves no fence block, only the body (M55.11: removing a page's last key,
   // its icon, gives back exactly the page it was).
   const emptied = YAML.isMap(doc.contents) && doc.contents.items.length === 0;
-  files.set(path, emptied ? body : `---\n${doc.toString()}---\n${body}`);
-  touch(path);
+  return emptied ? body : `---\n${doc.toString()}---\n${body}`;
 }
 
 export async function createNote(
@@ -1427,10 +1655,12 @@ export async function saveList(
   logWrite(writeKind(existed), path);
 }
 
-export async function startWatcher(_vault: string): Promise<void> {
+export async function startWatcher(_vault: string): Promise<OpenReport> {
   // The mock has no file watcher; writers trigger rescans directly. The open
-  // does run lib.rs's launch purge of the Trash (M60.8).
+  // does run lib.rs's launch purge of the Trash (M60.8). A mock change never
+  // stops partway, so the open has nothing to put back (M60.6).
   purgeExpiredTrash(new Date());
+  return { unfinished: 0, restored: 0, kept: 0 };
 }
 
 // The browser mock has no ledger (M21.7): the tamper-evident chain is a Rust
@@ -2074,6 +2304,250 @@ export function purgeExpiredTrash(
   return report;
 }
 
+// --- The batch writer (M60.6) ---------------------------------------------
+//
+// Mirrors lib.rs `apply_batch` and src-tauri/src/vault/batch.rs in their order
+// and words, over the files Map and the mock Trash: every path guarded, then
+// the count, each op's words, each path as a note, the per-path order, the
+// journal, each page's preconditions, every expectHash, the new bytes and the
+// byte cap, before anything changes. A mock change has no disk to fail on,
+// so it never stops partway. Each row it logs carries its batch id. Both
+// backends replay src-tauri/fixtures/batch-cases.json; YAML bytes may differ.
+// A `revert` (M60.7) follows batch.rs's rule: untrash, back to the Trash, or
+// `before` while the page holds `afterHash`, else key by key for a
+// frontmatter-only change, else stale.
+
+/** The bytes `save_note` composes for `body` under `current`'s frontmatter
+ * (write.rs `compose_saved`). */
+function composedBody(current: string, body: string): string {
+  const { yaml } = splitFrontmatter(current);
+  return yaml !== null && yaml.trim() !== '' ? `---\n${yaml}\n---\n${body}` : body;
+}
+
+/** A frontmatter key's value in `text`, null when the page, its block or the
+ * key is absent (batch.rs `key_value`). */
+function batchKeyValue(text: string | null, key: string): unknown {
+  if (text === null) return null;
+  const { yaml } = splitFrontmatter(text);
+  if (yaml === null) return null;
+  try {
+    const parsed: unknown = YAML.parse(yaml);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+    return (parsed as Record<string, unknown>)[key] ?? null;
+  } catch {
+    // An unreadable block holds no key, as Rust reads it.
+    return null;
+  }
+}
+
+const utf8Length = (text: string | null): number =>
+  text === null ? 0 : new TextEncoder().encode(text).length;
+
+/** What a revert does to its page (batch.rs `Revert`), or null for any
+ * other op. */
+function revertMode(op: BatchOp): 'untrash' | 'retrash' | 'rewrite' | null {
+  if (op.op !== 'revert') return null;
+  if (op.trashed !== null) return 'untrash';
+  return op.restored !== null || op.before === null ? 'retrash' : 'rewrite';
+}
+
+/** The stamp an op takes from the Trash: a restore's, or a revert of a
+ * trashed page's (batch.rs `own_stamp`). */
+function ownStamp(op: BatchOp): string | null {
+  if (op.op === 'restore') return op.stamp;
+  return op.op === 'revert' ? op.trashed : null;
+}
+
+/** Whether `before` patched with each key's after value lands on
+ * `afterHash` (batch.rs `patched_alone`). */
+function patchedAlone(before: string, keys: KeyChange[], afterHash: string): boolean {
+  try {
+    const set = Object.fromEntries(keys.map((k) => [k.key, k.after]));
+    return sha256Hex(patchedFrontmatter(before, set)) === afterHash;
+  } catch {
+    // Bytes the patch can't reproduce read as a body change, as in Rust.
+    return false;
+  }
+}
+
+/** What the mock batch will do to one page. */
+interface PlannedPage {
+  path: string;
+  before: string | null;
+  after: string | null;
+  keys: { key: string; before: unknown; after: unknown }[];
+  trashed: boolean;
+  restored: string | null;
+  rewrites: boolean;
+  created: boolean;
+  skipped: Skipped | null;
+}
+
+/** Apply `ops` as one change, all or nothing (lib.rs `apply_batch`). */
+export async function applyBatch(vault: string, ops: readonly unknown[]): Promise<BatchApplied> {
+  for (const op of ops) {
+    const path = (op as { path?: unknown } | null)?.path;
+    guardHumanWrite(typeof path === 'string' ? path : '');
+  }
+  if (ops.length === 0) return { batchId: '', files: [] };
+  if (ops.length > MAX_BATCH_OPS) throw new Error(tooMany(ops.length));
+  const parsed = parseBatchOps(ops);
+  for (const op of parsed) {
+    guardNoteTarget(op.path, MARKDOWN);
+    guardHumanWrite(op.path);
+  }
+  const pages = new Map<string, BatchOp[]>();
+  for (const op of parsed) pages.set(op.path, [...(pages.get(op.path) ?? []), op]);
+  for (const [path, list] of pages) {
+    if (list.length > 1 && list.some((op) => op.op === 'revert')) {
+      throw new Error(revertNotAlone(path));
+    }
+    if (list.slice(1).some((op) => op.op === 'create' || op.op === 'restore')) {
+      throw new Error(notFirst(path));
+    }
+    if (list.length > 1 && list.some((op) => op.op === 'delete')) throw new Error(notAlone(path));
+  }
+  if (!mockJournal) throw new Error(NO_JOURNAL);
+  const entries = [...pages];
+  const current = entries.map(([path]) => files.get(path) ?? null);
+  const start = entries.map(([path, list], i): string | null => {
+    const first = list[0];
+    if (first.op === 'create') {
+      if (current[i] !== null) throw new Error(pageExists(path));
+      return null;
+    }
+    const stamp = ownStamp(first);
+    if (stamp !== null) {
+      const manifest = readTrashManifest(stamp);
+      if (manifest.path !== path) throw new Error(wrongItem(stamp, manifest.path, path));
+      if (manifest.kind !== 'file') throw new Error(UNREADABLE_ITEM);
+      const item = files.get(`${TRASH_DIR}/${stamp}/${path}`);
+      if (item === undefined) throw new Error(nothingAt(stamp));
+      if (occupied(path)) throw new Error(alreadyExists(path));
+      return item;
+    }
+    // A revert of a rewrite skips a page that is gone; its other forms are
+    // held to their hash below.
+    if (first.op === 'revert') return current[i];
+    if (current[i] === null) throw new Error(missingPage(path));
+    return current[i];
+  });
+  entries.forEach(([path, list], i) => {
+    const now = current[i];
+    const actual = now === null ? '' : sha256Hex(now);
+    for (const op of list) {
+      if (op.op === 'revert') {
+        const mode = revertMode(op);
+        const expected = op.afterHash ?? '';
+        const held = now !== null && actual === expected;
+        const reverts =
+          mode === 'untrash' ||
+          (mode === 'retrash' && held) ||
+          (mode === 'rewrite' &&
+            (held || now === null || patchedAlone(op.before ?? '', op.keys, expected)));
+        if (!reverts) throw new Error(staleWords(path));
+        continue;
+      }
+      const expected = op.op === 'create' || op.op === 'restore' ? undefined : op.expectHash;
+      if (expected !== undefined && expected !== actual) throw new Error(staleWords(path));
+    }
+  });
+  const planned: PlannedPage[] = [];
+  entries.forEach(([path, list], i) => {
+    const before = start[i];
+    let after = before;
+    let trashed = false;
+    let patched: string[] = [];
+    let skipped: Skipped | null = null;
+    const now = current[i];
+    for (const op of list) {
+      if (op.op === 'revert') {
+        const mode = revertMode(op);
+        const names = op.keys.map((k) => k.key);
+        if (mode === 'retrash') {
+          trashed = true;
+          after = null;
+        } else if (mode === 'rewrite' && now === null) {
+          skipped = { keys: names, reason: 'gone' };
+        } else if (mode === 'rewrite' && now !== null && sha256Hex(now) === op.afterHash) {
+          after = op.before;
+          patched = names;
+        } else if (mode === 'rewrite' && now !== null) {
+          const set: Record<string, unknown> = {};
+          const kept: string[] = [];
+          for (const change of op.keys) {
+            if (deepEqual(batchKeyValue(now, change.key), change.after)) {
+              set[change.key] = change.before;
+              patched.push(change.key);
+            } else {
+              kept.push(change.key);
+            }
+          }
+          if (Object.keys(set).length > 0) after = patchedFrontmatter(now, set);
+          if (kept.length > 0) skipped = { keys: kept, reason: null };
+        }
+      }
+      if (op.op === 'create') after = op.content;
+      if (op.op === 'body') after = composedBody(after ?? '', op.body);
+      if (op.op === 'delete') {
+        trashed = true;
+        after = null;
+      }
+      if (op.op === 'patch') {
+        after = patchedFrontmatter(after ?? '', op.set);
+        for (const key of Object.keys(op.set)) if (!patched.includes(key)) patched.push(key);
+      }
+    }
+    const first = list[0];
+    const created = first.op === 'create';
+    const restored = ownStamp(first);
+    const rewrites = after !== null && (created || after !== before);
+    if (!rewrites && !trashed && restored === null && skipped === null) return;
+    const keys = patched.map((key) => ({
+      key,
+      before: batchKeyValue(before, key),
+      after: batchKeyValue(after, key),
+    }));
+    planned.push({ path, before, after, keys, trashed, restored, rewrites, created, skipped });
+  });
+  const bytes = planned.reduce((sum, p) => sum + utf8Length(p.before) + utf8Length(p.after), 0);
+  if (bytes > MAX_BATCH_BYTES) throw new Error(TOO_LARGE);
+  const batchId = Array.from({ length: 32 }, () =>
+    Math.floor(Math.random() * 16).toString(16),
+  ).join('');
+  if (planned.length === 0) return { batchId, files: [] };
+  const results: FileResult[] = [];
+  currentBatch = batchId;
+  try {
+    // Trash moves log as they move, and each staged page logs once the
+    // change commits, as Rust records them.
+    for (const page of planned) {
+      if (page.restored !== null) await restoreFromTrash(vault, page.restored);
+      if (page.rewrites && page.after !== null) {
+        files.set(page.path, page.after);
+        touch(page.path);
+      }
+      const stamp = page.trashed ? (await deleteNote(vault, page.path)).stamp : null;
+      results.push({
+        path: page.path,
+        beforeHash: page.before === null ? null : sha256Hex(page.before),
+        afterHash: page.after === null ? null : sha256Hex(page.after),
+        before: page.before,
+        keys: page.keys,
+        trashed: stamp,
+        restored: page.restored,
+        skipped: page.skipped,
+      });
+    }
+    for (const page of planned) {
+      if (page.rewrites) logWrite(page.created ? 'vault.create' : 'vault.write', page.path);
+    }
+  } finally {
+    currentBatch = null;
+  }
+  return { batchId, files: results };
+}
+
 // --- Page comments (M70.2) --------------------------------------------------
 //
 // Mirrors src-tauri/src/vault/comments.rs in its order and its words: the
@@ -2290,7 +2764,7 @@ function agentLocate(
   if (n === 0) {
     if (occurrencesOf(body, quote).length > 0) {
       throw new Error(
-        `The quoted text appears only inside a fence, a \`:::\` line, a line's marker or a link's target, which the page doesn't show as text. Quote words the page shows. ${NOTHING_POSTED}`,
+        `The quoted text appears only inside a fence, a \`:::\` line, a line's marker, a link's target, an image, a wikilink, a footnote or a date, which the page doesn't show as text. Quote words the page shows. ${NOTHING_POSTED}`,
       );
     }
     if (prefix.includes(quote)) {
@@ -3026,6 +3500,12 @@ function canonicalJson(value: unknown): string {
 const argText = (args: Record<string, unknown>, key: string): string =>
   typeof args[key] === 'string' ? (args[key] as string) : '';
 
+/** A draft's `if_exists` as `agentCreate` reads it (M61.6b): absent or
+ * null is the default, a string goes as written, and any other value is a
+ * word neither of the two, refused in Rust's words. */
+const ifExistsArg = (value: unknown): string | null =>
+  value === undefined || value === null ? null : typeof value === 'string' ? value : String(value);
+
 /** One of the mock's agent doors, by tool name, writing under `stamp`:
  * what it answers, and the page it wrote. The mock has no agent frontmatter
  * door (M56.10). */
@@ -3038,7 +3518,7 @@ async function agentDoor(
   const expectHash = typeof args.expect_hash === 'string' ? args.expect_hash : undefined;
   switch (tool) {
     case 'create_note': {
-      const reply = await agentCreate(
+      const { path, reply } = await agentCreate(
         vault,
         {
           folder: argText(args, 'folder'),
@@ -3046,8 +3526,9 @@ async function agentDoor(
           body: argText(args, 'body'),
         },
         stamp,
+        ifExistsArg(args.if_exists),
       );
-      return { path: reply.replace(/^Created /, ''), reply };
+      return { path, reply };
     }
     case 'append_to_note': {
       const path = argText(args, 'path');
@@ -3058,6 +3539,10 @@ async function agentDoor(
       const path = argText(args, 'path');
       const edits = Array.isArray(args.edits) ? (args.edits as QuoteEdit[]) : [];
       return { path, reply: await agentEdit(vault, path, edits, expectHash, stamp) };
+    }
+    case 'set_fields': {
+      const path = argText(args, 'path');
+      return { path, reply: await agentSetFields(vault, path, args, stamp) };
     }
     default:
       throw new Error(`${tool} is not available here`);
@@ -3917,6 +4402,301 @@ export async function fleetRunsPage(filter: FleetFilter = {}): Promise<FleetRun[
   return ordered.slice(0, Math.min(filter.limit ?? FLEET_DEFAULT_LIMIT, FLEET_MAX_LIMIT));
 }
 
+// --- History's activity read (M64.2) ----------------------------------------
+//
+// Rust's `runtime::activity` reads three lanes raw; this serves the same
+// shape. Writes are the demo's history rows (`demoActivity`) plus every door's
+// row in the live write log, stamped with the clock's time when it was
+// logged; runs are the mock fleet's demo-vault runs; spans are when Cerebro
+// had the vault open. A window that is no window is refused in Rust's words,
+// replayed from src-tauri/fixtures/activity-window-cases.json.
+
+/** One run as History reads it (`activity::ActivityRun`): Fleet's run, and
+ * whether its writes were booked (1 all, 2 the shell may have written
+ * elsewhere, 0 not recorded). */
+export type ActivityRun = FleetRun & { writes_booked: number };
+
+/** What `vaultActivity` answers. */
+export type HistoryActivity = VaultActivity<ActivityRun>;
+
+/** `activity::MAX_DAYS`, and the refusals in Rust's words. */
+const ACTIVITY_MAX_DAYS = 400;
+export const ACTIVITY_WORDS = {
+  backwards: 'History needs a window that starts before it ends.',
+  too_long: 'History reads at most 400 days at a time.',
+  not_an_instant: (value: string) => `${value} is not an RFC 3339 instant.`,
+};
+/** `activity::{WRITE_CAP, RUN_CAP, SPAN_CAP}`. */
+const ACTIVITY_CAPS = { writes: 20_000, runs: 5_000, spans: 5_000 };
+
+/** chrono's strict RFC 3339: a date, `T`, `t` or a space, a time with any
+ * fraction, and `Z` or an offset up to ±23:59. */
+const RFC3339 =
+  /^(\d{4})-(\d{2})-(\d{2})[Tt ](\d{2}):(\d{2}):(\d{2})(\.\d+)?(?:[Zz]|([+-])(\d{2}):(\d{2}))$/;
+
+/** The instant `value` names, in ms, or null when it names none. */
+function rfc3339Instant(value: string): number | null {
+  const m = RFC3339.exec(value);
+  if (m === null) return null;
+  const [y, mo, d, h, mi, sec] = m.slice(1, 7).map(Number);
+  const days = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  if (mo < 1 || mo > 12 || d < 1 || d > days || h > 23 || mi > 59 || sec > 60) return null;
+  const fraction = m[7] === undefined ? 0 : Math.floor(Number(`0${m[7]}`) * 1000);
+  let at = Date.UTC(y, mo - 1, d, h, mi, sec, fraction);
+  if (m[8] !== undefined) {
+    const [oh, om] = [Number(m[9]), Number(m[10])];
+    if (oh > 23 || om > 59) return null;
+    const offset = (oh * 60 + om) * 60_000;
+    at -= m[8] === '+' ? offset : -offset;
+  }
+  return at;
+}
+
+/** `activity::Window::parse`: since, then until, then the order, then the
+ * length, each refused in Rust's words. */
+export function parseActivityWindow(
+  since: string,
+  until: string,
+): { since: number; until: number } {
+  const from = rfc3339Instant(since);
+  if (from === null) throw new Error(ACTIVITY_WORDS.not_an_instant(since));
+  const to = rfc3339Instant(until);
+  if (to === null) throw new Error(ACTIVITY_WORDS.not_an_instant(until));
+  if (from >= to) throw new Error(ACTIVITY_WORDS.backwards);
+  if (to - from > ACTIVITY_MAX_DAYS * 86_400_000) throw new Error(ACTIVITY_WORDS.too_long);
+  return { since: from, until: to };
+}
+
+/** The history rows and spans the mock serves; null makes that lane
+ * unavailable, as a failed SELECT does. */
+let activityRows: Omit<ActivityWrite, 'content'>[] | null = demoActivity().writes;
+let activitySpans: AppSessionSpan[] | null = demoActivity().sessions;
+
+function resetActivity(): void {
+  const demo = demoActivity();
+  activityRows = demo.writes;
+  activitySpans = demo.sessions;
+}
+
+/** Test seam (window `__cerebroSeedActivity`): replace the history rows or
+ * the spans; null fails that lane. A key left out keeps what is there. The
+ * live write log is never touched. */
+export function __seedActivity(seed: {
+  writes?: Omit<ActivityWrite, 'content'>[] | null;
+  sessions?: AppSessionSpan[] | null;
+}): void {
+  if (seed.writes !== undefined) activityRows = seed.writes;
+  if (seed.sessions !== undefined) activitySpans = seed.sessions;
+}
+
+if (typeof window !== 'undefined') {
+  (window as unknown as { __cerebroSeedActivity: typeof __seedActivity }).__cerebroSeedActivity =
+    __seedActivity;
+}
+
+const NO_LANE = 'the mock was seeded without this lane';
+
+/** Newest first by `key`, later rows first on a tie, cut to `cap`. */
+function page<T>(rows: T[], key: (row: T) => number, cap: number) {
+  const ordered = rows
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => key(b.row) - key(a.row) || b.index - a.index)
+    .map(({ row }) => row);
+  return { state: 'read' as const, rows: ordered.slice(0, cap), more: ordered.length > cap };
+}
+
+/** What happened in the vault over `[since, until)` (M64.2). */
+export async function vaultActivity(
+  _vault: string,
+  since: string,
+  until: string,
+): Promise<HistoryActivity> {
+  const asked = parseActivityWindow(since, until);
+  const at = Date.parse;
+  const overlaps = (from: number, to: number) => from < asked.until && to >= asked.since;
+  const now = new Date().toISOString();
+  const all = activityWrites(now);
+  const first = firstRecorded(all);
+  const booked = (runId: string) => {
+    const state = fleetDetails[runId]?.wrote?.state;
+    return state === 'recorded' ? 1 : state === 'partial' ? 2 : 0;
+  };
+  return {
+    writes:
+      all === null
+        ? { state: 'unavailable', reason: NO_LANE }
+        : page(
+            all.filter((w) => overlaps(at(w.first_at), at(w.at))),
+            (w) => at(w.at),
+            ACTIVITY_CAPS.writes,
+          ),
+    runs: !fleetAvailable
+      ? { state: 'unavailable', reason: fleetUnavailable().message }
+      : page(
+          fleetRuns
+            .filter((r) => r.vault_id === 'demo')
+            .filter((r) => overlaps(at(r.started_at), at(r.ended_at ?? now)))
+            .map((r) => ({ ...r, writes_booked: booked(r.run_id) })),
+          (r) => at(r.started_at),
+          ACTIVITY_CAPS.runs,
+        ),
+    app_sessions:
+      activitySpans === null
+        ? { state: 'unavailable', reason: NO_LANE }
+        : page(
+            activitySpans
+              // A span still open runs to the clock, as its heartbeat would.
+              .map((s) =>
+                s.precision === 'open' && at(s.until) < at(now) ? { ...s, until: now } : s,
+              )
+              .filter((s) => overlaps(at(s.opened_at), at(s.until))),
+            (s) => at(s.opened_at),
+            ACTIVITY_CAPS.spans,
+          ),
+    recording_since:
+      all === null ? { state: 'unavailable', reason: NO_LANE } : { state: 'read', at: first },
+  };
+}
+
+/** Every write row the mock serves, oldest first: the demo's history, then
+ * the live log stamped with the clock's time when each was logged. Null when
+ * the history lane was seeded to fail. */
+function activityWrites(now: string): ActivityWrite[] | null {
+  if (activityRows === null) return null;
+  const live: Omit<ActivityWrite, 'content'>[] = writes.map((w) => {
+    const stamped = writtenAs.get(w)?.at ?? now;
+    return {
+      kind: w.kind,
+      path: w.path,
+      to: w.to,
+      actor: w.actor,
+      run_id: w.runId,
+      approved_by: w.approvedBy,
+      first_at: stamped,
+      at: stamped,
+    };
+  });
+  return [...activityRows, ...live].map((w) => ({ ...w, content: CONTENT_KINDS.includes(w.kind) }));
+}
+
+/** The earliest `first_at` among `rows`: `activity::recording_since`. */
+function firstRecorded(rows: ActivityWrite[] | null): string | null {
+  let first: string | null = null;
+  for (const w of rows ?? []) {
+    if (first === null || Date.parse(w.first_at) < Date.parse(first)) first = w.first_at;
+  }
+  return first;
+}
+
+// --- A page's History (M64.2b) ----------------------------------------------
+//
+// Rust's `page_activity` reads one page's rows under each name it has had
+// (renames followed back at most RENAME_HOPS times) and its comment sidecar,
+// the runs those rows name, and, on a knowledge page, the ledger. The
+// browser keeps no ledger, so the Knowledge lane is seeded:
+// `demoConceptHistory` for two concepts, not recorded for every other.
+
+/** What `pageActivity` answers. */
+export type HistoryPageActivity = PageActivity<ActivityRun>;
+
+/** `page_activity`'s refusal for a path outside the vault, in Rust's words
+ * (lib.rs `page_outside_vault`). */
+export const pageOutsideVault = (path: string): string =>
+  `${path} is outside this vault, so it has no history here.`;
+
+/** lib.rs `PAGE_WRITE_CAP`. */
+const PAGE_WRITE_CAP = 2_000;
+
+/** A concept's seeded ledger lane: its events, a vault with no ledger, or
+ * null, a read that failed. A path with no seed reads not recorded. */
+type ConceptSeed = ConceptEvent[] | 'not_recorded' | null;
+let conceptSeeds = new Map<string, ConceptSeed>(Object.entries(demoConceptHistory()));
+
+function resetConceptHistory(): void {
+  conceptSeeds = new Map(Object.entries(demoConceptHistory()));
+}
+
+/** Test seam (window `__cerebroSeedConceptHistory`): set one concept's
+ * Knowledge lane — its events, `'not_recorded'`, or null to fail it. */
+export function __seedConceptHistory(path: string, seed: ConceptSeed): void {
+  conceptSeeds.set(path, seed);
+}
+
+if (typeof window !== 'undefined') {
+  (
+    window as unknown as { __cerebroSeedConceptHistory: typeof __seedConceptHistory }
+  ).__cerebroSeedConceptHistory = __seedConceptHistory;
+}
+
+/** The names `path` has had, newest first, as `write_log::rename_chain`
+ * follows renames into it back through `rows` (oldest first). */
+function renameChain(rows: ActivityWrite[], path: string): string[] {
+  const chain = [path];
+  let current = path;
+  let before = rows.length;
+  for (let hop = 0; hop < RENAME_HOPS; hop++) {
+    let i = before - 1;
+    while (i >= 0 && !(rows[i].kind === 'vault.rename' && rows[i].to === current)) i--;
+    if (i < 0) break;
+    current = rows[i].path;
+    before = i;
+    if (!chain.includes(current)) chain.push(current);
+  }
+  return chain;
+}
+
+/** One page's History (M64.2b). */
+export async function pageActivity(_vault: string, path: string): Promise<HistoryPageActivity> {
+  if (path.split('/').some((part) => part === '..') || path.startsWith('/')) {
+    throw new Error(pageOutsideVault(path));
+  }
+  const at = Date.parse;
+  const now = new Date().toISOString();
+  const all = activityWrites(now);
+  const chain = all === null ? [path] : renameChain(all, path);
+  const paths = new Set([...chain, ...chain.map(sidecarPathOf)]);
+  const mine = all?.filter((w) => paths.has(w.path) || (w.to !== null && paths.has(w.to)));
+  const ids = new Set((mine ?? []).flatMap((w) => (w.run_id === null ? [] : [w.run_id])));
+  const booked = (runId: string) => {
+    const state = fleetDetails[runId]?.wrote?.state;
+    return state === 'recorded' ? 1 : state === 'partial' ? 2 : 0;
+  };
+  const seed = conceptSeeds.has(path) ? conceptSeeds.get(path)! : 'not_recorded';
+  return {
+    chain,
+    writes:
+      mine === undefined
+        ? { state: 'unavailable', reason: NO_LANE }
+        : page(mine, (w) => at(w.at), PAGE_WRITE_CAP),
+    runs:
+      mine === undefined
+        ? {
+            state: 'unavailable',
+            reason: "the page's edits could not be read, so its runs are unknown",
+          }
+        : !fleetAvailable
+          ? { state: 'unavailable', reason: fleetUnavailable().message }
+          : page(
+              fleetRuns
+                .filter((r) => r.vault_id === 'demo' && ids.has(r.run_id))
+                .map((r) => ({ ...r, writes_booked: booked(r.run_id) })),
+              (r) => at(r.started_at),
+              ACTIVITY_CAPS.runs,
+            ),
+    recording_since:
+      all === null
+        ? { state: 'unavailable', reason: NO_LANE }
+        : { state: 'read', at: firstRecorded(all) },
+    knowledge: !isKnowledgePath(path)
+      ? null
+      : seed === null
+        ? { state: 'unavailable', reason: NO_LANE }
+        : seed === 'not_recorded'
+          ? { state: 'not_recorded' }
+          : { state: 'read', events: seed },
+  };
+}
+
 /** One concept a run's proposals named (M50.3, `knowledge::RunWrite`). */
 export interface RunWrite {
   path: string;
@@ -4478,6 +5258,9 @@ export async function setAgentPaused(vault: string, actor: string, paused: boole
   if (paused) set.add(named);
   else set.delete(named);
   pausedByVault.set(vault, set);
+  // M63.1: pausing cancels the agent's pending wakes, as Rust's
+  // `wakes::pause_agent` does in the pause's own transaction.
+  if (paused) cancelAgentWakes(vault, named, new Date());
 }
 
 /**
@@ -4497,6 +5280,489 @@ export function refuseIfAgentPaused(vault: string, actor: string | null | undefi
     `${actor} is paused, so this run did not start. Resume it on the fleet — ` +
       'a paused agent that still ran would make the pause a lie.',
   );
+}
+
+// --- Durable wakes (M63.1) ---------------------------------------------------
+//
+// Mirrors `runtime::wakes` and the woken half of `dispatch::claim_woken`:
+// admission ignores a live key and refuses a paused agent or a malformed
+// offer; a claim answers single flight with `agent_running`, cancels a wake
+// whose agent is paused, coalesces the pending event wakes of its trigger,
+// and expires a wake past the TTL; a run's outcome finishes its wake; cancels
+// take a why from Rust's list; and the pending read leaves the expired out.
+// The browser has no budget gate, so no budget deferral is mirrored.
+// `src-tauri/fixtures/wake-cases.json` holds both sides: `mockIpc.test.ts`
+// replays it here, `wakes.rs` there. `window.__cerebroMockWakes()` returns a
+// snapshot of every row.
+
+/** One wake as the mock holds it: `agent_wakes`' columns, by name. */
+export interface MockWake {
+  wakeId: string;
+  vault: string;
+  agent: string;
+  wakeKey: string;
+  trigger: string;
+  cause: WakeCause;
+  admittedAt: string;
+  notBefore: string | null;
+  deferred: string | null;
+  state: 'pending' | 'started' | 'finished';
+  runId: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  outcome: string | null;
+  reason: string | null;
+  detail: string | null;
+}
+
+const WAKE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const WAKE_COALESCE_MAX = 20;
+const WAKE_BUSY_RETRY_MS = 60 * 1000;
+const WAKE_BUDGET_RETRY_MS = 600 * 1000;
+const CANCEL_WHYS = ['paused', 'trigger_changed', 'agent_gone', 'page_gone'];
+
+const mockWakes: MockWake[] = [];
+let mockWakeSeq = 0;
+/** Whether the lobby's wake list reads (M63.1b); `__cerebroSeedWakes(null)`
+ * clears it. */
+let wakesReadable = true;
+
+function resetWakes(): void {
+  mockWakes.length = 0;
+  wakesReadable = true;
+}
+
+const isLowerHex = (raw: unknown, length: number): boolean =>
+  typeof raw === 'string' && raw.length === length && /^[0-9a-f]+$/.test(raw);
+
+/** A cause value as Rust's `cause::clean` keeps it: control characters as
+ * spaces, trimmed, blank as absent, and cut to `cap` with an ellipsis. */
+function cleanCauseValue(raw: unknown, cap: number): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  // eslint-disable-next-line no-control-regex -- Rust's clean: C0, DEL and C1 become spaces
+  const trimmed = raw.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim();
+  if (trimmed === '') return undefined;
+  const chars = [...trimmed];
+  return chars.length <= cap ? trimmed : `${chars.slice(0, cap - 1).join('')}…`;
+}
+
+/** The cleaned cause an offer stores, or null when its shape is refused. */
+function admissibleWake(offer: WakeOffer): WakeCause | null {
+  if (typeof offer.agent !== 'string' || offer.agent.length > 128) return null;
+  if (!/^process:[a-z0-9-]+$/.test(offer.agent)) return null;
+  if (!isLowerHex(offer.wakeKey, 64) || !isLowerHex(offer.trigger, 16)) return null;
+  if (offer.cause?.kind !== 'event') return null;
+  const subject = cleanCauseValue(offer.cause.subject, 512);
+  const detail = cleanCauseValue(offer.cause.detail, 200);
+  return {
+    kind: 'event',
+    ...(subject === undefined ? {} : { subject }),
+    ...(detail === undefined ? {} : { detail }),
+  };
+}
+
+const wakeExpired = (wake: MockWake, now: Date): boolean =>
+  Date.parse(wake.admittedAt) + WAKE_TTL_MS <= now.getTime();
+
+function finishWake(
+  wake: MockWake,
+  outcome: string,
+  now: Date,
+  reason: string | null = null,
+  detail: string | null = null,
+): void {
+  Object.assign(wake, {
+    state: 'finished',
+    outcome,
+    reason,
+    detail,
+    finishedAt: now.toISOString(),
+    notBefore: null,
+    deferred: null,
+  });
+}
+
+function cancelAgentWakes(vault: string, agent: string, now: Date): void {
+  for (const wake of mockWakes) {
+    if (wake.vault === vault && wake.agent === agent && wake.state === 'pending') {
+      finishWake(wake, 'cancelled', now, 'superseded', 'paused');
+    }
+  }
+}
+
+/** Admit trigger matches, each once — `wakes::admit`. */
+export async function admitWakes(
+  vault: string,
+  offers: readonly WakeOffer[],
+  now: Date = new Date(),
+): Promise<AdmitReport> {
+  const report: AdmitReport = { admitted: 0, live: 0, refused: [] };
+  for (const offer of offers) {
+    const cause = admissibleWake(offer);
+    if (cause === null) {
+      report.refused.push({ agent: String(offer.agent), reason: 'malformed' });
+      continue;
+    }
+    if (pausedByVault.get(vault)?.has(offer.agent) === true) {
+      report.refused.push({ agent: offer.agent, reason: 'paused' });
+      continue;
+    }
+    const live = mockWakes.some(
+      (w) =>
+        w.vault === vault &&
+        w.agent === offer.agent &&
+        w.wakeKey === offer.wakeKey &&
+        w.state !== 'finished',
+    );
+    if (live) {
+      report.live += 1;
+      continue;
+    }
+    mockWakeSeq += 1;
+    mockWakes.push({
+      wakeId: mockWakeSeq.toString(16).padStart(32, '0'),
+      vault,
+      agent: offer.agent,
+      wakeKey: offer.wakeKey,
+      trigger: offer.trigger,
+      cause,
+      admittedAt: now.toISOString(),
+      notBefore: null,
+      deferred: null,
+      state: 'pending',
+      runId: null,
+      startedAt: null,
+      finishedAt: null,
+      outcome: null,
+      reason: null,
+      detail: null,
+    });
+    report.admitted += 1;
+  }
+  return report;
+}
+
+/** The vault's pending wakes inside the TTL, oldest first — `wakes::pending`. */
+export async function wakesPending(vault: string, now: Date = new Date()): Promise<PendingWake[]> {
+  return mockWakes
+    .map((wake, order) => ({ wake, order }))
+    .filter(
+      ({ wake }) => wake.vault === vault && wake.state === 'pending' && !wakeExpired(wake, now),
+    )
+    .sort((a, b) => a.wake.admittedAt.localeCompare(b.wake.admittedAt) || a.order - b.order)
+    .map(({ wake }) => ({
+      wakeId: wake.wakeId,
+      agent: wake.agent,
+      wakeKey: wake.wakeKey,
+      trigger: wake.trigger,
+      cause: { ...wake.cause },
+      admittedAt: wake.admittedAt,
+      notBefore: wake.notBefore,
+      deferred: wake.deferred,
+    }));
+}
+
+/** Cancel pending wakes as superseded, each with its why — `wakes::cancel`.
+ * An unknown why refuses the whole call before anything changes. */
+export async function cancelWakes(
+  vault: string,
+  cancels: readonly WakeCancel[],
+  now: Date = new Date(),
+): Promise<number> {
+  const unknown = cancels.find((c) => !CANCEL_WHYS.includes(c.why));
+  if (unknown !== undefined) {
+    throw new Error(
+      `${JSON.stringify(unknown.why)} is not a reason to cancel a wake — the reasons live in ` +
+        'src-tauri/src/runtime/wakes.rs. Nothing was cancelled.',
+    );
+  }
+  let cancelled = 0;
+  for (const { wakeId, why } of cancels) {
+    const wake = mockWakes.find(
+      (w) => w.wakeId === wakeId && w.vault === vault && w.state === 'pending',
+    );
+    if (wake === undefined) continue;
+    finishWake(wake, 'cancelled', now, 'superseded', why);
+    cancelled += 1;
+  }
+  return cancelled;
+}
+
+/** Cancel the vault's pending wakes past the TTL — `wakes::expire`. */
+export function expireMockWakes(vault: string, now: Date = new Date()): number {
+  let expired = 0;
+  for (const wake of mockWakes) {
+    if (wake.vault === vault && wake.state === 'pending' && wakeExpired(wake, now)) {
+      finishWake(wake, 'cancelled', now, 'expired');
+      expired += 1;
+    }
+  }
+  return expired;
+}
+
+/**
+ * Keep a pending wake pending with the reasons it waits on and a time to try
+ * again — `dispatch::defer_wake`: a minute when every reason is a busy slot,
+ * ten minutes otherwise. The mock has no budget gate, so a test that stands
+ * one in calls this with the gate's reasons.
+ */
+export function deferMockWake(
+  wakeId: string,
+  reasons: readonly string[],
+  now: Date = new Date(),
+): void {
+  const wake = mockWakes.find((w) => w.wakeId === wakeId && w.state === 'pending');
+  if (wake === undefined) return;
+  const busy = reasons.every((r) => r === 'ambient_busy' || r === 'agent_running');
+  const wait = busy ? WAKE_BUSY_RETRY_MS : WAKE_BUDGET_RETRY_MS;
+  wake.notBefore = new Date(now.getTime() + wait).toISOString();
+  wake.deferred = reasons.join(',');
+}
+
+/** What a mock woken claim answers — `dispatch::Woken`. */
+export type MockWoken =
+  { started: { cause: WakeCause; also: WakeCause[] } } | { deferred: string[] } | 'gone';
+
+/**
+ * Claim one wake for the run `runId` — the woken half of
+ * `dispatch::claim_woken`. Another agent's wake, or a coalesce list that
+ * names a wake twice, the claim itself or more than 19, throws and changes
+ * nothing.
+ */
+export function claimMockWake(
+  vault: string,
+  actor: string,
+  request: { claim: string; coalesce: readonly string[] },
+  runId: string,
+  now: Date = new Date(),
+): MockWoken {
+  const wake = mockWakes.find((w) => w.wakeId === request.claim);
+  if (wake === undefined || wake.vault !== vault || wake.state !== 'pending') return 'gone';
+  if (wake.agent !== actor) {
+    throw new Error(`wake ${wake.wakeId} belongs to ${wake.agent}, not ${actor}`);
+  }
+  if (wakeExpired(wake, now)) {
+    finishWake(wake, 'cancelled', now, 'expired');
+    return 'gone';
+  }
+  const busy =
+    mockWakes.some((w) => w.vault === vault && w.agent === actor && w.state === 'started') ||
+    [...liveRuns.values()].some((run) => run.actor === actor);
+  if (busy) {
+    deferMockWake(wake.wakeId, ['agent_running'], now);
+    return { deferred: ['agent_running'] };
+  }
+  if (pausedByVault.get(vault)?.has(actor) === true) {
+    finishWake(wake, 'cancelled', now, 'superseded', 'paused');
+    return 'gone';
+  }
+  const seen = new Set<string>();
+  for (const id of request.coalesce) {
+    if (id === request.claim || seen.has(id)) {
+      throw new Error(`wake ${id} is named twice: a claim takes each wake once`);
+    }
+    seen.add(id);
+  }
+  if (request.coalesce.length > WAKE_COALESCE_MAX - 1) {
+    throw new Error(`a run takes at most ${WAKE_COALESCE_MAX} wakes`);
+  }
+  Object.assign(wake, {
+    state: 'started',
+    runId,
+    startedAt: now.toISOString(),
+    notBefore: null,
+    deferred: null,
+  });
+  const also: WakeCause[] = [];
+  if (wake.cause.kind === 'event') {
+    for (const id of request.coalesce) {
+      const other = mockWakes.find(
+        (w) =>
+          w.wakeId === id &&
+          w.state === 'pending' &&
+          w.vault === vault &&
+          w.agent === actor &&
+          w.trigger === wake.trigger &&
+          w.cause.kind === 'event',
+      );
+      if (other === undefined) continue;
+      finishWake(other, 'coalesced', now);
+      other.runId = runId;
+      also.push({ ...other.cause });
+    }
+  }
+  return { started: { cause: { ...wake.cause }, also } };
+}
+
+/** Finish the wake `runId` started, from the run's outcome —
+ * `wakes::finish_for_run`. A run that started none changes nothing. */
+export function finishMockWake(runId: string, outcome: string, now: Date = new Date()): void {
+  const wake = mockWakes.find((w) => w.runId === runId && w.state === 'started');
+  if (wake === undefined) return;
+  const word =
+    outcome === 'succeeded'
+      ? 'succeeded'
+      : outcome === 'cancelled' || outcome === 'abandoned_usage_unknown'
+        ? 'interrupted'
+        : 'failed';
+  finishWake(wake, word, now);
+}
+
+// --- What is waiting to wake an agent (M63.1b) -------------------------------
+//
+// Mirrors `fleet::wakes` over the same store: every pending wake oldest
+// first, then the wakes skipped or expired in the last week newest first, at
+// most 200, in `wakes::words`' words. `mockIpc.test.ts` holds every word here
+// to Rust's source. `window.__cerebroSeedWakes(rows)` replaces the store;
+// `null` makes the read refuse, as a runtime database that will not open does.
+
+/** One row of the lobby's wake list — `fleet::FleetWake`. */
+export interface FleetWake {
+  wakeId: string;
+  agent: string;
+  state: 'pending' | 'skipped' | 'expired';
+  outcome: string | null;
+  reason: string | null;
+  detail: string | null;
+  words: string;
+  cause: FleetRunCause | null;
+  admittedAt: string;
+  notBefore: string | null;
+  deferred: string | null;
+  finishedAt: string | null;
+  runId: string | null;
+}
+
+const FINISHED_WAKES_MS = 7 * 24 * 60 * 60 * 1000;
+const FLEET_WAKES_MAX = 200;
+
+/** `wakes::CancelWhy::words`, by why. */
+const CANCEL_WORDS: Record<string, string> = {
+  paused: 'cancelled — the agent was paused',
+  trigger_changed: 'cancelled — the trigger that matched was edited or removed',
+  agent_gone: 'cancelled — no agent answers to this name any more',
+  page_gone: 'cancelled — the page that changed is gone',
+};
+
+/** How a wake's end reads — `wakes::words`. */
+export function mockWakeWords(
+  outcome: string | null,
+  reason: string | null,
+  detail: string | null,
+): string {
+  if (outcome === null) return 'waiting';
+  if (outcome === 'cancelled' && reason === 'superseded' && detail !== null) {
+    const said = CANCEL_WORDS[detail];
+    if (said !== undefined) return said;
+  }
+  if (outcome === 'cancelled' && reason === 'expired') {
+    return `expired — waited more than ${WAKE_TTL_MS / (24 * 60 * 60 * 1000)} days`;
+  }
+  const raw = reason === null ? 'not recorded' : detail === null ? reason : `${reason}: ${detail}`;
+  return `skipped (or cancelled) for a reason this version does not name (${raw})`;
+}
+
+/** `cause::WORDS`' sentence for the one kind a mock wake holds. */
+const EVENT_WHY = 'a vault change matched its trigger';
+
+function fleetWakeOf(wake: MockWake): FleetWake {
+  const state =
+    wake.outcome === null
+      ? 'pending'
+      : wake.outcome === 'cancelled' && wake.reason === 'expired'
+        ? 'expired'
+        : 'skipped';
+  return {
+    wakeId: wake.wakeId,
+    agent: wake.agent,
+    state,
+    outcome: wake.outcome,
+    reason: wake.reason,
+    detail: wake.detail,
+    words: mockWakeWords(wake.outcome, wake.reason, wake.detail),
+    cause: {
+      kind: wake.cause.kind,
+      why: wake.cause.kind === 'event' ? EVENT_WHY : 'a reason this build cannot read',
+      subject: wake.cause.subject ?? null,
+      detail: wake.cause.detail ?? null,
+      due_at: wake.cause.due_at ?? null,
+    },
+    admittedAt: wake.admittedAt,
+    notBefore: wake.notBefore,
+    deferred: wake.deferred,
+    finishedAt: wake.finishedAt,
+    runId: wake.runId,
+  };
+}
+
+/** What is waiting to wake this vault's agents, and what did not —
+ * `fleet::wakes`. Refuses while the store is unreadable. */
+export async function fleetWakes(
+  vault: string,
+  actor: string | null = null,
+  now: Date = new Date(),
+): Promise<FleetWake[]> {
+  if (!wakesReadable) throw new Error('no runtime database for this workspace');
+  const mine = mockWakes
+    .map((wake, order) => ({ wake, order }))
+    .filter(({ wake }) => wake.vault === vault && (actor === null || wake.agent === actor));
+  const pending = mine
+    .filter(({ wake }) => wake.state === 'pending')
+    .sort((a, b) => a.wake.admittedAt.localeCompare(b.wake.admittedAt) || a.order - b.order)
+    .slice(0, FLEET_WAKES_MAX);
+  const since = now.getTime() - FINISHED_WAKES_MS;
+  const finished = mine
+    .filter(
+      ({ wake }) =>
+        wake.state === 'finished' &&
+        (wake.outcome === 'skipped' ||
+          (wake.outcome === 'cancelled' && wake.reason === 'expired')) &&
+        wake.finishedAt !== null &&
+        Date.parse(wake.finishedAt) > since,
+    )
+    .sort(
+      (a, b) =>
+        (b.wake.finishedAt ?? '').localeCompare(a.wake.finishedAt ?? '') || b.order - a.order,
+    )
+    .slice(0, FLEET_WAKES_MAX - pending.length);
+  return [...pending, ...finished].map(({ wake }) => fleetWakeOf(wake));
+}
+
+/** A wake a spec seeds: the store's columns, with every column the lifecycle
+ * leaves empty optional. */
+export type SeedWake = Pick<MockWake, 'vault' | 'agent' | 'admittedAt'> & Partial<MockWake>;
+
+/** Test-only seam: replace the wake store with `rows`, or make the wake list
+ * refuse (`null`). */
+export function __seedWakes(rows: readonly SeedWake[] | null): void {
+  mockWakes.length = 0;
+  wakesReadable = rows !== null;
+  for (const row of rows ?? []) {
+    mockWakeSeq += 1;
+    mockWakes.push({
+      wakeId: mockWakeSeq.toString(16).padStart(32, '0'),
+      wakeKey: mockWakeSeq.toString(16).padStart(64, '0'),
+      trigger: '0123456789abcdef',
+      cause: { kind: 'event' },
+      notBefore: null,
+      deferred: null,
+      state: row.outcome == null ? 'pending' : 'finished',
+      runId: null,
+      startedAt: null,
+      finishedAt: null,
+      outcome: null,
+      reason: null,
+      detail: null,
+      ...row,
+    });
+  }
+}
+
+if (typeof window !== 'undefined') {
+  (window as unknown as { __cerebroMockWakes: () => MockWake[] }).__cerebroMockWakes = () =>
+    mockWakes.map((wake) => ({ ...wake, cause: { ...wake.cause } }));
+  (window as unknown as { __cerebroSeedWakes: typeof __seedWakes }).__cerebroSeedWakes =
+    __seedWakes;
 }
 
 // --- Claude Code session files (M56.3) -------------------------------------

@@ -36,8 +36,10 @@ enforced: `.github/workflows/mac-app.yml`
 - `src/` — React app. `engine/` is the pure domain core (best-tested layer),
   and `engine/scene/` the whiteboard scene core (M68.1, CV-45);
   `views/`, `pages/`, `app/`, `detail/`, `knowledge/`, `agent/`, `editor/`,
-  `git/`, `library/`, `workspace/`, `status/` are surfaces; `stores/` is
-  Zustand; `lib/` holds IPC + browser mocks. Lint (`eslint.config.js`) and the
+  `git/`, `library/`, `workspace/`, `status/`, `history/` are surfaces; `stores/` is
+  Zustand; `lib/` holds IPC + browser mocks, and `lib/keys/` the keymap (one
+  capture-phase listener, scopes, editor claims) that dispatches the command
+  rows in `app/commands/` (M65.1, CV-47). Lint (`eslint.config.js`) and the
   no-DOM typecheck (`tsconfig.engine.json`) keep `engine/` pure;
   `@tauri-apps/*` loads only in the four IPC adapters (`lib/ipc.ts`,
   `lib/gitIpc.ts`, `lib/rootsIpc.ts`, `agent/agentIpc.ts`), and only
@@ -101,7 +103,12 @@ enforced: `.github/workflows/mac-app.yml`
   `corpus.rs` is search's stat-keyed cache, one read per changed file and
   never an index, M17.19 and M59.4; `trash.rs` is the vault's own Trash,
   where a delete waits in `.trash/<stamp>/` until Settings restores it or
-  the launch purge hands it to the OS Trash, M60.8),
+  the launch purge hands it to the OS Trash, M60.8; `schema.rs` reads Type
+  docs and checks values by `shared/schema/field-kinds.v1.json`, and
+  `dates.rs` reads dates by `shared/calendar/dates.v1.json`, the tables TS
+  reads too, M60.3; `batch.rs` is the batch writer, a database-wide change
+  checked whole, journaled, staged and renamed, and put back at the next
+  start if it stopped, M60.6),
   `git/`, `mcp.rs`
   (loopback MCP server), `agent/` (CLI spawn; `fold.rs` folds the live
   stream and Claude Code's session file into one event vocabulary, and
@@ -112,21 +119,36 @@ enforced: `.github/workflows/mac-app.yml`
   `confirmable` column, M57.4; `thread_turn.rs` is an @agent turn in a
   comment thread, M70.4), `comment_tools.rs` (the agent comment tools,
   M70.3), `knowledge.rs` (OKF guards),
+  `files/` (`kinds.rs` reads `shared/files/kinds.v1.json`, and its
+  `open_policy` is the one verdict on whether a file may open outside the
+  app, M66.1),
   `connectors.rs`, `shell/` (the main window, built in setup so its
   navigation guard is attached and its title follows the page's; `open.rs`
   is Open with: Finder, the default app, agent links and the clipboard;
   `quit.rs` owns ⌘Q and the close guard, which flush every pending save
   before exit (M55.10), while Dock Quit, logout and shutdown exit without
-  them), `runtime/fleet.rs` (run history,
+  them), `runtime/fleet.rs` (run history, and the `agent_wakes` the Agents
+  lobby lists as waiting, skipped or expired, M63.1b) and `runtime/activity.rs`
+  (History's read: write rows, runs and app sessions, folded in
+  `src/engine/activity.ts`, M64.2), both SELECT-only,
   read through `runtime::ReadOnly`, a connection SQLite refuses writes on; a
   phase that needs a new fact still goes through the Meter or the governance
-  writers).
+  writers. `runtime/wakes.rs` holds durable wakes (M63.1): each trigger match
+  is admitted once, claimed inside the dispatch transaction with its run's
+  lease, and ends in a closed outcome. `runtime/batch_journal.rs` holds a
+  batch's row while it runs (M60.6): its pages' pre-images, deleted at the
+  commit.
 - `shared/prompt/` — prose the model reads, which Rust compiles in and TS
   imports `?raw` (M54.7). `server-instructions.md` is the MCP `instructions`
   every run hears, whatever it holds; its README holds the rules (CV-19).
   `product-brief.md` is the one description of the product, which the system
   prompt and get_vault_context both carry, and `retired-terms.json` lists the
   words for the retired model that none of it may say (M54.8, CV-20).
+- `shared/files/` — what a file is (M66.1): `kinds.v1.json` gives each
+  extension its kind, MIME, viewer, extractor, ingest rule, Shiki language,
+  icon, bytes door and open policy. Rust (`src-tauri/src/files/kinds.rs`)
+  and TS (`src/engine/fileKinds.ts`) read the same bytes; its README holds
+  the columns and the regen command.
 - `demo-vault/` — the golden corpus. Dev, vitest, and Playwright all run
   against it; editing it churns e2e assertions, so treat changes as test
   changes.
@@ -166,14 +188,23 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
   enforced: prose
 - **CV-04 Policy is data**: `shared/policy/` is loaded by Rust (`include_str!`) and
   TS (vite) from the SAME files. A policy rule implemented as twin Rust and
-  TS code is a review-blocking defect — grow the table format instead.
+  TS code is a review-blocking defect — grow the table format instead
+  (a vault semantic may twin only under D3, below).
   Parity is the shared artifact plus `shared/policy/goldens/`; see that
   directory's README before editing either artifact (both have regeneration
   steps that are deliberate, `#[ignore]`d tests). Tool facts are data too
   (M54.2): `tools.v1.json` names each cerebro tool and CLI built-in, Rust
   serves and gates from it, and TS derives the picker, the icons and the write
   checks from it, so a tool list typed in either language is the same defect.
-  enforced: `src/lib/policy/table.test.ts::hashes to the digest`, `src-tauri/src/policy/table.rs::the_loaded_bytes_match_the_committed_digest`, `src/lib/policy/tools.test.ts::hashes to the digest the Rust core also asserts`, `src-tauri/src/policy/tools.rs::the_loaded_bytes_match_the_committed_digest`
+  Where Rust and TS must agree on a vault rule (D3), one shared artifact or
+  case file holds both, replayed by cargo and vitest; `shared/policy/README.md`
+  lists every twin, and an unlisted twin is the same defect. Field kinds and
+  dates are such artifacts (M60.3): `shared/schema/` and `shared/calendar/`.
+  File kinds are data too (M66.1): `shared/files/kinds.v1.json` names each
+  extension's kind, MIME, viewer, extractor, ingest, Shiki language, icon,
+  bytes door and open policy; Rust alone enforces open and the doors, and TS
+  derives icons, languages and ingest from it.
+  enforced: `src/lib/policy/table.test.ts::hashes to the digest`, `src-tauri/src/policy/table.rs::the_loaded_bytes_match_the_committed_digest`, `src/lib/policy/tools.test.ts::hashes to the digest the Rust core also asserts`, `src-tauri/src/policy/tools.rs::the_loaded_bytes_match_the_committed_digest`, `src/engine/fieldKindTable.test.ts::hashes to the digest the Rust reader also asserts`, `src-tauri/src/vault/schema.rs::the_loaded_bytes_match_the_committed_digest`, `src/engine/dateGrammar.test.ts::hashes to the digest the Rust reader also asserts`, `src-tauri/src/vault/dates.rs::the_loaded_bytes_match_the_committed_digest`, `src/engine/fileKinds.test.ts::hashes to the digest the Rust reader also asserts`, `src-tauri/src/files/kinds.rs::the_loaded_bytes_match_the_committed_digest`, `scripts/twins.test.ts::every listed twin replays its cases in both suites`
 - **CV-05 Absent is never zero, and unavailable is never empty.** A number nobody
   recorded renders as words ("not recorded", "unknown", "unattributed"), never
   as `0` or `$0`; a total that had to skip unmetered rows says how many it
@@ -214,7 +245,10 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
   `entry.relationships`, not `properties` — test fixtures must use that shape.
   A target is read whole first, then as the page before its first `#`
   (M55.8); the fragment stays in the file and in `outgoingLinks`.
-  `link.rs` and `wikilink.ts` replay `src-tauri/fixtures/wikilink-targets.json`.
+  A target resolves by filename stem, then a project.md's folder, then an
+  item key (`key: PREFIX-N`), then title, case-insensitively; the first entry
+  in path order wins (M60.9). Rust's `TargetIndex` and TS's `targetIndexFor`
+  replay one case file, `src-tauri/fixtures/wikilink-targets.json`.
   enforced: `src-tauri/src/vault/entry.rs::wikilink_arrays_become_relationships`, `src/lib/scanGolden.test.ts`, `src-tauri/src/vault/link.rs::replays_the_shared_target_cases`, `src/engine/wikilink.test.ts::replays the shared target cases`
 - **CV-16 The webview never leaves its entry document** (M53.12).
   `src-tauri/src/shell/links.rs` routes every navigation and every
@@ -341,8 +375,9 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
   that fails or never runs leaves the call refused.
   enforced: `src-tauri/src/agent/interaction.rs::only_the_answer_command_mints_a_person_answer`, `src-tauri/src/agent/mod.rs::a_tool_the_gate_may_defer_is_never_pre_approved`
 - **CV-29 One table decides what Claude Code may run** (M57.2). Whether one
-  of the CLI's own tools runs, asks the person or is refused is decided only
-  by `shared/policy/tool-approval.v1.json`, by tool family (the manifest's
+  of the CLI's own tools runs, asks the person or is refused, and which vault
+  folders its readers may not open (M60.8b, the Trash), is decided only by
+  `shared/policy/tool-approval.v1.json`, by tool family (the manifest's
   `family` column), run kind and ceiling. Allow and deny ride argv; ask and
   refuse meet the gate on a seated run and are never pre-approved, and
   refuse rides `--disallowedTools` where no gate sits, so a hook outage fails
@@ -382,11 +417,12 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
   person allowed names them as approver; the mock stamps the same doors.
   enforced: `src-tauri/src/vault/receipt.rs::receipts_are_minted_only_at_their_doors`, `src/lib/mockIpc.test.ts::replays the shared write doors`
 - **CV-34 A run commits only what it wrote** (M58.3). When a run ends, Rust
-  commits exactly the paths its `vault_writes` rows and its own Write and
-  Edit calls name, one commit at a time per repository, with `Cerebro-Run`
-  and `Cerebro-Actor` trailers. Every other commit leaves a live run's paths
+  commits exactly the paths its `vault_writes` rows and its own completed
+  Write and Edit calls name (a deferred call's commits with the run that
+  resumes it), one commit at a time per repository, with `Cerebro-Run` and
+  `Cerebro-Actor` trailers. Every other commit leaves a live run's paths
   alone.
-  enforced: `src-tauri/src/git/changeset.rs::a_run_commit_takes_only_its_paths`, `src-tauri/src/git/commit.rs::commit_all_leaves_a_live_runs_paths_alone`
+  enforced: `src-tauri/src/git/changeset.rs::a_run_commit_takes_only_its_paths`, `src-tauri/src/git/commit.rs::commit_all_leaves_a_live_runs_paths_alone`, `src-tauri/src/agent/mod.rs::a_deferred_write_commits_with_the_run_that_resumes_it`
 - **CV-35 Attribution is recorded, never inferred** (M58.4). History names
   an agent for a commit only when runtime.db's `run_commits` record says
   that agent's run made it; a run's commit writes that row and nothing else
@@ -408,11 +444,44 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
   agent tools. Restore refuses to overwrite. The launch purge moves items
   past 30 days to the OS Trash. No code under `vault/` unlinks a page.
   enforced: `src-tauri/src/vault/trash.rs::no_vault_writer_unlinks_a_page`, `src/lib/mockIpc.test.ts::replays the shared trash cases`
+- **CV-38 A database-wide rewrite is one batch** (M60.6). A human action
+  that rewrites a database's records — a property rename, kind change or
+  copy, a bulk delete — sends them with the Type doc as one `applyBatch`:
+  validated, journaled in runtime.db, staged, renamed, and rolled back on the
+  next start if it stopped partway. It refuses knowledge/, its caps and a
+  missing journal.
+  enforced: `src-tauri/src/vault/batch.rs::a_batch_stopped_between_its_temps_and_renames_rolls_back_on_the_next_start`, `src/app/typeActions.test.ts::database-wide rewrites send one batch`
+- **CV-39 Undo puts back only what still stands** (M60.7). Undo and redo act
+  on the person's own batches and Trash moves from this session, never on
+  knowledge/ or proposal decisions. A file nothing touched since returns byte
+  for byte; otherwise each key reverts only while it holds what the change
+  wrote, and the rest is kept, its writer named only from a recorded write.
+  enforced: `src-tauri/src/vault/batch.rs::revert_skips_keys_changed_since_and_keeps_the_rest`, `src/stores/undoStore.test.ts::never applies to knowledge/ or proposal decisions`
+- **CV-40 References follow renames** (M60.2). Every stored view, layout,
+  tab, field-spec and list key is classified in `src/engine/fieldRefs.ts`,
+  and a field is renamed only through `renameFieldOnType`, as one batch.
+  List files, agent triggers and knowledge/ pages that name the field are
+  flagged, never rewritten.
+  enforced: `src/engine/fieldRefs.test.ts::every classified key is walked`
 - **CV-45 The whiteboard scene core stays self-contained** (M68.1).
   `src/engine/scene/` imports only its own files, perfect-freehand (in
   `ink.ts` alone) and fractional-indexing (in `order.ts` alone), reads no
   clock or randomness, and takes every new id from its caller.
   enforced: `src/engine/scene/boundary.test.ts::the scene core imports only itself and its two upstream libraries`, `scripts/lint-rails.test.ts::engine imports admit the two scene libraries and no subpath`
+- **CV-46 An agent's reach is derived, never restated** (M58.6). What an
+  agent may read or change on a page comes from `src/engine/agentAccess.ts`
+  over the tool manifest, `tool-approval.v1.json` and the record's own axes.
+  Its folder grammar twins Rust's `folder_list` (hand-offs and thread turns
+  alike) and `scope_admits`, held by `src-tauri/fixtures/grant-scope.json`,
+  and a scope that names no folder scopes to nothing in both.
+  enforced: `src-tauri/src/mcp.rs::replays_the_shared_scope_cases`, `src/engine/agentAccess.test.ts::replays the shared scope cases`
+- **CV-47 App shortcuts go through the keymap** (M65.1). A shortcut is a row
+  in `src/app/commands/*.commands.ts`, bound with `useCommand` and dispatched
+  by the one capture-phase listener in `src/lib/keys/root.ts`; Settings →
+  Keyboard shortcuts renders the catalog. Every other keydown listener is
+  listed with its reason. Escape belongs to `layers.ts`, and letters stand
+  down in editors, claimed elements and modal layers.
+  enforced: `src/lib/keys/keydownRail.test.ts::every keydown listener outside the keymap is listed with a reason`, `src/app/commands/index.test.ts::no command binds Escape`
 
 ## Verifying UI work
 
@@ -479,7 +548,7 @@ this repo; product Skills are vault records (`type: Skill`).
 enforced: `scripts/dev-skills.test.ts::the list names exactly the skills on disk`
 
 - `verify-ui` — launch the app on a free port and prove a UI change in a real browser.
-- `policy-artifact-edit` — edit `shared/policy/` or `shared/runtime/` without breaking the byte anchor.
+- `policy-artifact-edit` — edit an artifact under `shared/` without breaking the byte anchor.
 - `land-stacked-pr` — land a PR stacked on another PR so its commits reach main.
 - `dependabot-triage` — sort alerts and PRs into a bump, an override or a proposed dismissal.
 - `record-cli` — record Claude Code runs on the pinned CLI and sanitize them into real fixtures.

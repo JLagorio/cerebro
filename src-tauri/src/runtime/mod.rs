@@ -35,6 +35,8 @@
 //! ([`status`]), and never half-creates tables. A process killed mid-step
 //! leaves the previous complete version, which the next open finishes.
 
+pub mod activity;
+pub mod batch_journal;
 pub mod budget;
 pub mod catchup;
 pub mod cause;
@@ -65,6 +67,7 @@ pub mod surface;
 pub mod taint;
 pub mod triggers;
 pub mod vault_writes;
+pub mod wakes;
 pub mod write_log;
 
 pub use read_only::ReadOnly;
@@ -113,8 +116,11 @@ pub const OPEN_MARKER: &str = "runtime.db.open";
 /// the by-time and by-run indexes, and adds `runs.writes_booked` — 0 on every
 /// run before it, whose writes read as not recorded — at 23. M58.4 adds
 /// `run_commits` — which run made which commit, the one record History names
-/// an agent from — at 24.
-pub const USER_VERSION: i64 = 24;
+/// an agent from — at 24. M63.1 adds `agent_wakes` — each trigger match an
+/// agent must answer, admitted once and claimed with its run's lease — at 25.
+/// M60.6 adds `batch_journal` — each database-wide change in flight, with
+/// the pre-images that put its pages back if it stopped partway — at 26.
+pub const USER_VERSION: i64 = 26;
 
 pub fn runtime_db_path(data_dir: &Path) -> PathBuf {
     data_dir.join(RUNTIME_DB)
@@ -322,7 +328,73 @@ const MIGRATIONS: &[Migration] = &[
         sql: schema::SCHEMA_V24,
         validate: validate_v24,
     },
+    Migration {
+        to: 25,
+        sql: schema::SCHEMA_V25,
+        validate: validate_v25,
+    },
+    Migration {
+        to: 26,
+        sql: schema::SCHEMA_V26,
+        validate: validate_v26,
+    },
 ];
+
+/// v26's promise (M60.6): every column of `batch_journal` reads, and the
+/// by-vault index recovery reads it through exists. A step without the index
+/// would still work, and quietly scan the table at every open.
+fn validate_v26(conn: &Connection) -> Result<(), String> {
+    conn.prepare("SELECT batch_id, vault_id, state, files, actor, started_at FROM batch_journal")
+        .map_err(|e| format!("validating batch_journal: {e}"))?;
+    let sql: Option<String> = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'index' \
+             AND name = 'batch_journal_by_vault' AND tbl_name = 'batch_journal'",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+    match sql {
+        Some(sql) if sql.contains("vault_id, started_at") => Ok(()),
+        Some(_) => Err("index batch_journal_by_vault has the wrong shape".to_string()),
+        None => Err("index batch_journal_by_vault on batch_journal is missing".to_string()),
+    }
+}
+
+/// v25's promise (M63.1): every column of `agent_wakes` reads, and its four
+/// indexes exist in their shape: the live-key UNIQUE that makes admission an
+/// INSERT OR IGNORE, the single-flight UNIQUE, the pending lookup and the
+/// by-run lookup. A step without the first would admit one change twice.
+fn validate_v25(conn: &Connection) -> Result<(), String> {
+    conn.prepare(
+        "SELECT wake_id, vault_id, agent, wake_key, trigger_digest, cause, admitted_at, \
+         not_before, deferred, state, run_id, started_at, finished_at, outcome, reason, \
+         detail, note FROM agent_wakes",
+    )
+    .map_err(|e| format!("validating agent_wakes: {e}"))?;
+    for (index, unique) in [
+        ("agent_wakes_live_key", true),
+        ("agent_wakes_single_flight", true),
+        ("agent_wakes_pending", false),
+        ("agent_wakes_by_run", false),
+    ] {
+        let sql: Option<String> = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?1 \
+                 AND tbl_name = 'agent_wakes'",
+                [index],
+                |row| row.get(0),
+            )
+            .ok();
+        let Some(sql) = sql else {
+            return Err(format!("index {index} on agent_wakes is missing"));
+        };
+        if unique != sql.contains("UNIQUE") || !sql.contains("WHERE") {
+            return Err(format!("index {index} on agent_wakes has the wrong shape"));
+        }
+    }
+    Ok(())
+}
 
 /// v24's promise (M58.4): every column of `run_commits` reads, and its CHECK
 /// holds a commit to a full lowercase hash, so a short or upper-case spelling
@@ -1527,6 +1599,282 @@ mod tests {
         assert!(!takes("C".repeat(40), run), "an upper-case hash");
         assert!(!takes("g".repeat(40), run), "not hex");
         assert!(!takes("d".repeat(40), "nobody"), "a run nobody recorded");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// v25 (M63.1): a database at 24 keeps its run and its commit, and comes
+    /// back with `agent_wakes` and its four indexes.
+    #[test]
+    fn a_previous_version_database_gains_agent_wakes_and_keeps_its_rows() {
+        let (dir, vault) = at_version_with_a_run("runtime-upgrade-24", 24);
+        let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+        conn.execute(
+            "INSERT INTO run_commits (vault_id, commit_sha, run_id, committed_at) \
+             VALUES (?1, ?2, 'before-causes', '2026-10-13T09:01:00.000Z')",
+            rusqlite::params![vault, "a".repeat(40)],
+        )
+        .unwrap();
+        assert!(validate_v25(&conn).is_err(), "no agent_wakes before v25");
+        drop(conn);
+
+        let conn = open(&dir).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), USER_VERSION);
+        assert!(validate_v25(&conn).is_ok());
+        let kept: (i64, i64) = conn
+            .query_row(
+                "SELECT (SELECT count(*) FROM runs), (SELECT count(*) FROM run_commits)",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(kept, (1, 1), "the step keeps every row it found");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// v25's CHECKs and indexes refuse every row `agent_wakes` must never
+    /// hold, and take the ones it must.
+    #[test]
+    fn the_agent_wakes_checks_refuse_bad_rows() {
+        let (dir, vault) = at_version_with_a_run("runtime-wake-checks", 24);
+        let conn = open(&dir).unwrap();
+        let seq = std::cell::Cell::new(0u32);
+        // One row: `cols` names the extra columns, `vals` their SQL values.
+        let insert = |agent: &str, key: &str, cols: &str, vals: &str| {
+            seq.set(seq.get() + 1);
+            let id = format!("{:032x}", seq.get());
+            conn.execute(
+                &format!(
+                    "INSERT INTO agent_wakes (wake_id, vault_id, agent, wake_key, \
+                     trigger_digest, cause, admitted_at{cols}) VALUES (?1, ?2, ?3, ?4, \
+                     '0123456789abcdef', '{{\"kind\":\"event\"}}', \
+                     '2026-10-13T09:00:00.000Z'{vals})"
+                ),
+                rusqlite::params![id, vault, agent, key],
+            )
+        };
+        let at = "'2026-10-13T09:05:00.000Z'";
+        assert!(
+            insert("process:scout", "k1", "", "").is_ok(),
+            "a pending wake"
+        );
+        assert!(
+            insert("process:scout", "k1", "", "").is_err(),
+            "a second live wake per key"
+        );
+        assert!(
+            insert(
+                "process:scout",
+                "k2",
+                ", state, run_id, started_at",
+                &format!(", 'started', 'before-causes', {at}")
+            )
+            .is_ok(),
+            "a started wake"
+        );
+        assert!(
+            insert(
+                "process:scout",
+                "k3",
+                ", state, run_id, started_at",
+                &format!(", 'started', 'before-causes', {at}")
+            )
+            .is_err(),
+            "a second started wake per agent"
+        );
+        assert!(
+            insert(
+                "process:scout",
+                "k4",
+                ", state, started_at",
+                &format!(", 'started', {at}")
+            )
+            .is_err(),
+            "started without a run"
+        );
+        assert!(
+            insert(
+                "process:scout",
+                "k5",
+                ", state, outcome, reason, detail",
+                ", 'finished', 'cancelled', 'superseded', 'paused'"
+            )
+            .is_err(),
+            "finished without finished_at"
+        );
+        assert!(
+            insert(
+                "process:scout",
+                "k6",
+                ", state, finished_at, outcome",
+                &format!(", 'finished', {at}, 'skipped'")
+            )
+            .is_err(),
+            "skipped without a reason"
+        );
+        assert!(
+            insert(
+                "process:scout",
+                "k7",
+                ", state, finished_at, outcome, reason",
+                &format!(", 'finished', {at}, 'vanished', 'x'")
+            )
+            .is_err(),
+            "an unknown outcome"
+        );
+        assert!(
+            insert(
+                "process:scout",
+                "k8",
+                ", state, finished_at, outcome, reason, detail",
+                &format!(", 'finished', {at}, 'cancelled', 'superseded', 'paused'")
+            )
+            .is_ok(),
+            "a cancelled wake"
+        );
+        assert!(
+            insert(
+                "process:scout",
+                "k1",
+                ", state, finished_at, outcome, reason",
+                &format!(", 'finished', {at}, 'cancelled', 'expired'")
+            )
+            .is_ok(),
+            "a finished wake never blocks its key"
+        );
+        assert!(
+            insert(
+                "process:scout",
+                "k9",
+                ", state, finished_at, outcome",
+                &format!(", 'finished', {at}, 'coalesced'")
+            )
+            .is_err(),
+            "coalesced without the run that took it"
+        );
+        assert!(
+            insert("scout", "k10", "", "").is_err(),
+            "an agent that is no process"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// v25's validation names a missing index, so a step that built three of
+    /// four rolls back.
+    #[test]
+    fn validate_catches_a_missing_wakes_index() {
+        let dir = testutil::temp_vault("runtime-index-25");
+        let conn = open(&dir).unwrap();
+        assert!(validate_v25(&conn).is_ok());
+        conn.execute_batch("DROP INDEX agent_wakes_single_flight")
+            .unwrap();
+        let err = validate_v25(&conn).unwrap_err();
+        assert!(err.contains("agent_wakes_single_flight"), "{err}");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// v26 (M60.6): a database at 25 keeps its run and its wake, and comes
+    /// back with an empty `batch_journal` and its index.
+    #[test]
+    fn a_previous_version_database_gains_the_batch_journal_and_keeps_every_row() {
+        let (dir, vault) = at_version_with_a_run("runtime-upgrade-25", 25);
+        let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+        conn.execute(
+            "INSERT INTO agent_wakes (wake_id, vault_id, agent, wake_key, trigger_digest, cause, \
+             admitted_at) VALUES (?1, ?2, 'process:scout', 'k', '0123456789abcdef', \
+             '{\"kind\":\"event\"}', '2026-10-13T09:00:00.000Z')",
+            rusqlite::params!["a".repeat(32), vault],
+        )
+        .unwrap();
+        assert!(validate_v26(&conn).is_err(), "no batch_journal before v26");
+        drop(conn);
+
+        let conn = open(&dir).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), USER_VERSION);
+        assert!(validate_v26(&conn).is_ok());
+        let kept: (i64, i64, i64) = conn
+            .query_row(
+                "SELECT (SELECT count(*) FROM runs), (SELECT count(*) FROM agent_wakes), \
+                 (SELECT count(*) FROM batch_journal)",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(kept, (1, 1, 0), "the step keeps every row and adds none");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// v26's CHECKs refuse every row `batch_journal` must never hold: a bad
+    /// state, files that are no JSON array, an actor that is no person, a
+    /// time in another spelling and an id of the wrong length.
+    #[test]
+    fn the_batch_journal_checks_refuse_bad_rows() {
+        let (dir, vault) = at_version_with_a_run("runtime-batch-checks", 25);
+        let conn = open(&dir).unwrap();
+        let insert = |id: &str, state: &str, files: &str, actor: &str, at: &str| {
+            conn.execute(
+                "INSERT INTO batch_journal (batch_id, vault_id, state, files, actor, started_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![id, vault, state, files, actor, at],
+            )
+        };
+        let at = "2026-10-14T09:00:00.000Z";
+        let id = |n: u32| format!("{n:032x}");
+        assert!(
+            insert(&id(1), "staged", "[]", "human:me", at).is_ok(),
+            "a staged row"
+        );
+        assert!(
+            insert(&id(2), "applying", "[]", "human:me", at).is_ok(),
+            "an applying row"
+        );
+        assert!(
+            insert(&id(3), "done", "[]", "human:me", at).is_err(),
+            "an unknown state"
+        );
+        assert!(
+            insert(&id(4), "staged", "{}", "human:me", at).is_err(),
+            "files not an array"
+        );
+        assert!(
+            insert(&id(5), "staged", "[", "human:me", at).is_err(),
+            "files not JSON"
+        );
+        assert!(
+            insert(&id(6), "staged", "[]", "process:scout", at).is_err(),
+            "an agent's batch"
+        );
+        assert!(
+            insert(&id(7), "staged", "[]", "human:me", "2026-10-14 09:00").is_err(),
+            "another time spelling"
+        );
+        assert!(
+            insert("abc", "staged", "[]", "human:me", at).is_err(),
+            "a short id"
+        );
+        assert!(
+            insert(&"G".repeat(32), "staged", "[]", "human:me", at).is_err(),
+            "an id that is not lowercase hex"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// v26's validation names a missing index, so a step that built the
+    /// table without it rolls back.
+    #[test]
+    fn validate_catches_a_missing_batch_journal_index() {
+        let dir = testutil::temp_vault("runtime-index-26");
+        let conn = open(&dir).unwrap();
+        assert!(validate_v26(&conn).is_ok());
+        conn.execute_batch("DROP INDEX batch_journal_by_vault")
+            .unwrap();
+        let err = validate_v26(&conn).unwrap_err();
+        assert!(err.contains("batch_journal_by_vault"), "{err}");
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
     }

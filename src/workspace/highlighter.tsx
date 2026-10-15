@@ -30,6 +30,7 @@ import type { ReactNode } from 'react';
 import { Fragment, jsx, jsxs } from 'react/jsx-runtime';
 import { toJsxRuntime } from 'hast-util-to-jsx-runtime';
 import type { Highlighter } from 'shiki';
+import { shikiFor } from '@/engine/fileKinds';
 import type { ResolvedTheme } from '@/hooks/useTheme';
 
 /**
@@ -44,81 +45,17 @@ interface HastNode {
   children?: HastNode[];
 }
 
-const EXTENSIONS: Record<string, string> = {
-  rs: 'rust',
-  ts: 'typescript',
-  tsx: 'tsx',
-  mts: 'typescript',
-  cts: 'typescript',
-  js: 'javascript',
-  mjs: 'javascript',
-  cjs: 'javascript',
-  jsx: 'jsx',
-  json: 'json',
-  jsonc: 'jsonc',
-  toml: 'toml',
-  yml: 'yaml',
-  yaml: 'yaml',
-  css: 'css',
-  scss: 'scss',
-  html: 'html',
-  xml: 'xml',
-  svg: 'xml',
-  sh: 'shell',
-  bash: 'shell',
-  zsh: 'shell',
-  fish: 'shell',
-  py: 'python',
-  rb: 'ruby',
-  go: 'go',
-  java: 'java',
-  kt: 'kotlin',
-  swift: 'swift',
-  c: 'c',
-  h: 'c',
-  cpp: 'cpp',
-  hpp: 'cpp',
-  cs: 'csharp',
-  php: 'php',
-  sql: 'sql',
-  graphql: 'graphql',
-  gql: 'graphql',
-  md: 'markdown',
-  markdown: 'markdown',
-  vue: 'vue',
-  svelte: 'svelte',
-  lua: 'lua',
-  r: 'r',
-  diff: 'diff',
-  patch: 'diff',
-};
-
-const FILENAMES: Record<string, string> = {
-  dockerfile: 'docker',
-  makefile: 'make',
-  '.gitignore': 'ini',
-  '.gitattributes': 'ini',
-  '.editorconfig': 'ini',
-  '.npmrc': 'ini',
-  '.prettierrc': 'json',
-  '.eslintrc': 'json',
-};
-
 /** The Shiki theme for a resolved app theme. */
 export function themeFor(theme: ResolvedTheme): string {
   return theme === 'dark' ? 'github-dark' : 'github-light';
 }
 
-/** The Shiki language id for a path, or null to render as plain text. */
+/**
+ * The Shiki language id for a path, or null to render as plain text: the
+ * file-kind table's `shiki` column, a filename override first (M66.1).
+ */
 export function languageFor(path: string): string | null {
-  const filename = path.split('/').pop() ?? path;
-  const lower = filename.toLowerCase();
-  const byName = FILENAMES[lower];
-  if (byName !== undefined) return byName;
-  // A leading-dot file with no further dot (`.env`) has no extension to read.
-  const cut = lower.lastIndexOf('.');
-  if (cut <= 0) return null;
-  return EXTENSIONS[lower.slice(cut + 1)] ?? null;
+  return shikiFor(path);
 }
 
 let instance: Promise<Highlighter> | null = null;

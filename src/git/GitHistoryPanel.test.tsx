@@ -17,9 +17,9 @@ vi.mock('@/lib/gitIpc', async (importOriginal) => {
   };
 });
 
-import { GitHistoryPanel } from '@/git/GitHistoryPanel';
+import { CommitRow, GitHistoryPanel, UncommittedRow } from '@/git/GitHistoryPanel';
 import { resetGitState } from '@/git/useGit';
-import { commitRuns, getFileHistory, getModifiedFiles, isGitRepo } from '@/lib/gitIpc';
+import { commitRuns, getFileHistory, isGitRepo } from '@/lib/gitIpc';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { makeEntry } from '@/test/factories';
@@ -54,9 +54,10 @@ const AGENT = makeEntry({
 });
 
 // M53.15: a failed read used to come back as [] and the block rendered
-// nothing, which is exactly what a note with no history renders. M58.4: the
-// side panel's tab speaks every answer, and each row names who made it from
-// the commit record alone.
+// nothing, which is exactly what a note with no history renders. M58.4: each
+// row names who made it from the commit record alone. M64.2b: the side
+// panel's tab is history/PageHistory, which reuses CommitRow; this is the
+// record peek's foot list.
 describe('GitHistoryPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -145,7 +146,7 @@ describe('GitHistoryPanel', () => {
 
   it('opens the version lens from a row', async () => {
     vi.mocked(getFileHistory).mockResolvedValueOnce([commit('a')]);
-    render(<GitHistoryPanel path="notes/plan.md" variant="tab" />);
+    render(<GitHistoryPanel path="notes/plan.md" />);
     const row = await screen.findByTestId('git-commit');
     fireEvent.click(within(row).getByRole('button', { name: 'commit a' }));
     expect(useUiStore.getState().diffView).toEqual({
@@ -154,38 +155,43 @@ describe('GitHistoryPanel', () => {
     });
   });
 
-  describe('as the side panel tab', () => {
-    it('says History is off in a vault that keeps none', async () => {
-      vi.mocked(isGitRepo).mockResolvedValue(false);
-      render(<GitHistoryPanel path="notes/plan.md" variant="tab" />);
-      expect(await screen.findByText('History is off')).toBeTruthy();
-      vi.mocked(isGitRepo).mockResolvedValue(true);
-    });
-
-    it('says No versions yet for a page nobody committed', async () => {
-      render(<GitHistoryPanel path="notes/plan.md" variant="tab" />);
-      expect(await screen.findByText('No versions yet')).toBeTruthy();
-    });
-
-    it('says a failed read in its own words', async () => {
-      vi.mocked(getFileHistory).mockRejectedValueOnce(new Error('git log exited 128'));
-      render(<GitHistoryPanel path="notes/plan.md" variant="tab" />);
-      expect((await screen.findByTestId('section-unavailable')).textContent).toBe(
-        "This page's history could not be read.",
+  // M64.2b: the side panel's tab is PageHistory now; it reuses these rows.
+  describe('the rows it exports', () => {
+    it('renders a CommitRow alone, with its author, its change and the lens', () => {
+      render(
+        <CommitRow
+          commit={commit('d', { change: 'added' })}
+          path="notes/plan.md"
+          runs={{ kind: 'ready', data: [] }}
+        />,
       );
+      const row = screen.getByTestId('git-commit');
+      expect(within(row).getByTestId('commit-author').textContent).toBe('unattributed');
+      expect(within(row).getByTestId('git-commit-change').textContent).toBe('created it');
+      fireEvent.click(within(row).getByRole('button', { name: 'commit d' }));
+      expect(useUiStore.getState().diffView).toEqual({
+        path: 'notes/plan.md',
+        commit: 'd'.repeat(40),
+      });
+      expect(getFileHistory).not.toHaveBeenCalled();
     });
 
-    it('adds a Not in history yet row while the page holds uncommitted changes', async () => {
-      vi.mocked(getModifiedFiles).mockResolvedValue([
-        { path: 'notes/plan.md', status: 'modified', staged: false },
-      ]);
-      vi.mocked(getFileHistory).mockResolvedValueOnce([]);
-      render(<GitHistoryPanel path="notes/plan.md" variant="tab" />);
-      const row = await screen.findByTestId('git-uncommitted');
+    it('opens the lens on uncommitted changes from the Not in history yet row', () => {
+      render(<UncommittedRow path="notes/plan.md" />);
+      const row = screen.getByTestId('git-uncommitted');
       expect(row.textContent).toContain('Not in history yet');
       fireEvent.click(within(row).getByRole('button'));
       expect(useUiStore.getState().diffView).toEqual({ path: 'notes/plan.md', commit: null });
-      vi.mocked(getModifiedFiles).mockResolvedValue([]);
+    });
+
+    it('leaves the foot list unchanged in a vault that keeps no history', async () => {
+      vi.mocked(isGitRepo).mockResolvedValue(false);
+      const read = deferred<FileCommit[]>();
+      vi.mocked(getFileHistory).mockReturnValueOnce(read.promise);
+      const { container } = render(<GitHistoryPanel path="notes/plan.md" />);
+      await act(async () => read.resolve([]));
+      expect(container.innerHTML).toBe('');
+      vi.mocked(isGitRepo).mockResolvedValue(true);
     });
   });
 });

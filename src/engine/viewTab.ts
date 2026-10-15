@@ -103,9 +103,9 @@ export function relationFieldTargeting(
  * scanner's bracket-stripped AUTHORED wikilink targets in
  * `entry.relationships[field]` — not paths, not necessarily the host's
  * title — while authors may legally spell the host as its filename stem,
- * its project folder, or its title, in any case (`resolveTarget`). So the
- * value set is every authored spelling among the rows that RESOLVES to the
- * host, which makes the strict filter exactly equivalent to the relation
+ * its project folder, its item key, or its title, in any case
+ * (`resolveTarget`). So the value set is every authored spelling among the
+ * rows that RESOLVES to the host, which makes the strict filter exactly equivalent to the relation
  * engine's reverse resolution: no spelling is missed, and a spelling that
  * resolves to a different record (stem shadowing) is never swept in.
  */

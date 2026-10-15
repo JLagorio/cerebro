@@ -2,16 +2,25 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { onAgentEvent, runAgent, stopAgent } from './agentIpc';
 import { buildSystemPrompt } from './systemPrompt';
 import { agentRef, isAgentEntry } from '@/engine/agents';
-import { observeScan, type ScanBaseline, type VaultEvent } from '@/engine/events';
+import { observeScan, type ScanBaseline } from '@/engine/events';
 import { causeOfJob, jobQueue, KNOWLEDGE_JOB_KINDS, type AgentJob } from '@/engine/jobs';
 import { isRecording, useLedgerStore, useLedgerReview, useQuarantine } from '@/stores/ledgerStore';
 import { writtenPath, type RunLogEntry } from '@/engine/runLog';
-import { describeTrigger, firstMatch, parseTriggers } from '@/engine/triggers';
+import { parseTriggers } from '@/engine/triggers';
+import {
+  triggerWords,
+  wakeOffers,
+  wakeVerdicts,
+  type PendingWake,
+  type WakeOffer,
+} from '@/engine/wakes';
 import { newRunId, shouldYield } from './runs';
 import { fireKeyDate, isSkillEntry, parseAllowedTools, parseSchedule } from '@/engine/skills';
 import { listConcepts } from '@/engine/okf';
-import { grantedTools, holdsShell, type PromptGrant } from '@/engine/toolGrant';
+import { grantedTools, holdsShell, holdsWeb, type PromptGrant } from '@/engine/toolGrant';
 import {
+  admitWakes,
+  cancelWakes,
   fleetActorSummary,
   jobLedgerClaim,
   jobLedgerImport,
@@ -20,6 +29,7 @@ import {
   jobLedgerUnclaim,
   readNote,
   reviewQueue,
+  wakesPending,
 } from '@/lib/ipc';
 import { splitFrontmatter } from '@/engine/frontmatter';
 import {
@@ -59,8 +69,9 @@ import { useVaultStore } from '@/stores/vaultStore';
  * 3. **It must not spin.** Every job is recorded in its ledger BEFORE the run
  *    — learn jobs by note version, scheduled runs by fire key — so a run that
  *    produces nothing, or dies, is not retried until the note changes or the
- *    schedule fires again. Two refinements leave no record for a run that
- *    never happened. A scheduled run consumes its fire key only once its
+ *    schedule fires again. A woken run's record is its durable wake (M63.1),
+ *    claimed in Rust with the run's lease. Two refinements leave no record
+ *    for a run that never happened. A scheduled run consumes its fire key only once its
  *    record's body has actually been read (PR #5 review): a failed READ is
  *    not a run, and must not eat the whole period. And a run the budget gate
  *    deferred gives its record back, durable and local, so the next launch
@@ -72,12 +83,15 @@ import { useVaultStore } from '@/stores/vaultStore';
 const SETTLE_MS = 4_000;
 
 /** How often the wall clock re-derives the queue. `now` moves on this tick
- * and nowhere else, and two things wait on it: a schedule's fire coming due,
- * and an event cooldown running out (TRIGGER_COOLDOWN_MS). */
+ * and nowhere else, and three things wait on it: a schedule's fire coming
+ * due, an event cooldown running out (TRIGGER_COOLDOWN_MS), and a deferred
+ * wake's retry time. The tick also offers again an admission that failed. */
 const TICK_MS = 60_000;
 
-/** One empty list, so "no events" keeps one identity across renders. */
-const NO_EVENTS: readonly VaultEvent[] = [];
+/** The most matches one vault holds back for admission (M63.1): a bulk
+ * change past it keeps the newest, and the wakes it admits drain twenty to
+ * a run. */
+const UNADMITTED_CAP = 500;
 
 /** What a job's log says when a hook outside Cerebro held one of its calls
  * (M57.1): nobody watches a job, so nobody answers it. */
@@ -108,6 +122,7 @@ export function useJobRunner(): void {
   // flipping back to false was what re-ran the effect below, by accident.
   const yielding = useUiStore((s) => shouldYield(s.runs));
   const shell = useUiStore((s) => s.agentShell);
+  const web = useUiStore((s) => s.agentWebAccess);
   const connectors = useUiStore((s) => s.agentConnectors);
   const issuePrefixes = useUiStore((s) => s.issuePrefixes);
 
@@ -120,14 +135,25 @@ export function useJobRunner(): void {
   // have. A vault with neither gets no interval and no re-render-per-minute.
   // The hook lives in JobRunnerHost (a null-rendering component) for the same
   // reason: its state churn must not reconcile the whole App tree.
+  //
+  // M63.1: the open vault's pending wakes, as `wakesPending` last read them,
+  // `null` when that read FAILED: gated, not empty, so no woken run is
+  // derived and nothing is cancelled. Kept per vault by its tag, so a list
+  // read in one vault is never this one's.
+  const [wakeRead, setWakeRead] = useState<{
+    vault: string;
+    wakes: readonly PendingWake[] | null;
+  } | null>(null);
+  const openWakes = wakeRead !== null && wakeRead.vault === vaultPath ? wakeRead.wakes : null;
   const needsClock = useMemo(
     () =>
+      (openWakes?.length ?? 0) > 0 ||
       entries.some(
         (e) =>
           ((isSkillEntry(e) || isAgentEntry(e)) && parseSchedule(e.properties.schedule) !== null) ||
           (isAgentEntry(e) && parseTriggers(e.properties.when).length > 0),
       ),
-    [entries],
+    [entries, openWakes],
   );
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -143,16 +169,15 @@ export function useJobRunner(): void {
   // next app start asks again. Held here, neither is re-asked at every
   // settle in the meantime — a read→fail→rescan hot loop, or a gate decision
   // and a run-log row every few seconds. A schedule's next fire is a new run
-  // key, so it is not held. An event run is not retried: events are never
-  // stored, and the first scan after a launch emits none.
+  // key, so it is not held. A woken run is held only when its start failed:
+  // a deferred wake waits in Rust with its own time to try again (M63.1).
   // Vault-scoped like skillRuns and for the same reason (PR #5 review): fire
   // keys are calendar values, so a flat map would let one vault's held run
   // suppress the SAME record in a vault opened later this session. Keyed by
   // the slot, never the path: one agent record holds two lanes, its
-  // schedule's and its `#event` one, and keyed by path each lane's failure
-  // overwrote the other's, so the two took turns reading, failing and
-  // rescanning every settle — AUTOMATION-2's shared slot, again; a deferral
-  // would take turns asking the gate the same way. State rather than a ref so
+  // schedule's and its `#wake` one, and keyed by path each lane's failure
+  // would overwrite the other's, so the two took turns reading, failing and
+  // rescanning every settle (AUTOMATION-2). State rather than a ref so
   // holding a run re-derives `next` and lets the jobs behind it proceed.
   const [held, setHeld] = useState<Record<string, Record<string, string>>>({});
 
@@ -221,6 +246,30 @@ export function useJobRunner(): void {
   }, [vaultPath]);
 
   /**
+   * The open vault's pending wakes, read again (M63.1). A read that fails
+   * stores `null` for that vault: no woken run is derived from it and no wake
+   * is cancelled against it, until a read succeeds. Every read that lands
+   * bumps `wakesRevision` (M63.1b), so the lobby's wake list reads again.
+   */
+  const refreshWakes = useCallback(async (): Promise<void> => {
+    const vault = useVaultStore.getState().vaultPath;
+    if (vault === null) return;
+    let wakes: PendingWake[] | null;
+    try {
+      wakes = await wakesPending(vault);
+    } catch {
+      wakes = null;
+    }
+    if (useVaultStore.getState().vaultPath !== vault) return;
+    setWakeRead({ vault, wakes });
+    useUiStore.getState().noteWakesChanged();
+  }, []);
+  useEffect(() => {
+    if (vaultPath === null || !ledgersReady) return;
+    void refreshWakes();
+  }, [ledgersReady, now, refreshWakes, vaultPath]);
+
+  /**
    * What changed since the last scan (M17.12) — the trigger event source.
    *
    * The runner's own memory of what it has already looked at, rather than
@@ -229,35 +278,87 @@ export function useJobRunner(): void {
    * was just created" and fires every trigger at once — and the first scan of
    * a vault switched to, or back to, is a first scan too. Diffed against the
    * vault it replaced, every note in the new one read as created. See
-   * `observeScan`, which owns that rule.
+   * `observeScan`, which owns that rule. Changes made while the app was
+   * closed are therefore never admitted.
+   *
+   * M63.1: while Learn on its own is on, each scan's matches become wake
+   * offers (engine/wakes.ts), held per vault until Rust admits them, at most
+   * UNADMITTED_CAP. An admission that fails keeps its batch for the next
+   * scan or the minute tick; nothing is dropped. A vault switch drops the
+   * other vault's batch: nothing the last vault produced is this one's.
    */
   const seen = useRef<ScanBaseline | null>(null);
-  const [scanned, setScanned] = useState<{
-    vault: string;
-    events: readonly VaultEvent[];
-  } | null>(null);
+  const unadmitted = useRef<{ vault: string; offers: WakeOffer[] } | null>(null);
+  const admitting = useRef(false);
+  const admit = useCallback(async (): Promise<void> => {
+    const held = unadmitted.current;
+    if (admitting.current || held === null || held.offers.length === 0) return;
+    if (useVaultStore.getState().vaultPath !== held.vault) return;
+    const batch = held.offers.slice();
+    admitting.current = true;
+    try {
+      await admitWakes(held.vault, batch);
+      // Only what was sent: a scan that landed meanwhile keeps its offers.
+      if (unadmitted.current?.vault === held.vault) {
+        unadmitted.current.offers = unadmitted.current.offers.slice(batch.length);
+      }
+      await refreshWakes();
+    } catch {
+      // Kept for the next scan or the minute tick: a failed admission is
+      // offered again, never dropped.
+    } finally {
+      admitting.current = false;
+    }
+  }, [refreshWakes]);
   useEffect(() => {
     if (entriesVault === null) return;
     const scan = observeScan(seen.current, entriesVault, entries);
     seen.current = scan.baseline;
-    // Replaced, never appended: an event stays on offer until a scan finds
-    // something new, so in a quiet vault one the cooldown held back is
-    // offered again on every derivation, while one that already ran is held
-    // off by its `#event` slot (engine/jobs.ts). Dropped outright when the
-    // snapshot is another vault's: nothing the last vault produced is this
-    // one's, switching back included.
-    setScanned((last) =>
-      scan.events.length > 0
-        ? { vault: entriesVault, events: scan.events }
-        : last !== null && last.vault !== entriesVault
-          ? null
-          : last,
+    if (unadmitted.current !== null && unadmitted.current.vault !== entriesVault) {
+      unadmitted.current = null;
+    }
+    if (!autoLearn) return;
+    const offers = wakeOffers(entries, scan.events);
+    if (offers.length > 0) {
+      const held = unadmitted.current?.offers ?? [];
+      unadmitted.current = {
+        vault: entriesVault,
+        offers: [...held, ...offers].slice(-UNADMITTED_CAP),
+      };
+    }
+    if (entriesVault === vaultPath) void admit();
+    // `autoLearn` and `vaultPath` are read, not listened to: a scan is what
+    // offers, and the minute tick below retries.
+  }, [entries, entriesVault]); // eslint-disable-line react-hooks/exhaustive-deps -- a scan offers once per new snapshot; re-running on a toggle would diff the same snapshot against itself
+  useEffect(() => {
+    void admit();
+  }, [admit, now]);
+
+  /**
+   * Cancel what the vault no longer backs (M63.1): a wake whose agent is gone
+   * or paused on its record, whose trigger was edited away, or whose page is
+   * gone. Only against the open vault's own entries, never an empty snapshot,
+   * only while Learn on its own is on, and only from a read that succeeded.
+   * Ids sent are held until their answer, so a re-render sends none twice.
+   */
+  const cancelling = useRef(new Set<string>());
+  useEffect(() => {
+    if (!autoLearn || vaultPath === null || entriesVault !== vaultPath || entries.length === 0) {
+      return;
+    }
+    if (openWakes === null) return;
+    const verdicts = wakeVerdicts(entries, openWakes).filter(
+      (v) => !cancelling.current.has(v.wakeId),
     );
-  }, [entries, entriesVault]);
-  // Read through the tag as well: the render in which a new vault's snapshot
-  // first appears still holds the old vault's events, until the effect above
-  // drops them.
-  const events = scanned !== null && scanned.vault === entriesVault ? scanned.events : NO_EVENTS;
+    if (verdicts.length === 0) return;
+    for (const v of verdicts) cancelling.current.add(v.wakeId);
+    void cancelWakes(vaultPath, verdicts)
+      .then(() => refreshWakes())
+      .catch(() => undefined)
+      .finally(() => {
+        for (const v of verdicts) cancelling.current.delete(v.wakeId);
+      });
+  }, [autoLearn, entries, entriesVault, openWakes, refreshWakes, vaultPath]);
 
   const today = todayIso();
   const next: AgentJob | null = useMemo(() => {
@@ -276,7 +377,8 @@ export function useJobRunner(): void {
         // vault read as already run.
         skillRuns: skillRuns[vaultPath] ?? {},
         now,
-        events,
+        // Absent when the read failed or has not landed: no woken run.
+        ...(openWakes === null ? {} : { wakes: openWakes }),
         triggerRuns: triggerRuns[vaultPath] ?? {},
       }).find(
         (j) =>
@@ -294,7 +396,7 @@ export function useJobRunner(): void {
     entries,
     entriesVault,
     held,
-    events,
+    openWakes,
     ledgersReady,
     now,
     skillRuns,
@@ -347,7 +449,9 @@ export function useJobRunner(): void {
     }
     // Whatever it just wrote is on disk and nowhere else until this runs.
     void rescan();
-  }, [rescan]);
+    // And the wakes it finished, coalesced or left waiting (M63.1).
+    void refreshWakes();
+  }, [refreshWakes, rescan]);
 
   // M17.3 deleted two whole mechanisms here. The chat used to PREEMPT this
   // runner — kill its child, wait up to 5s for `learningPath` to clear, then
@@ -415,6 +519,10 @@ export function useJobRunner(): void {
       // run's row says so.
       const ceiling: ShellCeiling =
         job.kind === 'agent' ? effectiveCeiling(shell, agent?.shell ?? false) : 'off';
+      // M57.7 — the web the same way: only an Agent record declaring
+      // `tools: web`, under Web access in Settings. A skill, a lane job and a
+      // record that does not declare it never get it.
+      const webCeiling = job.kind === 'agent' && web && (agent?.web ?? false);
       // What this run's prompts may name (M54.7): its narrowed tools, the
       // shell its ceiling plans for an unwatched run, less a read limit
       // (M53.5), and nobody watching.
@@ -422,6 +530,13 @@ export function useJobRunner(): void {
         tools: grantedTools(narrowing),
         shell: holdsShell({
           shell: ceiling,
+          attended: false,
+          readScoped: agent?.readScope != null,
+          narrowing,
+        }),
+        web: holdsWeb({
+          shell: ceiling,
+          web: webCeiling ? 'on' : 'off',
           attended: false,
           readScoped: agent?.readScope != null,
           narrowing,
@@ -454,7 +569,7 @@ export function useJobRunner(): void {
          * as answered the next time it is open. Nothing is held: the next
          * time that vault is open, the job is simply due again. */
         const abandon = () => {
-          if (claimed) {
+          if (claimed && job.ledger !== 'wakes') {
             useUiStore.getState().forgetJobRecord(vaultPath, job.ledger, job.key, job.runKey);
             void jobLedgerUnclaim(vaultPath, job.ledger, job.key, job.runKey).catch(
               () => undefined,
@@ -480,35 +595,12 @@ export function useJobRunner(): void {
               return;
             }
           }
-          // What woke an event run: the path and the trigger's words ride the
-          // request as its cause, which Rust quotes into the run's message as
-          // data (M56.7). The trigger's `ask:` and `do:` go to the prompt —
-          // layer two, reached only because layer one already passed
-          // deterministically, with no model consulted (M17.12).
-          const event = job.runKey.startsWith('event:')
-            ? (events.find((e) => job.runKey.endsWith(`:${e.path}@${e.entry.modifiedAt}`)) ?? null)
-            : null;
-          const trigger =
-            event === null
-              ? null
-              : firstMatch(
-                  parseTriggers(
-                    useVaultStore.getState().entries.find((e) => e.path === job.path)?.properties
-                      .when,
-                  ),
-                  event,
-                );
-          const woken =
-            event === null || trigger === null
-              ? null
-              : {
-                  subject: event.path,
-                  because: describeTrigger(trigger)
-                    .replace(/^When /, '')
-                    .replace(/\.$/, ''),
-                  ...(trigger.ask === undefined ? {} : { ask: trigger.ask }),
-                  ...(trigger.do === undefined ? {} : { do: trigger.do }),
-                };
+          // What woke a woken run (M63.1): its wake's cause, which Rust
+          // stored at admission and quotes into the run's message as data.
+          // The trigger's `ask:` and `do:` go to the prompt — layer two,
+          // reached only because layer one already passed deterministically,
+          // with no model consulted (M17.12).
+          const woken = job.wake ?? null;
           // M33.8 — push the state that goes stale, rather than trusting the
           // agent's own notes about it. Both reads degrade to omitting their
           // line: this is a human-action path in every sense that matters, and
@@ -559,8 +651,8 @@ export function useJobRunner(): void {
                   woken === null
                     ? null
                     : {
-                        ...(woken.ask === undefined ? {} : { ask: woken.ask }),
-                        ...(woken.do === undefined ? {} : { do: woken.do }),
+                        ...(woken.trigger.ask === undefined ? {} : { ask: woken.trigger.ask }),
+                        ...(woken.trigger.do === undefined ? {} : { do: woken.trigger.do }),
                       },
                   agent?.scope ?? null,
                   agent?.readScope ?? null,
@@ -638,8 +730,9 @@ export function useJobRunner(): void {
             // record is fixed (Q12).
             model: agent?.model ?? null,
             effort: agent?.effort ?? null,
-            // The ceiling worked out above, never the Settings one itself.
+            // The ceilings worked out above, never the Settings ones themselves.
             shell: ceiling,
+            web: webCeiling,
             // M17.13/M17.8: the record's own declarations, enforced in Rust.
             // Each is a narrowing — none can widen what Settings granted —
             // and the tools are the narrowing the grant above was read from.
@@ -669,14 +762,46 @@ export function useJobRunner(): void {
             // ingest share one budget and one deferral record.
             lane: job.kind,
             // Why it started (M56.7): admitted by Rust, written with the
-            // run's row, and opening its message as quoted data.
+            // run's row, and opening its message as quoted data. A woken
+            // run names none: its cause is its wake's (M63.1).
             cause: causeOfJob(
               job,
-              woken,
               typeof entry?.properties.schedule === 'string' ? entry.properties.schedule : null,
             ),
+            // M63.1: the wake it claims inside the dispatch transaction, and
+            // the due wakes of the same trigger it takes with it.
+            ...(woken === null ? {} : { wake: { claim: woken.claim, coalesce: woken.coalesce } }),
             approvedStdio: useUiStore.getState().stdioApprovals[vaultPath] ?? [],
           });
+          if ('settled' in start) {
+            // M63.1: the wake was no longer pending, expired, or its agent's
+            // pause cancelled it. Nothing ran and nothing is owed: no row.
+            await refreshWakes();
+            finish();
+            return;
+          }
+          if ('deferred' in start && woken !== null) {
+            // M63.1: the wake stays pending in Rust with its own time to try
+            // again, so nothing is held or given back. One row, the first
+            // time it is deferred, so a long wait is not a row a minute.
+            if (woken.deferredBefore === null) {
+              useRunLogStore.getState().append({
+                id: `rl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+                at: new Date().toISOString(),
+                owner: 'job',
+                label: job.title,
+                source: job.path,
+                trigger: 'event',
+                scope: agent?.scope ?? null,
+                files: [],
+                status: 'deferred',
+                error: `deferred by the budget gate: ${start.deferred.join(', ')}`,
+              });
+            }
+            await refreshWakes();
+            finish();
+            return;
+          }
           if ('deferred' in start) {
             // The gate said "not now" — over a ceiling, paused, accounting
             // unknown. One honest row, and the claim gives back both records
@@ -685,24 +810,24 @@ export function useJobRunner(): void {
             // the next launch starts from its localStorage mirror, and a
             // record left there comes back as answered
             // (uiStore.forgetJobRecord). So the next launch asks again: a
-            // schedule's open fire or a concept recheck still due. A
-            // deferred EVENT run is not retried: events are
-            // never stored, and the first scan after a launch emits none.
+            // schedule's open fire or a concept recheck still due.
             // Within this session the run is `held` instead, and held FIRST,
             // so no render offers it again: re-asking at every settle would
             // be a gate decision and a run-log row every few seconds.
             hold();
-            useUiStore.getState().forgetJobRecord(vaultPath, job.ledger, job.key, job.runKey);
-            void jobLedgerUnclaim(vaultPath, job.ledger, job.key, job.runKey).catch(
-              () => undefined,
-            );
+            if (job.ledger !== 'wakes') {
+              useUiStore.getState().forgetJobRecord(vaultPath, job.ledger, job.key, job.runKey);
+              void jobLedgerUnclaim(vaultPath, job.ledger, job.key, job.runKey).catch(
+                () => undefined,
+              );
+            }
             useRunLogStore.getState().append({
               id: `rl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
               at: new Date().toISOString(),
               owner: 'job',
               label: job.title,
               source: job.path,
-              trigger: job.runKey.startsWith('event:') ? 'event' : 'schedule',
+              trigger: 'schedule',
               scope: agent?.scope ?? null,
               files: [],
               status: 'deferred',
@@ -727,8 +852,8 @@ export function useJobRunner(): void {
           // spawn, so a deferred run starts no cooldown. Fire and forget —
           // a clock is not a claim, and a stamp that failed only costs one
           // extra cooldown check on the next launch. Under `cooldownKey`,
-          // never `key`: an event run's `key` is its `#event` slot, where the
-          // cooldown check never looks (AUTOMATION-2, AgentJob.cooldownKey).
+          // the agent's bare identity the check reads, never the job's own
+          // `key` (AgentJob.cooldownKey).
           if (job.cooldownKey !== null) {
             const at = new Date().toISOString();
             useUiStore.getState().recordTriggerRun(vaultPath, job.cooldownKey, at);
@@ -747,7 +872,9 @@ export function useJobRunner(): void {
                 ? job.kind === 'agent' || job.kind === 'scheduled'
                   ? 'schedule'
                   : job.kind
-                : `event: ${woken.because}`,
+                : `event: ${triggerWords(woken.trigger)}${
+                    woken.coalesce.length > 0 ? ` (+${woken.coalesce.length} more)` : ''
+                  }`,
             scope: agent?.scope ?? null,
             // Absent in the browser, where there is no row to point at.
             ...(durableId === null ? {} : { durableId }),
@@ -755,10 +882,7 @@ export function useJobRunner(): void {
             // log can say when this run was owed — and, on a catch-up after a
             // closed weekend, how late it ran. Late is not failed.
             ...(() => {
-              const due =
-                job.ledger === 'skillRuns' && !job.runKey.startsWith('event:')
-                  ? fireKeyDate(job.runKey)
-                  : null;
+              const due = job.ledger === 'skillRuns' ? fireKeyDate(job.runKey) : null;
               return due === null ? {} : { dueAt: due.toISOString() };
             })(),
           };
@@ -788,7 +912,7 @@ export function useJobRunner(): void {
               owner: 'job',
               label: job.title,
               source: job.path,
-              trigger: job.runKey.startsWith('event:') ? 'event' : 'schedule',
+              trigger: job.wake !== undefined ? 'event' : 'schedule',
               scope: agent?.scope ?? null,
               files: [],
               status: 'failed',
@@ -806,11 +930,7 @@ export function useJobRunner(): void {
       })();
     }, SETTLE_MS);
     return () => clearTimeout(timer);
-    // `events` is read inside the timer to describe what woke a run. Listed
-    // because it is genuinely read — and harmless as a dep: it only changes
-    // when a scan produced something new or a vault switch dropped it, which
-    // is also when `next` changes.
-  }, [connectors, events, finish, issuePrefixes, next, shell, vaultPath, yielding]);
+  }, [connectors, finish, issuePrefixes, next, refreshWakes, shell, vaultPath, web, yielding]);
 }
 
 /** Mounts the runner where its minute tick re-renders nothing but itself. */

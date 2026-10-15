@@ -143,7 +143,8 @@ export function RecordTabs({
   // A view tab being re-pointed through "Change source…" (M45.4).
   const [changingSource, setChangingSource] = useState<string | null>(null);
   // A tab points at per-record section content, and removing the pointer is
-  // one click from an ordinary tab click — the app has no undo, so ask.
+  // one click from an ordinary tab click — removing a tab is not undoable,
+  // so ask.
   const [deleting, setDeleting] = useState<TabDef | null>(null);
 
   // Horizontal, because the tabs are — arrow keys on the grip follow the axis.

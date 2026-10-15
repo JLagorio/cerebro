@@ -220,15 +220,19 @@ export async function getModifiedFiles(_vault: string): Promise<ModifiedFile[]> 
 /** As git_commands.rs `git_discard_file` (M58.1, Q2): a person's write, so
  * knowledge/ is refused like every human door refuses it, and the discard is
  * logged as theirs, a restored file as a write and a removed untracked one
- * as a delete. */
+ * as a delete. The path is one file, matched literally as status.rs's
+ * `--literal-pathspecs` matches it: an empty or `.` segment is refused, and
+ * a path with no change at it has nothing to discard. */
 export async function gitDiscardFile(_vault: string, path: string): Promise<void> {
   guardHumanWrite(path);
+  if (path.split('/').some((part) => part === '' || part === '.')) {
+    throw new Error(`refusing a path that names no one file: ${path}`);
+  }
   const s = state();
   const file = s.modified.find((f) => f.path === path);
+  if (file === undefined) throw new Error(`nothing to discard at ${path}`);
   s.modified = s.modified.filter((f) => f.path !== path);
-  if (file !== undefined) {
-    logHumanWrite(file.status === 'untracked' ? 'vault.delete' : 'vault.write', path);
-  }
+  logHumanWrite(file.status === 'untracked' ? 'vault.delete' : 'vault.write', path);
 }
 
 /** A commit's parent: the one it names, else the next commit in the log. */

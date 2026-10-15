@@ -14,6 +14,7 @@ import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
 import { GitHistoryPanel } from '@/git/GitHistoryPanel';
 import { InlineDiff } from '@/git/InlineDiff';
 import { spliceTitleIntoBlocks } from '@/editor/markdown';
+import { localDateOf } from '@/engine/dates';
 import { UNTYPED_LABEL } from '@/engine/destinations';
 import { sourceFreshness } from '@/engine/ingest';
 import { resolveLayout } from '@/engine/layout';
@@ -28,6 +29,7 @@ import { setNoteTitle } from '@/lib/ipc';
 import { todayIso } from '@/lib/templates';
 import { useNavStore } from '@/stores/navStore';
 import { ownsEscape, useLayer } from '@/components/ui/layers';
+import { useKeyScope } from '@/lib/keys/useKeys';
 import { useEntry, useSchema, useVaultStore } from '@/stores/vaultStore';
 import { dragCeiling, fitWidth } from '@/app/shellLayout';
 import {
@@ -61,7 +63,8 @@ function SourceFreshnessLine({ entry }: { entry: Entry }) {
     // looking fine.
     freshness.fetchedAt === null
       ? 'fetch not recorded'
-      : `fetched ${freshness.fetchedAt.slice(0, 10)}`;
+      : // The day this machine's clock said, not UTC's (M61.8).
+        `fetched ${localDateOf(freshness.fetchedAt).slice(0, 10)}`;
   return (
     <div
       data-testid="detail-source-freshness"
@@ -139,7 +142,10 @@ function KnowledgeSection({ entry }: { entry: Entry }) {
  * anything the panel contains, since child effects run before their parent's.
  */
 function DetailEscapeLayer({ onClose }: { onClose: () => void }) {
-  const id = useLayer();
+  // Not modal (M65.1, SHELL-2 §8): the peek docks beside the page rather than
+  // over it, so the keymap's letters keep working on the page while it is
+  // open. It still takes its own Escape, and still counts for `hasLayers`.
+  const id = useLayer({ modal: false });
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
@@ -260,6 +266,9 @@ export function DetailPanel({
     // over the newly renamed file.
     editorRef.current = null;
   }, [entry?.path, showsBody]);
+  // M65.1: the record peek is its own key scope, under app; what it holds
+  // binds its peek commands here.
+  const peekScope = useKeyScope('peek');
 
   if (!detailPath || !entry) return null;
 
@@ -350,125 +359,127 @@ export function DetailPanel({
       // pass. `drawn` is the same arithmetic measured, for the handle.
       className="cb-panel-in relative z-30 flex h-full shrink flex-col border-l border-n-200 bg-n-0"
       style={{ width, minWidth: RIGHT_PANEL_MIN_WIDTH }}
+      {...peekScope.props}
     >
-      {/* First, so the panel is on the stack before anything it contains. */}
-      <DetailEscapeLayer onClose={closeDetail} />
-      <ResizeHandle
-        label="Resize detail panel"
-        side="left"
-        width={drawn}
-        preferred={width}
-        min={DETAIL_WIDTH_MIN}
-        max={dragCeiling(room, DETAIL_WIDTH_MAX)}
-        onResize={setWidth}
-      />
-      <header className="flex items-center gap-2 border-b border-n-100 px-4 py-3">
-        {/* M9.6: one resolver everywhere — a Risk looks like a Risk in the
+      <peekScope.Provider>
+        {/* First, so the panel is on the stack before anything it contains. */}
+        <DetailEscapeLayer onClose={closeDetail} />
+        <ResizeHandle
+          label="Resize detail panel"
+          side="left"
+          width={drawn}
+          preferred={width}
+          min={DETAIL_WIDTH_MIN}
+          max={dragCeiling(room, DETAIL_WIDTH_MAX)}
+          onResize={setWidth}
+        />
+        <header className="flex items-center gap-2 border-b border-n-100 px-4 py-3">
+          {/* M9.6: one resolver everywhere — a Risk looks like a Risk in the
             panel, the table, QuickOpen, and the assistant's transcript. */}
-        <span
-          className="inline-flex"
-          style={{ color: typeStyle(entry.type, schema).color ?? 'var(--n-500)' }}
-        >
-          <Icon name={typeStyle(entry.type, schema).icon} size={14} />
-        </span>
-        {/* One line at the 320px floor (M52): it wrapped to "Key / result".
+          <span
+            className="inline-flex"
+            style={{ color: typeStyle(entry.type, schema).color ?? 'var(--n-500)' }}
+          >
+            <Icon name={typeStyle(entry.type, schema).icon} size={14} />
+          </span>
+          {/* One line at the 320px floor (M52): it wrapped to "Key / result".
             The type gives first, to an ellipsis — the icon beside it still
             says what it is — and the key, the record's own name, not at all. */}
-        <span
-          data-testid="detail-type"
-          title={entry.type ?? UNTYPED_LABEL}
-          className="min-w-0 truncate text-xs font-medium text-n-700"
-        >
-          {entry.type ?? UNTYPED_LABEL}
-        </span>
-        {key !== '' && (
-          <span className="flex-none whitespace-nowrap [font-family:var(--font-mono)] text-2xs text-n-500">
-            {key}
+          <span
+            data-testid="detail-type"
+            title={entry.type ?? UNTYPED_LABEL}
+            className="min-w-0 truncate text-xs font-medium text-n-700"
+          >
+            {entry.type ?? UNTYPED_LABEL}
           </span>
-        )}
-        {/* M9.3/M12.5: opening a record no longer drags you to its container,
+          {key !== '' && (
+            <span className="flex-none whitespace-nowrap [font-family:var(--font-mono)] text-2xs text-n-500">
+              {key}
+            </span>
+          )}
+          {/* M9.3/M12.5: opening a record no longer drags you to its container,
             so the container becomes something you press rather than something
             that happens to you. Hidden when you are already standing on it. */}
-        {container !== null && containerFolder !== null && (
-          <>
-            <span aria-hidden className="text-2xs text-n-300">
-              /
-            </span>
-            <button
-              type="button"
-              data-testid="detail-collection-crumb"
-              onClick={() => navigate({ kind: 'collection', folder: containerFolder })}
-              className="inline-flex min-w-0 items-center gap-1 rounded-md border-0 bg-transparent px-1 py-0.5 text-xs text-n-500 hover:bg-n-50 hover:text-n-800"
-            >
-              <Icon name="folder-open" size={11} />
-              <span className="truncate">{container.title}</span>
-            </button>
-          </>
-        )}
-        {/* M16.11: everything Notion's peek header offers that means anything
+          {container !== null && containerFolder !== null && (
+            <>
+              <span aria-hidden className="text-2xs text-n-300">
+                /
+              </span>
+              <button
+                type="button"
+                data-testid="detail-collection-crumb"
+                onClick={() => navigate({ kind: 'collection', folder: containerFolder })}
+                className="inline-flex min-w-0 items-center gap-1 rounded-md border-0 bg-transparent px-1 py-0.5 text-xs text-n-500 hover:bg-n-50 hover:text-n-800"
+              >
+                <Icon name="folder-open" size={11} />
+                <span className="truncate">{container.title}</span>
+              </button>
+            </>
+          )}
+          {/* M16.11: everything Notion's peek header offers that means anything
             in a files-first app — see the docblock for the three that do
             not. One group that never shrinks (M52): at the 320px floor the
             controls were squeezed under their own icons and Close was pushed
             past the panel's edge, so the type label is what gives. */}
-        <span className="ml-auto flex flex-none items-center gap-0.5">
-          <DetailHeaderActions
-            entry={entry}
-            drawn={drawn}
-            room={room}
-            besideAssistant={besideAssistant}
-          />
-          <IconButton icon="x" label="Close" size="sm" onClick={closeDetail} />
-        </span>
-      </header>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5 pt-3.5">
-        {/* M55.11 — the page's cover and icon, the peek twin of the page's
+          <span className="ml-auto flex flex-none items-center gap-0.5">
+            <DetailHeaderActions
+              entry={entry}
+              drawn={drawn}
+              room={room}
+              besideAssistant={besideAssistant}
+            />
+            <IconButton icon="x" label="Close" size="sm" onClick={closeDetail} />
+          </span>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5 pt-3.5">
+          {/* M55.11 — the page's cover and icon, the peek twin of the page's
             (M45.6). The header's type glyph above stays: it names the type. */}
-        <div className="-mx-4 -mt-3.5 mb-3.5 empty:hidden">
-          <PageCoverBand entry={entry} editable={!isKnowledgePath(entry.path)} variant="peek" />
-        </div>
-        <PageIconHeader
-          entry={entry}
-          editable={!isKnowledgePath(entry.path)}
-          variant="peek"
-          className="mb-3.5"
-        >
-          <input
-            data-testid="detail-title"
-            aria-label="Title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onBlur={() => void commitTitle()}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-              if (e.key === 'Escape') {
-                e.stopPropagation();
-                setTitle(entry.title);
-              }
-            }}
-            // focus-visible + the shared --ring token: every other control in
-            // the app uses that halo and suppresses it on plain mouse clicks.
-            className="-ml-2 min-w-0 flex-1 rounded-lg border border-transparent px-2 py-1 text-lg font-semibold leading-[22px] tracking-[-0.01em] text-n-900 outline-none hover:border-n-200 focus-visible:border-cortex-500 focus-visible:shadow-[var(--ring)]"
-          />
-        </PageIconHeader>
-        {/* M45.1 — the key-property strip, with the expander that opens the
+          <div className="-mx-4 -mt-3.5 mb-3.5 empty:hidden">
+            <PageCoverBand entry={entry} editable={!isKnowledgePath(entry.path)} variant="peek" />
+          </div>
+          <PageIconHeader
+            entry={entry}
+            editable={!isKnowledgePath(entry.path)}
+            variant="peek"
+            className="mb-3.5"
+          >
+            <input
+              data-testid="detail-title"
+              aria-label="Title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onBlur={() => void commitTitle()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                if (e.key === 'Escape') {
+                  e.stopPropagation();
+                  setTitle(entry.title);
+                }
+              }}
+              // focus-visible + the shared --ring token: every other control in
+              // the app uses that halo and suppresses it on plain mouse clicks.
+              className="-ml-2 min-w-0 flex-1 rounded-lg border border-transparent px-2 py-1 text-lg font-semibold leading-[22px] tracking-[-0.01em] text-n-900 outline-none hover:border-n-200 focus-visible:border-cortex-500 focus-visible:shadow-[var(--ring)]"
+            />
+          </PageIconHeader>
+          {/* M45.1 — the key-property strip, with the expander that opens the
             full stack. Keyed per record like the stack below, so field
             popovers close on switch. */}
-        {headingFields.length > 0 && (
-          <HeadingProperties
-            key={`strip:${entry.path}`}
-            entry={entry}
-            schema={schema}
-            fields={headingFields}
-            detailsShown={detailsShown}
-            // M46.1: the expander is offered on EVERY tab, because the stack
-            // it opens stands on every tab. Gating it by tab kind would
-            // strand the record's sections behind a strip with no way to
-            // open — the same hole one layer down from the one this slice
-            // closed.
-            onToggleDetails={() => setDetails({ path: entry.path, shown: !detailsShown })}
-          />
-        )}
-        {/* M3: extracted to RecordProperties — shared with the split view.
+          {headingFields.length > 0 && (
+            <HeadingProperties
+              key={`strip:${entry.path}`}
+              entry={entry}
+              schema={schema}
+              fields={headingFields}
+              detailsShown={detailsShown}
+              // M46.1: the expander is offered on EVERY tab, because the stack
+              // it opens stands on every tab. Gating it by tab kind would
+              // strand the record's sections behind a strip with no way to
+              // open — the same hole one layer down from the one this slice
+              // closed.
+              onToggleDetails={() => setDetails({ path: entry.path, shown: !detailsShown })}
+            />
+          )}
+          {/* M3: extracted to RecordProperties — shared with the split view.
             Keyed per record (prefixed: the sibling NoteBodyEditor also keys
             on the path) so the add-property flyout closes on switch.
 
@@ -477,10 +488,10 @@ export function DetailPanel({
             "tabs are only for related data sources. fields shwo above"), so
             the only thing that still hides this stack is the strip's own
             fold — and the toggle for it now renders on every tab too. */}
-        {(!stripShows || detailsShown) && (
-          <RecordProperties key={`props:${entry.path}`} entry={entry} schema={schema} />
-        )}
-        {/* The peek's own chrome (M45.6, re-placed M46.1): freshness and the
+          {(!stripShows || detailsShown) && (
+            <RecordProperties key={`props:${entry.path}`} entry={entry} schema={schema} />
+          )}
+          {/* The peek's own chrome (M45.6, re-placed M46.1): freshness and the
             knowledge loop are facts about the RECORD, not about the lens you
             have open, and a tab that hid them would make them unreachable
             from the peek rather than merely elsewhere.
@@ -494,15 +505,15 @@ export function DetailPanel({
             it. Fixed position either way: chrome that moves when you press a
             tab is worse than chrome in an awkward place. The two heavy blocks
             stay at the foot of the panel, where they have always been. */}
-        {/* M34.5.3 — a cached copy says its own freshness. Null for every
+          {/* M34.5.3 — a cached copy says its own freshness. Null for every
             record without fetch bookkeeping. */}
-        <SourceFreshnessLine entry={entry} />
-        {/* M12: records lost the doc side panel when display:doc died, and
+          <SourceFreshnessLine entry={entry} />
+          {/* M12: records lost the doc side panel when display:doc died, and
             the knowledge loop must not die with it — the same commit state
             and related-concepts view, collapsed until asked (M8.3's rule:
             the assistant never speaks first). */}
-        <KnowledgeSection key={`knowledge:${entry.path}`} entry={entry} />
-        {/* M45.6 — the peek shows the record's tabs. The user found them
+          <KnowledgeSection key={`knowledge:${entry.path}`} entry={entry} />
+          {/* M45.6 — the peek shows the record's tabs. The user found them
             missing here (2026-08-29): the strip mounted on the page and in
             the layout editor, and the peek is the surface a table row opens
             into. Same gate as the page — SAVED tabs only, because Simple
@@ -514,53 +525,53 @@ export function DetailPanel({
             page pins nothing above its scroll container anymore either.
             `-mx-4` lets the underline reach both edges of the panel while
             `gutter="sm"` keeps the tabs on this column's own 16px inset. */}
-        {savedTabs.length > 0 && activeTab !== null && (
-          <div className="-mx-4 mb-3.5">
-            <RecordTabs
-              tabs={tabs}
-              activeId={activeTab.id}
-              gutter="sm"
-              hostType={entry.type}
-              onSelect={(id) => setTabPick({ path: entry.path, id })}
-              onChange={(next) => {
-                // The vault is the store: the peek writes the type's tabs
-                // exactly as the page does. Fire-and-forget by the store-layer
-                // invariant — `setTypeTabs` toasts and returns false.
-                if (entry.type !== null)
-                  void setTypeTabs({ name: entry.type, docPath: null }, next);
-              }}
-            />
-          </div>
-        )}
-        {/* M44.1 — the type's display config gates the body; M45.6 — so does
+          {savedTabs.length > 0 && activeTab !== null && (
+            <div className="-mx-4 mb-3.5">
+              <RecordTabs
+                tabs={tabs}
+                activeId={activeTab.id}
+                gutter="sm"
+                hostType={entry.type}
+                onSelect={(id) => setTabPick({ path: entry.path, id })}
+                onChange={(next) => {
+                  // The vault is the store: the peek writes the type's tabs
+                  // exactly as the page does. Fire-and-forget by the store-layer
+                  // invariant — `setTypeTabs` toasts and returns false.
+                  if (entry.type !== null)
+                    void setTypeTabs({ name: entry.type, docPath: null }, next);
+                }}
+              />
+            </div>
+          )}
+          {/* M44.1 — the type's display config gates the body; M45.6 — so does
             the open tab (`showsBody`). DocPage's body IS the page; this is
             the peek panel's Description block. */}
-        {showsBody && (
-          <>
-            <div
-              data-testid="detail-body-heading"
-              className="mb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500"
-            >
-              Description
-            </div>
-            {/* Task 12: rich markdown editor replaces the raw textarea. Keyed by
+          {showsBody && (
+            <>
+              <div
+                data-testid="detail-body-heading"
+                className="mb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500"
+              >
+                Description
+              </div>
+              {/* Task 12: rich markdown editor replaces the raw textarea. Keyed by
                 path so switching items reloads cleanly. */}
-            <NoteBodyEditor
-              key={entry.path}
-              path={entry.path}
-              compact
-              onReady={({ editor }) => {
-                editorRef.current = editor;
-              }}
-            />
-          </>
-        )}
-        {/* M45.6 — the free-text arm: the tab's own sections, keyed by tab
+              <NoteBodyEditor
+                key={entry.path}
+                path={entry.path}
+                compact
+                onReady={({ editor }) => {
+                  editorRef.current = editor;
+                }}
+              />
+            </>
+          )}
+          {/* M45.6 — the free-text arm: the tab's own sections, keyed by tab
             because `_sections` is stored per tab id on the record itself. */}
-        {activeTab?.content === 'sections' && (
-          <TabSections key={`${entry.path}#${activeTab.id}`} entry={entry} tabId={activeTab.id} />
-        )}
-        {/* M45.6 — the view arm: the real embedded database, resolved by the
+          {activeTab?.content === 'sections' && (
+            <TabSections key={`${entry.path}#${activeTab.id}`} entry={entry} tabId={activeTab.id} />
+          )}
+          {/* M45.6 — the view arm: the real embedded database, resolved by the
             engine (a dead pointer renders the card, never an empty view).
             DECISION, weighed against rendering an honest "open the page" line
             instead: the embed is HONEST at this width. `ViewTabEmbed` is
@@ -575,38 +586,39 @@ export function DetailPanel({
             sideways, and pressing a row moves the ONE peek to that row's
             record, which is what pressing a record anywhere in this app
             does. */}
-        {activeTab?.content === 'view' && (
-          <ViewTabEmbed
-            resolution={resolveViewTab(activeTab, entry, entries, schema, views)}
-            entries={entries}
-            schema={schema}
-            scope={`viewtab:${activeTab.id}`}
-          />
-        )}
-        {/* The foot of the panel, under whatever the tab showed: the two
+          {activeTab?.content === 'view' && (
+            <ViewTabEmbed
+              resolution={resolveViewTab(activeTab, entry, entries, schema, views)}
+              entries={entries}
+              schema={schema}
+              scope={`viewtab:${activeTab.id}`}
+            />
+          )}
+          {/* The foot of the panel, under whatever the tab showed: the two
             blocks that can run long, in the place they have always held. */}
-        {/* M9.4 — every version of this note, and what each one changed.
+          {/* M9.4 — every version of this note, and what each one changed.
             Renders nothing when there is no history, so a note you just
             created does not get a heading over an empty list. */}
-        <GitHistoryPanel path={entry.path} />
-        {/* M9.7 — the diff appears under the body, not over the panel. */}
-        <InlineDiff path={entry.path} />
-      </div>
-      {/* M44.1 — opt-in muted file-path row, a quiet sibling above the
-          timestamps. Net-new: no such row existed before this task. */}
-      {display.showFile && (
-        <div
-          data-testid="detail-file"
-          className="truncate px-4 pt-1 font-mono text-2xs text-n-400"
-          title={entry.path}
-        >
-          {entry.path}
+          <GitHistoryPanel path={entry.path} />
+          {/* M9.7 — the diff appears under the body, not over the panel. */}
+          <InlineDiff path={entry.path} />
         </div>
-      )}
-      <footer className="flex items-center gap-3 border-t border-n-100 px-4 py-2.5 [font-family:var(--font-mono)] text-2xs text-n-400">
-        <span>Created {entry.createdAt.slice(0, 10)}</span>
-        <span>Modified {entry.modifiedAt.slice(0, 10)}</span>
-      </footer>
+        {/* M44.1 — opt-in muted file-path row, a quiet sibling above the
+          timestamps. Net-new: no such row existed before this task. */}
+        {display.showFile && (
+          <div
+            data-testid="detail-file"
+            className="truncate px-4 pt-1 font-mono text-2xs text-n-400"
+            title={entry.path}
+          >
+            {entry.path}
+          </div>
+        )}
+        <footer className="flex items-center gap-3 border-t border-n-100 px-4 py-2.5 [font-family:var(--font-mono)] text-2xs text-n-400">
+          <span>Created {localDateOf(entry.createdAt).slice(0, 10)}</span>
+          <span>Modified {localDateOf(entry.modifiedAt).slice(0, 10)}</span>
+        </footer>
+      </peekScope.Provider>
     </aside>
   );
 }

@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "artifact_version": 4,
+  "artifact_version": 6,
   "rule_version": "tool-approval/2026-10-14",
   "cli_version": "2.1.250",
   "min_cli_version": "2.1.250",
@@ -16,6 +16,10 @@
     "ask_first": [
       "yes",
       "no"
+    ],
+    "web": [
+      "off",
+      "on"
     ]
   },
   "run_kinds": [
@@ -49,6 +53,15 @@
     "file_write": "deny",
     "shell": "deny",
     "file_read": "deny"
+  },
+  "hidden_paths": {
+    "folders": [
+      ".trash"
+    ],
+    "tools": [
+      "Read",
+      "Edit"
+    ]
   },
   "families": [
     {
@@ -139,17 +152,20 @@
     },
     {
       "id": "web",
-      "ceiling": "none",
+      "ceiling": "web",
       "needs_default_mode": false,
       "grid": {
         "attended": {
-          "any": "cli"
+          "off": "deny",
+          "on": "allow"
         },
         "unattended": {
-          "any": "cli"
+          "off": "deny",
+          "on": "allow"
         },
         "internal": {
-          "any": "deny"
+          "off": "deny",
+          "on": "deny"
         }
       },
       "card": null,

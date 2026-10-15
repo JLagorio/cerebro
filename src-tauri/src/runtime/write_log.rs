@@ -1,9 +1,10 @@
 //! The vault-write log, read back (M58.1b).
 //!
 //! `vault_writes` (M58.1) records who wrote which file, in which run, and who
-//! allowed it. This module is the one place that reads it back, and it reads
-//! through [`ReadOnly`]: a handle SQLite refuses writes on, so a question
-//! about who changed a page can never change a row.
+//! allowed it. This module reads it back for one page or one run, and
+//! `runtime::activity` (M64.2) reads it raw for History; both read through
+//! [`ReadOnly`]: a handle SQLite refuses writes on, so a question about who
+//! changed a page can never change a row.
 //!
 //! **Who last changed a page.** [`page_attribution`] takes the newest content
 //! row for the path (a write, a create, or a rename into it — never a comment,
@@ -19,6 +20,8 @@
 //!
 //! A rename into the path is followed back to the old path's newest content
 //! row, at most [`RENAME_HOPS`] times, so a moved page keeps its last writer.
+//! A page's History tab (M64.2b) follows the same renames through
+//! [`rename_chain`], so the rows recorded under its earlier names stay its.
 //! A row whose actor is NULL reads as not recorded, never as "unattributed",
 //! which here means changed outside Cerebro (CV-05).
 //!
@@ -170,6 +173,41 @@ fn newest_content(ro: &ReadOnly, vault_id: &str, path: &str) -> Result<Option<Co
         }
     }
     Ok(None)
+}
+
+/// The names `path` has had, newest first: `path` itself, then the path each
+/// rename into it came from, at most `hops` renames back, as
+/// [`page_attribution`] follows them. A name the page held twice is listed
+/// once.
+pub(crate) fn rename_chain(
+    ro: &ReadOnly,
+    vault_id: &str,
+    path: &str,
+    hops: usize,
+) -> Result<Vec<String>, String> {
+    let mut chain = vec![path.to_string()];
+    let mut current = path.to_string();
+    let mut before = i64::MAX;
+    for _ in 0..hops {
+        let renamed = ro
+            .query_row(
+                "SELECT rowid, path FROM vault_writes WHERE vault_id = ?1 AND to_path = ?2 \
+                 AND rowid < ?3 AND kind = 'vault.rename' ORDER BY rowid DESC LIMIT 1",
+                rusqlite::params![vault_id, current, before],
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
+            )
+            .map(Some)
+            .or_else(none_when_empty)?;
+        let Some((moved, from)) = renamed else {
+            break;
+        };
+        if !chain.contains(&from) {
+            chain.push(from.clone());
+        }
+        current = from;
+        before = moved;
+    }
+    Ok(chain)
 }
 
 /// What `run_id` wrote, as its `runs.writes_booked` lets it be said.
@@ -511,6 +549,51 @@ mod tests {
             matches!(read(&dir, &vault, within, &h), Attribution::Recorded(_)),
             "{RENAME_HOPS} moves are followed"
         );
+        done(dir, conn);
+    }
+
+    #[test]
+    fn rename_chain_follows_renames_back_at_most_eight_hops() {
+        let (dir, conn, vault) = fixture("write-log-chain");
+        assert_eq!(RENAME_HOPS, 8);
+        let names: Vec<String> = (0..=RENAME_HOPS + 1).map(|i| format!("p{i}.md")).collect();
+        for (i, pair) in names.windows(2).enumerate() {
+            let mut moved = row("vault.rename", &pair[0], None);
+            moved.to = Some(&pair[1]);
+            record_at(&conn, &vault, &moved, at(i as i64)).unwrap();
+        }
+        // An unrelated rename names neither end.
+        let mut other = row("vault.rename", "x.md", None);
+        other.to = Some("y.md");
+        record_at(&conn, &vault, &other, at(20)).unwrap();
+        let ro = ReadOnly::open(&dir).unwrap();
+        let newest = names.last().unwrap();
+        let chain = rename_chain(&ro, &vault, newest, RENAME_HOPS).unwrap();
+        let expected: Vec<String> = names.iter().rev().take(RENAME_HOPS + 1).cloned().collect();
+        assert_eq!(chain, expected, "the page and its eight earlier names");
+        assert!(
+            !chain.contains(&names[0]),
+            "a ninth rename back is not followed"
+        );
+        assert_eq!(
+            rename_chain(&ro, &vault, "never-moved.md", RENAME_HOPS).unwrap(),
+            vec!["never-moved.md".to_string()]
+        );
+        drop(ro);
+
+        // A page moved away and back lists each name once.
+        let mut away = row("vault.rename", "a.md", None);
+        away.to = Some("b.md");
+        record_at(&conn, &vault, &away, at(30)).unwrap();
+        let mut back = row("vault.rename", "b.md", None);
+        back.to = Some("a.md");
+        record_at(&conn, &vault, &back, at(31)).unwrap();
+        let ro = ReadOnly::open(&dir).unwrap();
+        assert_eq!(
+            rename_chain(&ro, &vault, "a.md", RENAME_HOPS).unwrap(),
+            vec!["a.md".to_string(), "b.md".to_string()]
+        );
+        drop(ro);
         done(dir, conn);
     }
 

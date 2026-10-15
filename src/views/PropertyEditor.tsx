@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/Input';
 import {
   addFieldToType,
   changeFieldKind,
+  convertFieldToNewProperty,
   normalizeFieldName,
   removeFieldFromType,
   renameFieldOnType,
@@ -16,12 +17,17 @@ import { OptionListEditor } from '@/detail/OptionListEditor';
 import { RelationConfigEditor } from '@/detail/RelationConfigEditor';
 import { FormatRow, RollupConfigEditor } from '@/detail/RollupConfigEditor';
 import { StatusListEditor } from '@/detail/StatusListEditor';
-import type { ColumnDef } from '@/engine/columns';
-import { CREATABLE_PROPERTY_KINDS, kindMeta } from '@/engine/properties';
+import type { KindChangePreview } from '@/engine/castRules';
+import { insertColumn, type ColumnDef } from '@/engine/columns';
+import { kindMeta } from '@/engine/properties';
 import { DEFAULT_STATUSES, humanize } from '@/engine/schema';
 import { isLockedField } from '@/engine/typeCatalog';
 import type { ColumnSpec, FieldDef, Schema } from '@/engine/types';
 import { useVaultStore } from '@/stores/vaultStore';
+import { KindChangeList } from '@/views/KindChangeList';
+
+const count = (n: number, one: string, many: string): string =>
+  n === 1 ? `1 ${one}` : `${n} ${many}`;
 
 /**
  * The floating property editor (M12.8): everything about one property —
@@ -32,44 +38,70 @@ import { useVaultStore } from '@/stores/vaultStore';
  * panel on the far side of the window.
  */
 /**
- * The confirmation a kind change owes the user (M15).
+ * The confirmation a kind change owes the user (M60.5), built from the
+ * change's dry run so it says exactly what will be written.
  *
- * `changeFieldKind` rewrites EVERY record of the type on disk and drops the
- * property's option list on the way. It used to fire from a single click in a
- * submenu, with no count, no preview and no undo — a mis-aimed click on a
- * 400-record select column wrote 400 files and destroyed the options, and the
- * only recovery in the app is git.
+ * When every value converts, the field changes in place: the dialog counts
+ * the records rewritten and the filter rules dropped from the type's own
+ * views, and warns about rules elsewhere the check will flag. When some
+ * values would not convert, nothing changes in place: the dialog shows up to
+ * three of them and offers Convert into a new property, which leaves the old
+ * property and every one of its values as they are.
  */
 export function ConfirmKindChange({
   name,
-  from,
-  to,
-  count,
+  preview,
   onConfirm,
   onCancel,
 }: {
+  /** Humanized, as the user reads it on the row. */
   name: string;
-  from: FieldDef['kind'];
-  to: FieldDef['kind'];
-  /** Records of this type that will be rewritten. */
-  count: number;
+  preview: KindChangePreview;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
-  const losesOptions = from === 'select' || from === 'multiselect' || from === 'status';
+  const kind = kindMeta(preview.to).label;
+  if (!preview.lossless) {
+    const kept =
+      preview.converts === 1 ? 'the 1 value that does' : `the ${preview.converts} values that do`;
+    return (
+      <Dialog
+        open
+        onClose={onCancel}
+        title={`Convert "${name}" into a new ${kind} property?`}
+        width={440}
+        primaryAction={{ label: 'Convert into a new property', onClick: onConfirm }}
+        secondaryAction={{ label: 'Cancel', onClick: onCancel }}
+      >
+        <p className="m-0 text-sm leading-relaxed text-n-600" data-testid="kind-change-body">
+          {`${preview.failures} won't convert: ${preview.examples.join(', ')}. A new property, “${humanize(preview.newName)}”, is added after ${name} holding ${kept}. ${name} keeps every value.`}
+        </p>
+      </Dialog>
+    );
+  }
+  const rewrites =
+    preview.writes.length > 0
+      ? `Every value converts. This rewrites ${count(preview.writes.length, 'record', 'records')} on disk`
+      : 'Every value converts, and no record changes on disk';
+  const drops =
+    preview.stripped > 0
+      ? ` and drops ${count(preview.stripped, 'filter', 'filters')} ${kind} can't express`
+      : '';
+  const elsewhere =
+    preview.flaggedElsewhere > 0
+      ? ` ${count(preview.flaggedElsewhere, 'filter', 'filters')} elsewhere will show as needing attention.`
+      : '';
   return (
     <Dialog
       open
       onClose={onCancel}
-      title={`Change "${name}" to ${kindMeta(to).label}?`}
+      title={`Change "${name}" to ${kind}?`}
       width={420}
       primaryAction={{ label: 'Change type', onClick: onConfirm }}
       secondaryAction={{ label: 'Cancel', onClick: onCancel }}
     >
-      <p className="m-0 text-sm text-n-600">
-        This rewrites {count === 1 ? '1 record' : `${count} records`} on disk
-        {losesOptions ? " and discards this property's option list" : ''}. Values that cannot be
-        read as {kindMeta(to).label.toLowerCase()} are dropped. This cannot be undone from the app.
+      <p className="m-0 text-sm leading-relaxed text-n-600" data-testid="kind-change-body">
+        {`${rewrites}${drops}.${elsewhere}`}
       </p>
     </Dialog>
   );
@@ -79,16 +111,16 @@ export function ConfirmKindChange({
  * The confirmation deleting a property owes the user (M16.29).
  *
  * `removeFieldFromType` rewrites the TYPE, so one click took the property off
- * every record of that type at once, with no confirmation and no undo. The
- * cruelty was that the surface it fired from — the record panel's property
- * menu — already computes and PRINTS the blast radius in its footer ("Changes
- * Work item — 45 records") and then guarded nothing.
+ * every record of that type at once, with no confirmation (and, until M60.7,
+ * no undo). The cruelty was that the surface it fired from — the record
+ * panel's property menu — already computes and PRINTS the blast radius in its
+ * footer ("Changes Work item — 45 records") and then guarded nothing.
  *
  * What the deletion actually does is not obvious from watching it, so the
  * dialog says all three parts: how far it reaches, that the stored values stay
  * in the files and merely stop being shown, and — for the kinds that carry
- * one — that the option list and its colours go with the property. Only the
- * last is truly unrecoverable, and only git can bring it back.
+ * one — that the option list and its colours go with the property. The
+ * removal is one undoable change (M60.7): Undo puts the declaration back.
  */
 export function ConfirmDeleteProperty({
   name,
@@ -115,7 +147,6 @@ export function ConfirmDeleteProperty({
       onClose={onCancel}
       title={`Delete "${name}"?`}
       width={440}
-      footerNote="Recoverable from git history, not from the app."
       primaryAction={{ label: 'Delete', onClick: onConfirm }}
       secondaryAction={{ label: 'Cancel', onClick: onCancel }}
     >
@@ -123,10 +154,30 @@ export function ConfirmDeleteProperty({
         This changes {sourceType} — {count === 1 ? '1 record' : `${count} records`}. Each one keeps
         its {name.toLowerCase()} value in its frontmatter, but nothing in the app will show or edit
         it again until the property is declared once more.
-        {losesOptions ? " The property's option list and its colours are not kept anywhere." : ''}
+        {losesOptions ? " The property's option list and its colours go with it." : ''}
       </p>
     </Dialog>
   );
+}
+
+/**
+ * Run the change a ConfirmKindChange agreed to: in place when every value
+ * converts, else Convert into a new property, whose column lands right after
+ * the old one in the open view. Never throws (CV-03): both actions toast.
+ */
+export async function runKindChange(
+  typeName: string,
+  field: string,
+  preview: KindChangePreview,
+  columns: ColumnSpec[],
+  onColumnsChange?: (next: ColumnSpec[]) => void,
+): Promise<void> {
+  if (preview.lossless) {
+    await changeFieldKind(typeName, field, preview.to);
+    return;
+  }
+  const added = await convertFieldToNewProperty(typeName, field, preview.to);
+  if (added !== null) onColumnsChange?.(insertColumn(columns, added, field, 'right'));
 }
 
 export function PropertyEditor({
@@ -143,9 +194,10 @@ export function PropertyEditor({
   sourceType: string;
   schema: Schema;
   /**
-   * The open view's columns — a rename must follow the field it names.
-   * Optional because the detail panel (M16.7) mounts this too and has none:
-   * a record's property list IS the type's declared order, not a per-view
+   * The open view's columns: a delete prunes the field's column, and a
+   * Convert into a new property places the new one beside it. Optional
+   * because the detail panel (M16.7) mounts this too and has none: a
+   * record's property list IS the type's declared order, not a per-view
    * selection of it.
    */
   columns?: ColumnSpec[];
@@ -157,7 +209,7 @@ export function PropertyEditor({
   const entries = useVaultStore((s) => s.entries);
   const [draft, setDraft] = useState(humanize(def.name));
   const [changingKind, setChangingKind] = useState(false);
-  const [pendingKind, setPendingKind] = useState<FieldDef['kind'] | null>(null);
+  const [pendingKind, setPendingKind] = useState<KindChangePreview | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const locked = isLockedField(sourceType, def.name);
@@ -182,12 +234,10 @@ export function PropertyEditor({
     const next = draft.trim();
     if (locked || next === '' || humanize(def.name) === next) return;
     void (async () => {
+      // The batch renames every stored view's column too (M60.2), so the
+      // open view is not rewritten from these pre-rename props.
       if (await renameFieldOnType(sourceType, def.name, next)) {
-        const normalized = normalizeFieldName(next);
-        onColumnsChange?.(
-          columns.map((c) => (c.field === def.name ? { ...c, field: normalized } : c)),
-        );
-        onRenamed?.(normalized);
+        onRenamed?.(normalizeFieldName(next));
       }
     })();
   };
@@ -235,19 +285,7 @@ export function PropertyEditor({
           </button>
           {changingKind && (
             <div className="mt-1 max-h-[200px] overflow-y-auto rounded-md bg-n-25 p-0.5">
-              {CREATABLE_PROPERTY_KINDS.filter((k) => !k.computed).map((k) => (
-                <button
-                  key={k.kind}
-                  type="button"
-                  data-testid={`change-type-${k.kind}`}
-                  onClick={() => setPendingKind(k.kind)}
-                  className="flex w-full items-center gap-2 rounded-sm border-0 bg-transparent px-2 py-1 text-left text-sm text-n-700 hover:bg-n-50"
-                >
-                  <Icon name={k.icon} size={12} color="var(--n-500)" />
-                  <span className="min-w-0 flex-1">{k.label}</span>
-                  {k.kind === def.kind && <Icon name="check" size={12} color="var(--cortex-600)" />}
-                </button>
-              ))}
+              <KindChangeList typeName={sourceType} def={def} onPick={setPendingKind} />
             </div>
           )}
         </div>
@@ -330,14 +368,13 @@ export function PropertyEditor({
       {pendingKind !== null && (
         <ConfirmKindChange
           name={humanize(def.name)}
-          from={def.kind}
-          to={pendingKind}
-          count={entries.filter((e) => e.type === sourceType).length}
+          preview={pendingKind}
           onCancel={() => setPendingKind(null)}
           onConfirm={() => {
+            const preview = pendingKind;
             setPendingKind(null);
             setChangingKind(false);
-            void changeFieldKind(sourceType, def.name, pendingKind);
+            void runKindChange(sourceType, def.name, preview, columns, onColumnsChange);
           }}
         />
       )}

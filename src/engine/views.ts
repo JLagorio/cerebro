@@ -311,7 +311,9 @@ function parsePresentation(raw: unknown): Presentation {
     ...(whiteboard !== undefined ? { whiteboard } : {}),
     // M16.23 grid chrome. Every one is stored only off its default, so a view
     // file that never touched them stays byte-identical.
-    ...(obj.calendarSpan === 'week' ? { calendarSpan: 'week' as const } : {}),
+    ...(obj.calendarSpan === 'week' || obj.calendarSpan === 'day'
+      ? { calendarSpan: obj.calendarSpan }
+      : {}),
     ...(obj.showWeekends === false ? { showWeekends: false } : {}),
     ...(obj.weekStart === 'monday' ? { weekStart: 'monday' as const } : {}),
     // showTable has no single default — it is per layout — so unlike the rest
@@ -1151,7 +1153,9 @@ function serializePresentation(p: Presentation): Record<string, unknown> {
     ...(p.whiteboard !== undefined && p.whiteboard.file !== null
       ? { whiteboard: { file: p.whiteboard.file } }
       : {}),
-    ...(p.calendarSpan === 'week' ? { calendarSpan: p.calendarSpan } : {}),
+    ...(p.calendarSpan === 'week' || p.calendarSpan === 'day'
+      ? { calendarSpan: p.calendarSpan }
+      : {}),
     ...(p.showWeekends === false ? { showWeekends: false } : {}),
     ...(p.weekStart === 'monday' ? { weekStart: p.weekStart } : {}),
     ...(p.showTable !== undefined ? { showTable: p.showTable } : {}),

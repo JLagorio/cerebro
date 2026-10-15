@@ -10,26 +10,33 @@
  */
 
 import type { ChildrenSpec, Entry, FieldDef } from './types';
-import { resolveTarget } from './wikilink';
+import { resolveTarget, targetIndexFor } from './wikilink';
 
 /** targetPath → field name → entries pointing at it through that field. */
 export type RelationIndex = Map<string, Map<string, Entry[]>>;
 
-export function buildRelationIndex(entries: Entry[]): RelationIndex {
+/**
+ * Built in one pass over the vault, resolving through the shared target index
+ * (M60.9), so it costs O(links) rather than a vault scan per link.
+ */
+export function buildRelationIndex(entries: readonly Entry[]): RelationIndex {
+  const targets = targetIndexFor(entries);
   const index: RelationIndex = new Map();
   for (const source of entries) {
-    for (const [field, targets] of Object.entries(source.relationships)) {
-      for (const raw of targets) {
-        const target = resolveTarget(raw, entries);
-        if (target === null) continue;
+    for (const [field, raws] of Object.entries(source.relationships)) {
+      for (const raw of raws) {
+        const target = targets.resolveLink(raw)?.entry;
+        if (target === undefined) continue;
         let byField = index.get(target.path);
         if (byField === undefined) {
           byField = new Map();
           index.set(target.path, byField);
         }
         const bucket = byField.get(field);
+        // Sources arrive in entry order and a field's targets consecutively,
+        // so a repeat of this source can only be the last one pushed.
         if (bucket === undefined) byField.set(field, [source]);
-        else if (!bucket.includes(source)) bucket.push(source);
+        else if (bucket[bucket.length - 1] !== source) bucket.push(source);
       }
     }
   }

@@ -1281,6 +1281,10 @@ export function StructuralEditor({
     <div
       ref={rootRef}
       data-structural-editor
+      // The canvas reads plain keys (Delete, Escape) from a window listener,
+      // so the keymap's letters keep off them; ⌘Z still reaches the diagram's
+      // own undo binding around it (M65.1).
+      data-key-claim="typing"
       // `outline-none` pairs with the tabIndex below. Chromium's :focus-visible
       // heuristic counts a focus as keyboard-initiated whenever the preceding
       // interaction involved a key, so a shift-click (or any click after a
@@ -1663,9 +1667,8 @@ export function StructuralEditor({
               onBlur={commitRename}
               onClick={(e) => e.stopPropagation()}
               onKeyDown={(e) => {
-                // Only what the canvas would claim: a blanket stop also killed
-                // the app's ⌘K, because React's synthetic stopPropagation stops
-                // the native event the window listener is waiting for (M29.53).
+                // Only what the canvas would claim (M29.53); the app's keys
+                // reach the keymap in the capture phase, before this runs.
                 if (claimedByHostEditor(e)) e.stopPropagation();
                 if (e.key === 'Enter') commitRename();
                 if (e.key === 'Escape') setRenaming(null);

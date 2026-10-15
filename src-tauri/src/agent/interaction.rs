@@ -148,6 +148,12 @@ pub const STALE: &str = "No longer waiting: this request was already answered or
 pub const NOT_REMEMBERED: &str =
     "This conversation is offered only for a command or file change the shell ceiling asks about.";
 
+/// What it shows for This conversation on a call whose subject was cut
+/// (`tool_approval::subject_is_cut`): a grant on a prefix would cover every
+/// call that shares it.
+pub const NOT_REMEMBERED_CUT: &str =
+    "This conversation is not offered for a command too long to show in full. Allow it once instead.";
+
 /// What it shows for an Allow on a question card (M57.3).
 pub const ANSWER_THE_QUESTION: &str = "A question is answered with its answers.";
 
@@ -688,6 +694,10 @@ impl Refusal {
         Self::malformed(NOT_REMEMBERED)
     }
 
+    fn not_remembered_cut() -> Self {
+        Self::malformed(NOT_REMEMBERED_CUT)
+    }
+
     /// An answer that does not fit its card (M57.3), in the words given.
     fn malformed(message: impl Into<String>) -> Self {
         Self {
@@ -817,7 +827,8 @@ struct Book {
 /// so a restart asks again; at most GRANT_SESSIONS sessions of
 /// GRANT_SUBJECTS subjects each, the oldest out; a vault switch drops every
 /// other vault's. Its one writer is `remember_subject`, which only
-/// `finish_answer` calls.
+/// `finish_answer` calls. A cut subject (`tool_approval::subject_is_cut`) is
+/// never held and never covered: it names only a prefix of the call.
 #[derive(Debug, Default)]
 struct ConversationGrants {
     /// Oldest session first.
@@ -834,17 +845,22 @@ struct GrantedSession {
 
 impl ConversationGrants {
     fn covers(&self, vault: &Path, session: &str, family: &str, subject: &str) -> bool {
-        self.sessions
-            .iter()
-            .find(|s| s.vault == vault && s.session_id == session)
-            .is_some_and(|s| {
-                s.subjects
-                    .iter()
-                    .any(|(f, sub)| f == family && sub == subject)
-            })
+        !tool_approval::subject_is_cut(subject)
+            && self
+                .sessions
+                .iter()
+                .find(|s| s.vault == vault && s.session_id == session)
+                .is_some_and(|s| {
+                    s.subjects
+                        .iter()
+                        .any(|(f, sub)| f == family && sub == subject)
+                })
     }
 
     fn remember_subject(&mut self, vault: &Path, session: &str, family: &str, subject: &str) {
+        if tool_approval::subject_is_cut(subject) {
+            return;
+        }
         let at = self
             .sessions
             .iter()
@@ -1445,7 +1461,8 @@ impl Interactions {
     /// Take a person's answer: only from Waiting, in the same vault; a
     /// question card only with its answers, which must fit its questions,
     /// and answers only for a question card (M57.3); and This conversation
-    /// only for a table ask whose card offers it (M57.2, M57.4). An edited
+    /// only for a table ask whose card offers it (M57.2, M57.4), on a subject
+    /// that was not cut. An edited
     /// draft (M57.4b) only with an Allow of a write card, and only once it
     /// fits the tool's schema (`validate_input`) and `check` admits it under
     /// the run's stored request: the caller's re-check of scopes, tool grant,
@@ -1503,6 +1520,14 @@ impl Interactions {
             .is_some_and(tool_approval::offers_conversation);
         if remembers && (!offered || entry.subject.is_none()) {
             return Err(Refusal::not_remembered());
+        }
+        if remembers
+            && entry
+                .subject
+                .as_deref()
+                .is_some_and(tool_approval::subject_is_cut)
+        {
+            return Err(Refusal::not_remembered_cut());
         }
         let approval = (entry.kind == Kind::Write && matches!(answer, PersonAnswer::Allow { .. }))
             .then(|| {
@@ -2457,6 +2482,33 @@ mod tests {
         assert!(book
             .begin_answer(Path::new("/v"), &card.id, allow())
             .is_ok());
+    }
+
+    #[test]
+    fn conversation_is_refused_for_a_cut_subject() {
+        // A command past SUBJECT_CHARS shows only its prefix: a grant on that
+        // text would cover any command sharing it, so only Allow once goes.
+        let book = Interactions::with_asks(Vec::new());
+        let long = format!(
+            "{}; echo benign",
+            "x".repeat(tool_approval::SUBJECT_CHARS)
+        );
+        let card = asked(&book, "run-1", "s-1", "t1", &long);
+        assert!(tool_approval::subject_is_cut(card.subject.as_deref().unwrap()));
+        let refused = book
+            .begin_answer(Path::new("/v"), &card.id, conversation())
+            .unwrap_err();
+        assert_eq!(refused.code, MALFORMED_ARGUMENTS);
+        assert_eq!(refused.message, NOT_REMEMBERED_CUT);
+        assert!(book
+            .begin_answer(Path::new("/v"), &card.id, allow())
+            .is_ok());
+        // The store never holds nor matches a cut subject, whoever writes it.
+        let mut grants = ConversationGrants::default();
+        let cut = card.subject.unwrap();
+        grants.remember_subject(Path::new("/v"), "s-1", "shell", &cut);
+        assert!(grants.sessions.is_empty());
+        assert!(!grants.covers(Path::new("/v"), "s-1", "shell", &cut));
     }
 
     #[test]

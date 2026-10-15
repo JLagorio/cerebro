@@ -218,6 +218,36 @@ describe('SettingsPage', () => {
     });
   });
 
+  // M57.7: Web access is a second ceiling, two states, after Shell access.
+  describe('web access', () => {
+    beforeEach(() => {
+      useUiStore.setState({ agentWebAccess: false });
+      window.localStorage.removeItem('cerebro.agentWebAccess');
+    });
+
+    it('is a switch, off by default, with its hint, and it persists', async () => {
+      const user = userEvent.setup();
+      render(<SettingsPage />);
+      const web = screen.getByRole('switch', { name: 'Web access' });
+      expect((web as HTMLInputElement).checked).toBe(false);
+      expect(
+        screen.getByText(
+          "Let the assistant search the web and fetch pages with Claude Code's WebSearch and WebFetch. Pages it fetches are written down under sources/. Off — no web, even if your own Claude Code settings allow it. Cerebro's background upkeep never gets it.",
+        ),
+      ).toBeTruthy();
+      await user.click(web);
+      expect(useUiStore.getState().agentWebAccess).toBe(true);
+      expect(window.localStorage.getItem('cerebro.agentWebAccess')).toBe('true');
+    });
+
+    it('sits after Shell access', () => {
+      render(<SettingsPage />);
+      const shell = screen.getByRole('tablist', { name: 'Shell access' });
+      const web = screen.getByRole('switch', { name: 'Web access' });
+      expect(shell.compareDocumentPosition(web) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+  });
+
   // M56.4: the row a not-signed-in card's Open Settings lands on.
   describe('the Claude Code row', () => {
     const status = () => screen.getByTestId('settings-claude-code-status');

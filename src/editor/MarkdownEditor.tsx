@@ -42,10 +42,10 @@ import {
 import { Dropdown } from '@/components/ui/Dropdown';
 import { Icon } from '@/components/ui/Icon';
 import { parseSources } from '@/engine/okf';
-import { isLinkablePage, linkTargetsFor } from '@/engine/pageCard';
+import { isLinkablePage } from '@/engine/pageCard';
 import { peopleTypes } from '@/engine/properties';
 import type { Entry } from '@/engine/types';
-import { resolveTarget } from '@/engine/wikilink';
+import { linkTargetsFor, resolveTarget } from '@/engine/wikilink';
 import { readNote } from '@/lib/ipc';
 import { listTemplates, templateDisplayName, todayIso } from '@/lib/templates';
 import { useRecency } from '@/stores/openLogStore';

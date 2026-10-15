@@ -5,8 +5,11 @@ import {
   addPropertyToEntry,
   applyTypeLayout,
   changeFieldKind,
+  convertFieldToNewProperty,
   createDatabase,
+  duplicateFieldOnType,
   findTypeDoc,
+  kindChangeContext,
   normalizeFieldName,
   removeFieldFromType,
   renameFieldOnType,
@@ -16,10 +19,15 @@ import {
   setTypeViews,
   type TypeLayoutDraft,
 } from '@/app/typeActions';
+import type { BatchApplied, BatchOp } from '@/engine/batch';
+import { dryRunKindChange } from '@/engine/castRules';
+import { planFieldRename } from '@/engine/fieldRefs';
+import { buildSchema } from '@/engine/schema';
 import { recordsFolder } from '@/engine/createRecord';
+import type { Entry, ListFile } from '@/engine/types';
 import { makeEntry } from '@/test/factories';
 import { useUiStore } from '@/stores/uiStore';
-import { useVaultStore } from '@/stores/vaultStore';
+import { useVaultStore, type BatchOptions } from '@/stores/vaultStore';
 
 const typeDoc = makeEntry({
   path: 'types/recipe.md',
@@ -32,11 +40,34 @@ const typeDoc = makeEntry({
 });
 
 let patches: { path: string; patch: Record<string, unknown> }[];
+let batches: BatchOp[][];
+/** Each batch's undo label (M60.7), undefined for an unlabelled one. */
+let labels: (string | undefined)[];
 let created: Record<string, unknown>[];
 let toasts: string[];
 
+/**
+ * A store `applyBatch` (M60.6) into `log`: every batch is kept whole in
+ * `batches`; one `lands` accepts writes each patch op into `log`, and one it
+ * refuses writes nothing and answers null, as the store does.
+ */
+function batchInto(
+  log: { path: string; patch: Record<string, unknown> }[],
+  lands: (ops: BatchOp[]) => boolean = () => true,
+) {
+  return vi.fn(async (ops: BatchOp[], options?: BatchOptions): Promise<BatchApplied | null> => {
+    batches.push(ops);
+    labels.push(options?.undo);
+    if (!lands(ops)) return null;
+    for (const op of ops) if (op.op === 'patch') log.push({ path: op.path, patch: op.set });
+    return { batchId: 'b'.repeat(32), files: [] };
+  });
+}
+
 beforeEach(() => {
   patches = [];
+  batches = [];
+  labels = [];
   created = [];
   toasts = [];
   useVaultStore.setState({
@@ -47,6 +78,7 @@ beforeEach(() => {
       patches.push({ path, patch });
       return true;
     }),
+    applyBatch: batchInto(patches),
     createItem: vi.fn(async (args: Record<string, unknown>) => {
       created.push(args);
       return 'types/new.md';
@@ -164,36 +196,227 @@ describe('removeFieldFromType', () => {
 });
 
 describe('renameFieldOnType', () => {
-  // M44.1 follow-up: the per-record migration loop used to count failures
-  // inside a try/catch waiting for a rejection patchFrontmatter never
-  // produces — the `failed` counter, and the aggregate toast it gates, were
-  // dead code. This pins the now-live path: a record write that comes back
-  // `false` is counted, and the toast fires with the real count.
-  it('counts records whose value write reports false, and toasts the aggregate', async () => {
+  it('moves the Type doc and every record that holds the value, each op hashed', async () => {
+    const a = makeEntry({
+      path: 'recipes/a.md',
+      title: 'A',
+      type: 'Recipe',
+      properties: { cuisine: 'thai' },
+      hash: 'a'.repeat(64),
+    });
+    const b = makeEntry({
+      path: 'recipes/b.md',
+      title: 'B',
+      type: 'Recipe',
+      relationships: { cuisine: ['oaxaca'] },
+    });
+    useVaultStore.setState({ entries: [{ ...typeDoc, hash: 'd'.repeat(64) }, a, b] });
+    expect(await renameFieldOnType('Recipe', 'cuisine', 'flavor')).toBe(true);
+    expect(batches).toEqual([
+      [
+        {
+          op: 'patch',
+          path: 'types/recipe.md',
+          set: { fields: { flavor: { kind: 'text' } } },
+          expectHash: 'd'.repeat(64),
+        },
+        {
+          op: 'patch',
+          path: 'recipes/a.md',
+          set: { flavor: 'thai', cuisine: null },
+          expectHash: 'a'.repeat(64),
+        },
+        // No hash read, so none sent: the write still lands, unchecked.
+        { op: 'patch', path: 'recipes/b.md', set: { flavor: '[[oaxaca]]', cuisine: null } },
+      ],
+    ]);
+  });
+});
+
+/**
+ * M60.2 (CV-40): a rename is planned by `planFieldRename` and sent as ONE
+ * batch with every stored reference in it; what the plan leaves alone is
+ * named in one toast, and only after the batch lands.
+ */
+describe('renameFieldOnType follows every reference in one batch (M60.2)', () => {
+  const board = {
+    id: 'board',
+    name: 'Board',
+    icon: null,
+    filters: { all: [{ field: 'cuisine', op: 'equals', value: 'thai' }] },
+    presentation: {
+      type: 'board',
+      group: [{ field: 'cuisine' }],
+      sort: [{ field: 'cuisine', dir: 'asc' }],
+      columns: [{ field: 'cuisine' }],
+    },
+  };
+  const doc = {
+    ...typeDoc,
+    properties: {
+      ...typeDoc.properties,
+      fields: { cuisine: { kind: 'text' } },
+      views: [board],
+      layout: { heading: ['cuisine'] },
+    } as unknown as Entry['properties'],
+  };
+  const record = makeEntry({
+    path: 'recipes/a.md',
+    title: 'A',
+    type: 'Recipe',
+    properties: { cuisine: 'thai' },
+  });
+  const list = {
+    id: 'mine',
+    path: 'lists/mine.list.yml',
+    project: null,
+    collection: null,
+    definition: {
+      name: 'Mine',
+      icon: null,
+      color: null,
+      order: null,
+      source: { type: 'Recipe', project: null },
+      views: [board],
+    },
+  } as unknown as ListFile;
+
+  it('sends the plan’s ops as one batch and answers what the batch answers', async () => {
+    const entries = [doc, record];
+    useVaultStore.setState({ entries, views: [] });
+    const planned = planFieldRename(
+      { type: 'Recipe', from: 'cuisine', to: 'kitchen' },
+      { entries, schema: buildSchema(entries), lists: [] },
+    );
+    expect(await renameFieldOnType('Recipe', 'cuisine', 'Kitchen')).toBe(true);
+    if (!planned.ok) throw new Error('the plan refused');
+    expect(batches).toEqual([planned.ops]);
+    const set = batches[0][0].op === 'patch' ? batches[0][0].set : {};
+    expect(Object.keys(set).sort()).toEqual(['fields', 'layout', 'views']);
+    expect(labels).toEqual(['Renamed “Cuisine” to “Kitchen” on 2 pages']);
+    expect(toasts).toEqual([]);
+  });
+
+  it('a refused batch answers false and says nothing about flags', async () => {
+    useVaultStore.setState({
+      entries: [doc, record],
+      views: [list],
+      applyBatch: batchInto(patches, () => false),
+    });
+    expect(await renameFieldOnType('Recipe', 'cuisine', 'kitchen')).toBe(false);
+    expect(batches).toHaveLength(1);
+    expect(toasts).toEqual([]);
+  });
+
+  it('refuses a rename that would overwrite a value, and writes nothing', async () => {
+    useVaultStore.setState({
+      entries: [doc, record, { ...record, path: 'recipes/b.md', properties: { kitchen: 'x' } }],
+      views: [],
+    });
+    expect(await renameFieldOnType('Recipe', 'cuisine', 'kitchen')).toBe(false);
+    expect(batches).toEqual([]);
+    expect(toasts).toEqual(['1 record already has “kitchen”. Nothing was renamed.']);
+  });
+
+  it('names what it left alone in one toast, after the batch lands', async () => {
+    useVaultStore.setState({ entries: [doc, record], views: [list] });
+    expect(await renameFieldOnType('Recipe', 'cuisine', 'kitchen')).toBe(true);
+    expect(batches).toHaveLength(1);
+    expect(batches[0].map((op) => op.path)).not.toContain('lists/mine.list.yml');
+    expect(toasts).toEqual(['Not changed: 1 list file still names “cuisine”.']);
+  });
+});
+
+describe('removeFieldFromType waits while a board or chart groups by the field (M60.2)', () => {
+  const grouped = (type: string) => ({
+    ...typeDoc,
+    properties: {
+      ...typeDoc.properties,
+      views: [
+        {
+          id: 'sprint',
+          name: 'Sprint',
+          icon: null,
+          filters: null,
+          presentation: { type, group: [{ field: 'cuisine' }], sort: [], columns: [] },
+        },
+      ],
+    } as unknown as Entry['properties'],
+  });
+
+  it('refuses, names the view and writes nothing', async () => {
+    useVaultStore.setState({ entries: [grouped('board')], views: [] });
+    expect(await removeFieldFromType('Recipe', 'cuisine')).toBe(false);
+    expect(batches).toEqual([]);
+    expect(patches).toEqual([]);
+    expect(toasts).toEqual([
+      "Can't delete “Cuisine”: the board “Sprint” groups by it. Regroup that view first.",
+    ]);
+  });
+
+  it('a table banded by it does not block: it falls back to raw values', async () => {
+    useVaultStore.setState({ entries: [grouped('table')], views: [] });
+    expect(await removeFieldFromType('Recipe', 'cuisine')).toBe(true);
+    expect(patches).toEqual([{ path: 'types/recipe.md', patch: { fields: {} } }]);
+  });
+});
+
+/**
+ * M60.6 (CV-38): a property rename, a kind change and a copy each send the
+ * Type doc and every record they rewrite as ONE batch, the Type doc first,
+ * so a failure halfway can never leave half a database renamed.
+ */
+describe('database-wide rewrites send one batch', () => {
+  const records = () => [
+    typeDoc,
+    makeEntry({ path: 'recipes/a.md', title: 'A', type: 'Recipe', properties: { cuisine: '12' } }),
+    makeEntry({ path: 'recipes/b.md', title: 'B', type: 'Recipe', properties: { cuisine: '7' } }),
+  ];
+  const paths = () => batches.map((ops) => ops.map((op) => op.path));
+  const everyRecord = ['types/recipe.md', 'recipes/a.md', 'recipes/b.md'];
+
+  beforeEach(() => {
+    useVaultStore.setState({ entries: records(), views: [] });
+  });
+
+  it('a rename', async () => {
+    expect(await renameFieldOnType('Recipe', 'cuisine', 'flavor')).toBe(true);
+    expect(paths()).toEqual([everyRecord]);
+  });
+
+  it('a kind change', async () => {
+    expect(await changeFieldKind('Recipe', 'cuisine', 'number')).toBe(true);
+    expect(paths()).toEqual([everyRecord]);
+  });
+
+  it('a copy', async () => {
+    expect(await duplicateFieldOnType('Recipe', 'cuisine')).toBe('cuisine_copy');
+    expect(paths()).toEqual([everyRecord]);
+  });
+
+  it('a conversion into a new property', async () => {
     useVaultStore.setState({
       entries: [
-        typeDoc,
+        ...records(),
         makeEntry({
-          path: 'recipes/a.md',
-          title: 'A',
+          path: 'recipes/c.md',
+          title: 'C',
           type: 'Recipe',
           properties: { cuisine: 'thai' },
         }),
-        makeEntry({
-          path: 'recipes/b.md',
-          title: 'B',
-          type: 'Recipe',
-          properties: { cuisine: 'oaxacan' },
-        }),
       ],
-      patchFrontmatter: vi.fn(async (path: string, patch: Record<string, unknown>) => {
-        patches.push({ path, patch });
-        return path !== 'recipes/b.md';
-      }),
     });
-    const ok = await renameFieldOnType('Recipe', 'cuisine', 'flavor');
-    expect(ok).toBe(true);
-    expect(toasts).toEqual(['Renamed, but 1 record(s) kept the old value']);
+    expect(await convertFieldToNewProperty('Recipe', 'cuisine', 'number')).toBe('cuisine_number');
+    expect(paths()).toEqual([everyRecord]);
+  });
+
+  it('a refused batch writes nothing, and each change says it did not land', async () => {
+    useVaultStore.setState({ applyBatch: batchInto(patches, () => false) });
+    expect(await renameFieldOnType('Recipe', 'cuisine', 'flavor')).toBe(false);
+    expect(await changeFieldKind('Recipe', 'cuisine', 'number')).toBe(false);
+    expect(await duplicateFieldOnType('Recipe', 'cuisine')).toBeNull();
+    expect(patches).toEqual([]);
+    expect(toasts).toEqual([]);
   });
 });
 
@@ -640,10 +863,7 @@ describe('changeFieldKind keeps the wiring the new kind understands', () => {
       vaultPath: '/v',
       entries: [withField(from)],
       status: 'ready',
-      patchFrontmatter: vi.fn(async (path: string, patch: Record<string, unknown>) => {
-        patches.push({ path, patch });
-        return true;
-      }),
+      applyBatch: batchInto(patches),
     });
     await changeFieldKind('Task', 'rel', to);
     const fields = patches[0].patch.fields as Record<string, Record<string, unknown>>;
@@ -674,6 +894,183 @@ describe('changeFieldKind keeps the wiring the new kind understands', () => {
     expect(await specAfter({ kind: 'relation', target: 'Person', limit: 1 }, 'text')).toEqual({
       kind: 'text',
     });
+  });
+});
+
+/**
+ * M60.5: a kind change converts what it can and never clears a value. The
+ * acceptance fixture is the roadmap's: a text stake holding one number and
+ * three things that are not.
+ */
+describe('kind change keeps every value (M60.5)', () => {
+  const betDoc = makeEntry({
+    path: 'types/bet.md',
+    title: 'Bet',
+    type: 'Type',
+    properties: {
+      fields: {
+        status: { kind: 'status' },
+        stake: { kind: 'text' },
+        settles_by: { kind: 'date' },
+      },
+    } as unknown as Entry['properties'],
+  });
+  const bet = (n: number, stake: string) =>
+    makeEntry({
+      path: `records/bets/bet-${n}.md`,
+      title: `Bet ${n}`,
+      type: 'Bet',
+      properties: { stake } as Entry['properties'],
+    });
+  const bets = () => [betDoc, bet(1, '12'), bet(2, 'abc'), bet(3, 'n/a'), bet(4, 'TBD')];
+
+  const use = (entries: Entry[], ok: (path: string) => boolean = () => true) => {
+    useVaultStore.setState({
+      entries,
+      views: [],
+      applyBatch: batchInto(patches, (ops) => ops.every((op) => ok(op.path))),
+    });
+  };
+
+  it("reports that three won't convert to a number", () => {
+    const entries = bets();
+    const ctx = kindChangeContext(entries, [], 'Bet', 'stake');
+    const p = dryRunKindChange(ctx!, 'number');
+    expect(p.failures).toBe(3);
+    expect(p.lossless).toBe(false);
+    expect(p.newName).toBe('stake_number');
+  });
+
+  it('converts into stake_number after stake and writes only the value that converts', async () => {
+    use(bets());
+    expect(await convertFieldToNewProperty('Bet', 'stake', 'number')).toBe('stake_number');
+    expect(patches).toHaveLength(2);
+    const fields = patches[0].patch.fields as Record<string, unknown>;
+    expect(patches[0].path).toBe('types/bet.md');
+    expect(Object.keys(fields)).toEqual(['status', 'stake', 'stake_number', 'settles_by']);
+    expect(fields.stake).toEqual({ kind: 'text' });
+    expect(fields.stake_number).toEqual({ kind: 'number' });
+    expect(patches[1]).toEqual({ path: 'records/bets/bet-1.md', patch: { stake_number: 12 } });
+    // Nothing writes the old key, on the Type doc's patch or any record's.
+    expect(patches.every((p) => !('stake' in p.patch))).toBe(true);
+    expect(toasts).toEqual([]);
+  });
+
+  it('refuses the lossy change in place and writes nothing', async () => {
+    use(bets());
+    expect(await changeFieldKind('Bet', 'stake', 'number')).toBe(false);
+    expect(patches).toEqual([]);
+    expect(toasts).toEqual(['3 values no longer convert to Number; nothing was changed']);
+  });
+
+  it('writes nothing when values changed since the preview', async () => {
+    const before = [betDoc, bet(1, '12'), bet(2, '7')];
+    const preview = dryRunKindChange(kindChangeContext(before, [], 'Bet', 'stake')!, 'number');
+    expect(preview.lossless).toBe(true);
+    use([betDoc, bet(1, '12'), bet(2, 'seven')]);
+    expect(await changeFieldKind('Bet', 'stake', 'number')).toBe(false);
+    expect(patches).toEqual([]);
+    expect(toasts).toEqual(['1 value no longer converts to Number; nothing was changed']);
+  });
+
+  it('refuses a Never change with its reason', async () => {
+    const dated = [
+      makeEntry({
+        ...betDoc,
+        properties: { fields: { stake: { kind: 'date' } } } as unknown as Entry['properties'],
+      }),
+      bet(1, '2026-07-28'),
+    ];
+    use(dated);
+    expect(await changeFieldKind('Bet', 'stake', 'number')).toBe(false);
+    expect(toasts).toEqual(['Date can become only Text.']);
+    expect(patches).toEqual([]);
+  });
+
+  it('a refused batch writes nothing, and the change reports it did not land', async () => {
+    use([betDoc, bet(1, '12'), bet(2, '7')], (path) => path !== 'records/bets/bet-2.md');
+    expect(await changeFieldKind('Bet', 'stake', 'number')).toBe(false);
+    expect(batches.map((ops) => ops.map((op) => op.path))).toEqual([
+      ['types/bet.md', 'records/bets/bet-1.md', 'records/bets/bet-2.md'],
+    ]);
+    expect(patches).toEqual([]);
+    // The store toasts a refusal once; the change adds nothing of its own.
+    expect(toasts).toEqual([]);
+  });
+
+  it('strips the filters the new kind cannot express in the same Type-doc write', async () => {
+    const workItem = makeEntry({
+      path: 'types/work-item.md',
+      title: 'Work item',
+      type: 'Type',
+      properties: {
+        fields: {
+          status: { kind: 'status' },
+          priority: {
+            kind: 'select',
+            options: [
+              { id: 'urgent', color: '#DE3B4E' },
+              { id: 'high', color: '#DE8F0A' },
+            ],
+          },
+        },
+        views: [
+          {
+            id: 'at-risk-work',
+            name: 'At risk',
+            filters: {
+              all: [
+                { field: 'priority', op: 'any_of', value: ['urgent', 'high'] },
+                {
+                  any: [
+                    { field: 'status', op: 'equals', value: 'progress' },
+                    { field: 'status', op: 'equals', value: 'review' },
+                  ],
+                },
+              ],
+            },
+            presentation: { type: 'table', group: [{ field: 'status' }], sort: [], columns: [] },
+          },
+        ],
+      },
+    } as unknown as Parameters<typeof makeEntry>[0]);
+    const item = (n: number, priority: string) =>
+      makeEntry({
+        path: `items/w-${n}.md`,
+        title: `W ${n}`,
+        type: 'Work item',
+        properties: { priority } as Entry['properties'],
+      });
+    use([workItem, item(1, 'urgent'), item(2, 'high')]);
+    expect(await changeFieldKind('Work item', 'priority', 'text')).toBe(true);
+    const typePatches = patches.filter((p) => p.path === 'types/work-item.md');
+    expect(typePatches).toHaveLength(1);
+    const patch = typePatches[0].patch as {
+      fields: Record<string, unknown>;
+      views: { id: string; filters: unknown }[];
+    };
+    expect(patch.fields.priority).toEqual({ kind: 'text' });
+    expect(patch.views[0].filters).toEqual({
+      all: [
+        {
+          any: [
+            { field: 'status', op: 'equals', value: 'progress' },
+            { field: 'status', op: 'equals', value: 'review' },
+          ],
+        },
+      ],
+    });
+    // Then only the records whose value changes: each select id becomes its label.
+    expect(patches.slice(1)).toEqual([
+      { path: 'items/w-1.md', patch: { priority: 'Urgent' } },
+      { path: 'items/w-2.md', patch: { priority: 'High' } },
+    ]);
+  });
+
+  it('carries no views key when nothing was stripped', async () => {
+    use([betDoc, bet(1, '12')]);
+    expect(await changeFieldKind('Bet', 'stake', 'number')).toBe(true);
+    expect(Object.keys(patches[0].patch)).toEqual(['fields']);
   });
 });
 
@@ -776,5 +1173,39 @@ describe('createDatabase (M47.4)', () => {
     });
     expect(await createDatabase('Reading list')).toBeNull();
     expect(toasts.join(' ')).toContain("Couldn't create");
+  });
+});
+
+describe('undo labels (M60.7)', () => {
+  const record = makeEntry({
+    path: 'recipes/a.md',
+    title: 'A',
+    type: 'Recipe',
+    properties: { cuisine: 'thai' },
+    hash: 'a'.repeat(64),
+  });
+
+  it('labels each database-wide change in the words the toast reads', async () => {
+    useVaultStore.setState({ entries: [typeDoc, record] });
+    expect(await renameFieldOnType('Recipe', 'cuisine', 'kitchen')).toBe(true);
+    useVaultStore.setState({ entries: [typeDoc, record] });
+    expect(await duplicateFieldOnType('Recipe', 'cuisine')).toBe('cuisine_copy');
+    expect(labels).toEqual([
+      'Renamed “Cuisine” to “Kitchen” on 2 pages',
+      'Copied “Cuisine” on 2 pages',
+    ]);
+  });
+
+  it('removeFieldFromType is one undoable batch', async () => {
+    expect(await removeFieldFromType('Recipe', 'cuisine')).toBe(true);
+    expect(batches).toEqual([[{ op: 'patch', path: 'types/recipe.md', set: { fields: {} } }]]);
+    expect(labels).toEqual(['Deleted property “Cuisine”']);
+  });
+
+  it('a Type doc under knowledge/ keeps patchFrontmatter and is never undoable', async () => {
+    useVaultStore.setState({ entries: [{ ...typeDoc, path: 'knowledge/types/recipe.md' }] });
+    expect(await removeFieldFromType('Recipe', 'cuisine')).toBe(true);
+    expect(batches).toEqual([]);
+    expect(patches).toEqual([{ path: 'knowledge/types/recipe.md', patch: { fields: {} } }]);
   });
 });

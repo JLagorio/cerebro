@@ -3,8 +3,8 @@ import { buildSystemPrompt, SYSTEM_FRAGMENTS } from './systemPrompt';
 import { grantedTools, mentionedTools, type PromptGrant } from '@/engine/toolGrant';
 import { PRODUCT_BRIEF } from '@/lib/productBrief';
 
-/** A panel turn that holds every tool. */
-const FULL: PromptGrant = { tools: grantedTools(null), shell: true, attended: true };
+/** A panel turn that holds every tool, the web among them (M57.7). */
+const FULL: PromptGrant = { tools: grantedTools(null), shell: true, web: true, attended: true };
 
 /** A grant holding exactly `tools`. */
 const holding = (tools: string[], extra: Partial<PromptGrant> = {}): PromptGrant => ({
@@ -28,6 +28,10 @@ const IDENTITY = 'You are the assistant inside cerebro.';
 const WIKILINKS = 'When you mention a note, write it as [[note-name]] so it is clickable.';
 const SCHEMA =
   "Never create or modify `type: Type` docs on your own — schema is the user's to change. When a vault clearly needs a new type or field, describe the change and why, and let them make it (a database's own page and the adoption wizard are the human path).";
+
+/** M57.7's web line, said to a run that holds WebFetch and cache_source. */
+const WEB_LINE =
+  'Pages you fetch with WebFetch or find with WebSearch must be written down with cache_source (kind web, the URL as its id), which keeps them under sources/. Search for a copy before fetching: one fetch, a local file, and later questions read the file.';
 
 const lines = (prompt: string) => prompt.split('\n');
 
@@ -91,9 +95,13 @@ describe('buildSystemPrompt names only the tools the run holds', () => {
 
   // M53's prompt, less the two rules the server now holds (M54.7), with the
   // identity line and the product brief in place of its first two lines
-  // (M54.8). Nothing else moved.
-  it('reads as M53 did, opened by the brief and less the two server rules, under a full attended grant', () => {
+  // (M54.8), and the web line last, since a full grant holds WebFetch
+  // (M57.7). Nothing else moved.
+  it('reads as M53 did, opened by the brief, less the two server rules and closed by the web line, under a full attended grant', () => {
     expect(buildSystemPrompt({ kind: 'none' }, { grant: FULL })).toBe(
+      [IDENTITY, PRODUCT_BRIEF, TOOLS_LINE, ORGANIZE, 'Be concise.', WEB_LINE].join('\n'),
+    );
+    expect(buildSystemPrompt({ kind: 'none' }, { grant: { ...FULL, web: false } })).toBe(
       [IDENTITY, PRODUCT_BRIEF, TOOLS_LINE, ORGANIZE, 'Be concise.'].join('\n'),
     );
   });
@@ -102,8 +110,35 @@ describe('buildSystemPrompt names only the tools the run holds', () => {
     // The branch SERVER_RULES_IN_PROMPT turns on if a resumed turn stops
     // hearing the MCP instructions (the owner's live check).
     expect(buildSystemPrompt({ kind: 'none' }, { grant: FULL }, true)).toBe(
-      [IDENTITY, PRODUCT_BRIEF, TOOLS_LINE, WIKILINKS, SCHEMA, ORGANIZE, 'Be concise.'].join('\n'),
+      [
+        IDENTITY,
+        PRODUCT_BRIEF,
+        TOOLS_LINE,
+        WIKILINKS,
+        SCHEMA,
+        ORGANIZE,
+        'Be concise.',
+        WEB_LINE,
+      ].join('\n'),
     );
+  });
+
+  it('says the web line only to a run that holds WebFetch and cache_source (M57.7)', () => {
+    const said = (grant: PromptGrant) =>
+      lines(buildSystemPrompt({ kind: 'none' }, { grant })).includes(WEB_LINE);
+    expect(said(holding(['cache_source'], { web: true }))).toBe(true);
+    expect(said(holding(['cache_source'], { web: true, attended: false }))).toBe(true);
+    expect(said(holding(['cache_source'], { web: false }))).toBe(false);
+    expect(said(holding(['cache_source']))).toBe(false);
+    expect(said(holding(['get_note'], { web: true }))).toBe(false);
+    // And no prompt names the web tools to a run without them.
+    for (const connectors of [true, false]) {
+      const prompt = buildSystemPrompt(
+        { kind: 'inbox' },
+        { grant: { ...FULL, web: false }, connectors, capabilities: ['knowledge'] },
+      );
+      expect(prompt).not.toMatch(/WebFetch|WebSearch/);
+    }
   });
 
   it('keeps the M9.5 sentence byte for byte, for exactly the runs that hold propose_organize', () => {
@@ -190,7 +225,11 @@ describe('buildSystemPrompt names only the tools the run holds', () => {
     expect(lacked).not.toContain('cache_source');
     // The issue keys name no tool, so they keep their M8.2 rule: the switch alone.
     expect(lacked).toContain("This vault's issue-tracker project keys are KES, OPS.");
-    const off = buildSystemPrompt({ kind: 'none' }, { issuePrefixes: 'KES', grant: FULL });
+    // The connector line goes with the switch; the web line is the grant's.
+    const off = buildSystemPrompt(
+      { kind: 'none' },
+      { issuePrefixes: 'KES', grant: { ...FULL, web: false } },
+    );
     expect(off).not.toContain('cache_source');
     expect(off).not.toContain('issue-tracker');
   });

@@ -186,3 +186,39 @@ describe('childrenAt', () => {
     expect(childrenAt(work, chain, 2, all, index)).toEqual([]);
   });
 });
+
+// M60.9: the index is one pass over the vault through the shared target index.
+describe('buildRelationIndex', () => {
+  it('lists a source once when one field names its target twice', () => {
+    const parent = makeEntry({ path: 'objs/p.md', title: 'P', type: 'Objective' });
+    const child = makeEntry({
+      path: 'krs/c.md',
+      type: 'Key result',
+      relationships: { objective: ['p', 'P', 'p#Goals'], also: ['p'] },
+    });
+    const byField = buildRelationIndex([parent, child]).get('objs/p.md');
+    expect(byField?.get('objective')).toEqual([child]);
+    expect(byField?.get('also')).toEqual([child]);
+  });
+
+  it('reads a 2,000-record vault at most 2N times', () => {
+    const N = 2000;
+    const records = Array.from({ length: N }, (_, i) =>
+      makeEntry({
+        path: `r/rec-${i}.md`,
+        type: 'Key result',
+        relationships: { objective: [`rec-${Math.floor(i / 3)}`], peer: [`rec-${(i + 1) % N}`] },
+      }),
+    );
+    let reads = 0;
+    const array = new Proxy(records, {
+      get(target, prop, receiver) {
+        if (typeof prop === 'string' && /^\d+$/.test(prop)) reads += 1;
+        return Reflect.get(target, prop, receiver) as unknown;
+      },
+    });
+    const index = buildRelationIndex(array);
+    expect(reads).toBeLessThanOrEqual(2 * N);
+    expect(index.get('r/rec-0.md')?.get('objective')).toEqual(records.slice(0, 3));
+  });
+});

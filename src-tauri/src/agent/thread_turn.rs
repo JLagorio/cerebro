@@ -208,8 +208,8 @@ pub(crate) fn plan(
     let page = req.page.as_str();
     page_refusal(vault, entries, page)?;
     // The question quotes the page, so an agent that may not read it is not
-    // asked.
-    let read_scope = crate::mcp::frontmatter_list(record, "read-scope");
+    // asked. Its axes read as a handed-off run's do (`callee_axes`, M58.6).
+    let (scope, read_scope, allowed_tools) = crate::mcp::callee_axes(record);
     if !crate::mcp::scope_admits_landing(vault, &read_scope, page) {
         let folders = folders_words(read_scope.as_deref().unwrap_or_default());
         return Err(format!(
@@ -232,7 +232,6 @@ pub(crate) fn plan(
         .find(|e| e.path == page)
         .map_or(String::new(), |e| e.title.clone());
     let record_body = crate::vault::write::read_note(vault, &record.path).unwrap_or_default();
-    let scope = crate::mcp::frontmatter_list(record, "scope");
     let message = thread_block(page, &page_title, &page_body, &file.threads[t], m);
     let system_prompt = system_prompt(record, &actor, &scope, &read_scope, &record_body);
     let request = crate::agent::AgentRequest {
@@ -242,10 +241,12 @@ pub(crate) fn plan(
         session_id: None,
         model,
         effort,
-        // Fail closed, as a handed-to run does (Q11): the shell ceiling and
-        // the connector approvals are the person's, in the renderer, and a
-        // turn that needs either is one they start in the panel.
+        // Fail closed, as a handed-to run does (Q11): the shell and web
+        // ceilings and the connector approvals are the person's, in the
+        // renderer, and a turn that needs any of them is one they start in
+        // the panel.
         shell: Some(crate::agent::ShellCeiling::Off),
+        web: Some(false),
         connectors: Some(false),
         connector_names: Some(vec![]),
         // Unseated (Q12): nobody answers a card in a thread.
@@ -260,7 +261,7 @@ pub(crate) fn plan(
         approved_stdio: Some(vec![]),
         scope,
         read_scope,
-        allowed_tools: crate::mcp::frontmatter_list(record, "allowed-tools"),
+        allowed_tools,
         // Connectors are off, so `disallowed-tools:` has nothing to deny.
         disallowed_tools: None,
         lane: None,
@@ -1475,13 +1476,17 @@ mod tests {
         assert_eq!(req.model.as_deref(), Some("sonnet"));
         assert_eq!(req.effort.as_deref(), Some("low"));
         assert_eq!(req.ask_first, Some(true));
-        // No web either: the plan denies the CLI's web tools to a run whose
-        // shell is off.
+        // No web either: its web ceiling is off, so the plan denies the
+        // CLI's web tools in argv (M57.7).
         let approval = crate::policy::tool_approval::plan_for(req, false);
         for tool in ["WebFetch", "WebSearch", "Bash"] {
             assert!(
                 !approval.allowed.iter().any(|t| t == tool),
                 "{tool} allowed"
+            );
+            assert!(
+                approval.disallowed.iter().any(|t| t == tool),
+                "{tool} denied"
             );
         }
         // The message is the THREAD block alone: no WHY block, no outcomes.
@@ -1496,6 +1501,52 @@ mod tests {
             ),
             req.message
         );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    /// M58.6 — a thread turn reads `scope:` and `read-scope:` as the page's
+    /// parse and a hand-off do, and admits the page by that reading: every
+    /// parse case of src-tauri/fixtures/grant-scope.json, on the record asked.
+    #[test]
+    fn a_thread_turn_reads_its_folders_as_the_page_does() {
+        let file: Value =
+            serde_json::from_str(include_str!("../../fixtures/grant-scope.json")).unwrap();
+        let vault = fixture_vault("thread-turn-grant-scope");
+        let scanned = scan(&vault);
+        for case in file["parse"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let key = case["key"].as_str().unwrap();
+            let folders: Option<Vec<String>> =
+                serde_json::from_value(case["folders"].clone()).unwrap();
+            let mut entries = scanned.clone();
+            let record = entries
+                .iter_mut()
+                .find(|e| e.path == "records/agents/proofreader.md")
+                .unwrap();
+            for (k, v) in case["properties"].as_object().unwrap() {
+                record.properties.insert(k.clone(), v.clone());
+            }
+            record.relationships = serde_json::from_value(case["relationships"].clone()).unwrap();
+            let planned = plan(&vault, &entries, &asking());
+            if key == "scope" {
+                assert_eq!(planned.unwrap().request.scope, folders, "{name}");
+                continue;
+            }
+            let admits = crate::mcp::scope_admits_landing(&vault, &folders, PAGE);
+            match planned {
+                Ok(plan) => {
+                    assert!(admits, "asked past its read scope: {name}");
+                    assert_eq!(plan.request.read_scope, folders, "{name}");
+                }
+                Err(refusal) => {
+                    assert!(!admits, "refused inside its read scope: {name}");
+                    assert!(
+                        refusal.contains("can't read notes/plan.md"),
+                        "{name}: {refusal}"
+                    );
+                }
+            }
+        }
         let _ = std::fs::remove_dir_all(&vault);
     }
 

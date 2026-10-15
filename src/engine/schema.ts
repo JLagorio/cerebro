@@ -7,6 +7,7 @@ import type {
   FieldVisibility,
   LayoutConfig,
   ResolvedField,
+  RollupCalc,
   Schema,
   StatusDef,
   TypeDef,
@@ -27,24 +28,23 @@ import {
   formatTimestamp,
   rollupCalcMeta,
 } from './properties';
+import {
+  DEFAULT_STATUS_SET,
+  ROLLUP_RESULTS,
+  STATUS_GROUP_DEFAULT,
+  STATUS_GROUPS,
+  VIRTUAL_FIELDS as TABLE_VIRTUAL_FIELDS,
+} from './fieldKindTable';
 import { buildRelationIndex, childrenOf } from './relations';
 import { parseTabList, parseViewList } from './views';
 import { resolveTarget } from './wikilink';
 
-/** Spec "simple" status template — fallback when no type/project declares statuses. */
-export const DEFAULT_STATUSES: StatusDef[] = [
-  { id: 'backlog', label: 'Backlog', color: '#A8AFC2', group: 'active' },
-  { id: 'todo', label: 'Todo', color: '#3D8BE8', group: 'active' },
-  { id: 'in-progress', label: 'In progress', color: '#EFB428', group: 'active' },
-  { id: 'done', label: 'Done', color: '#34B764', group: 'done' },
-  { id: 'cancelled', label: 'Cancelled', color: '#A8AFC2', hollow: true, group: 'closed' },
-];
-
-const ROLLUP_CALCS = ['count', 'sum', 'avg', 'min', 'max', 'earliest', 'latest', 'show'];
+/** The statuses a record falls back to when neither its project nor its type
+ * declares any: `default_statuses` in shared/schema/field-kinds.v1.json,
+ * which Rust's status chain falls back to as well. */
+export const DEFAULT_STATUSES: StatusDef[] = [...DEFAULT_STATUS_SET];
 
 const FIELD_FORMATS = ['plain', 'percent', 'progress', 'currency'];
-
-const STATUS_GROUPS = ['active', 'done', 'closed'] as const;
 
 /** 'in-progress' → 'In progress' (sentence case, DS rule). */
 export function humanize(id: string): string {
@@ -97,7 +97,7 @@ function parseFieldDef(name: string, spec: unknown): FieldDef {
   // Rollup config: which relation to follow, what to read, how to fold it.
   if (typeof s.relation === 'string') def.relation = s.relation;
   if (typeof s.property === 'string') def.property = s.property;
-  if (typeof s.calculate === 'string' && ROLLUP_CALCS.includes(s.calculate)) {
+  if (typeof s.calculate === 'string' && ROLLUP_RESULTS.has(s.calculate as RollupCalc)) {
     def.calculate = s.calculate as FieldDef['calculate'];
   }
   // Reverse rollup source (M3.5): `from: { type, field }`.
@@ -160,7 +160,7 @@ function parseStatuses(raw: unknown): StatusDef[] {
     const group: StatusDef['group'] =
       typeof groupRaw === 'string' && (STATUS_GROUPS as readonly string[]).includes(groupRaw)
         ? (groupRaw as StatusDef['group'])
-        : 'active';
+        : STATUS_GROUP_DEFAULT;
     out.push({ ...option, group });
   }
   return out;
@@ -275,16 +275,19 @@ export function serializeLayoutConfig(l: LayoutConfig): Record<string, unknown> 
   return Object.keys(out).length === 0 ? null : out;
 }
 
+/** The union the switch below covers; fieldKindTable.test.ts holds it to
+ * the artifact's `virtual_fields`, in order. */
+export type VirtualField = 'title' | 'type' | 'createdAt' | 'modifiedAt';
+
 /**
  * The fields every entry answers from its own facts, never from frontmatter
- * (M60.1). They come first in `fieldValue`'s one order — virtual, then a
- * declared computed kind, then a relationship, then a property — so a
- * frontmatter `title:` key never outranks the page title a sort and the
- * Title column already read.
+ * (M60.1): `virtual_fields` in shared/schema/field-kinds.v1.json, whose
+ * precedence cases both languages replay. They come first in `fieldValue`'s
+ * one order — virtual, then a declared computed kind, then a relationship,
+ * then a property — so a frontmatter `title:` key never outranks the page
+ * title a sort and the Title column already read.
  */
-export const VIRTUAL_FIELDS = ['title', 'type', 'createdAt', 'modifiedAt'] as const;
-
-export type VirtualField = (typeof VIRTUAL_FIELDS)[number];
+export const VIRTUAL_FIELDS = TABLE_VIRTUAL_FIELDS as readonly VirtualField[];
 
 function virtualValue(e: Entry, field: VirtualField): unknown {
   switch (field) {
@@ -352,7 +355,8 @@ export function buildSchema(entries: Entry[]): Schema {
     return DEFAULT_STATUSES;
   }
 
-  /** Project override → the entry's own type's `statuses:` → app defaults.
+  /** Project override → the entry's own type's `statuses:` → DEFAULT_STATUSES
+   * (field-kinds.v1.json's `status_chain`, which Rust walks the same way).
    * M12.2: no type inherits from another — Work item used to be the vault's
    * status source, which meant one type name the app could never let go of. */
   function statusSetFor(e: Entry): StatusDef[] {
