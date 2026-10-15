@@ -14,6 +14,11 @@
 // `decisions.json`, deny by default. Mode `hook` answers a PreToolUse hook
 // from `hook-decisions.json`, allow by default. Both append what they saw to
 // `log.jsonl` in the same folder, which the driver splits per step.
+//
+// M57.1 adds a third tool to the server, `gate`, which `tools/list` never
+// names: the target of an `mcp_tool` PreToolUse hook (the defer-gate
+// scenario), as Cerebro's `ask_gate` is. It answers hook JSON as its text,
+// from `gate-decisions.json` by tool name, and `{}` (no opinion) by default.
 
 import { appendFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -26,6 +31,8 @@ type JsonObject = Record<string, unknown>;
 export interface ProbeIo {
   /** `decisions.json`, read again on every call so a step can change it. */
   decisions(): JsonObject;
+  /** `gate-decisions.json` (M57.1), read the same way; absent reads empty. */
+  gateDecisions?(): JsonObject;
   log(entry: JsonObject): void;
   sleep(ms: number): Promise<void>;
 }
@@ -41,6 +48,8 @@ export type Decision =
   { behavior: 'allow'; updatedInput: JsonObject } | { behavior: 'deny'; message: string };
 
 export const SERVER_NAME = 'probe';
+/** The hook endpoint (M57.1): served, and never listed. */
+export const GATE_TOOL = 'gate';
 export const MAX_SECONDS = 60;
 /** The version Claude Code 2.1.250 offers when a client names none. */
 const FALLBACK_PROTOCOL = '2025-06-18';
@@ -134,6 +143,35 @@ export function decide(toolName: string, input: JsonObject, decisions: JsonObjec
   return { behavior: 'allow', updatedInput };
 }
 
+/**
+ * The gate's answer for one hook call (M57.1): the hook JSON its tool's entry
+ * in `decisions` names, as the text Claude Code reads, or `{}` (no opinion)
+ * when there is none. An entry with `isError` answers as a failed tool, which
+ * a hook treats as no answer at all. `updatedInput` rides an allow.
+ */
+export function gateAnswer(args: JsonObject, decisions: JsonObject): JsonObject {
+  const toolName = typeof args.tool_name === 'string' ? args.tool_name : '';
+  const entry = decisions[toolName];
+  if (!isObject(entry)) return text('{}');
+  if (entry.isError === true) return text('The probe gate failed on purpose.', true);
+  const decision = HOOK_DECISIONS.includes(String(entry.permissionDecision))
+    ? String(entry.permissionDecision)
+    : null;
+  if (decision === null) return text('{}');
+  const output: JsonObject = {
+    hookEventName: 'PreToolUse',
+    permissionDecision: decision,
+    permissionDecisionReason:
+      typeof entry.permissionDecisionReason === 'string'
+        ? entry.permissionDecisionReason
+        : `The probe gate answers ${decision}.`,
+  };
+  if (decision === 'allow' && isObject(entry.updatedInput)) {
+    output.updatedInput = entry.updatedInput;
+  }
+  return text(JSON.stringify({ hookSpecificOutput: output }));
+}
+
 async function callTool(params: JsonObject, io: ProbeIo): Promise<JsonObject> {
   const args = isObject(params.arguments) ? params.arguments : {};
   if (params.name === 'slow_echo') {
@@ -151,6 +189,11 @@ async function callTool(params: JsonObject, io: ProbeIo): Promise<JsonObject> {
     const answer = decide(toolName, input, io.decisions());
     io.log({ mode: 'approve', tool_name: toolName, input, tool_use_id: args.tool_use_id, answer });
     return text(JSON.stringify(answer));
+  }
+  if (params.name === GATE_TOOL) {
+    const answer = gateAnswer(args, io.gateDecisions?.() ?? {});
+    io.log({ mode: 'gate', arguments: args, answer });
+    return answer;
   }
   return text(`The probe has no tool named ${String(params.name)}.`, true);
 }
@@ -220,6 +263,7 @@ function readJson(path: string): JsonObject {
 function fileIo(dir: string): ProbeIo {
   return {
     decisions: () => readJson(join(dir, 'decisions.json')),
+    gateDecisions: () => readJson(join(dir, 'gate-decisions.json')),
     log: (entry) => appendFileSync(join(dir, 'log.jsonl'), `${JSON.stringify(entry)}\n`),
     sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
   };

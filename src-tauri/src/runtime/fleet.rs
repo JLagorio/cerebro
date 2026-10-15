@@ -1,8 +1,10 @@
 //! The fleet read model (M33.2).
 //!
-//! It reads `runs`, the two governance tables M31.6 writes, and the
-//! `operational_log` rows recorded against a run (M56.9), and it reads them
-//! through [`ReadOnly`]: a handle SQLite refuses writes on, so this module
+//! It reads `runs`, the two governance tables M31.6 writes, the
+//! `operational_log` rows recorded against a run (M56.9), what the run
+//! wrote (`write_log::run_writes`, M58.1b), and which run made which commit
+//! (`run_commits`, M58.4), and it reads them through
+//! [`ReadOnly`]: a handle SQLite refuses writes on, so this module
 //! cannot change a row even by mistake. It computes nothing the rows do not
 //! already say: every aggregate it serves is recomputable from the rows it
 //! reads, and nothing is cached. If a number here needs a new fact recorded,
@@ -24,7 +26,9 @@
 use serde::{Deserialize, Serialize};
 
 use super::cause::{view_of_column, CauseView};
+use super::write_log::{run_writes, writers_since, RunWrites};
 use super::ReadOnly;
+use crate::vault::receipt::HUMAN_ACTOR;
 
 /// The most rows one page will ever return, however large a limit is asked
 /// for. A UI that wants more asks for another page; a UI that asks for
@@ -150,6 +154,12 @@ pub struct RunDetail {
     pub refusals: Vec<RefusalRow>,
     /// Every refusal row the run has, so a list the cap cut says so.
     pub refusals_total: u64,
+    /// What the run wrote in the vault (M58.1b), as `runs.writes_booked`
+    /// lets it be said: `Recorded` with an empty list is measured, it wrote
+    /// nothing; `Partial` is booked, but the shell may have written
+    /// elsewhere; `NotRecorded` is a run from before M58.1 booked writes,
+    /// never an empty list.
+    pub wrote: RunWrites,
 }
 
 /// Where a run's Claude Code session file is, and how many runs share it
@@ -384,6 +394,7 @@ pub fn run_detail(ro: &ReadOnly, run_id: &str) -> Result<RunDetail, String> {
     let refusals_total = ro
         .query_row(REFUSALS_COUNT_SQL, bound, |row| row.get::<_, i64>(0))
         .map_err(|e| e.to_string())? as u64;
+    let wrote = run_writes(ro, run_id)?;
 
     Ok(RunDetail {
         run,
@@ -394,6 +405,7 @@ pub fn run_detail(ro: &ReadOnly, run_id: &str) -> Result<RunDetail, String> {
         model_id,
         refusals,
         refusals_total,
+        wrote,
     })
 }
 
@@ -533,6 +545,140 @@ pub fn actor_summary(ro: &ReadOnly, actor: &str) -> Result<ActorSummary, String>
 /// missing database is an error, and the caller renders it as unavailable.
 pub fn actor_summaries(ro: &ReadOnly) -> Result<Vec<ActorSummary>, String> {
     summaries(ro, None)
+}
+
+/// The most commits one attribution read may ask about: a page of history.
+pub const MAX_COMMIT_QUERIES: usize = 200;
+
+/// One commit a history row asks about (M58.4). With `path`, the read also
+/// says who else wrote that path for the commit, from `since` (the path's
+/// previous commit time, `FileCommit::previous_at`) to the commit: `commit
+/// --only` took the path's whole diff, so the span opens at the previous
+/// commit, not at the run's start.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CommitQuery {
+    pub hash: String,
+    pub path: Option<String>,
+    pub since: Option<String>,
+}
+
+/// The run that made one commit, as `run_commits` recorded it (M58.4,
+/// CV-35). `actor: None` is a run whose actor was never stamped.
+/// `with_person` says your own writes rode along (`None` when no path was
+/// asked), and `also_by` names any other run's actors that wrote the path in
+/// the span, each once.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CommitRun {
+    pub hash: String,
+    pub run_id: String,
+    pub actor: Option<String>,
+    pub with_person: Option<bool>,
+    pub also_by: Vec<String>,
+}
+
+/// A full commit hash: 40 (sha1) or 64 (sha256) lowercase hex, the only
+/// spelling `run_commits` stores.
+fn full_hash(hash: &str) -> bool {
+    matches!(hash.len(), 40 | 64)
+        && hash
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// Which recorded runs made `queries`' commits in `vault_id` (M58.4).
+///
+/// History names an agent only from this record (CV-35): a commit with no
+/// row comes back absent and reads "unattributed", whatever its trailer, its
+/// message or its git author says. One SELECT, with placeholders, joins the
+/// record to `runs`; then, for each recorded commit that asked a path,
+/// `write_log::writers_since` over the span names your edits and any other
+/// run's. Both times are `runtime::now_utc` stamps, so string order is time
+/// order. A hash that is not full and lowercase, or more than
+/// [`MAX_COMMIT_QUERIES`] of them, is refused in words.
+pub fn commit_runs(
+    ro: &ReadOnly,
+    vault_id: &str,
+    queries: &[CommitQuery],
+) -> Result<Vec<CommitRun>, String> {
+    if queries.len() > MAX_COMMIT_QUERIES {
+        return Err(format!(
+            "At most {MAX_COMMIT_QUERIES} commits can be asked about at once, not {}.",
+            queries.len()
+        ));
+    }
+    if let Some(bad) = queries.iter().find(|q| !full_hash(&q.hash)) {
+        return Err(format!("{:?} is not a full commit hash.", bad.hash));
+    }
+    if queries.is_empty() {
+        return Ok(Vec::new());
+    }
+    let marks: Vec<String> = (0..queries.len()).map(|n| format!("?{}", n + 2)).collect();
+    let sql = format!(
+        "SELECT c.commit_sha, c.run_id, r.actor, c.committed_at FROM run_commits c \
+         JOIN runs r ON r.run_id = c.run_id \
+         WHERE c.vault_id = ?1 AND c.commit_sha IN ({})",
+        marks.join(", ")
+    );
+    let mut statement = ro.prepare(&sql).map_err(|e| e.to_string())?;
+    let params = std::iter::once(vault_id).chain(queries.iter().map(|q| q.hash.as_str()));
+    let recorded: Vec<(String, String, Option<String>, String)> = statement
+        .query_map(rusqlite::params_from_iter(params), |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    let mut answered = Vec::new();
+    for query in queries {
+        let Some((hash, run_id, actor, committed_at)) =
+            recorded.iter().find(|(hash, ..)| *hash == query.hash)
+        else {
+            continue;
+        };
+        if answered.iter().any(|a: &CommitRun| a.hash == *hash) {
+            continue;
+        }
+        let (with_person, also_by) = match &query.path {
+            None => (None, Vec::new()),
+            Some(path) => {
+                let writers =
+                    writers_since(ro, vault_id, path, query.since.as_deref(), committed_at)?;
+                let mine = writers.iter().any(|w| w.actor == HUMAN_ACTOR);
+                let mut others: Vec<String> = Vec::new();
+                for writer in writers {
+                    let other_run = writer.run_id.as_deref().is_some_and(|r| r != run_id);
+                    if other_run && writer.actor != HUMAN_ACTOR && !others.contains(&writer.actor) {
+                        others.push(writer.actor);
+                    }
+                }
+                (Some(mine), others)
+            }
+        };
+        answered.push(CommitRun {
+            hash: hash.clone(),
+            run_id: run_id.clone(),
+            actor: actor.clone(),
+            with_person,
+            also_by,
+        });
+    }
+    Ok(answered)
+}
+
+/// Whether a run that is still `running` wrote `path` in `vault_id` (M58.4):
+/// Restore refuses such a page rather than racing the run. Content rows
+/// only (`write_log::CONTENT_KINDS`), matched as every reader matches them.
+pub fn live_run_wrote(ro: &ReadOnly, vault_id: &str, path: &str) -> Result<bool, String> {
+    ro.query_row(
+        "SELECT EXISTS (SELECT 1 FROM vault_writes w JOIN runs r ON r.run_id = w.run_id \
+         WHERE w.vault_id = ?1 \
+         AND ((w.path = ?2 AND w.kind IN ('vault.write', 'vault.create')) \
+              OR (w.to_path = ?2 AND w.kind = 'vault.rename')) \
+         AND r.outcome = 'running')",
+        rusqlite::params![vault_id, path],
+        |row| row.get::<_, bool>(0),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -768,6 +914,7 @@ mod tests {
             batch_id: "batch".into(),
             replayed: false,
             kept: vec![],
+            projected: Vec::new(),
         }
         .book("fresh");
         crate::runtime::sink::disarm();
@@ -1097,6 +1244,379 @@ mod tests {
 
         let unknown = transcript_key(&ro, "nope").unwrap_err();
         assert!(unknown.contains("no run with id nope"), "{unknown}");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_detail_carries_what_the_run_wrote() {
+        let (dir, conn, vault) = fixture("fleet-wrote");
+        seed_runs(
+            &conn,
+            &vault,
+            &[
+                Seed::new("wrote", Some("process:scout"), "2026-10-14T09:00:00Z"),
+                Seed::new("idle", Some("process:scout"), "2026-10-14T09:05:00Z"),
+                Seed::new("old", None, "2026-10-14T09:10:00Z"),
+            ],
+        );
+        conn.execute("UPDATE runs SET writes_booked = 0 WHERE run_id = 'old'", [])
+            .unwrap();
+        let hash = "a".repeat(64);
+        crate::runtime::vault_writes::record_at(
+            &conn,
+            &vault,
+            &crate::runtime::vault_writes::WriteRow {
+                kind: "vault.create",
+                path: "records/risks/x.md",
+                to: None,
+                content_hash: Some(&hash),
+                actor: Some("process:scout"),
+                run_id: Some("wrote"),
+                approved_by: None,
+            },
+            chrono::Utc::now(),
+        )
+        .unwrap();
+        let ro = read(&dir);
+        let RunWrites::Recorded(rows) = run_detail(&ro, "wrote").unwrap().wrote else {
+            panic!("a run booked from the start lists its writes");
+        };
+        assert_eq!(
+            rows.iter().map(|w| w.path.as_str()).collect::<Vec<_>>(),
+            ["records/risks/x.md"]
+        );
+        assert_eq!(
+            run_detail(&ro, "idle").unwrap().wrote,
+            RunWrites::Recorded(vec![]),
+            "booked and empty is measured: it wrote nothing"
+        );
+        let old = run_detail(&ro, "old").unwrap();
+        assert_eq!(old.wrote, RunWrites::NotRecorded);
+        let wire = serde_json::to_value(&old).unwrap();
+        assert_eq!(
+            wire["wrote"],
+            serde_json::json!({ "state": "not_recorded" })
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A commit `run_id` made in `vault`, recorded at `at`.
+    fn recorded_commit(conn: &Connection, vault: &str, sha: &str, run_id: &str, at: &str) {
+        conn.execute(
+            "INSERT INTO run_commits (vault_id, commit_sha, run_id, committed_at) \
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![vault, sha, run_id, at],
+        )
+        .unwrap();
+    }
+
+    /// One `vault_writes` row whose burst ran from `first` to `last`.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a row is these columns; a struct for one test helper is noise"
+    )]
+    fn wrote(
+        conn: &Connection,
+        vault: &str,
+        kind: &str,
+        path: &str,
+        actor: &str,
+        run_id: Option<&str>,
+        first: &str,
+        last: &str,
+    ) {
+        let to = (kind == "vault.rename").then_some(path);
+        let from = if to.is_some() { "elsewhere.md" } else { path };
+        conn.execute(
+            "INSERT INTO vault_writes (vault_id, kind, path, to_path, actor, run_id, first_at, \
+             recorded_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![vault, kind, from, to, actor, run_id, first, last],
+        )
+        .unwrap();
+    }
+
+    fn ask(hash: &str, path: Option<&str>, since: Option<&str>) -> CommitQuery {
+        CommitQuery {
+            hash: hash.to_string(),
+            path: path.map(str::to_string),
+            since: since.map(str::to_string),
+        }
+    }
+
+    // M58.4 (CV-35): a commit names a run only from its record. A sha nobody
+    // recorded reads none, whatever it says of itself; so does one recorded
+    // for another vault. A hash that is short, upper-case, or one of more
+    // than 200, is refused in words.
+    #[test]
+    fn a_commit_names_a_run_only_from_its_record() {
+        let (dir, conn, vault) = fixture("fleet-commit-runs");
+        let other_dir = testutil::temp_vault("fleet-commit-runs-other");
+        let other = crate::runtime::scope::register(&conn, &other_dir).unwrap();
+        seed_runs(
+            &conn,
+            &vault,
+            &[Seed::new(
+                "run-scout",
+                Some("process:release-scout"),
+                "2026-10-14T09:50:00.000Z",
+            )],
+        );
+        let (mine, theirs, unknown) = ("a".repeat(40), "b".repeat(40), "c".repeat(64));
+        recorded_commit(
+            &conn,
+            &vault,
+            &mine,
+            "run-scout",
+            "2026-10-14T10:00:00.000Z",
+        );
+        recorded_commit(
+            &conn,
+            &other,
+            &theirs,
+            "run-scout",
+            "2026-10-14T10:00:00.000Z",
+        );
+
+        let ro = read(&dir);
+        let answered = commit_runs(
+            &ro,
+            &vault,
+            &[
+                ask(&mine, None, None),
+                ask(&theirs, None, None),
+                ask(&unknown, None, None),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            answered,
+            vec![CommitRun {
+                hash: mine.clone(),
+                run_id: "run-scout".into(),
+                actor: Some("process:release-scout".into()),
+                with_person: None,
+                also_by: vec![],
+            }]
+        );
+        assert_eq!(commit_runs(&ro, &vault, &[]).unwrap(), vec![]);
+        for bad in [mine.to_uppercase(), mine[..7].to_string(), "g".repeat(40)] {
+            let err = commit_runs(&ro, &vault, &[ask(&bad, None, None)]).unwrap_err();
+            assert!(err.contains("not a full commit hash"), "{bad}: {err}");
+        }
+        let many: Vec<CommitQuery> = (0..201).map(|_| ask(&mine, None, None)).collect();
+        let err = commit_runs(&ro, &vault, &many).unwrap_err();
+        assert!(err.contains("At most 200"), "{err}");
+        drop(conn);
+        for d in [&dir, &other_dir] {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+
+    // M58.4: your edits ride along in a run's commit from the path's previous
+    // commit on, those from before the run included. One from before the
+    // previous commit doesn't count; a coalesced burst that straddles it
+    // does.
+    #[test]
+    fn with_person_counts_your_edits_since_the_paths_previous_commit() {
+        let (dir, conn, vault) = fixture("fleet-with-person");
+        seed_runs(
+            &conn,
+            &vault,
+            &[Seed::new(
+                "run-1",
+                Some("process:scout"),
+                "2026-10-14T09:50:00.000Z",
+            )],
+        );
+        let since = "2026-10-14T09:30:00.000Z";
+        let at = "2026-10-14T10:00:00.000Z";
+        let (old, before_run, straddle) = ("1".repeat(40), "2".repeat(40), "3".repeat(40));
+        for sha in [&old, &before_run, &straddle] {
+            recorded_commit(&conn, &vault, sha, "run-1", at);
+        }
+        for path in ["old.md", "before.md", "straddle.md"] {
+            let t = "2026-10-14T09:55:00.000Z";
+            wrote(
+                &conn,
+                &vault,
+                "vault.write",
+                path,
+                "process:scout",
+                Some("run-1"),
+                t,
+                t,
+            );
+        }
+        let h = HUMAN_ACTOR;
+        let (early, mid) = ("2026-10-14T09:00:00.000Z", "2026-10-14T09:40:00.000Z");
+        wrote(
+            &conn,
+            &vault,
+            "vault.write",
+            "old.md",
+            h,
+            None,
+            early,
+            early,
+        );
+        wrote(&conn, &vault, "vault.write", "before.md", h, None, mid, mid);
+        let (burst_start, burst_end) = ("2026-10-14T09:20:00.000Z", "2026-10-14T09:35:00.000Z");
+        wrote(
+            &conn,
+            &vault,
+            "vault.write",
+            "straddle.md",
+            h,
+            None,
+            burst_start,
+            burst_end,
+        );
+        // A comment never counts as a change to the page.
+        wrote(&conn, &vault, "vault.comment", "old.md", h, None, mid, mid);
+
+        let answered = commit_runs(
+            &read(&dir),
+            &vault,
+            &[
+                ask(&old, Some("old.md"), Some(since)),
+                ask(&before_run, Some("before.md"), Some(since)),
+                ask(&straddle, Some("straddle.md"), Some(since)),
+            ],
+        )
+        .unwrap();
+        let with: Vec<Option<bool>> = answered.iter().map(|a| a.with_person).collect();
+        assert_eq!(with, vec![Some(false), Some(true), Some(true)]);
+        assert!(
+            answered.iter().all(|a| a.also_by.is_empty()),
+            "{answered:?}"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // M58.4: another run's write to the path in the span is named, each
+    // actor once; the commit's own run is not.
+    #[test]
+    fn another_actors_write_in_the_span_is_named() {
+        let (dir, conn, vault) = fixture("fleet-also-by");
+        seed_runs(
+            &conn,
+            &vault,
+            &[
+                Seed::new("run-1", Some("process:scout"), "2026-10-14T09:50:00.000Z"),
+                Seed::new("run-2", Some("process:digest"), "2026-10-14T09:40:00.000Z"),
+            ],
+        );
+        let sha = "e".repeat(40);
+        recorded_commit(&conn, &vault, &sha, "run-1", "2026-10-14T10:00:00.000Z");
+        let t = "2026-10-14T09:45:00.000Z";
+        wrote(
+            &conn,
+            &vault,
+            "vault.write",
+            "a.md",
+            "process:scout",
+            Some("run-1"),
+            t,
+            t,
+        );
+        wrote(
+            &conn,
+            &vault,
+            "vault.write",
+            "a.md",
+            "process:digest",
+            Some("run-2"),
+            t,
+            t,
+        );
+        let t2 = "2026-10-14T09:46:00.000Z";
+        wrote(
+            &conn,
+            &vault,
+            "vault.create",
+            "a.md",
+            "process:digest",
+            Some("run-2"),
+            t2,
+            t2,
+        );
+
+        let answered = commit_runs(&read(&dir), &vault, &[ask(&sha, Some("a.md"), None)]).unwrap();
+        assert_eq!(answered[0].also_by, vec!["process:digest".to_string()]);
+        assert_eq!(answered[0].with_person, Some(false));
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // M58.4: Restore refuses a page a running run wrote. A finished run's
+    // write is history; a running one's write, or rename into the path, is
+    // not.
+    #[test]
+    fn live_run_wrote_sees_only_running_runs() {
+        let (dir, conn, vault) = fixture("fleet-live-run");
+        let mut live = Seed::new("live", Some("process:scout"), "2026-10-14T09:50:00.000Z");
+        live.outcome = "running";
+        seed_runs(
+            &conn,
+            &vault,
+            &[
+                live,
+                Seed::new("done", Some("process:digest"), "2026-10-14T09:00:00.000Z"),
+            ],
+        );
+        let t = "2026-10-14T09:55:00.000Z";
+        wrote(
+            &conn,
+            &vault,
+            "vault.write",
+            "done.md",
+            "process:digest",
+            Some("done"),
+            t,
+            t,
+        );
+        wrote(
+            &conn,
+            &vault,
+            "vault.write",
+            "live.md",
+            "process:scout",
+            Some("live"),
+            t,
+            t,
+        );
+        wrote(
+            &conn,
+            &vault,
+            "vault.rename",
+            "moved.md",
+            "process:scout",
+            Some("live"),
+            t,
+            t,
+        );
+        wrote(
+            &conn,
+            &vault,
+            "vault.comment",
+            "said.md",
+            "process:scout",
+            Some("live"),
+            t,
+            t,
+        );
+        let ro = read(&dir);
+        assert!(!live_run_wrote(&ro, &vault, "done.md").unwrap());
+        assert!(live_run_wrote(&ro, &vault, "live.md").unwrap());
+        assert!(live_run_wrote(&ro, &vault, "moved.md").unwrap());
+        assert!(
+            !live_run_wrote(&ro, &vault, "said.md").unwrap(),
+            "a comment is no write"
+        );
+        assert!(!live_run_wrote(&ro, &vault, "nobody.md").unwrap());
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -3,9 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import * as ipc from '@/lib/ipc';
 import type { Entry } from '@/engine/types';
+import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { makeEntry } from '@/test/factories';
-import { AgentProperties } from './AgentProperties';
+import { AgentProperties, shellWords } from './AgentProperties';
 
 /**
  * An agent page's properties (M55.12; the M18 editor's tests moved here).
@@ -28,6 +29,14 @@ const AGENT = makeEntry({
     scope: ['records/risks'],
     recent: 'Last run found two.',
   } as never,
+});
+/** An agent that declares the shell (M57.2's Shell row). */
+const shellAgent = makeEntry({
+  path: 'records/agents/shell-probe.md',
+  folder: 'records/agents',
+  title: 'Shell probe',
+  type: 'Agent',
+  properties: { slug: 'shell-probe', tools: 'shell' } as never,
 });
 const RISK = makeEntry({
   path: 'records/risks/rollback.md',
@@ -211,6 +220,7 @@ describe('AgentProperties', () => {
       'allowed-tools': [
         'get_vault_context',
         'search_notes',
+        'list_notes',
         'get_note',
         'knowledge_about',
         'list_inbox',
@@ -284,6 +294,27 @@ describe('AgentProperties', () => {
     expect(row('schedule').textContent).toContain('weekdays 08:30');
   });
 
+  it('the Shell row words what the ceiling leaves the agent (M57.2)', () => {
+    expect(shellWords(false, false, 'on')).toBe('off');
+    expect(shellWords(true, false, 'on')).toBe('On');
+    expect(shellWords(true, false, 'ask')).toBe(
+      'Asks first in the panel; scheduled runs go without',
+    );
+    expect(shellWords(true, false, 'off')).toBe('Off in Settings');
+    expect(shellWords(true, true, 'on')).toBe('Withdrawn by its read limit');
+    for (const [ceiling, words] of [
+      ['on', 'On'],
+      ['ask', 'Asks first in the panel; scheduled runs go without'],
+      ['off', 'Off in Settings'],
+    ] as const) {
+      useUiStore.setState({ agentShell: ceiling });
+      cleanup();
+      setup([shellAgent], shellAgent.path);
+      expect(row('shell').textContent).toContain(words);
+    }
+    useUiStore.setState({ agentShell: 'off' });
+  });
+
   it('a refused write keeps the editor open with its draft', async () => {
     patch.mockResolvedValueOnce(false);
     setup();
@@ -297,6 +328,107 @@ describe('AgentProperties', () => {
         name: 'Remove records/risks',
       }),
     ).toBeNull();
+  });
+
+  describe('an open trigger editor follows its trigger, never its slot', () => {
+    const WHEN = [
+      { event: 'created' },
+      { event: 'changed', in: 'records/risks' },
+      { event: 'moved' },
+    ];
+    const withWhen = (when: unknown[]) =>
+      ({ ...AGENT, properties: { ...AGENT.properties, when } }) as Entry;
+    /** The write lands and the rescan brings it back, as the store would. */
+    const rescanOnWrite = () =>
+      patch.mockImplementation(async (_path, p) => {
+        act(() =>
+          useVaultStore.setState({
+            entries: [withWhen((p.when as unknown[] | null) ?? []), RISK],
+          }),
+        );
+        return true;
+      });
+    const line = (i: number) => fireEvent.click(screen.getAllByTestId('agent-trigger-line')[i]);
+    const trigger = (id: number) => screen.getByTestId(`agent-editor-trigger-${id}`);
+
+    it('Done writes the trigger it opened on after another editor removes one above it', async () => {
+      rescanOnWrite();
+      setup([withWhen(WHEN), RISK]);
+      line(1);
+      line(0);
+      fireEvent.change(within(trigger(0)).getByLabelText('Trigger 2 event'), {
+        target: { value: 'created' },
+      });
+      fireEvent.click(within(trigger(1)).getByRole('button', { name: 'Remove trigger 1' }));
+      await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+      expect(lastPatch()).toEqual({ when: [WHEN[1], WHEN[2]] });
+      await waitFor(() => expect(screen.queryByTestId('agent-editor-trigger-1')).toBeNull());
+      // Its trigger is first now, and the editor says so.
+      expect(within(trigger(0)).getByLabelText('Trigger 1 event')).toBeTruthy();
+      done(trigger(0));
+      await waitFor(() => expect(patch).toHaveBeenCalledTimes(2));
+      expect(lastPatch()).toEqual({
+        when: [{ event: 'created', in: 'records/risks' }, WHEN[2]],
+      });
+    });
+
+    it('Remove removes the trigger it opened on after another editor removes one above it', async () => {
+      rescanOnWrite();
+      setup([withWhen(WHEN), RISK]);
+      line(1);
+      line(0);
+      fireEvent.click(within(trigger(1)).getByRole('button', { name: 'Remove trigger 1' }));
+      await waitFor(() => expect(screen.queryByTestId('agent-editor-trigger-1')).toBeNull());
+      fireEvent.click(within(trigger(0)).getByRole('button', { name: 'Remove trigger 1' }));
+      await waitFor(() => expect(patch).toHaveBeenCalledTimes(2));
+      expect(lastPatch()).toEqual({ when: [WHEN[2]] });
+    });
+
+    it('a rescan that reorders when: keeps Done on the right trigger', async () => {
+      setup([withWhen(WHEN), RISK]);
+      line(0);
+      fireEvent.change(within(trigger(0)).getByLabelText('Trigger 1 event'), {
+        target: { value: 'changed' },
+      });
+      act(() => useVaultStore.setState({ entries: [withWhen([WHEN[2], WHEN[1], WHEN[0]]), RISK] }));
+      done(trigger(0));
+      await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+      expect(lastPatch()).toEqual({ when: [WHEN[2], WHEN[1], { event: 'changed' }] });
+    });
+
+    it('a trigger changed outside its editor writes nothing from it, and says why', async () => {
+      setup([withWhen(WHEN), RISK]);
+      line(0);
+      fireEvent.change(within(trigger(0)).getByLabelText('Trigger 1 event'), {
+        target: { value: 'moved' },
+      });
+      act(() =>
+        useVaultStore.setState({
+          entries: [withWhen([{ event: 'changed' }, WHEN[1], WHEN[2]]), RISK],
+        }),
+      );
+      expect(within(trigger(0)).getByTestId('agent-trigger-lost')).toBeTruthy();
+      done(trigger(0));
+      fireEvent.click(within(trigger(0)).getByRole('button', { name: /^Remove trigger/ }));
+      expect(patch).not.toHaveBeenCalled();
+      expect(trigger(0)).toBeTruthy();
+      // No line claims the lost editor.
+      expect(
+        screen.getAllByTestId('agent-trigger-line').map((b) => b.getAttribute('aria-expanded')),
+      ).toEqual(['false', 'false', 'false']);
+    });
+
+    it('tells identical triggers apart', async () => {
+      rescanOnWrite();
+      setup([withWhen([WHEN[2], WHEN[2]]), RISK]);
+      line(1);
+      fireEvent.change(within(trigger(0)).getByLabelText('Trigger 2 event'), {
+        target: { value: 'created' },
+      });
+      done(trigger(0));
+      await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+      expect(lastPatch()).toEqual({ when: [WHEN[2], { event: 'created' }] });
+    });
   });
 
   it('a rescan keeps an open draft', () => {
@@ -457,6 +589,58 @@ describe('AgentProperties model and effort (M56.5)', () => {
     fireEvent.click(within(editor).getByRole('radio', { name: 'Max' }));
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByTestId('agent-editor-effort')).toBeNull();
+    expect(patch).not.toHaveBeenCalled();
+  });
+});
+
+describe('AgentProperties Asks first (M57.4)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    patch.mockResolvedValue(true);
+  });
+
+  const withProps = (props: Record<string, unknown>) =>
+    makeEntry({ ...AGENT, properties: { ...AGENT.properties, ...props } as never });
+
+  it('words the row both ways', () => {
+    setup();
+    expect(row('ask-first').textContent).toContain('Writes without asking');
+    cleanup();
+    setup([withProps({ 'ask-first': true }), RISK]);
+    expect(row('ask-first').textContent).toContain('Asks before every page write');
+  });
+
+  it('warns about an odd value, reads it as on, and holds Done until a choice', async () => {
+    setup([withProps({ 'ask-first': 'yes' }), RISK]);
+    expect(row('ask-first').textContent).toContain('ask-first: yes — read as on until you choose');
+    const editor = openRow('ask-first');
+    const doneButton = within(editor).getByRole('button', { name: 'Done' });
+    expect((doneButton as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(within(editor).getByRole('radio', { name: 'Writes without asking' }));
+    done(editor);
+    await waitFor(() => expect(lastPatch()).toEqual({ 'ask-first': null }));
+  });
+
+  it('Done writes only ask-first', async () => {
+    setup();
+    const editor = openRow('ask-first');
+    fireEvent.click(within(editor).getByRole('radio', { name: 'Asks before every page write' }));
+    expect(patch).not.toHaveBeenCalled();
+    done(editor);
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    expect(lastPatch()).toEqual({ 'ask-first': true });
+  });
+
+  it('Cancel and Escape write nothing', () => {
+    setup();
+    let editor = openRow('ask-first');
+    fireEvent.click(within(editor).getByRole('radio', { name: 'Asks before every page write' }));
+    fireEvent.click(within(editor).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByTestId('agent-editor-ask-first')).toBeNull();
+    editor = openRow('ask-first');
+    fireEvent.click(within(editor).getByRole('radio', { name: 'Asks before every page write' }));
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByTestId('agent-editor-ask-first')).toBeNull();
     expect(patch).not.toHaveBeenCalled();
   });
 });

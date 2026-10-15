@@ -458,6 +458,9 @@ impl RunOutcome {
 /// `usage: None` is the honest-unknown path and is NOT the same as
 /// `Some(Usage::default())`. Zero says "this run cost nothing"; none says
 /// "nobody knows what this run cost", which pauses ambient work.
+///
+/// A quota death here backs off for one quota window: a caller that knows
+/// when Claude Code said the limit resets uses [`finalize_until_reset`].
 pub fn finalize(
     conn: &Connection,
     run_id: &str,
@@ -467,10 +470,40 @@ pub fn finalize(
     items: ItemOutcome,
     now: DateTime<Utc>,
 ) -> Result<(), String> {
+    finalize_until_reset(conn, run_id, outcome, usage, facts, items, None, now)
+}
+
+/// [`finalize`], with the reset Claude Code reported for the limit that
+/// killed a `QuotaFailed` run (M56.14), so the backoff ends there rather than
+/// after one window (`health::quota_backoff_end`). Ignored for any other
+/// outcome.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "finalize's seven, plus the reported reset; a struct would rename every caller's arguments for one optional field"
+)]
+pub fn finalize_until_reset(
+    conn: &Connection,
+    run_id: &str,
+    outcome: RunOutcome,
+    usage: Option<Usage>,
+    facts: Option<&RunFacts>,
+    items: ItemOutcome,
+    quota_resets_at: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> Result<(), String> {
     conn.execute_batch("BEGIN IMMEDIATE")
         .map_err(|e| format!("finalize: {e}"))?;
     crate::crash::crash_point("runtime-finalize-begun");
-    let result = finalize_inner(conn, run_id, outcome, usage, facts, items, now);
+    let result = finalize_inner(
+        conn,
+        run_id,
+        outcome,
+        usage,
+        facts,
+        items,
+        quota_resets_at,
+        now,
+    );
     match result {
         Ok(pause) => {
             conn.execute_batch("COMMIT")
@@ -493,6 +526,10 @@ pub fn finalize(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "finalize_until_reset's arguments, passed through whole"
+)]
 fn finalize_inner(
     conn: &Connection,
     run_id: &str,
@@ -500,6 +537,7 @@ fn finalize_inner(
     usage: Option<Usage>,
     facts: Option<&RunFacts>,
     items: ItemOutcome,
+    quota_resets_at: Option<DateTime<Utc>>,
     now: DateTime<Utc>,
 ) -> Result<bool, String> {
     let (vault_id, store_uuid, lane, mode, reserved_total, reserved_output, started_at): (
@@ -611,14 +649,16 @@ fn finalize_inner(
 
     // The quota path, INSIDE the same transaction that requeued the work: a
     // backoff written afterwards could be lost by a kill between the two, and
-    // the next dispatcher would walk straight back into the wall.
+    // the next dispatcher would walk straight back into the wall. It ends at
+    // the reset Claude Code reported, when it reported one (M56.14).
     if outcome == RunOutcome::QuotaFailed {
         if let Some(store) = &store_uuid {
-            super::health::record_quota_failure(
+            super::health::record_quota_failure_until_reset(
                 conn,
                 store,
                 "the CLI reported a usage or rate limit",
                 now,
+                quota_resets_at,
             )?;
         }
     } else if outcome.is_success() {
@@ -805,6 +845,45 @@ pub fn begin_attended(
         ],
     )
     .map_err(|e| format!("runs (attended, open): {e}"))?;
+    Ok(())
+}
+
+/// Does `approval` let the CLI's own writers or its shell run, asked or not
+/// (M58.1)? Those tools write past every door, so `vault_writes` cannot hold
+/// all a run of them wrote. Read from the data: a CLI tool in a family the
+/// Settings shell ceiling decides, that is no reader (it folds no reads),
+/// with a decision that lets it run.
+pub fn shell_may_write(approval: &crate::policy::tool_approval::RunApproval) -> bool {
+    use crate::policy::tool_approval::Decision as Planned;
+    let table = crate::policy::tool_approval::table();
+    approval.decisions.iter().any(|row| {
+        let past_the_doors = table
+            .family(&row.family)
+            .is_some_and(|family| family.ceiling == "shell")
+            && crate::policy::tools::cli_tool(&row.tool).is_some_and(|tool| tool.fold.is_none());
+        past_the_doors && matches!(row.decision, Planned::Allow | Planned::Cli | Planned::Ask)
+    })
+}
+
+/// Book a run's writes as partial (M58.1): `runs.writes_booked = 2`, when its
+/// plan lets the CLI's own writers or the shell run (`shell_may_write`). Its
+/// `vault_writes` rows are still every door's write, but the shell may have
+/// written elsewhere. Only a row booked whole moves; a row from before M58.1
+/// stays not recorded. Called once the row stands (the claim, or
+/// `begin_attended`); never fails a run.
+pub fn book_partial_writes(
+    conn: &Connection,
+    run_id: &str,
+    approval: &crate::policy::tool_approval::RunApproval,
+) -> Result<(), String> {
+    if !shell_may_write(approval) {
+        return Ok(());
+    }
+    conn.execute(
+        "UPDATE runs SET writes_booked = 2 WHERE run_id = ?1 AND writes_booked = 1",
+        [run_id],
+    )
+    .map_err(|e| format!("runs (writes booked): {e}"))?;
     Ok(())
 }
 
@@ -1175,6 +1254,55 @@ mod tests {
             total_tokens: 5_000,
             output_tokens: 1_000,
         }
+    }
+
+    /// The plan a request of `shell` (and, attended or not) is planned by.
+    fn plan_of(shell: &str, attended: bool) -> crate::policy::tool_approval::RunApproval {
+        let req: crate::agent::AgentRequest = serde_json::from_value(serde_json::json!({
+            "message": "", "shell": shell, "attended": attended
+        }))
+        .unwrap();
+        crate::policy::tool_approval::plan_for(&req, attended)
+    }
+
+    fn writes_booked(conn: &Connection, run_id: &str) -> i64 {
+        conn.query_row(
+            "SELECT writes_booked FROM runs WHERE run_id = ?1",
+            [run_id],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    // M58.1: a run whose plan lets the CLI's own writers or the shell run,
+    // asked or not, books its writes as partial; one with the shell off
+    // books them whole.
+    #[test]
+    fn a_run_whose_plan_lets_the_shell_write_books_partial() {
+        let (dir, conn, vault) = fixture("dispatch-writes-booked");
+        let now = at("2026-10-14T10:00:00Z");
+        for (run, shell, attended, booked) in [
+            ("shell-off", "off", true, 1),
+            ("shell-ask", "ask", true, 2),
+            ("shell-on", "on", false, 2),
+        ] {
+            begin_attended(
+                &conn,
+                run,
+                Some(&vault),
+                Some("store"),
+                None,
+                None,
+                None,
+                now,
+            )
+            .unwrap();
+            assert_eq!(writes_booked(&conn, run), 1, "{run}: booked from the start");
+            book_partial_writes(&conn, run, &plan_of(shell, attended)).unwrap();
+            assert_eq!(writes_booked(&conn, run), booked, "{run}");
+        }
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// One finished run row, raw — enough for the chain walk, which reads
@@ -2270,6 +2398,113 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A run that died of quota at 2026-08-09T10:00:00Z, finalized with
+    /// `reset` as the reset Claude Code reported (M56.14).
+    fn quota_death_reporting(
+        label: &str,
+        reset: Option<&str>,
+    ) -> (std::path::PathBuf, Connection, String) {
+        let (dir, conn, vault) = fixture(label);
+        seed_item(&conn, &vault, "a.md");
+        let now = at("2026-08-09T10:00:00Z");
+        let Dispatched::Started(lease) = claim(
+            &conn,
+            &vault,
+            "store",
+            "filed",
+            small(),
+            &["a.md".into()],
+            None,
+            None,
+            now,
+        )
+        .unwrap() else {
+            panic!("dispatch");
+        };
+        finalize_until_reset(
+            &conn,
+            &lease.run_id,
+            RunOutcome::QuotaFailed,
+            Some(Usage::default()),
+            None,
+            ItemOutcome::Requeue,
+            reset.map(at),
+            now,
+        )
+        .unwrap();
+        (dir, conn, vault)
+    }
+
+    /// Is a dispatch at `when` refused for quota? One that starts holds the
+    /// item, so a probe that may start goes last.
+    fn backed_off_at(conn: &Connection, vault: &str, when: &str) -> bool {
+        match claim(
+            conn,
+            vault,
+            "store",
+            "filed",
+            small(),
+            &["a.md".into()],
+            None,
+            None,
+            at(when),
+        )
+        .unwrap()
+        {
+            Dispatched::Started(_) => false,
+            Dispatched::Deferred(reasons) => reasons.contains(&GateReason::QuotaBackoff),
+            other => panic!("unexpected dispatch {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_quota_death_with_a_reported_reset_backs_off_until_that_instant() {
+        // A weekly limit that resets three days out: five hours later the
+        // runtime still waits, and it waits exactly until the reset.
+        let _lock = status::test_lock();
+        status::clear();
+        let (dir, conn, vault) =
+            quota_death_reporting("dispatch-quota-reset", Some("2026-08-12T10:00:00Z"));
+        assert!(backed_off_at(&conn, &vault, "2026-08-09T15:05:00Z"));
+        assert!(backed_off_at(&conn, &vault, "2026-08-12T09:59:59Z"));
+        assert!(!backed_off_at(&conn, &vault, "2026-08-12T10:00:01Z"));
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_quota_death_without_a_reset_keeps_the_five_hour_window() {
+        let _lock = status::test_lock();
+        status::clear();
+        let (dir, conn, vault) = quota_death_reporting("dispatch-quota-window", None);
+        assert!(backed_off_at(&conn, &vault, "2026-08-09T14:59:00Z"));
+        assert!(!backed_off_at(&conn, &vault, "2026-08-09T15:01:00Z"));
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_past_or_absurd_reported_reset_is_clamped() {
+        let _lock = status::test_lock();
+        status::clear();
+        // A reset already past would end the pause at once: it is no reset,
+        // and the window holds.
+        let (dir, conn, vault) =
+            quota_death_reporting("dispatch-quota-past", Some("2026-08-01T00:00:00Z"));
+        assert!(backed_off_at(&conn, &vault, "2026-08-09T14:59:00Z"));
+        assert!(!backed_off_at(&conn, &vault, "2026-08-09T15:01:00Z"));
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // A reset years out parks the runtime for the ceiling, not for good.
+        let (dir, conn, vault) =
+            quota_death_reporting("dispatch-quota-far", Some("2031-01-01T00:00:00Z"));
+        assert!(backed_off_at(&conn, &vault, "2026-08-17T09:59:00Z"));
+        assert!(!backed_off_at(&conn, &vault, "2026-08-17T10:01:00Z"));
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_successful_run_says_the_runtime_is_working_again() {
         let (dir, conn, vault) = fixture("dispatch-recovered");
@@ -2538,6 +2773,7 @@ mod tests {
             batch_id: "batch".into(),
             replayed: false,
             kept: vec![],
+            projected: Vec::new(),
         }
     }
 

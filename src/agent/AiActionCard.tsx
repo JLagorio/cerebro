@@ -51,13 +51,12 @@ export function toolLabel(name: string): string {
 export const INTERRUPTED = 'Interrupted, may have completed';
 
 /** What a deferred call says, by its status (M57.1). */
-export const DEFERRED: Readonly<Record<'waiting' | 'cancelled' | 'not_run' | 'paused', string>> =
-  {
-    waiting: 'Waiting for your answer',
-    cancelled: 'Cancelled: it did not run',
-    not_run: 'Not run: it waited for an answer that never came',
-    paused: 'Paused by a hook outside Cerebro; your next message refuses it',
-  };
+export const DEFERRED: Readonly<Record<'waiting' | 'cancelled' | 'not_run' | 'paused', string>> = {
+  waiting: 'Waiting for your answer',
+  cancelled: 'Cancelled: it did not run',
+  not_run: 'Not run: it waited for an answer that never came',
+  paused: 'Paused by a hook outside Cerebro; your next message refuses it',
+};
 
 /** A whole payload's size, as the cut note names it. */
 export function formatSize(bytes: number): string {

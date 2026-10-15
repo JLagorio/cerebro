@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { buildSchema } from './schema';
-import { groupEntries, groupTree } from './grouping';
+import { bandDef, bandWritable, groupEntries, groupTree } from './grouping';
 import { makeEntry } from './testHelpers';
+import type { FieldDef } from './types';
+import { bigTasks, computedVault, epics, smallTasks } from '@/test/computedVault';
 
 const typeNote = makeEntry({
   path: 'types/work-item.md',
@@ -226,5 +228,68 @@ describe('groupTree', () => {
     // 'shipped' is declared on the type but unused here.
     expect(withEmpty.some((n) => n.key === 'shipped')).toBe(true);
     expect(withoutEmpty.some((n) => n.key === 'shipped')).toBe(false);
+  });
+});
+
+// M60.1: grouping reads `schema.fieldValue`, so a derived relation bands by
+// its linking records instead of piling every record into "No <field>".
+describe('groupEntries — computed values (M60.1)', () => {
+  const vault = computedVault();
+  const schema = buildSchema(vault);
+
+  it('bands each record of a derived relation under its linking record', () => {
+    const groups = groupEntries(epics(), 'tasks', schema);
+    expect(groups.map((g) => [g.key, g.label, g.entries.map((e) => e.title)])).toEqual([
+      ['big-1', 'big 1', ['Big']],
+      ['small-1', 'small 1', ['Small']],
+      ['__none__', 'No tasks', ['Empty']],
+    ]);
+  });
+
+  it('bands by a count rollup’s number', () => {
+    const groups = groupEntries(epics(), 'task_count', schema);
+    expect(groups.map((g) => [g.key, g.entries.length])).toEqual([
+      ['0', 1],
+      ['10', 1],
+      ['9', 1],
+    ]);
+  });
+
+  it('a stored relation still bands by its bracket-stripped target', () => {
+    const groups = groupEntries([...bigTasks, ...smallTasks], 'epic', schema);
+    expect(groups.map((g) => [g.key, g.label, g.entries.length])).toEqual([
+      ['big', 'Big', 10],
+      ['small', 'Small', 9],
+    ]);
+  });
+});
+
+describe('bandWritable (M60.1)', () => {
+  const schema = buildSchema(computedVault());
+  const defOf = (field: string, entries = epics()) => bandDef(entries, field, schema);
+
+  it('finds the first declaring def, or null', () => {
+    expect(defOf('task_count')?.kind).toBe('rollup');
+    expect(defOf('colour')).toBeNull();
+  });
+
+  it.each([
+    ['a rollup', 'task_count'],
+    ['created time', 'created'],
+    ['edited time', 'edited'],
+    ['a derived relation', 'tasks'],
+  ])('is false for %s', (_label, field) => {
+    expect(bandWritable(defOf(field))).toBe(false);
+  });
+
+  it('is false for a derived person too', () => {
+    const def: FieldDef = { name: 'owners', kind: 'person', from: { type: 'T', field: 'f' } };
+    expect(bandWritable(def)).toBe(false);
+  });
+
+  it('is true for a stored relation and an undeclared field', () => {
+    expect(bandWritable(defOf('epic', bigTasks))).toBe(true);
+    expect(bandWritable(defOf('colour'))).toBe(true);
+    expect(bandWritable(null)).toBe(true);
   });
 });

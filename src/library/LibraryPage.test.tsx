@@ -81,6 +81,23 @@ describe('LibraryPage', () => {
     expect(await screen.findByText('PRD')).toBeTruthy();
   });
 
+  // M59.3 — the shelf filters through nameMatches: words apart still match.
+  it('finds a card from two words that are apart', () => {
+    render(<LibraryPage />);
+    // In order, across the title and the description: a match.
+    fireEvent.change(screen.getByLabelText('Search the library'), {
+      target: { value: 'risk unwritten' },
+    });
+    expect(screen.getAllByTestId('library-card').map((c) => c.textContent)).toEqual([
+      expect.stringContaining('Risk sweep'),
+    ]);
+    // Out of order: none.
+    fireEvent.change(screen.getByLabelText('Search the library'), {
+      target: { value: 'unwritten sweep' },
+    });
+    expect(screen.queryAllByTestId('library-card')).toHaveLength(0);
+  });
+
   it('says what an agent may write on the card, without opening it', () => {
     // A boundary that only exists in a file nobody opens is a promise, not a
     // control surface.

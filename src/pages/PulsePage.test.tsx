@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PulseCommit, VaultPulse } from '@/engine/git';
+import type { CommitRun, PulseCommit, VaultPulse } from '@/engine/git';
 
 const { pulseCommit } = vi.hoisted(() => ({
   pulseCommit: (over: Partial<PulseCommit> = {}): PulseCommit => ({
-    hash: 'aaaaaaaaaaaa',
+    hash: 'a'.repeat(40),
     shortHash: 'aaaaaaa',
     message: 'Update 2 notes in knowledge',
     author: 'assistant',
@@ -25,12 +25,14 @@ vi.mock('@/lib/gitIpc', async (importOriginal) => {
       commits: [pulseCommit()],
     })),
     getCommitDiff: vi.fn(async () => 'diff --git a b'),
+    commitRuns: vi.fn(async () => [] as CommitRun[]),
   };
 });
 
-import { getCommitDiff, getVaultPulse } from '@/lib/gitIpc';
+import { commitRuns, getCommitDiff, getVaultPulse } from '@/lib/gitIpc';
 import { PulsePage } from '@/pages/PulsePage';
 import { useVaultStore } from '@/stores/vaultStore';
+import { makeEntry } from '@/test/factories';
 
 afterEach(cleanup);
 
@@ -62,7 +64,7 @@ describe('PulsePage', () => {
   it('opens the diff from anywhere on the card, not just the message', async () => {
     render(<PulsePage />);
     const commit = await card();
-    fireEvent.click(within(commit).getByText('assistant'));
+    fireEvent.click(await within(commit).findByText('unattributed'));
     expect(await screen.findByRole('dialog')).toBeTruthy();
   });
 
@@ -130,7 +132,7 @@ describe('PulsePage', () => {
   it('says a failed diff read could not be read, never "No changes."', async () => {
     vi.mocked(getCommitDiff).mockRejectedValueOnce(new Error('fatal: bad object'));
     render(<PulsePage />);
-    fireEvent.click(within(await card()).getByText('assistant'));
+    fireEvent.click(await within(await card()).findByText('unattributed'));
     const dialog = await screen.findByRole('dialog');
     expect(await within(dialog).findByTestId('section-unavailable')).toBeTruthy();
     expect(within(dialog).queryByText('No changes.')).toBeNull();
@@ -140,12 +142,57 @@ describe('PulsePage', () => {
     const read = deferred<string>();
     vi.mocked(getCommitDiff).mockReturnValueOnce(read.promise);
     render(<PulsePage />);
-    fireEvent.click(within(await card()).getByText('assistant'));
+    fireEvent.click(await within(await card()).findByText('unattributed'));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).queryByText('No changes.')).toBeNull();
     expect(within(dialog).queryByTestId('diff-view')).toBeNull();
 
     await act(async () => read.resolve('diff --git a/x b/x\n+added line'));
     expect(within(dialog).getByTestId('diff-view')).toBeTruthy();
+  });
+
+  // M58.4 (CV-35): the History page reads who made a commit as the page's
+  // History tab does, from the commit record alone.
+  describe('attribution', () => {
+    const scout = makeEntry({
+      path: 'records/agents/release-scout.md',
+      title: 'Release scout',
+      type: 'Agent',
+      properties: { slug: 'release-scout' },
+    });
+
+    it('names the agent of a recorded commit, and unattributed otherwise', async () => {
+      useVaultStore.setState({ vaultPath: '/demo-vault', entries: [scout] });
+      vi.mocked(getVaultPulse).mockResolvedValueOnce({
+        tracked: true,
+        commits: [pulseCommit(), pulseCommit({ hash: 'b'.repeat(40), shortHash: 'bbbbbbb' })],
+      });
+      vi.mocked(commitRuns).mockResolvedValueOnce([
+        {
+          hash: 'a'.repeat(40),
+          run_id: 'run-scout-1',
+          actor: 'process:release-scout',
+          with_person: null,
+          also_by: [],
+        },
+      ]);
+      render(<PulsePage />);
+      const cards = await screen.findAllByTestId('pulse-commit');
+      expect(await within(cards[0]).findByText('Release scout')).toBeTruthy();
+      expect(within(cards[1]).getByTestId('commit-author').textContent).toBe('unattributed');
+      expect(commitRuns).toHaveBeenCalledWith('/demo-vault', [
+        { hash: 'a'.repeat(40), path: null, since: null },
+        { hash: 'b'.repeat(40), path: null, since: null },
+      ]);
+    });
+
+    it('says attribution unknown when the record could not be read', async () => {
+      vi.mocked(commitRuns).mockRejectedValueOnce(new Error('no runtime db'));
+      render(<PulsePage />);
+      const commit = await card();
+      expect((await within(commit).findByText('attribution unknown')).dataset.attributed).toBe(
+        'unknown',
+      );
+    });
   });
 });

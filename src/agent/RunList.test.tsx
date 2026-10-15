@@ -36,7 +36,7 @@ const run = (over: Partial<RunRecord> = {}): RunRecord => ({
 describe('RunList', () => {
   beforeEach(() => {
     vi.mocked(agentIpc.stopAgent).mockClear();
-    useUiStore.setState({ runs: [], aiPanelOpen: false });
+    useUiStore.setState({ runs: [], aiPanelOpen: false, panelConversation: null });
     useNavStore.setState({ selection: { kind: 'home' } });
     useRunLogStore.getState().clear();
   });
@@ -94,6 +94,8 @@ describe('RunList', () => {
     // the run so a screen reader knows what it would be stopping).
     fireEvent.click(within(screen.getByTestId('run-row')).getAllByRole('button')[0]);
     expect(useUiStore.getState().aiPanelOpen).toBe(true);
+    // M57.6: the panel opens on the run's own thread, not whichever was open.
+    expect(useUiStore.getState().panelConversation).toBe('c-1');
     expect(useNavStore.getState().selection).toEqual({
       kind: 'list',
       id: 'roadmap',

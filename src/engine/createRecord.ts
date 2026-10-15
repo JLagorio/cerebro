@@ -1,4 +1,4 @@
-import { bandKind, bandValueFor, NO_VALUE_KEY } from './grouping';
+import { bandDef, bandValueFor, bandWritable, NO_VALUE_KEY } from './grouping';
 import { nextItemKey } from './itemKeys';
 import type { ChildrenSpec, Entry, Schema } from './types';
 
@@ -51,7 +51,10 @@ export function createTarget(
   // it verbatim produced `epic: Bonsai` — filed under `properties` rather than
   // `relationships`, so the link did not exist and the record did not come back
   // to the band it was created in. `undefined` means the band cannot be
-  // expressed as one write (multi-select), so nothing is seeded.
+  // expressed as one write (multi-select), so nothing is seeded. A computed
+  // or derived band (M60.1: a rollup, a timestamp, a relation with `from`)
+  // seeds nothing either: its value is not this record's to store, and a key
+  // written there would be a mirror nothing reads.
   if (
     groupBy != null &&
     groupBy !== '' &&
@@ -59,7 +62,8 @@ export function createTarget(
     groupValue !== '' &&
     groupValue !== NO_VALUE_KEY
   ) {
-    const value = bandValueFor(groupValue, bandKind(entries, groupBy, schema));
+    const def = bandDef(entries, groupBy, schema);
+    const value = bandWritable(def) ? bandValueFor(groupValue, def?.kind) : undefined;
     if (value !== undefined && value !== null) frontmatter[groupBy] = value;
   }
 

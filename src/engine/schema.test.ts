@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_STATUSES,
+  VIRTUAL_FIELDS,
   buildSchema,
   parseLayoutConfig,
   serializeDisplayConfig,
@@ -8,6 +9,7 @@ import {
 } from './schema';
 import type { DisplayConfig } from './types';
 import { makeEntry } from './testHelpers';
+import { bigEpic, bigTasks, computedVault, emptyEpic, smallEpic } from '@/test/computedVault';
 
 const typeNote = makeEntry({
   path: 'types/work-item.md',
@@ -405,6 +407,68 @@ describe('derived two-way relations', () => {
     const owning = schema.types.get('Key result')!.fields.find((f) => f.name === 'objective')!;
     expect(owning.limit).toBe(1);
     expect(owning.target).toBe('Objective');
+  });
+});
+
+// M60.1: the one value every view reads. Filter, sort, group, chart and the
+// dashboard number all call it, so these pin its order once.
+describe('fieldValue', () => {
+  const schema = buildSchema(computedVault());
+
+  it('pins the virtual fields in one order', () => {
+    expect(VIRTUAL_FIELDS).toEqual(['title', 'type', 'createdAt', 'modifiedAt']);
+  });
+
+  it('reads the page title, never a frontmatter `title:` key', () => {
+    expect(bigEpic.properties.title).toBe('Zeta');
+    expect(schema.fieldValue(bigEpic, 'title')).toBe('Big');
+    expect(schema.fieldValue(bigEpic, 'type')).toBe('Epic');
+  });
+
+  it('gives created and edited time as the entry’s own stamps', () => {
+    expect(schema.fieldValue(bigEpic, 'createdAt')).toBe('2026-08-01T12:00:00Z');
+    expect(schema.fieldValue(bigEpic, 'modifiedAt')).toBe('2026-07-25T12:00:00Z');
+    expect(schema.fieldValue(bigEpic, 'created')).toBe('2026-08-01T12:00:00Z');
+    expect(schema.fieldValue(bigEpic, 'edited')).toBe('2026-07-25T12:00:00Z');
+  });
+
+  it('gives count and sum rollups as numbers', () => {
+    expect(schema.fieldValue(bigEpic, 'task_count')).toBe(10);
+    expect(schema.fieldValue(smallEpic, 'task_count')).toBe(9);
+    expect(schema.fieldValue(bigEpic, 'points')).toBe(10);
+    expect(schema.fieldValue(smallEpic, 'points')).toBe(18);
+    // A count of nothing is a measured zero, not an absence.
+    expect(schema.fieldValue(emptyEpic, 'task_count')).toBe(0);
+  });
+
+  it('leaves a sum over prose, or over nothing, undefined — never 0', () => {
+    expect(schema.fieldValue(bigEpic, 'prose_sum')).toBeUndefined();
+    expect(schema.fieldValue(emptyEpic, 'points')).toBeUndefined();
+  });
+
+  it('keeps a show rollup’s text', () => {
+    expect(schema.fieldValue(smallEpic, 'notes')).toBe(Array(9).fill('beta').join(', '));
+  });
+
+  it('gives a derived relation the linking records’ stems', () => {
+    expect(schema.fieldValue(bigEpic, 'tasks')).toEqual(
+      Array.from({ length: 10 }, (_, i) => `big-${i + 1}`),
+    );
+    expect(schema.fieldValue(emptyEpic, 'tasks')).toEqual([]);
+  });
+
+  it('gives a stored relation its bracket-stripped targets', () => {
+    expect(schema.fieldValue(bigTasks[0], 'epic')).toEqual(['big']);
+  });
+
+  it('falls through to an undeclared property, and absent is undefined', () => {
+    expect(schema.fieldValue(bigEpic, 'colour')).toBe('red');
+    expect(schema.fieldValue(bigTasks[0], 'estimate')).toBe(1);
+    expect(schema.fieldValue(bigEpic, 'nothing_here')).toBeUndefined();
+  });
+
+  it('answers a repeat read from its memo', () => {
+    expect(schema.fieldValue(bigEpic, 'tasks')).toBe(schema.fieldValue(bigEpic, 'tasks'));
   });
 });
 

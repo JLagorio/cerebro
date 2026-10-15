@@ -1,11 +1,30 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { createElement, type ComponentProps } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { EditorReadyInfo } from '@/editor/MarkdownEditor';
+import { announceExternalWrites } from '@/editor/openPages';
 import { resetMockFs } from '@/lib/mockIpc';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { DocPage } from './DocPage';
+
+// The real editor, with its ready info kept so a case can type the way the
+// person would (M55.13's held-save case). Every other case is unaffected.
+const lastEditor = vi.hoisted(() => ({ info: null as EditorReadyInfo | null }));
+vi.mock('@/editor/NoteBodyEditor', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('@/editor/NoteBodyEditor')>();
+  const Tracked = (props: ComponentProps<typeof mod.NoteBodyEditor>) =>
+    createElement(mod.NoteBodyEditor, {
+      ...props,
+      onReady: (info: EditorReadyInfo) => {
+        lastEditor.info = info;
+        props.onReady?.(info);
+      },
+    });
+  return { ...mod, NoteBodyEditor: Tracked };
+});
 
 const DOC = 'projects/guided-onboarding-ga/meetings/kickoff.md';
 const DOC_FOLDER = 'projects/guided-onboarding-ga/spec';
@@ -24,6 +43,20 @@ describe('DocPage', () => {
     useUiStore.setState({ docPanelOpen: true, docPanelTab: 'outline' });
   });
   afterEach(cleanup);
+
+  // M58.4 (D18): the page's history is the side panel's History tab, not a
+  // list under the editor.
+  it('keeps history out from under the editor, in the side panel', async () => {
+    render(<DocPage selection={{ kind: 'doc', path: DOC }} />);
+    await waitFor(() => expect(screen.getByTestId('markdown-editor')).toBeTruthy(), {
+      timeout: 5_000,
+    });
+    expect(screen.queryByTestId('git-history')).toBeNull();
+    fireEvent.click(screen.getByTestId('doc-panel-tab-history'));
+    const panel = screen.getByTestId('doc-side-panel');
+    expect(await within(panel).findByTestId('git-history')).toBeTruthy();
+    expect(within(screen.getByTestId('doc-content')).queryByTestId('git-history')).toBeNull();
+  });
 
   it('shows the breadcrumb bar, title, editor, and outline panel', async () => {
     render(<DocPage selection={{ kind: 'doc', path: DOC }} />);
@@ -629,6 +662,28 @@ describe('DocPage', () => {
     expect(fs().has(DOC_MAIN)).toBe(false);
   });
 
+  // M60.8: the doc goes to the vault's own Trash through trashPath, every
+  // page in it, and the dialog says Settings brings it back.
+  it('trashing a doc moves every page into the vault Trash, in the new words', async () => {
+    fs().set(DOC_MAIN, '# Spec\n');
+    fs().set(`${DOC_FOLDER}/two.md`, '# Two\n');
+    await useVaultStore.getState().rescan();
+    render(<DocPage selection={{ kind: 'doc', path: DOC_MAIN }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Page options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move doc to Trash' }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toContain('The whole doc — every page in it — moves to the Trash.');
+    expect(dialog.textContent).toContain('Restore from Settings → Recently deleted for 30 days.');
+    expect(dialog.textContent).not.toMatch(/system Trash|not from the app/);
+    fireEvent.click(screen.getByRole('button', { name: 'Move to Trash' }));
+    await waitFor(() => expect(fs().has(DOC_MAIN)).toBe(false), { timeout: 5_000 });
+    const keys = [...fs().keys()];
+    expect(
+      keys.find((p) => p.startsWith('.trash/') && p.endsWith(`/${DOC_FOLDER}/two.md`)),
+    ).toBeTruthy();
+    expect(useUiStore.getState().toasts.map((t) => t.message)).toContain('Moved “Spec” to Trash');
+  });
+
   // M15: a doc whose body has no H1 had its title in the breadcrumb and
   // nowhere else — the document itself was untitled.
   describe('the title of an untitled doc', () => {
@@ -704,6 +759,41 @@ describe('DocPage', () => {
       expect(fs().get('notes/plan/plan.md')).toBe('# Plan\n\nBody.\n');
       expect(fs().has(PLAIN)).toBe(false);
       expect(fs().get('notes/plan/goals.md')).toBe('# Goals\n');
+    });
+
+    it('refuses to grow a page while its save waits on a choice, and keeps the typing', async () => {
+      fs().set(PLAIN, '# Plan\n\nBody.\n');
+      await useVaultStore.getState().rescan();
+      useUiStore.setState({ toasts: [] });
+      lastEditor.info = null;
+      render(<DocPage selection={{ kind: 'doc', path: PLAIN }} />);
+      await waitFor(() => expect(lastEditor.info).not.toBeNull(), { timeout: 5_000 });
+      const info = lastEditor.info as unknown as EditorReadyInfo;
+      const body = info.editor.document.find((b) => JSON.stringify(b.content).includes('Body.'));
+      if (body === undefined) throw new Error('no Body. paragraph');
+      // Typed, then an outside write hits the same paragraph: a choice opens
+      // and the save is held until it is settled (M55.6).
+      act(() => {
+        info.editor.updateBlock(body, { content: 'Body, typed by me.' });
+      });
+      fs().set(PLAIN, '# Plan\n\nBody, by the agent.\n');
+      await act(() => announceExternalWrites([PLAIN], async () => undefined));
+      await waitFor(() => expect(screen.getAllByTestId('merge-choice')).toHaveLength(1), {
+        timeout: 5_000,
+      });
+      await addSubPageNamed('Goals');
+      await waitFor(() =>
+        expect(useUiStore.getState().toasts.map((t) => t.message)).toContain(
+          `Couldn't add sub-page: "Plan" has changes waiting on you. Settle them first`,
+        ),
+      );
+      // Nothing moved, so the held save still has its file.
+      expect(fs().has('notes/plan/plan.md')).toBe(false);
+      expect(fs().has('notes/plan/goals.md')).toBe(false);
+      fireEvent.click(screen.getByTestId('merge-keep-mine'));
+      await waitFor(() => expect(fs().get(PLAIN)).toContain('Body, typed by me.'), {
+        timeout: 5_000,
+      });
     });
 
     it('on a sub-page, adds a grandchild under that page’s own folder', async () => {

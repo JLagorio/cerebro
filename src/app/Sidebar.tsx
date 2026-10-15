@@ -23,6 +23,7 @@ import { useOpenPath } from '@/app/useOpenPath';
 import { rowClass } from '@/app/sidebarChrome';
 import { agentRef, isAgentEntry } from '@/engine/agents';
 import { collectionsTree, effectiveCollections } from '@/engine/collections';
+import { destination, visibleDestinations, type DestinationKind } from '@/engine/destinations';
 import { inboxCounts } from '@/engine/inbox';
 import { isPaused } from '@/engine/jobs';
 import { openWork } from '@/engine/myWork';
@@ -197,11 +198,11 @@ function SurfaceRow({
  * live here now, so the canvas starts at the window's top edge.
  *
  * Shape, top to bottom: header (vault tile · wordmark · zap · search ·
- * collapse), the New button, the destination rows (Inbox, Home, My work,
- * Work, Studio, Base, History, Library — groups keep their M42.2 chevrons),
- * then the sections — Collections, Pages, Agents, Databases, Favorites — all
- * wearing SectionHeader's one anatomy, then the footer (SyncBadge · Theme ·
- * Settings). Agents left the destination list for a section because the
+ * collapse), the New button, the destination rows (`engine/destinations.ts`'s
+ * `row` places, in its order), then the sections — Collections, Pages, Work,
+ * Knowledge, Agents, Databases, Favorites — all wearing SectionHeader's one
+ * anatomy, then the footer (SyncBadge · Theme · Settings). The table names
+ * every row, door and the Settings footer (M59.1). Agents left the destination list for a section because the
  * design's `sec()` treats a roster the way Databases already reads: a
  * labelled shelf of subjects, not a place with children.
  */
@@ -296,14 +297,6 @@ export function Sidebar({
   useEffect(() => {
     void loadRoots();
   }, [loadRoots]);
-  // M9.4: the two git surfaces share one slot's worth of "history".
-  const historyActive = selection.kind === 'changes' || selection.kind === 'pulse';
-  // Home is current on Home alone (M52). M15 lit it on every Collection, List
-  // and Type screen as the item world's front door, which was true while
-  // those rows lived in a sidebar of Home's own; in the one column they are
-  // rows of their own, so on the Epic table Home and Epic were both current.
-  const homeActive = selection.kind === 'home';
-
   // M15: the badge counts what the page will SHOW — the persisted period, not
   // the unfiltered total.
   const queued = useMemo(
@@ -314,6 +307,13 @@ export function Sidebar({
   // M43: the same contract as the Inbox badge — the count is the page's own
   // membership rule, so the nav never promises work the page cannot show.
   const openCount = useMemo(() => openWork(entries, schema).length, [entries, schema]);
+  const counts: Partial<Record<DestinationKind, number>> = { inbox: queued, mywork: openCount };
+  // The table's standalone rows, in its order; Inbox only with its workflow.
+  const rows = visibleDestinations({ inboxEnabled }).filter((d) => d.nav === 'row');
+  const work = destination('workspace');
+  const knowledge = destination('knowledge');
+  const fleet = destination('agents');
+  const settings = destination('settings');
 
   // M3: every type the vault knows about — system, declared, and ghost.
   const types = useMemo(() => listTypes(entries, schema), [entries, schema]);
@@ -622,71 +622,23 @@ export function Sidebar({
         <div className="mb-2">
           <CreateMenu />
         </div>
-        {/* M42.2 — every destination that owns subjects is a GROUP whose
-            rows nest under it, on every surface (the Notion shape the user
-            asked for by name). Heads live in `nav-surfaces` containers;
-            nested rows live OUTSIDE them, because nested labels are not
-            destinations and an agent named "Home" must never be caught by a
-            spec scoped to the destinations. Only the deepest thing you are
-            on lights up — a lit parent above a lit child is two rows
-            claiming one place. */}
+        {/* The destination rows, from engine/destinations.ts (M59.1) — each
+            row's rationale lives on its row there. Nested rows live OUTSIDE
+            `nav-surfaces`, because nested labels are not destinations and an
+            agent named "Home" must never be caught by a spec scoped to the
+            destinations. */}
         <div data-testid="nav-surfaces">
-          {inboxEnabled && (
+          {rows.map((d) => (
             <SurfaceRow
-              icon="inbox"
-              label="Inbox"
-              hot
-              active={selection.kind === 'inbox'}
-              count={queued}
-              onClick={() => navigate({ kind: 'inbox' })}
+              key={d.kind}
+              icon={d.icon}
+              label={d.label}
+              hot={d.hot === true}
+              active={d.lights.includes(selection.kind)}
+              count={counts[d.kind]}
+              onClick={() => navigate(d.selection)}
             />
-          )}
-          <SurfaceRow
-            icon="house"
-            label="Home"
-            active={homeActive}
-            onClick={() => navigate({ kind: 'home' })}
-          />
-          {/* M43 — open work across every database. The quiet count is the
-              page's own membership rule (engine/myWork), never a promise the
-              page cannot keep. */}
-          <SurfaceRow
-            icon="circle-check"
-            label="My work"
-            active={selection.kind === 'mywork'}
-            count={openCount}
-            onClick={() => navigate({ kind: 'mywork' })}
-          />
-          {/* M43.10 — the app-like surfaces are STANDALONE rows under My
-              work: Studio and History carry no nested subjects (a prototype
-              is reachable from Studio's own bench), and the repos and Base
-              moved down into sections, where their rows read like every
-              other shelf. */}
-          <SurfaceRow
-            icon="pencil-ruler"
-            label="Studio"
-            active={selection.kind === 'studio'}
-            onClick={() => navigate({ kind: 'studio' })}
-          />
-          {/* M9.4 — the vault's history. No badge: a count of commits is
-              chrome. The footer SyncBadge speaks instead, and only when
-              something needs doing. */}
-          <SurfaceRow
-            icon="activity"
-            label="History"
-            active={historyActive}
-            onClick={() => navigate({ kind: 'pulse' })}
-          />
-          {/* Up from the footer (M43): the Library is a place you work —
-              agents, skills, blocks — not a dial you set. `blocks`, not
-              `library`: Pages already owns the book glyph, and two rows drawn
-              identically is the nav failing at the one job it has (M18). */}
-          <SurfaceRow
-            icon="blocks"
-            label="Library"
-            active={selection.kind === 'library'}
-            onClick={() => navigate({ kind: 'library' })}
-          />
+          ))}
         </div>
         {/* M10: Collections are the top-level navigation of the item world. A
             Collection is a container — it holds Lists, Folders and Docs —
@@ -759,18 +711,17 @@ export function Sidebar({
         )}
         {/* M30 — mounted repositories, worn as a section since M43.10: each
             mounted folder is a row, the way every other shelf lists its
-            subjects. The label is the locked name (M37.2); the `workspace`
-            KIND stays — kinds are internal vocabulary shared with the
-            navigate MCP tool. The ↗ is the door to the Work surface. */}
+            subjects. The label and the ↗ door to the Work surface are the
+            table's (M59.1). */}
         <SectionHeader
-          label="Work"
+          label={work.label}
           open={groupOpen('work')}
           onToggle={() => setNavGroupOpen('work', !groupOpen('work'))}
           actions={[
             {
               icon: 'arrow-up-right',
-              label: 'Open all repositories',
-              onClick: () => navigate({ kind: 'workspace' }),
+              label: work.door ?? work.label,
+              onClick: () => navigate(work.selection),
             },
           ]}
         />
@@ -808,14 +759,14 @@ export function Sidebar({
             counts up at you from the chrome. `current` keeps an un-current
             nav from lighting a row for a canvas some other surface owns. */}
         <SectionHeader
-          label="Knowledge"
+          label={knowledge.label}
           open={groupOpen('base')}
           onToggle={() => setNavGroupOpen('base', !groupOpen('base'))}
           actions={[
             {
               icon: 'arrow-up-right',
-              label: 'Open Knowledge',
-              onClick: () => navigate({ kind: 'knowledge' }),
+              label: knowledge.door ?? knowledge.label,
+              onClick: () => navigate(knowledge.selection),
             },
           ]}
         />
@@ -830,14 +781,14 @@ export function Sidebar({
             (M55.12). Rows keep their testids and stay outside `nav-surfaces`
             (the e2e scoping rule survives the move). */}
         <SectionHeader
-          label="Agents"
+          label={fleet.label}
           open={groupOpen('agents')}
           onToggle={() => setNavGroupOpen('agents', !groupOpen('agents'))}
           actions={[
             {
               icon: 'arrow-up-right',
-              label: 'Open all agents',
-              onClick: () => navigate({ kind: 'agents' }),
+              label: fleet.door ?? fleet.label,
+              onClick: () => navigate(fleet.selection),
             },
             {
               icon: 'plus',
@@ -979,16 +930,16 @@ export function Sidebar({
         </button>
         <button
           type="button"
-          aria-current={selection.kind === 'settings' ? 'page' : undefined}
-          onClick={() => navigate({ kind: 'settings' })}
+          aria-current={settings.lights.includes(selection.kind) ? 'page' : undefined}
+          onClick={() => navigate(settings.selection)}
           className={`flex h-[30px] flex-1 items-center gap-2 rounded-md border-0 px-2 text-left text-xs ${
-            selection.kind === 'settings'
+            settings.lights.includes(selection.kind)
               ? 'bg-surface-selected font-medium text-cortex-700'
               : 'bg-transparent text-n-600 hover:bg-n-100 hover:text-n-800'
           }`}
         >
-          <Icon name="settings" size={15} />
-          Settings
+          <Icon name={settings.icon} size={15} />
+          {settings.label}
         </button>
       </div>
       {typeMenu !== null && (

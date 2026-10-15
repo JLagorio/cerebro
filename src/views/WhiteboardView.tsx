@@ -6,12 +6,13 @@ import { Input } from '@/components/ui/Input';
 import { Popover } from '@/components/ui/Popover';
 import type { Entry, Presentation, Schema } from '@/engine/types';
 import { writeTextFile } from '@/lib/ipc';
-import { quickOpenScore } from '@/lib/quickOpenScore';
+import { rankNames } from '@/lib/nameRank';
 import { slugify } from '@/lib/slug';
 import { FullScreenDiagramEditor } from '@/mermaid/FullScreenDiagramEditor';
 import type { NodePlacer } from '@/mermaid/flowchart/StructuralEditor';
 import { parseFlowchart, serialize } from '@/mermaid/flowchart/model';
 import { SAVE_LABEL, useDiagramFile } from '@/mermaid/useDiagramFile';
+import { useRecency } from '@/stores/openLogStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { RecordChipOverlay } from '@/views/RecordChipOverlay';
@@ -412,7 +413,7 @@ function WhiteboardCanvas({
   );
 }
 
-/** The record's key (`FLD-7`), or ''. The alias QuickOpen scores against. */
+/** The record's key (`FLD-7`), or ''. The alias QuickOpen ranks against. */
 function recordKey(entry: Entry): string {
   return typeof entry.properties.key === 'string' ? entry.properties.key : '';
 }
@@ -420,11 +421,11 @@ function recordKey(entry: Entry): string {
 /**
  * The picker behind "Add record" (M29.47).
  *
- * `quickOpenScore` over TITLE AND KEY, `Math.max` of the two — the same pair
- * ⌘K scores (QuickOpen.tsx:84,203), so the typing that finds a record there
- * finds it here. Title alone was a false claim in this very docstring: every
- * work item in the demo vault carries a key, so `lnc-3` found the record in
- * ⌘K and nothing at all on the whiteboard.
+ * Ranked by the one name ranker ⌘K uses (`src/lib/nameRank.ts`, M59.3) over
+ * TITLE AND KEY, the same pair ⌘K ranks, so the typing that finds a record
+ * there finds it here, in the same order. Title alone was once a false claim
+ * here: every work item in the demo vault carries a key, so `lnc-3` found the
+ * record in ⌘K and nothing at all on the whiteboard.
  *
  * Built on the `Popover` primitive rather than a hand-rolled scrim: dismissal,
  * the Escape layer stack and the portal all come with it, and this surface
@@ -453,25 +454,26 @@ function AddRecordPopover({
   /**
    * Which row Enter will take, or null for "the top one, once you have typed".
    *
-   * Null rather than 0 at rest, deliberately: an empty box offers 25 records in
-   * whatever order they came, and marking one of them would be the picker
-   * claiming a choice nobody has made — the same rule the Enter branch below
-   * has always held, now visible.
+   * Null rather than 0 at rest, deliberately: an empty box offers 25 records,
+   * the ones you opened first and the rest in the order they came, and
+   * marking one of them would be the picker claiming a choice nobody has made
+   * — the same rule the Enter branch below has always held, now visible.
    */
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const recency = useRecency();
   const q = query.trim();
-  const results = useMemo(() => {
-    if (q === '') return entries.slice(0, MAX_OFFERED);
-    return entries
-      .map((e) => ({
-        e,
-        score: Math.max(quickOpenScore(q, e.title), quickOpenScore(q, recordKey(e))),
-      }))
-      .filter((r) => r.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, MAX_OFFERED)
-      .map((r) => r.e);
-  }, [entries, q]);
+  const results = useMemo(
+    () =>
+      rankNames({
+        query: q,
+        items: entries,
+        texts: (e) => [e.title, recordKey(e)],
+        path: (e) => e.path,
+        recency,
+        limit: MAX_OFFERED,
+      }).items,
+    [entries, q, recency],
+  );
   // A mark that outlived the list it pointed into would move Enter's target
   // silently as the user typed.
   const active = activeIndex === null || activeIndex >= results.length ? null : activeIndex;
@@ -505,8 +507,8 @@ function AddRecordPopover({
           // this: 25 options with an empty query, ArrowDown moved nothing,
           // every row's background was rgba(0,0,0,0) and there was no
           // aria-activedescendant — so Enter DID place a record and nothing on
-          // screen had said which one it would be. ⌘K, whose scorer this
-          // reuses, has always highlighted its rows; this is that pattern.
+          // screen had said which one it would be. ⌘K, whose ranker this
+          // shares, has always highlighted its rows; this is that pattern.
           ariaActivedescendant={active === null ? undefined : optionId(active)}
           ariaControls={LIST_ID}
           onKeyDown={(e) => {

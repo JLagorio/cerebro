@@ -1,0 +1,44 @@
+{
+  "why": "A panel turn under Ask: the writers and the shell ride neither list and meet the gate, which asks the person; the run starts in default mode, since acceptEdits would approve them with no host.",
+  "input": {
+    "kind": "attended",
+    "shell": "ask",
+    "ask_first": false,
+    "read_scoped": false,
+    "narrowing": null
+  },
+  "expected": {
+    "permission_mode": "default",
+    "allowed": [],
+    "disallowed": [],
+    "matcher": [
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "NotebookEdit",
+      "Bash",
+      "AskUserQuestion",
+      "ExitPlanMode"
+    ],
+    "withheld": [],
+    "decisions": {
+      "Write": "ask",
+      "Edit": "ask",
+      "MultiEdit": "ask",
+      "NotebookEdit": "ask",
+      "Bash": "ask",
+      "Read": "cli",
+      "Glob": "cli",
+      "Grep": "cli",
+      "WebFetch": "cli",
+      "WebSearch": "cli",
+      "Task": "cli",
+      "AskUserQuestion": "ask",
+      "ExitPlanMode": "refuse",
+      "mcp__cerebro__create_note": "allow",
+      "mcp__cerebro__update_frontmatter": "allow",
+      "mcp__cerebro__append_to_note": "allow",
+      "mcp__cerebro__edit_note": "allow"
+    }
+  }
+}

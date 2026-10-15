@@ -1,24 +1,28 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLedgerReview, useQuarantine } from '@/stores/ledgerStore';
 import { Button } from '@/components/ui/Button';
 import { ClaudeCodeRow } from '@/pages/ClaudeCodeRow';
+import { RecentlyOpenedSettings } from '@/pages/RecentlyOpenedSettings';
 import { CliWorkspaceRow } from '@/pages/CliWorkspaceRow';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Switch } from '@/components/ui/Switch';
 import { ConnectorSettings } from '@/app/ConnectorSettings';
+import { TrashSettings } from '@/app/TrashSettings';
 import { listAgents } from '@/engine/agents';
 import { isPaused, jobQueue } from '@/engine/jobs';
 import type { Entry } from '@/engine/types';
 import { GitSettings } from '@/git/GitSettings';
 import { listConcepts } from '@/engine/okf';
+import { APP_VERSION } from '@/lib/appVersion';
 import { pickVault } from '@/lib/ipc';
 import { todayIso } from '@/lib/templates';
+import { claudeUserSettings } from '@/agent/agentIpc';
+import type { ClaudeUserSettings } from '@/agent/types';
+import { parseShellCeiling, type ShellCeiling } from '@/lib/policy/toolApproval';
 import { asThemeMode, useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
-
-const APP_VERSION = '0.1.0';
 
 const THEME_OPTIONS = [
   { value: 'light', label: 'Light', icon: 'sun', testId: 'theme-light' },
@@ -47,6 +51,110 @@ function SettingRow({
         <div className="mt-0.5 text-xs leading-[16px] text-n-500">{hint}</div>
       </div>
       <Switch ariaLabel={label} checked={checked} onChange={onChange} disabled={disabled} />
+    </div>
+  );
+}
+
+const SHELL_OPTIONS = [
+  { value: 'off', label: 'Off', testId: 'shell-off' },
+  { value: 'ask', label: 'Ask', testId: 'shell-ask' },
+  { value: 'on', label: 'On', testId: 'shell-on' },
+];
+
+/** One hint per shell ceiling (Appendix C, M57.2). */
+export const SHELL_HINTS: Record<ShellCeiling, string> = {
+  off: "Cerebro's tools only. The assistant can't run commands or edit files directly.",
+  ask: "A card in the conversation names each command or file change and waits for you. Scheduled agents can't ask, so they run without the shell, and their run says so.",
+  on: 'The assistant runs commands and edits files directly in the vault folder without asking, and so do scheduled agents that declare the shell.',
+};
+
+/** What the person's own settings act with, as a sentence (M57.2). Never a
+ * promise that every command asks: their rules and hooks act first. */
+export function userRulesSentence(settings: ClaudeUserSettings): string {
+  const managed = "Settings your organization manages can act too, and Cerebro can't see them.";
+  switch (settings.state) {
+    case 'browser':
+      return 'Desktop app only.';
+    case 'unreadable':
+      return `Couldn't read ${settings.path}, so Cerebro can't tell which commands your own rules allow without a card.`;
+    case 'absent':
+      return `No Claude Code settings file at ${settings.path}. ${managed}`;
+    case 'read': {
+      const events = settings.hook_events;
+      if (settings.allow === 0 && events.length === 0) {
+        return `Your Claude Code settings hold no allow rules or hooks. ${managed}`;
+      }
+      const rules = `${settings.allow} allow ${settings.allow === 1 ? 'rule' : 'rules'}`;
+      const hooks =
+        events.length === 0
+          ? 'no hooks'
+          : `hooks on ${events.length} ${events.length === 1 ? 'event' : 'events'} (${events.join(', ')})`;
+      return `Your own Claude Code settings act before Cerebro asks: ${rules}, and ${hooks}. A command they allow runs without a card. ${managed}`;
+    }
+  }
+}
+
+/**
+ * Shell access (M57.2): off, ask or on, and beside it what the person's own
+ * Claude Code settings act with before Cerebro asks, re-read whenever the
+ * window comes back, since they edit those settings elsewhere. A read that
+ * failed says so (CV-05), never that there is nothing.
+ */
+function ShellAccessRow({ vaultPath }: { vaultPath: string | null }) {
+  const shell = useUiStore((s) => s.agentShell);
+  const setShell = useUiStore((s) => s.setAgentShell);
+  const [settings, setSettings] = useState<ClaudeUserSettings | null>(null);
+  useEffect(() => {
+    let live = true;
+    const read = () => {
+      claudeUserSettings(vaultPath).then(
+        (found) => {
+          if (live) setSettings(found);
+        },
+        (err: unknown) => {
+          if (live) {
+            setSettings({
+              state: 'unreadable',
+              path: 'your Claude Code settings',
+              detail: err instanceof Error ? err.message : String(err),
+            });
+          }
+        },
+      );
+    };
+    read();
+    window.addEventListener('focus', read);
+    return () => {
+      live = false;
+      window.removeEventListener('focus', read);
+    };
+  }, [vaultPath]);
+  return (
+    <div className="py-2">
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium text-n-800">Shell access</div>
+          <div data-testid="shell-hint" className="mt-0.5 text-xs leading-[16px] text-n-500">
+            {SHELL_HINTS[shell]}
+          </div>
+        </div>
+        <SegmentedControl
+          ariaLabel="Shell access"
+          options={SHELL_OPTIONS}
+          value={shell}
+          onChange={(v) => setShell(parseShellCeiling(v))}
+          className="flex-none"
+        />
+      </div>
+      {settings !== null && (
+        <div
+          data-testid="shell-user-rules"
+          data-state={settings.state}
+          className="mt-1.5 text-xs leading-[16px] text-n-500"
+        >
+          {userRulesSentence(settings)}
+        </div>
+      )}
     </div>
   );
 }
@@ -135,8 +243,6 @@ export function SettingsPage() {
   const setInboxAutoAdvance = useUiStore((s) => s.setInboxAutoAdvance);
   const actorId = useUiStore((s) => s.actorId);
   const setActorId = useUiStore((s) => s.setActorId);
-  const shellAccess = useUiStore((s) => s.agentShellAccess);
-  const setShellAccess = useUiStore((s) => s.setAgentShellAccess);
   const connectors = useUiStore((s) => s.agentConnectors);
   const setConnectors = useUiStore((s) => s.setAgentConnectors);
   const issuePrefixes = useUiStore((s) => s.issuePrefixes);
@@ -212,6 +318,7 @@ export function SettingsPage() {
             Change vault…
           </Button>
         </section>
+        <TrashSettings />
         <section className="mb-6 rounded-xl border border-n-200 p-5">
           <h2 className="mb-1 text-md font-semibold text-n-900">Appearance</h2>
           <p className="mb-4 text-sm text-n-500">
@@ -256,22 +363,19 @@ export function SettingsPage() {
             disabled={!inboxEnabled}
           />
         </section>
+        <RecentlyOpenedSettings />
         <section className="mb-6 rounded-xl border border-n-200 p-5">
           <h2 className="mb-1 text-md font-semibold text-n-900">Assistant</h2>
           <p className="mb-4 text-sm leading-[18px] text-n-500">
             What the assistant may change follows from where it is writing, not from a mode you pick
             each time: it owns <span className="[font-family:var(--font-mono)]">knowledge/</span>{' '}
             and writes there directly, and it reaches everything else through cerebro's own tools.
-            Shell access is the one thing a folder boundary cannot express.
+            Shell access decides what Claude Code's own commands and file edits may do: never, after
+            you answer a card, or directly.
           </p>
           <ClaudeCodeRow />
           {vaultPath !== null && <PanelAgentRow vaultPath={vaultPath} entries={entries} />}
-          <SettingRow
-            label="Shell access"
-            hint="Let the assistant run commands and edit files directly inside the vault folder. Off — cerebro's tools only."
-            checked={shellAccess}
-            onChange={setShellAccess}
-          />
+          <ShellAccessRow vaultPath={vaultPath} />
           <SettingRow
             label="Connectors"
             hint="Let the assistant use MCP servers — Jira, Confluence — to fetch what a note refers to. Anything it fetches is written down under sources/, so the same ticket is only ever fetched once. A cached copy past its refresh date is marked stale; ask for a fresh one when you need it."

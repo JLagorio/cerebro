@@ -2,6 +2,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useNavStore } from '@/stores/navStore';
+import { useOpenLogStore } from '@/stores/openLogStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { makeEntry } from '@/test/factories';
@@ -178,5 +179,75 @@ describe('useOpenPath comment sidecars (M70.2b)', () => {
     const { result } = renderHook(() => useOpenPath());
     act(() => result.current('.comments/notes.txt'));
     expect(useUiStore.getState().docPanelTab).toBe('outline');
+  });
+});
+
+// M59.3 — the person's opens land in the open log once each; the backdrop a
+// record opens over is never one of them, and an agent's opens never count.
+describe('useOpenPath and the open log (M59.3)', () => {
+  const logged = () => (useOpenLogStore.getState().logs['/v'] ?? []).map((r) => r.path);
+
+  beforeEach(() => {
+    useNavStore.setState({
+      selection: { kind: 'home' },
+      history: [{ kind: 'home' }],
+      historyIndex: 0,
+    });
+    useUiStore.setState({ detailPath: null });
+    useOpenLogStore.setState({ logs: {}, saved: true });
+    useVaultStore.setState({
+      vaultPath: '/v',
+      entries: [
+        makeEntry({
+          path: 'projects/onboarding/items/fld-2.md',
+          title: 'Wire the flags',
+          type: 'Work item',
+          project: 'projects/onboarding/project.md',
+        }),
+        makeEntry({ path: 'types/risk.md', title: 'Risk', type: 'Type' }),
+        makeEntry({ path: 'notes/loose.md', title: 'Loose', type: null }),
+      ],
+    });
+  });
+
+  it('logs a record once, and never the Collection it opens over', () => {
+    const { result } = renderHook(() => useOpenPath());
+    act(() => result.current('projects/onboarding/items/fld-2.md'));
+    expect(useNavStore.getState().selection).toEqual({
+      kind: 'collection',
+      folder: 'projects/onboarding',
+    });
+    expect(useUiStore.getState().detailPath).toBe('projects/onboarding/items/fld-2.md');
+    expect(useOpenLogStore.getState().logs['/v']).toEqual([
+      expect.objectContaining({ path: 'projects/onboarding/items/fld-2.md', count: 1 }),
+    ]);
+  });
+
+  it('logs a record opened in place once', () => {
+    const { result } = renderHook(() => useOpenPath('in-place'));
+    act(() => result.current('projects/onboarding/items/fld-2.md'));
+    expect(logged()).toEqual(['projects/onboarding/items/fld-2.md']);
+  });
+
+  it('logs a Type doc by its path', () => {
+    const { result } = renderHook(() => useOpenPath());
+    act(() => result.current('types/risk.md'));
+    expect(useNavStore.getState().selection).toEqual({ kind: 'type', name: 'Risk' });
+    expect(logged()).toEqual(['types/risk.md']);
+  });
+
+  it('logs a page once, through the navigation itself', () => {
+    const { result } = renderHook(() => useOpenPath());
+    act(() => result.current('notes/loose.md'));
+    expect(useOpenLogStore.getState().logs['/v']?.[0]?.count).toBe(1);
+  });
+
+  it('logs nothing for an agent', () => {
+    const { result } = renderHook(() => useOpenPath('navigate', { byAgent: true }));
+    act(() => result.current('projects/onboarding/items/fld-2.md'));
+    act(() => result.current('types/risk.md'));
+    act(() => result.current('notes/loose.md'));
+    expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'notes/loose.md' });
+    expect(useOpenLogStore.getState().logs).toEqual({});
   });
 });

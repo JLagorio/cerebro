@@ -3,6 +3,8 @@ import { Icon } from '@/components/ui/Icon';
 import { Popover } from '@/components/ui/Popover';
 import type { Entry } from '@/engine/types';
 import { resolveTarget } from '@/engine/wikilink';
+import { rankNames } from '@/lib/nameRank';
+import { useRecency } from '@/stores/openLogStore';
 import { isWebUrl } from './linkTargets';
 
 const MAX_RESULTS = 8;
@@ -11,7 +13,8 @@ const MAX_RESULTS = 8;
  * Bind a node to a URL or a vault record (M29.38, spec D3/D8). One box, two
  * readings: a `https?://` string offers a URL link; anything else searches
  * records — `resolveTarget`'s exact hit first (stem > project folder > title,
- * the Tolaria rule), then title/filename substring matches. Picking a record
+ * the Tolaria rule), then the rest ranked over title and filename by the one
+ * name ranker (`src/lib/nameRank.ts`, M59.3). Picking a record
  * stores its vault-relative PATH in the click line, so the binding survives a
  * retitle.
  *
@@ -51,18 +54,21 @@ export function LinkPopover({
   // The same predicate the badge classifies stored targets with, so this can
   // never offer a target the badge would then refuse to open (./linkTargets).
   const isUrl = isWebUrl(q);
+  const recency = useRecency();
 
   const matches = useMemo(() => {
     if (entries === undefined || q === '' || isUrl) return [];
     const exact = resolveTarget(q, entries);
-    const needle = q.toLowerCase();
-    const rest = entries.filter(
-      (e) =>
-        e !== exact &&
-        (e.title.toLowerCase().includes(needle) || e.filename.toLowerCase().includes(needle)),
-    );
-    return [...(exact !== null ? [exact] : []), ...rest].slice(0, MAX_RESULTS);
-  }, [entries, q, isUrl]);
+    const rest = rankNames({
+      query: q,
+      items: entries.filter((e) => e !== exact),
+      texts: (e) => [e.title, e.filename],
+      path: (e) => e.path,
+      recency,
+      limit: exact === null ? MAX_RESULTS : MAX_RESULTS - 1,
+    }).items;
+    return [...(exact !== null ? [exact] : []), ...rest];
+  }, [entries, q, isUrl, recency]);
 
   const pick = (target: string | null): void => {
     onPick(target);

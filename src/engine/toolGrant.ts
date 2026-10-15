@@ -10,25 +10,30 @@
  * src-tauri/fixtures/tool-grants.json, which both languages replay. No other
  * TS module decides which tools a run holds.
  *
- * Only cerebro's own tools are reckoned. The CLI's are the shell grant
- * (`PromptGrant.shell`). A run the app's TS starts never holds a window or an
- * answer tool, which belong to Rust's own runs, and TS cannot read the
- * proposal switch, so the generated proposal tools count as not held and no
- * prompt names them (fail closed).
+ * Cerebro's own tools are reckoned by name. The CLI's are reckoned by the
+ * tool-approval table (M57.2, `cliGrant`): `PromptGrant.shell` says whether
+ * the run can change files itself, pre-approved or by asking the person. A
+ * run the app's TS starts never holds a window or an answer tool, which
+ * belong to Rust's own runs, and TS cannot read the proposal switch, so the
+ * generated proposal tools count as not held and no prompt names them (fail
+ * closed).
  *
  * Pure: engine/ reads it, and tsconfig.engine.json typechecks it without the
  * DOM.
  */
 
 import { TOOLS, toolFacts } from '@/lib/policy/tools';
+import { plan, TOOL_APPROVAL, type ShellCeiling } from '@/lib/policy/toolApproval';
 import { ALL_TOOLS, TOOLSETS } from './tools';
 
 /** What a prompt is composed against. */
 export interface PromptGrant {
   /** The cerebro tools the run holds, by their short names. */
   tools: ReadonlySet<string>;
-  /** Whether it holds the CLI's shell and file tools: the Settings ceiling,
-   * less what its record withholds and what a read limit withdraws (M53.5). */
+  /** Whether it can change files through the CLI's own tools, pre-approved
+   * or by asking the person: its shell ceiling as the tool-approval table
+   * plans it (`holdsShell`), less what its record withholds and what a read
+   * limit withdraws (M53.5). */
   shell: boolean;
   /** Whether a person is watching it: a panel turn, never a background job. */
   attended: boolean;
@@ -78,6 +83,61 @@ export function grantedTools(narrowing: readonly string[] | null): ReadonlySet<s
   return new Set(
     HOLDABLE.filter((name) => wanted.has(name) || wanted.has(`${SERVER_PREFIX}${name}`)),
   );
+}
+
+/** The one name test, `names_tool` (M54.4): does `declared`, an entry of a
+ * run's declared tools, name `tool` as the CLI grants it? Heard as Rust
+ * hears it, with or without the `mcp__cerebro__` prefix, which names only
+ * cerebro's tools. */
+export function namesTool(declared: string, tool: string): boolean {
+  const wanted = heard(declared);
+  const full = tool.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+  const short = full.startsWith(SERVER_PREFIX) ? full.slice(SERVER_PREFIX.length) : full;
+  return wanted !== '' && (wanted === full || wanted === short);
+}
+
+/** What a run of the app's TS asks the tool-approval table about (M57.2). */
+export interface CliGrantInput {
+  /** Its effective shell ceiling (`effectiveCeiling`). */
+  shell: ShellCeiling;
+  /** A person watches it, in the panel: its gate can ask. */
+  attended: boolean;
+  /** Its record draws a read limit. */
+  readScoped: boolean;
+  /** Its declared tools, as it sends them as `allowedTools`; null narrows
+   * nothing. */
+  narrowing: readonly string[] | null;
+}
+
+/** The CLI's own tools a run holds (`cli`, pre-approved) and may ask the
+ * person for (`asks`), as the tool-approval table plans them, in manifest
+ * order. Held to Rust by tool-grants.json's `cli_cases`. */
+export function cliGrant(input: CliGrantInput): { cli: string[]; asks: string[] } {
+  const narrowing = input.narrowing;
+  const approval = plan({
+    kind: input.attended ? 'attended' : 'unattended',
+    shell: input.shell,
+    readScoped: input.readScoped,
+    narrowing:
+      narrowing === null ? null : (tool) => narrowing.some((entry) => namesTool(entry, tool)),
+  });
+  return { cli: approval.allowed, asks: approval.asks };
+}
+
+/** The families whose tools change things (`needs_default_mode`: the ones
+ * acceptEdits would approve with no host). */
+const CHANGING_FAMILIES = new Set(
+  TOOL_APPROVAL.families.filter((family) => family.needs_default_mode).map((family) => family.id),
+);
+
+/** Can the run change files itself: does it hold, or may it ask for, a CLI
+ * tool of a family that changes things? */
+export function holdsShell(input: CliGrantInput): boolean {
+  const { cli, asks } = cliGrant(input);
+  return [...cli, ...asks].some((name) => {
+    const family = TOOLS.cli_tools.find((tool) => tool.name === name)?.family;
+    return family != null && CHANGING_FAMILIES.has(family);
+  });
 }
 
 /** Does the run hold every one of `names`? */

@@ -1,0 +1,154 @@
+{
+  "why": "AskUserQuestion on an attended run asks the person with a question card (M57.3), whatever the shell ceiling: the family is question, and the subject is the call's whole input, compact.",
+  "host_answers": [
+    {
+      "why": "Attended, Shell access off: the question asks.",
+      "input": {
+        "kind": "attended",
+        "shell": "off",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "AskUserQuestion",
+      "tool_input": {
+        "questions": [
+          {
+            "question": "Which release?",
+            "header": "Release",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "1.4",
+                "description": "This week"
+              },
+              {
+                "label": "1.5",
+                "description": "Next month"
+              }
+            ]
+          }
+        ]
+      },
+      "answer": {
+        "kind": "ask",
+        "family": "question",
+        "subject": "{\"questions\":[{\"question\":\"Which release?\",\"header\":\"Release\",\"multiSelect\":false,\"options\":[{\"label\":\"1.4\",\"description\":\"This week\"},{\"label\":\"1.5\",\"description\":\"Next month\"}]}]}"
+      }
+    },
+    {
+      "why": "Attended, Shell access ask: the question asks.",
+      "input": {
+        "kind": "attended",
+        "shell": "ask",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "AskUserQuestion",
+      "tool_input": {
+        "questions": [
+          {
+            "question": "Which release?",
+            "header": "Release",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "1.4",
+                "description": "This week"
+              },
+              {
+                "label": "1.5",
+                "description": "Next month"
+              }
+            ]
+          }
+        ]
+      },
+      "answer": {
+        "kind": "ask",
+        "family": "question",
+        "subject": "{\"questions\":[{\"question\":\"Which release?\",\"header\":\"Release\",\"multiSelect\":false,\"options\":[{\"label\":\"1.4\",\"description\":\"This week\"},{\"label\":\"1.5\",\"description\":\"Next month\"}]}]}"
+      }
+    },
+    {
+      "why": "Attended, Shell access on: the question asks.",
+      "input": {
+        "kind": "attended",
+        "shell": "on",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "AskUserQuestion",
+      "tool_input": {
+        "questions": [
+          {
+            "question": "Which release?",
+            "header": "Release",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "1.4",
+                "description": "This week"
+              },
+              {
+                "label": "1.5",
+                "description": "Next month"
+              }
+            ]
+          }
+        ]
+      },
+      "answer": {
+        "kind": "ask",
+        "family": "question",
+        "subject": "{\"questions\":[{\"question\":\"Which release?\",\"header\":\"Release\",\"multiSelect\":false,\"options\":[{\"label\":\"1.4\",\"description\":\"This week\"},{\"label\":\"1.5\",\"description\":\"Next month\"}]}]}"
+      }
+    },
+    {
+      "why": "A question card offers no This conversation, so no grant answers the next question.",
+      "input": {
+        "kind": "attended",
+        "shell": "ask",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [
+        [
+          "question",
+          "{\"questions\":[{\"question\":\"Which release?\",\"header\":\"Release\",\"multiSelect\":false,\"options\":[{\"label\":\"1.4\",\"description\":\"This week\"},{\"label\":\"1.5\",\"description\":\"Next month\"}]}]}"
+        ]
+      ],
+      "tool": "AskUserQuestion",
+      "tool_input": {
+        "questions": [
+          {
+            "question": "Which release?",
+            "header": "Release",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "1.4",
+                "description": "This week"
+              },
+              {
+                "label": "1.5",
+                "description": "Next month"
+              }
+            ]
+          }
+        ]
+      },
+      "answer": {
+        "kind": "ask",
+        "family": "question",
+        "subject": "{\"questions\":[{\"question\":\"Which release?\",\"header\":\"Release\",\"multiSelect\":false,\"options\":[{\"label\":\"1.4\",\"description\":\"This week\"},{\"label\":\"1.5\",\"description\":\"Next month\"}]}]}"
+      }
+    }
+  ]
+}

@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useOpenPath } from '@/app/useOpenPath';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
-import type { PulseChanges } from '@/engine/git';
+import type { CommitQuery, PulseChanges } from '@/engine/git';
+import { CommitAuthor } from '@/git/CommitAuthor';
 import { DiffView } from '@/git/DiffView';
 import { relativeDate } from '@/git/GitHistoryPanel';
-import { useCommitDiff, useVaultPulse } from '@/git/useGit';
+import { useCommitDiff, useCommitRuns, useVaultPulse } from '@/git/useGit';
 
 /**
  * What has happened in this vault (M9.4).
@@ -22,12 +23,25 @@ import { useCommitDiff, useVaultPulse } from '@/git/useGit';
  * committed ("No history yet"), and the commits. Nothing renders until the
  * read lands, so the page never says "No history yet" about a vault it has
  * not looked at.
+ *
+ * Who made each commit is the page's History tab's reading (M58.4,
+ * `CommitAuthor`): a run only from runtime.db's commit record, else
+ * "unattributed", and "attribution unknown" when the record could not be
+ * read. The git author stays in the hover.
  */
 export function PulsePage() {
   const { pulse, reload } = useVaultPulse();
   const openPath = useOpenPath();
   const [open, setOpen] = useState<{ hash: string; message: string } | null>(null);
   const diff = useCommitDiff(open === null ? null : open.hash);
+  const queries = useMemo<CommitQuery[]>(
+    () =>
+      pulse.kind === 'ready'
+        ? pulse.data.commits.map((c) => ({ hash: c.hash, path: null, since: null }))
+        : [],
+    [pulse],
+  );
+  const runs = useCommitRuns(queries);
 
   if (pulse.kind === 'loading') return null;
 
@@ -109,8 +123,8 @@ export function PulsePage() {
                 </span>
               </div>
               <div className="mt-0.5 flex items-center gap-2 text-2xs text-n-500">
-                <span>{c.author}</span>
-                <span>·</span>
+                <CommitAuthor commit={c} runs={runs} />
+                {runs.kind !== 'loading' && <span>·</span>}
                 <span>{relativeDate(c.date)}</span>
                 {c.changes === null ? (
                   // Not +0 / ~0: nobody counted, so no number is shown.

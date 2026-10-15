@@ -98,6 +98,7 @@ export function AgentRunHistory({ actor }: { actor: string }) {
     >
       {hop && <Icon name="corner-down-right" size={13} color="var(--n-400)" />}
       <span
+        data-testid="agent-run-label"
         className="min-w-0 flex-1 truncate text-n-800"
         title={hop ? (run.actor ?? undefined) : run.started_at}
       >

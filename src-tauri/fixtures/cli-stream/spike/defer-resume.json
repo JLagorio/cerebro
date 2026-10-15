@@ -2,7 +2,9 @@
   "cli_version": "2.1.250",
   "scenario": "defer-resume",
   "source": "derived",
-  "derived_from": ["cli bundle (deferred result, resume re-check, transcript repair)"],
+  "derived_from": [
+    "cli bundle (deferred result, hook_deferred_tool marker, per-line defer count, resume re-check, transcript repair)"
+  ],
   "steps": [
     {
       "argv": [
@@ -208,6 +210,20 @@
                   "ephemeral_1h_input_tokens": 0
                 }
               }
+            }
+          },
+          {
+            "type": "attachment",
+            "uuid": "00000000-0000-4000-8000-00000000002a",
+            "parentUuid": "00000000-0000-4000-8000-000000000006",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "attachment": {
+              "type": "hook_deferred_tool",
+              "toolUseID": "toolu_000000000000000000000001",
+              "toolName": "mcp__probe__slow_echo"
             }
           }
         ]
@@ -451,9 +467,23 @@
             }
           },
           {
+            "type": "attachment",
+            "uuid": "00000000-0000-4000-8000-00000000002a",
+            "parentUuid": "00000000-0000-4000-8000-000000000006",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "attachment": {
+              "type": "hook_deferred_tool",
+              "toolUseID": "toolu_000000000000000000000001",
+              "toolName": "mcp__probe__slow_echo"
+            }
+          },
+          {
             "type": "user",
             "uuid": "00000000-0000-4000-8000-00000000000b",
-            "parentUuid": "00000000-0000-4000-8000-000000000006",
+            "parentUuid": "00000000-0000-4000-8000-00000000002a",
             "sessionId": "00000000-0000-4000-8000-000000000001",
             "isSidechain": false,
             "entrypoint": "sdk-cli",
@@ -762,6 +792,20 @@
                 }
               }
             }
+          },
+          {
+            "type": "attachment",
+            "uuid": "00000000-0000-4000-8000-00000000002b",
+            "parentUuid": "00000000-0000-4000-8000-000000000013",
+            "sessionId": "00000000-0000-4000-8000-00000000000e",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "attachment": {
+              "type": "hook_deferred_tool",
+              "toolUseID": "toolu_000000000000000000000002",
+              "toolName": "mcp__probe__slow_echo"
+            }
           }
         ]
       },
@@ -1008,9 +1052,23 @@
             }
           },
           {
+            "type": "attachment",
+            "uuid": "00000000-0000-4000-8000-00000000002b",
+            "parentUuid": "00000000-0000-4000-8000-000000000013",
+            "sessionId": "00000000-0000-4000-8000-00000000000e",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "attachment": {
+              "type": "hook_deferred_tool",
+              "toolUseID": "toolu_000000000000000000000002",
+              "toolName": "mcp__probe__slow_echo"
+            }
+          },
+          {
             "type": "user",
             "uuid": "00000000-0000-4000-8000-000000000018",
-            "parentUuid": "00000000-0000-4000-8000-000000000013",
+            "parentUuid": "00000000-0000-4000-8000-00000000002b",
             "sessionId": "00000000-0000-4000-8000-00000000000e",
             "isSidechain": false,
             "entrypoint": "sdk-cli",
@@ -1269,10 +1327,10 @@
           "total_cost_usd": 0,
           "permission_denials": [],
           "deferred_tool_use": {
-            "id": "toolu_000000000000000000000003",
+            "id": "toolu_000000000000000000000004",
             "name": "mcp__probe__slow_echo",
             "input": {
-              "text": "one",
+              "text": "two",
               "seconds": 0
             }
           },
@@ -1390,6 +1448,34 @@
                 }
               }
             }
+          },
+          {
+            "type": "attachment",
+            "uuid": "00000000-0000-4000-8000-00000000002c",
+            "parentUuid": "00000000-0000-4000-8000-000000000022",
+            "sessionId": "00000000-0000-4000-8000-00000000001b",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "attachment": {
+              "type": "hook_deferred_tool",
+              "toolUseID": "toolu_000000000000000000000003",
+              "toolName": "mcp__probe__slow_echo"
+            }
+          },
+          {
+            "type": "attachment",
+            "uuid": "00000000-0000-4000-8000-00000000002d",
+            "parentUuid": "00000000-0000-4000-8000-00000000002c",
+            "sessionId": "00000000-0000-4000-8000-00000000001b",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "attachment": {
+              "type": "hook_deferred_tool",
+              "toolUseID": "toolu_000000000000000000000004",
+              "toolName": "mcp__probe__slow_echo"
+            }
           }
         ]
       },
@@ -1404,6 +1490,27 @@
               "seconds": 0
             },
             "tool_use_id": "toolu_000000000000000000000003",
+            "session_id": "00000000-0000-4000-8000-00000000001b",
+            "permission_mode": "acceptEdits"
+          },
+          "answer": {
+            "hookSpecificOutput": {
+              "hookEventName": "PreToolUse",
+              "permissionDecision": "defer",
+              "permissionDecisionReason": "Waiting for the person to answer."
+            }
+          }
+        },
+        {
+          "mode": "hook",
+          "input": {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "mcp__probe__slow_echo",
+            "tool_input": {
+              "text": "two",
+              "seconds": 0
+            },
+            "tool_use_id": "toolu_000000000000000000000004",
             "session_id": "00000000-0000-4000-8000-00000000001b",
             "permission_mode": "acceptEdits"
           },
@@ -1505,11 +1612,11 @@
             "content": [
               {
                 "type": "tool_result",
-                "tool_use_id": "toolu_000000000000000000000003",
+                "tool_use_id": "toolu_000000000000000000000004",
                 "content": [
                   {
                     "type": "text",
-                    "text": "one"
+                    "text": "two"
                   }
                 ]
               }
@@ -1672,9 +1779,37 @@
             }
           },
           {
+            "type": "attachment",
+            "uuid": "00000000-0000-4000-8000-00000000002c",
+            "parentUuid": "00000000-0000-4000-8000-000000000022",
+            "sessionId": "00000000-0000-4000-8000-00000000001b",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "attachment": {
+              "type": "hook_deferred_tool",
+              "toolUseID": "toolu_000000000000000000000003",
+              "toolName": "mcp__probe__slow_echo"
+            }
+          },
+          {
+            "type": "attachment",
+            "uuid": "00000000-0000-4000-8000-00000000002d",
+            "parentUuid": "00000000-0000-4000-8000-00000000002c",
+            "sessionId": "00000000-0000-4000-8000-00000000001b",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "attachment": {
+              "type": "hook_deferred_tool",
+              "toolUseID": "toolu_000000000000000000000004",
+              "toolName": "mcp__probe__slow_echo"
+            }
+          },
+          {
             "type": "user",
             "uuid": "00000000-0000-4000-8000-000000000027",
-            "parentUuid": "00000000-0000-4000-8000-000000000022",
+            "parentUuid": "00000000-0000-4000-8000-00000000002d",
             "sessionId": "00000000-0000-4000-8000-00000000001b",
             "isSidechain": false,
             "entrypoint": "sdk-cli",
@@ -1684,11 +1819,11 @@
               "content": [
                 {
                   "type": "tool_result",
-                  "tool_use_id": "toolu_000000000000000000000003",
+                  "tool_use_id": "toolu_000000000000000000000004",
                   "content": [
                     {
                       "type": "text",
-                      "text": "one"
+                      "text": "two"
                     }
                   ]
                 }
@@ -1758,10 +1893,10 @@
             "hook_event_name": "PreToolUse",
             "tool_name": "mcp__probe__slow_echo",
             "tool_input": {
-              "text": "one",
+              "text": "two",
               "seconds": 0
             },
-            "tool_use_id": "toolu_000000000000000000000003",
+            "tool_use_id": "toolu_000000000000000000000004",
             "session_id": "00000000-0000-4000-8000-00000000001b",
             "permission_mode": "acceptEdits"
           },
@@ -1769,7 +1904,7 @@
             "hookSpecificOutput": {
               "hookEventName": "PreToolUse",
               "permissionDecision": "allow",
-              "permissionDecisionReason": "The person allowed both."
+              "permissionDecisionReason": "The person allowed it."
             }
           }
         }

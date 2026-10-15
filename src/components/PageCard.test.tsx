@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PageRef } from '@/engine/pageCard';
 import { buildSchema } from '@/engine/schema';
 import type { Entry } from '@/engine/types';
+import { useOpenLogStore } from '@/stores/openLogStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { makeEntry } from '@/test/factories';
 import { ConnectedPageCard, PageCardView, PICKER_LIMIT } from './PageCard';
@@ -84,6 +85,28 @@ describe('the unset card', () => {
     expect(onChange).toHaveBeenCalledWith({ target: 'how-we-schedule', alias: '' });
   });
 
+  it('writes a name that reaches the picked page when another page has its stem', () => {
+    // The demo vault's four meetings/kickoff.md: `[[kickoff]]` is the first one's.
+    const first = makeEntry({ path: 'field-app/meetings/kickoff.md', title: 'Field App kickoff' });
+    const second = makeEntry({ path: 'sync/meetings/kickoff.md', title: 'Offline sync kickoff' });
+    const onChange = vi.fn();
+    renderView({ entries: [first, second], onChange });
+    fireEvent.change(screen.getByLabelText('Find a page'), { target: { value: 'offline' } });
+    fireEvent.click(options()[0]);
+    expect(onChange).toHaveBeenLastCalledWith({ target: 'Offline sync kickoff', alias: '' });
+    // Written back, the card shows the page that was picked.
+    cleanup();
+    renderView({ entries: [first, second], target: 'Offline sync kickoff' });
+    expect(screen.getByTestId('page-card-title').textContent).toBe('Offline sync kickoff');
+  });
+
+  it('leaves out a page no name reaches', () => {
+    const first = makeEntry({ path: 'a/kickoff.md', title: 'Sync kickoff' });
+    const shadowed = makeEntry({ path: 'b/kickoff.md', title: 'Sync kickoff' });
+    renderView({ entries: [first, shadowed], onChange: vi.fn() });
+    expect(options().map((o) => o.textContent)).toEqual([expect.stringContaining('a/kickoff.md')]);
+  });
+
   it('lists fifty rows, then asks for more letters', () => {
     const many = Array.from({ length: PICKER_LIMIT + 3 }, (_, i) =>
       makeEntry({ path: `notes/n-${i}.md`, title: `Note ${i}` }),
@@ -91,6 +114,46 @@ describe('the unset card', () => {
     renderView({ entries: many, onChange: vi.fn() });
     expect(options()).toHaveLength(PICKER_LIMIT);
     expect(screen.getByTestId('page-card-more').textContent).toBe('3 more — keep typing');
+  });
+
+  // M59.3 — ranked as the `[[` page rows are: the tier, then your opens.
+  it('puts the page you opened first within its tier, as [[ does', () => {
+    useVaultStore.setState({ vaultPath: '/v' });
+    useOpenLogStore.setState({ logs: {}, saved: true });
+    useOpenLogStore.getState().record('/v', 'notes/plan-b.md');
+    useOpenLogStore.getState().record('/v', 'notes/replan.md');
+    const entries = [
+      makeEntry({ path: 'notes/replan.md', title: 'Replan' }),
+      makeEntry({ path: 'notes/plan-a.md', title: 'Plan a' }),
+      makeEntry({ path: 'notes/plan-b.md', title: 'Plan b' }),
+    ];
+    renderView({ entries, onChange: vi.fn() });
+    // An empty box: opened pages first (most weight, then most recent), then A to Z.
+    expect(options().map((o) => o.textContent)).toEqual([
+      expect.stringContaining('Replan'),
+      expect.stringContaining('Plan b'),
+      expect.stringContaining('Plan a'),
+    ]);
+    fireEvent.change(screen.getByLabelText('Find a page'), { target: { value: 'plan' } });
+    expect(options().map((o) => o.textContent)).toEqual([
+      expect.stringContaining('Plan b'),
+      expect.stringContaining('Plan a'),
+      expect.stringContaining('Replan'),
+    ]);
+    useOpenLogStore.setState({ logs: {}, saved: true });
+  });
+
+  it('counts the matches past fifty from the ranked total', () => {
+    const many = Array.from({ length: PICKER_LIMIT + 7 }, (_, i) =>
+      makeEntry({ path: `notes/n-${i}.md`, title: `Note ${i}` }),
+    );
+    renderView({
+      entries: [...many, makeEntry({ path: 'x.md', title: 'Other' })],
+      onChange: vi.fn(),
+    });
+    fireEvent.change(screen.getByLabelText('Find a page'), { target: { value: 'note' } });
+    expect(options()).toHaveLength(PICKER_LIMIT);
+    expect(screen.getByTestId('page-card-more').textContent).toBe('7 more — keep typing');
   });
 
   it('offers no picker when the card may not be written', () => {

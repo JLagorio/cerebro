@@ -3,11 +3,13 @@ import { copyText, deleteRecord, duplicateRecord } from '@/views/recordActions';
 import { makeEntry } from '@/test/factories';
 
 const readNote = vi.fn();
-const deleteNote = vi.fn();
+const trashPath = vi.fn();
 
 vi.mock('@/lib/ipc', () => ({
   readNote: (...args: unknown[]) => readNote(...args) as Promise<string>,
-  deleteNote: (...args: unknown[]) => deleteNote(...args) as Promise<void>,
+}));
+vi.mock('@/app/trashActions', () => ({
+  trashPath: (...args: unknown[]) => trashPath(...args) as Promise<unknown>,
 }));
 
 const entry = makeEntry({
@@ -30,7 +32,7 @@ function deps(overrides: { vaultPath?: string | null; rescan?: ReturnType<typeof
 
 beforeEach(() => {
   readNote.mockReset().mockResolvedValue('# Design first-run flow\n\nBody.\n');
-  deleteNote.mockReset().mockResolvedValue(undefined);
+  trashPath.mockReset().mockResolvedValue({ stamp: '20261014T093000Z-a1b2' });
 });
 
 describe('duplicateRecord', () => {
@@ -73,28 +75,25 @@ describe('duplicateRecord', () => {
 });
 
 describe('deleteRecord', () => {
-  it('removes the file and refreshes the vault', async () => {
+  // M60.8: through trashPath, which moves it to the vault's Trash, toasts and
+  // rescans; deleteRecord adds no words of its own.
+  it('moves the record to the Trash through trashPath', async () => {
     const d = deps();
     expect(await deleteRecord(entry, d)).toBe(true);
-    expect(deleteNote).toHaveBeenCalledWith('/vault', entry.path);
-    expect(d.rescan).toHaveBeenCalled();
+    expect(trashPath).toHaveBeenCalledWith(entry.path, 'Design first-run flow');
+    expect(d.toast).not.toHaveBeenCalled();
   });
 
-  it('reports failure instead of throwing at a closing menu', async () => {
-    deleteNote.mockRejectedValue(new Error('read-only'));
+  it('reports a refusal as false, never a throw at a closing menu', async () => {
+    trashPath.mockResolvedValue(null);
     const d = deps();
     expect(await deleteRecord(entry, d)).toBe(false);
-    expect(d.toast).toHaveBeenCalledWith("Couldn't delete this record");
-    expect(d.rescan).not.toHaveBeenCalled();
+    expect(d.toast).not.toHaveBeenCalled();
   });
 
-  // The file IS gone; a rescan that fails is a stale screen, not a delete
-  // that did not happen, and reporting false would send the caller looking
-  // for a record that no longer exists.
-  it('still reports success when only the refresh fails', async () => {
-    const d = deps({ rescan: vi.fn().mockRejectedValue(new Error('busy')) });
-    expect(await deleteRecord(entry, d)).toBe(true);
-    expect(d.toast).toHaveBeenCalledWith("Couldn't refresh vault");
+  it('does nothing with no vault open', async () => {
+    expect(await deleteRecord(entry, deps({ vaultPath: null }))).toBe(false);
+    expect(trashPath).not.toHaveBeenCalled();
   });
 });
 

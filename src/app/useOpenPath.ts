@@ -3,9 +3,11 @@ import { pageOfSidecar } from '@/engine/comments';
 import { isKnowledgePath } from '@/engine/okf';
 import { libraryKind } from '@/engine/library';
 import { isRecordEntry } from '@/engine/typeCatalog';
-import { useNavStore } from '@/stores/navStore';
+import { useNavStore, type NavigateOptions } from '@/stores/navStore';
+import { recordPersonOpen } from '@/stores/openLogStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import type { Selection } from '@/engine/types';
 
 /**
  * How much a caller is allowed to move you (M9.3).
@@ -37,9 +39,20 @@ const dirOf = (path: string) => {
  * it declares. Templates and the knowledge bundle carry types that are not
  * content types, so they keep their document form.
  */
-export function useOpenPath(mode: OpenMode = 'navigate'): (path: string) => void {
-  const navigate = useNavStore((s) => s.navigate);
+export function useOpenPath(
+  mode: OpenMode = 'navigate',
+  { byAgent = false }: { byAgent?: boolean } = {},
+): (path: string) => void {
+  const navigateTo = useNavStore((s) => s.navigate);
   const openDetail = useUiStore((s) => s.openDetail);
+  // An agent's open (AgentActions) records nothing in the open log (M59.3).
+  const navigate = (sel: Selection, options?: NavigateOptions) =>
+    navigateTo(sel, byAgent ? { ...options, byAgent } : options);
+  // The opens that are not page selections — a Type doc, a Collection page, a
+  // record's panel — are recorded here; navStore records page selections.
+  const recordOpen = (path: string) => {
+    if (!byAgent) recordPersonOpen(path);
+  };
 
   return (path) => {
     // Resolved at CALL time, not render time (M12.8): the New button creates
@@ -79,6 +92,7 @@ export function useOpenPath(mode: OpenMode = 'navigate'): (path: string) => void
     // editor is the old world.
     if (entry.type === 'Type') {
       navigate({ kind: 'type', name: entry.title });
+      recordOpen(path);
       return;
     }
     // Same rule for a container: its page IS the collection (M47.5). Routed
@@ -86,6 +100,7 @@ export function useOpenPath(mode: OpenMode = 'navigate'): (path: string) => void
     // else, with the container listed as a row of it.
     if (isCollectionPage(entry)) {
       navigate({ kind: 'collection', folder: entry.folder });
+      recordOpen(path);
       return;
     }
     // M55.12: an agent opens as a page. Its body is its instructions, and its
@@ -109,6 +124,7 @@ export function useOpenPath(mode: OpenMode = 'navigate'): (path: string) => void
     if (isRecordEntry(entry) && entry.type !== null) {
       // The backdrop jump: in-place callers get the panel and nothing else —
       // DetailPanel's breadcrumb is how you reach the container deliberately.
+      // The backdrop is never the open; the record is, once.
       if (mode === 'navigate') {
         const folder = entry.project !== null ? dirOf(entry.project) : null;
         const onCollection =
@@ -121,6 +137,7 @@ export function useOpenPath(mode: OpenMode = 'navigate'): (path: string) => void
         }
       }
       openDetail(path);
+      recordOpen(path);
       return;
     }
     navigate({ kind: 'doc', path });

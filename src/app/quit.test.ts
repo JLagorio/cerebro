@@ -123,6 +123,28 @@ describe('prepareQuit', () => {
     ]);
   });
 
+  it('stays open with a toast when a save made on leave fails', async () => {
+    const h = harness();
+    let settles = 0;
+    h.deps.settlePageWrites = async (ms) => {
+      h.steps.push(`settle ${ms}`);
+      settles += 1;
+      if (settles === 2) h.fail();
+      return true;
+    };
+    expect(await prepareQuit(REQUEST, h.deps)).toBe('stayed');
+    expect(h.steps).toEqual([
+      'blur',
+      'flush 2500',
+      'settle 750',
+      'leave 750',
+      'settle 750',
+      'end leaving',
+      'cancel',
+      `toast ${STAYED_TOAST}`,
+    ]);
+  });
+
   it('finishes despite a failed save when told to quit anyway', async () => {
     const h = harness();
     h.deps.flushOpenPages = async () => {

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { FixedBelowAnchor } from '@/detail/FieldPopover';
+import { destination } from '@/engine/destinations';
 import { isFailure, type SyncState } from '@/engine/git';
 import { useGit } from '@/git/useGit';
 import * as git from '@/lib/gitIpc';
@@ -52,6 +53,7 @@ export function SyncBadge() {
           ? (remote?.behind ?? 0)
           : (remote?.ahead ?? 0);
   const tone = TONE[sync];
+  const history = destination('pulse');
 
   const run = async (op: 'pull' | 'push') => {
     if (vaultPath === null) return;
@@ -136,16 +138,17 @@ export function SyncBadge() {
                     </Button>
                   </>
                 )}
+                {/* The vault's history, named as the nav names it (M59.1). */}
                 <Button
                   variant="secondary"
                   size="sm"
-                  icon="activity"
+                  icon={history.icon}
                   onClick={() => {
                     setOpen(false);
-                    navigate({ kind: 'pulse' });
+                    navigate(history.selection);
                   }}
                 >
-                  Pulse
+                  {history.label}
                 </Button>
               </div>
             </div>

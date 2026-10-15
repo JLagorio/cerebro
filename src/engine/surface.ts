@@ -1,4 +1,5 @@
 import { isTemplate } from '@/lib/templates';
+import { destination, type DestinationKind } from './destinations';
 import { openWork } from './myWork';
 import { columnUniverse, defaultColumnsFor } from './columns';
 import { inboxEntries } from './inbox';
@@ -35,22 +36,25 @@ function defaultPresentation(): Presentation {
   return clonePresentation(DEFAULT_PRESENTATION);
 }
 
+/** A destination that draws its own layout: its label from the table
+ * (M59.1), no entry set. */
+function emptySurface(kind: DestinationKind): Surface {
+  return { title: destination(kind).label, entries: [], presentation: defaultPresentation() };
+}
+
 const stem = (path: string) => (path.split('/').pop() ?? path).replace(/\.(md|mmd)$/, '');
 
 function isEmptyValue(v: unknown): boolean {
   return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 }
 
-/** The value an entry sorts by for a field: entry metadata first, then
- * relationships (first target), then properties (first element). */
-function sortValue(entry: Entry, field: string): unknown {
-  if (field === 'modifiedAt') return entry.modifiedAt;
-  if (field === 'createdAt') return entry.createdAt;
-  if (field === 'title') return entry.title;
-  const rel = entry.relationships[field];
-  if (rel !== undefined) return rel[0] ?? null;
-  const raw = entry.properties[field];
-  return Array.isArray(raw) ? (raw[0] ?? null) : (raw ?? null);
+/** The value an entry sorts by for a field: the first element of
+ * `schema.fieldValue`, the one read a filter makes too (M60.1) — an entry
+ * fact for the virtual fields, then a computed kind, then a relationship,
+ * then a property. */
+function sortValue(entry: Entry, field: string, schema: Schema): unknown {
+  const value = schema.fieldValue(entry, field);
+  return Array.isArray(value) ? (value[0] ?? null) : (value ?? null);
 }
 
 /** Declared option/status order for the field, from the first entry that
@@ -85,8 +89,8 @@ function compareBy(
   const ranks = optionOrder(entries, spec.field, schema);
   const dir = spec.dir === 'asc' ? 1 : -1;
   return (a, b) => {
-    const va = sortValue(a, spec.field);
-    const vb = sortValue(b, spec.field);
+    const va = sortValue(a, spec.field, schema);
+    const vb = sortValue(b, spec.field, schema);
     const emptyA = isEmptyValue(va);
     const emptyB = isEmptyValue(vb);
     // Empty-last is evaluated PER KEY (M9.1). Returning 0 when both are empty
@@ -231,20 +235,20 @@ export function resolveSurface(
       // one here would invent a query the container deliberately lacks.
       return { title: stem(sel.folder), entries: [], presentation: defaultPresentation() };
     case 'home':
-      return { title: 'Home', entries: [], presentation: defaultPresentation() };
+      return emptySurface('home');
     case 'knowledge':
       // The bundle has its own read-only surface; it is deliberately not a
       // collection of records, so nothing else can list or filter it. M33a.2
       // brought the epistemic tabs under the same kind, and the carve-out
       // covers them for a second reason: lanes and convergence lines are
       // derived from the LEDGER and never from the scanned entries.
-      return { title: 'Knowledge', entries: [], presentation: defaultPresentation() };
+      return emptySurface('knowledge');
     case 'inbox':
       // InboxPage draws its own queue/reading/organize layout, but the
       // collection still reports the real contents so the shell and any
       // other consumer see the truth rather than an empty stand-in.
       return {
-        title: 'Inbox',
+        title: destination('inbox').label,
         entries: inboxEntries(entries),
         presentation: defaultPresentation(),
       };
@@ -252,7 +256,7 @@ export function resolveSurface(
       // MyWorkPage draws its own grouped layout; the surface still reports
       // the real open set so any consumer sees the truth, the Inbox rule.
       return {
-        title: 'My work',
+        title: destination('mywork').label,
         entries: openWork(entries, schema).map((r) => r.entry),
         presentation: defaultPresentation(),
       };
@@ -265,29 +269,29 @@ export function resolveSurface(
     case 'changes':
       // The git surfaces draw their own layouts; they are not collections of
       // records and deliberately cannot be filtered or grouped.
-      return { title: 'Changes', entries: [], presentation: defaultPresentation() };
+      return emptySurface('changes');
     case 'pulse':
-      return { title: 'Pulse', entries: [], presentation: defaultPresentation() };
+      return emptySurface('pulse');
     // Neither holds records. Listed rather than defaulted so that the next
     // surface added to Selection breaks the compiler here instead of silently
     // rendering an empty table.
     case 'library':
-      return { title: 'Library', entries: [], presentation: defaultPresentation() };
+      return emptySurface('library');
     // M30 — mounted repositories hold FILES, not records. Repo markdown is
     // indexed as `IndexedDoc` and never enters `vaultStore`, so there is no
     // entry set to report here and reporting one would invent a query the
     // surface deliberately lacks.
     case 'workspace':
-      return { title: 'Workspace', entries: [], presentation: defaultPresentation() };
+      return emptySurface('workspace');
     // M40 — Studio draws its own layout: a prototype is a folder of pages,
     // not a query over records.
     case 'studio':
-      return { title: 'Studio', entries: [], presentation: defaultPresentation() };
+      return emptySurface('studio');
     // M41 — the agents' front door draws its own layout too: a roster and a
     // run feed, not a query over records.
     case 'agents':
-      return { title: 'Agents', entries: [], presentation: defaultPresentation() };
+      return emptySurface('agents');
     case 'settings':
-      return { title: 'Settings', entries: [], presentation: defaultPresentation() };
+      return emptySurface('settings');
   }
 }

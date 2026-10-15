@@ -27,7 +27,7 @@ import { ConceptTable, ReviewQueueList } from '@/knowledge/ConceptTable';
 import { clearReviewWalk, useReviewStart } from '@/knowledge/ReviewQueue';
 import { ThreadView } from '@/knowledge/ThreadView';
 import { useConcepts } from '@/knowledge/useConcepts';
-import { proposalsByPath, usePendingCards } from '@/knowledge/usePendingCards';
+import { proposalsByPath, usePendingCards, usePendingWrites } from '@/knowledge/usePendingCards';
 import type { ReviewCard } from '@/lib/ipc';
 import { DocPage } from '@/pages/DocPage';
 import { useNavStore } from '@/stores/navStore';
@@ -249,6 +249,18 @@ function KnowledgeLists({ nav: asked }: { nav: KnowledgeNav | undefined }) {
       card.targets.some((t) => t.path != null && here.has(t.path)),
     ).length;
   }, [pending, filed]);
+  // M57.4c: the page writes agents queued, of the whole bundle's Review only:
+  // a folder of concepts holds none of them. Null when they could not be
+  // read — never 0, which would say "nothing waits".
+  const writes = usePendingWrites(vaultPath);
+  const writeCount =
+    filed !== undefined
+      ? 0
+      : writes.kind === 'unavailable'
+        ? null
+        : writes.kind === 'ready'
+          ? writes.data.length
+          : 0;
 
   const openConcept = (path: string) => navigate({ kind: 'doc', path });
   const openFolder = (at: string) =>
@@ -346,28 +358,36 @@ function KnowledgeLists({ nav: asked }: { nav: KnowledgeNav | undefined }) {
       tab: 'review',
       label: 'Review',
       icon: 'shield-check',
-      // Review holds two queues — concepts to verify and the changes agents
-      // proposed — and its count is both. The cards are left out only when
-      // they could not be read.
-      count: bundleWide ? queue.length + (proposalCount ?? 0) : undefined,
+      // Review holds three queues — concepts to verify, the changes agents
+      // proposed and the page writes they queued (M57.4c) — and its count is
+      // all three. The cards are left out only when they could not be read;
+      // writes that could not be read take the count away.
+      count:
+        bundleWide && writeCount !== null
+          ? queue.length + (proposalCount ?? 0) + writeCount
+          : undefined,
     },
     { tab: 'activity', label: 'Activity', icon: 'activity' },
   ];
 
-  // "9 to verify · 3 proposals" — of the folder in a folder's view. The
-  // concept count sits beside the title, as a view's record count does.
+  // "9 to verify · 3 proposals · 1 page write" — of the folder in a folder's
+  // view. The concept count sits beside the title, as a view's record count
+  // does. "nothing to review" needs every queue read and empty.
   const counted = filed ?? all;
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   const summary =
     all.length === 0
       ? null
-      : waiting.length === 0 && (proposalCount ?? 0) === 0
+      : waiting.length === 0 && (proposalCount ?? 0) === 0 && writeCount === 0
         ? 'nothing to review'
         : [
             waiting.length === 0 ? 'nothing to verify' : `${waiting.length} to verify`,
             proposalCount === null || proposalCount === 0
               ? null
               : plural(proposalCount, 'proposal', 'proposals'),
+            writeCount === null || writeCount === 0
+              ? null
+              : plural(writeCount, 'page write', 'page writes'),
           ]
             .filter((part) => part !== null)
             .join(' · ');

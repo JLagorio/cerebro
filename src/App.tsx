@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AgentActions } from '@/agent/AgentActions';
 import { AiPanel } from '@/agent/AiPanel';
+import { ChatTurnsHost } from '@/agent/ChatTurnsHost';
 import { JobRunnerHost } from '@/agent/useJobRunner';
 import { CheckpointHost } from '@/git/CheckpointHost';
 import { ReconciliationBanner } from '@/app/ReconciliationBanner';
@@ -24,6 +25,7 @@ import { Sidebar } from '@/app/Sidebar';
 import { StatusBar } from '@/app/StatusBar';
 import { QuickOpen } from '@/app/QuickOpen';
 import { useQuitHost, useQuitting } from '@/app/quit';
+import { WindowTitle } from '@/app/WindowTitle';
 import { QuitScreen } from '@/app/QuitScreen';
 import { ToastHost } from '@/app/ToastHost';
 import { DetailPanel } from '@/detail/DetailPanel';
@@ -481,14 +483,17 @@ function App() {
                 <DetailPanel room={rooms?.detail ?? null} besideAssistant={showAssistant} />
               )}
               {/* One mount, drawn or parked, so crossing the width it parks
-                  at never remounts it (M17.2: unmounting is what kills the
-                  run). Parked is `park.frame`: clipped to zero width in the
-                  same layout pass — see SHELL_CLASSES. `inert` (React 19)
-                  follows a frame later, and takes it out of the tab order and
-                  the a11y tree, which `aria-hidden` alone would not do. A
-                  vault switch is the one remount, and it is on purpose
-                  (M53.10): keyed by the vault, the panel ends its turn with
-                  the vault it was asked in, so no turn outlives its vault. */}
+                  at never remounts it (M17.2): a remount detaches the
+                  panel from its turn and reads the thread back, which a
+                  resize has no business costing (M57.6). Parked is
+                  `park.frame`: clipped to zero width in the same layout pass
+                  — see SHELL_CLASSES. `inert` (React 19) follows a frame
+                  later, and takes it out of the tab order and the a11y tree,
+                  which `aria-hidden` alone would not do. A vault switch is
+                  the one remount, and it is on purpose (M53.10): Rust ends
+                  the old vault's runs as the new vault opens
+                  (`stop_other_vaults`), and keyed by the vault, the remount
+                  only lets go of them. */}
               {aiPanelOpen && (
                 <div
                   data-testid="ai-panel-frame"
@@ -544,6 +549,13 @@ function App() {
           is not one), and as a HOST so its minute tick re-renders nothing. */}
       <JobRunnerHost />
       <AgentActions />
+      {/* M59.1 — the window title names the place; the chooser keeps
+          index.html's own title, since this branch is the vault's. */}
+      <WindowTitle />
+      {/* M57.6 — a chat turn outlives its panel, so what its end does to
+          the vault (end its run record, rescan, checkpoint) is settled here,
+          once, whether or not the assistant is open. */}
+      <ChatTurnsHost />
     </div>
   );
 }

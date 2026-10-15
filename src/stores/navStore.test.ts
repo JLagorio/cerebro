@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Selection } from '@/engine/types';
 import { useNavStore } from './navStore';
+import { useOpenLogStore } from './openLogStore';
 import { useUiStore } from './uiStore';
+import { useVaultStore } from './vaultStore';
 
 function reset() {
   useNavStore.setState({
@@ -250,5 +252,93 @@ describe('navStore', () => {
     s = useNavStore.getState();
     expect(s.selection).toEqual(a);
     expect(s.historyIndex).toBe(0);
+  });
+});
+
+/**
+ * The open log hears a person's page opens and nothing else (M59.3).
+ */
+describe('navStore and the open log', () => {
+  const logged = (vault = '/v') =>
+    (useOpenLogStore.getState().logs[vault] ?? []).map((r) => [r.path, r.count]);
+
+  beforeEach(() => {
+    reset();
+    useVaultStore.setState({ vaultPath: '/v' });
+    useOpenLogStore.setState({ logs: {}, saved: true });
+  });
+
+  it('records one open for a page navigate, doc or diagram', () => {
+    const { navigate } = useNavStore.getState();
+    navigate({ kind: 'doc', path: 'a.md' });
+    navigate({ kind: 'diagram', path: 'd.mmd' });
+    expect(logged()).toEqual([
+      ['d.mmd', 1],
+      ['a.md', 1],
+    ]);
+  });
+
+  it('records two library pages as two opens', () => {
+    const { navigate } = useNavStore.getState();
+    navigate({ kind: 'library', tab: 'skill', path: 'skills/a.md' });
+    navigate({ kind: 'library', tab: 'skill', path: 'skills/b.md' });
+    navigate({ kind: 'library', tab: 'skill' });
+    expect(logged()).toEqual([
+      ['skills/b.md', 1],
+      ['skills/a.md', 1],
+    ]);
+  });
+
+  it('records nothing for a same-place navigate, a tab or thread switch, or a non-page', () => {
+    const { navigate } = useNavStore.getState();
+    navigate({ kind: 'doc', path: 'a.md' });
+    navigate({ kind: 'doc', path: 'a.md' });
+    navigate({ kind: 'doc', path: 'a.md', tab: 'spec' });
+    navigate({ kind: 'doc', path: 'a.md', thread: '1111111111111111' });
+    navigate({ kind: 'collection', folder: 'projects' });
+    navigate({ kind: 'settings' });
+    expect(logged()).toEqual([['a.md', 1]]);
+  });
+
+  it('records nothing for an agent move, a replace it starts, or Back and Forward', () => {
+    const { navigate, back, forward } = useNavStore.getState();
+    navigate({ kind: 'doc', path: 'agent.md' }, { byAgent: true });
+    navigate({ kind: 'agents', actor: 'process:x' }, { byAgent: true });
+    navigate({ kind: 'doc', path: 'records/agents/x.md' }, { replace: true });
+    back();
+    forward();
+    expect(logged()).toEqual([]);
+  });
+
+  it("logs exactly one open when {agents, actor} forwards to the agent's page", () => {
+    const { navigate } = useNavStore.getState();
+    navigate({ kind: 'agents', actor: 'process:x' });
+    navigate({ kind: 'doc', path: 'records/agents/x.md' }, { replace: true });
+    expect(logged()).toEqual([['records/agents/x.md', 1]]);
+  });
+
+  it("logs one open when a library agent path forwards to the agent's page", () => {
+    const { navigate } = useNavStore.getState();
+    navigate({ kind: 'library', tab: 'agent', path: 'records/agents/x.md' });
+    navigate({ kind: 'doc', path: 'records/agents/x.md' }, { replace: true });
+    expect(logged()).toEqual([['records/agents/x.md', 1]]);
+  });
+
+  it('records nothing with no vault open', () => {
+    useVaultStore.setState({ vaultPath: null });
+    useNavStore.getState().navigate({ kind: 'doc', path: 'a.md' });
+    expect(useOpenLogStore.getState().logs).toEqual({});
+  });
+
+  it('replacePath remaps exact and descendant paths in the current vault only', () => {
+    const log = useOpenLogStore.getState();
+    log.record('/v', 'docs/old.md');
+    log.record('/v', 'docs/old/page.md');
+    log.record('/w', 'docs/old/page.md');
+    useNavStore.getState().replacePath('docs/old', 'docs/new');
+    expect(logged().map(([p]) => p)).toEqual(['docs/new/page.md', 'docs/old.md']);
+    expect(logged('/w').map(([p]) => p)).toEqual(['docs/old/page.md']);
+    useNavStore.getState().replacePath('docs/old.md', 'docs/renamed.md');
+    expect(logged().map(([p]) => p)).toEqual(['docs/new/page.md', 'docs/renamed.md']);
   });
 });

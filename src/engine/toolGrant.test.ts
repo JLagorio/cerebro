@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest';
 import TOOL_GRANTS from '../../src-tauri/fixtures/tool-grants.json';
 import { agentFacingOps, POLICY } from '@/lib/policy/table';
 import { TOOLS } from '@/lib/policy/tools';
+import { parseShellCeiling } from '@/lib/policy/toolApproval';
 import {
+  cliGrant,
   editsNotes,
   grantedTools,
   holds,
+  holdsShell,
   mentionedTools,
+  namesTool,
   NOTE_EDITORS,
   type PromptGrant,
 } from './toolGrant';
@@ -45,6 +49,52 @@ describe('grantedTools replays src-tauri/fixtures/tool-grants.json', () => {
     expect(sorted(grantedTools(never))).toEqual([]);
     const all = grantedTools(null);
     for (const name of never) expect(all.has(name), name).toBe(false);
+  });
+});
+
+/**
+ * M57.2 — the CLI's own tools, by the tool-approval table, against the same
+ * cases cli_grants_match_the_shared_cases replays in Rust: the ceiling
+ * dimension.
+ */
+describe('cliGrant replays tool-grants.json cli_cases', () => {
+  it('agrees with Rust on every case', () => {
+    expect(TOOL_GRANTS.cli_cases.length).toBeGreaterThan(0);
+    for (const c of TOOL_GRANTS.cli_cases) {
+      const got = cliGrant({
+        shell: parseShellCeiling(c.shell),
+        attended: c.kind === 'attended',
+        readScoped: c.read_scoped,
+        narrowing: c.allowed_tools,
+      });
+      expect(got, JSON.stringify(c)).toEqual({ cli: c.cli, asks: c.asks });
+    }
+  });
+
+  it('holds the shell under On and Ask attended, and never for an unattended Ask run', () => {
+    const at = (shell: 'off' | 'ask' | 'on', attended: boolean) =>
+      holdsShell({ shell, attended, readScoped: false, narrowing: null });
+    expect(at('off', true)).toBe(false);
+    expect(at('ask', true)).toBe(true);
+    expect(at('on', true)).toBe(true);
+    expect(at('ask', false)).toBe(false);
+    expect(at('on', false)).toBe(true);
+    // A read limit withdraws it at every ceiling.
+    for (const shell of ['off', 'ask', 'on'] as const) {
+      expect(holdsShell({ shell, attended: true, readScoped: true, narrowing: null })).toBe(false);
+    }
+    // A record that names only cerebro's tools holds no CLI tool of its own.
+    expect(
+      holdsShell({ shell: 'on', attended: true, readScoped: false, narrowing: ['get_note'] }),
+    ).toBe(false);
+  });
+
+  it('hears a name as names_tool does', () => {
+    expect(namesTool(' bash ', 'Bash')).toBe(true);
+    expect(namesTool('mcp__cerebro__get_note', 'mcp__cerebro__get_note')).toBe(true);
+    expect(namesTool('get_note', 'mcp__cerebro__get_note')).toBe(true);
+    expect(namesTool('mcp__cerebro__bash', 'Bash')).toBe(false);
+    expect(namesTool('', 'Bash')).toBe(false);
   });
 });
 

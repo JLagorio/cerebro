@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Popover } from '@/components/ui/Popover';
-import { quickOpenScore } from '@/lib/quickOpenScore';
+import { nameMatches } from '@/lib/nameRank';
 
 /**
  * Pick from what exists, instead of typing it from memory (M18.4).
@@ -65,8 +65,9 @@ export function Picker({
   const unknown = selected.filter((v) => !byValue.has(v));
 
   const groups = useMemo(() => {
-    const shown = options.filter(
-      (o) => query.trim() === '' || quickOpenScore(query.trim(), `${o.label} ${o.hint ?? ''}`) > 0,
+    // A filter, not a ranking: option lists keep their designed order (M59.3).
+    const shown = options.filter((o) =>
+      nameMatches(query, [o.label, o.hint, `${o.label} ${o.hint ?? ''}`]),
     );
     const out = new Map<string, PickerOption[]>();
     for (const option of shown) {

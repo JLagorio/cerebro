@@ -75,7 +75,7 @@ beforeEach(() => {
     vaultPath: '/vault',
     entries: [...fixtureVault(), LEARNED, ABOUT, AROUND],
   });
-  useUiStore.setState({ detailPath: RECORD, docPanelTab: 'knowledge', agentPendingPrompt: null });
+  useUiStore.setState({ detailPath: RECORD, docPanelTab: 'knowledge', handoffs: [] });
   vi.mocked(ipc.ingestItemState).mockClear();
   vi.mocked(ipc.ingestItemState).mockResolvedValue(null);
 });
@@ -184,7 +184,7 @@ describe('PageKnowledge (M52.3)', () => {
   it('asks about the page by the act and the page’s name', () => {
     render(<PageKnowledge entry={record()} />);
     fireEvent.click(screen.getByRole('button', { name: "What's missing?" }));
-    const pending = useUiStore.getState().agentPendingPrompt;
+    const pending = useUiStore.getState().handoffs.at(-1);
     expect(pending?.label).toBe("What's missing? · Design first-run flow");
     expect(pending?.subject).toBe(RECORD);
     expect(pending?.text).toContain('**Missing**');

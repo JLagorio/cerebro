@@ -4,14 +4,17 @@
 //! `Command::new` (M53.21), and the one call in [`command`] carries the
 //! reasoned exception.
 //!
-//! - [`command`] builds a short call that is waited on: git, `which`, the
-//!   login-shell probe, the CLI's `--version`, the system browser. It scrubs
-//!   the repo-selecting variables and nulls stdin, and it leaves the child in
-//!   our process group (its doc says why).
-//! - [`supervise`] starts a long run, the Claude Code CLI. The child leads its
-//!   own process group, so ending the run ends everything it started inside
-//!   that group. Its stderr is drained while it runs, into a bounded tail, so
-//!   a chatty child never blocks on a full pipe. Whoever finishes it reaps it.
+//! - [`command`] builds a short call that is waited on: `which`, the
+//!   login-shell probe, the CLI's `--version`, the system browser, and git's
+//!   local reads. It scrubs the repo-selecting variables and nulls stdin, and
+//!   it leaves the child in our process group (its doc says why).
+//! - [`supervise`] starts a run that may have to be ended: the Claude Code
+//!   CLI, and git under a deadline (M58.3, `git::command::run_bounded`: the
+//!   network calls and each step of a commit). The child leads its own process
+//!   group, so ending it ends everything it started inside that group, ssh
+//!   and git's remote helpers included. Its stderr is drained while it runs,
+//!   into a bounded tail, so a chatty child never blocks on a full pipe.
+//!   Whoever finishes it reaps it.
 //!
 //! The limit, stated rather than discovered: a process that starts its own
 //! session (`setsid`) leaves the group, and nothing here reaches it. The CLI's
@@ -73,9 +76,11 @@ const POLL: Duration = Duration::from_millis(25);
 /// deliberate. When the app runs from a terminal, a process in a background
 /// group that touches the terminal is stopped by SIGTTIN or SIGTTOU, and a
 /// stopped child is a call that never returns. `zsh -lic` (the login-shell
-/// probe) reads the terminal, and so can an ssh prompt under git. These calls
-/// are short and waited on, so there is nothing to end early. A run is the
-/// opposite case, and [`supervise`] gives it a group.
+/// probe) reads the terminal. A run is the opposite case, and [`supervise`]
+/// gives it a group. Network git runs supervised under a deadline (M58.3), and
+/// that is the cost it pays: from a dev terminal, an ssh host-key or
+/// passphrase prompt stops on SIGTTIN and reads as a timeout at the deadline.
+/// A packaged app has no terminal, so there the prompt fails at once.
 pub fn command(program: impl AsRef<OsStr>) -> Command {
     #[expect(
         clippy::disallowed_methods,
@@ -289,6 +294,12 @@ pub fn supervise(cmd: &mut Command) -> io::Result<(Supervised, ChildStdout)> {
 }
 
 impl Supervised {
+    /// The child's stdin, once, when `cmd` piped it before [`supervise`]
+    /// (M58.3: git reads a pathspec list there). Dropping it closes the pipe.
+    pub fn take_stdin(&self) -> Option<std::process::ChildStdin> {
+        lock(&self.child).stdin.take()
+    }
+
     /// A handle that can ask after the child, and end it, from any thread.
     pub fn handle(&self) -> Handle {
         Handle {

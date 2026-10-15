@@ -63,6 +63,11 @@ const FOLD_LIMIT: usize = 40;
 /// Where a fold phrase's count goes.
 const FOLD_COUNT: &str = "{n}";
 
+/// The door the comment tools go through (M70.3): they write a page's
+/// comment sidecar, never the page, so the door writes nothing, and its rows
+/// are reads of one note (a refusal lists where a quote appears).
+pub const COMMENT_DOOR: &str = "comment";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Surface {
@@ -259,6 +264,12 @@ pub struct ToolRow {
     /// A lucide icon name.
     pub icon: String,
     pub always_load: bool,
+    /// Does an agent whose record says `ask-first: true` wait for the
+    /// person's Allow before this call lands (M57.4)? Only a tool that
+    /// writes the person's own pages: a door that writes, on the write or
+    /// read_write axis. Which runs ask, and how, is `tool-approval.v1.json`'s
+    /// `confirmable` family.
+    pub confirmable: bool,
     pub search_hint: String,
     pub description: String,
     pub input_schema: Value,
@@ -281,6 +292,9 @@ pub struct Generated {
     pub renderer: Renderer,
     pub icon: String,
     pub always_load: bool,
+    /// Always false (M57.4): a proposal is decided by policy.v3, never by an
+    /// ask-first card.
+    pub confirmable: bool,
     pub search_hint: String,
 }
 
@@ -289,11 +303,14 @@ pub struct Generated {
 #[serde(deny_unknown_fields)]
 pub struct CliTool {
     pub name: String,
+    /// Its tool-approval family (M57.2): the row of
+    /// `shared/policy/tool-approval.v1.json` that decides whether it runs,
+    /// asks or is refused. Required: a row with none fails the load.
+    pub family: Option<String>,
+    /// The input field a person's card names it by (M57.2): a command, a
+    /// path, a URL. None names it by its whole input.
+    pub subject: Option<String>,
     pub writes: bool,
-    pub denied_without_shell: bool,
-    pub denied_when_read_scoped: bool,
-    /// Granted, with the cerebro tools, to a run that holds shell.
-    pub with_shell: bool,
     pub renderer: Renderer,
     /// Set only on a reader: what a run of its calls folds under.
     pub fold: Option<FoldPhrases>,
@@ -631,6 +648,7 @@ impl ToolsManifest {
                 .as_deref(),
             row.renderer,
         )?;
+        check_comment_door(subject, row)?;
         self.check_facts(
             subject,
             &Facts {
@@ -646,6 +664,7 @@ impl ToolsManifest {
                 search_hint: &row.search_hint,
             },
         )?;
+        self.check_confirmable(subject, row)?;
         if row.renderer == Renderer::Commit && row.surface != Surface::Proposals {
             return Err(refusal(
                 subject,
@@ -698,8 +717,42 @@ impl ToolsManifest {
         Ok(())
     }
 
+    /// `confirmable` sits only on a tool that writes the person's pages
+    /// (M57.4): a door that writes, and the write or read_write axis, so the
+    /// write has a note or folder a card can name.
+    fn check_confirmable(&self, subject: &str, row: &ToolRow) -> Result<(), String> {
+        if !row.confirmable {
+            return Ok(());
+        }
+        if !self.door(&row.door).is_some_and(|door| door.writes) {
+            return Err(refusal(
+                subject,
+                "confirmable",
+                format!("is true on door {}, which writes nothing", row.door),
+            ));
+        }
+        if !matches!(row.axis, Axis::Write | Axis::ReadWrite) {
+            return Err(refusal(
+                subject,
+                "confirmable",
+                format!(
+                    "needs the write or read_write axis, not {}",
+                    row.axis.as_str()
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     fn check_generated(&self) -> Result<(), String> {
         let generated = &self.generated;
+        if generated.confirmable {
+            return Err(refusal(
+                "generated",
+                "confirmable",
+                "must be false: policy.v3 decides a proposal",
+            ));
+        }
         if !fits(&generated.title_prefix, TITLE_LIMIT) {
             return Err(refusal(
                 "generated",
@@ -834,14 +887,12 @@ impl ToolsManifest {
             }
             (_, None) => {}
         }
-        if facts.renderer == Renderer::Change {
-            if !door.writes {
-                return Err(refusal(
-                    subject,
-                    "renderer",
-                    format!("change needs a door that writes, and {} does not", door.id),
-                ));
-            }
+        if facts.renderer == Renderer::Change && !door.writes {
+            return Err(refusal(
+                subject,
+                "renderer",
+                format!("change needs a door that writes, and {} does not", door.id),
+            ));
         }
         // A change card shows the path it changed, and a concept row opens
         // the concept to review: both need the argument that names it.
@@ -882,6 +933,27 @@ impl ToolsManifest {
         }
         Ok(())
     }
+}
+
+/// Door `comment` holds one shape of row (M70.3): a read of one note, which
+/// posts beside it and draws as a step. Judged before the door's own lists,
+/// so a misplaced row hears this one sentence whatever else it breaks.
+fn check_comment_door(subject: &str, row: &ToolRow) -> Result<(), String> {
+    let shaped = row.axis == Axis::Read
+        && row
+            .target
+            .as_ref()
+            .is_some_and(|target| target.kind == TargetKind::Note)
+        && row.kind == Kind::Additive
+        && row.renderer == Renderer::Step;
+    if row.door == COMMENT_DOOR && !shaped {
+        return Err(refusal(
+            subject,
+            "door",
+            "comment takes only axis read, a note target, kind additive and renderer step",
+        ));
+    }
+    Ok(())
 }
 
 /// A schema root's property names and its required list, or what is wrong
@@ -934,27 +1006,22 @@ fn check_cli(tool: &CliTool) -> Result<(), String> {
             ),
         ));
     }
-    if tool.with_shell && !tool.denied_without_shell && !tool.denied_when_read_scoped {
+    if !tool.family.as_deref().is_some_and(is_snake) {
         return Err(refusal(
             subject,
-            "with_shell",
-            "grants a tool that neither denied_without_shell nor denied_when_read_scoped \
-             withdraws",
+            "family",
+            "must name a tool-approval family, [a-z][a-z_]*",
         ));
     }
-    if tool.denied_without_shell && tool.denied_when_read_scoped {
+    if tool
+        .subject
+        .as_deref()
+        .is_some_and(|field| !is_snake(field))
+    {
         return Err(refusal(
             subject,
-            "denied_when_read_scoped",
-            "is set on a tool denied_without_shell already, so a read-scoped run's one deny \
-             list would name it twice",
-        ));
-    }
-    if tool.writes && !tool.denied_without_shell {
-        return Err(refusal(
-            subject,
-            "denied_without_shell",
-            "must be set on a tool that writes",
+            "subject",
+            "must be null or an input field, [a-z][a-z_]*",
         ));
     }
     if tool.renderer == Renderer::Change && !tool.writes {
@@ -1083,6 +1150,113 @@ pub fn fold(name: &str) -> Option<&'static FoldPhrases> {
         .and_then(|tool| tool.fold.as_ref())
 }
 
+/// Does `name` name a confirmable tool (M57.4)? Spelled any way the one
+/// name test takes (`agent::names_tool`): trimmed, ignoring ASCII case, and
+/// with or without the `mcp__<server>__` prefix.
+pub fn confirmable(name: &str) -> bool {
+    let wanted = name.trim().to_ascii_lowercase();
+    let bare = bare_name(&wanted);
+    manifest()
+        .tools
+        .iter()
+        .any(|row| row.confirmable && row.name == bare)
+}
+
+/// The confirmable rows' names, as the CLI spells them, in served order.
+pub fn confirmable_names() -> Vec<String> {
+    let prefix = manifest().server_prefix();
+    manifest()
+        .tools
+        .iter()
+        .filter(|row| row.confirmable)
+        .map(|row| format!("{prefix}{}", row.name))
+        .collect()
+}
+
+/// The words a JSON type takes in a refusal of an edited draft (M57.4b).
+fn type_words(json_type: &str) -> &str {
+    match json_type {
+        "string" => "a string",
+        "boolean" => "true or false",
+        "integer" => "a whole number",
+        "number" => "a number",
+        "object" => "an object",
+        "array" => "a list",
+        "null" => "null",
+        other => other,
+    }
+}
+
+/// Does `value` have JSON type `json_type`? An integer is a number too.
+fn has_type(value: &Value, json_type: &str) -> bool {
+    match json_type {
+        "string" => value.is_string(),
+        "boolean" => value.is_boolean(),
+        "integer" => value.is_i64() || value.is_u64(),
+        "number" => value.is_number(),
+        "object" => value.is_object(),
+        "array" => value.is_array(),
+        "null" => value.is_null(),
+        _ => true,
+    }
+}
+
+/// Is `input` the shape tool `name`'s schema declares (M57.4b)? A person's
+/// edited draft is checked here at the answer, before anything is recorded:
+/// it must be an object, hold every required key, hold no key the schema
+/// does not declare, and give each key a value of its declared `type` (an
+/// array of types allows any of them, `null` among them). A property with
+/// no `type` takes any value; the tool body judges the rest. Each refusal
+/// names the key. A name with no hand-written row takes no draft. The
+/// renderer's form (`src/engine/writeDraft.ts`'s `draftRefusal`) speaks the
+/// same words, for the mock's book.
+pub fn validate_input(name: &str, input: &Value) -> Result<(), String> {
+    let row = row(name).ok_or_else(|| format!("{} takes no edited draft.", bare_name(name)))?;
+    let object = input
+        .as_object()
+        .ok_or("The edited draft must be a JSON object.")?;
+    let schema = &row.input_schema;
+    let properties = schema.get("properties").and_then(Value::as_object);
+    let required = schema
+        .get("required")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str);
+    for key in required {
+        if !object.contains_key(key) {
+            return Err(format!(
+                "The edited draft leaves out {key}, which this tool requires."
+            ));
+        }
+    }
+    for (key, value) in object {
+        let Some(declared) = properties.and_then(|p| p.get(key)) else {
+            return Err(format!(
+                "The edited draft has {key}, which this tool does not take."
+            ));
+        };
+        let types: Vec<&str> = match declared.get("type") {
+            Some(Value::String(one)) => vec![one.as_str()],
+            Some(Value::Array(many)) => many.iter().filter_map(Value::as_str).collect(),
+            _ => continue,
+        };
+        if !types.iter().any(|t| has_type(value, t)) {
+            let words: Vec<&str> = types.iter().map(|t| type_words(t)).collect();
+            return Err(format!(
+                "The edited draft's {key} must be {}.",
+                words.join(" or ")
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The CLI built-in named `name`, as the CLI spells it.
+pub fn cli_tool(name: &str) -> Option<&'static CliTool> {
+    manifest().cli_tools.iter().find(|tool| tool.name == name)
+}
+
 /// The CLI built-ins `select` keeps, in argv order.
 pub fn cli_names(select: impl Fn(&CliTool) -> bool) -> Vec<&'static str> {
     manifest()
@@ -1189,6 +1363,261 @@ mod tests {
         for fragment in fragments {
             assert!(err.contains(fragment), "{fragment:?} missing from: {err}");
         }
+    }
+
+    // --- The confirmable column (M57.4) ------------------------------------
+
+    #[test]
+    fn confirmable_sits_only_on_note_writers() {
+        let cases: Vec<Case> = vec![
+            (
+                Box::new(|v| tool(v, "get_note")["confirmable"] = json!(true)),
+                &[
+                    "tool get_note",
+                    "`confirmable`",
+                    "door none, which writes nothing",
+                ],
+            ),
+            (
+                Box::new(|v| tool(v, "write_concept")["confirmable"] = json!(true)),
+                &[
+                    "tool write_concept",
+                    "`confirmable`",
+                    "write or read_write axis, not none",
+                ],
+            ),
+            (
+                Box::new(|v| v["generated"]["confirmable"] = json!(true)),
+                &["generated", "`confirmable`", "policy.v3"],
+            ),
+        ];
+        for (mutate, fragments) in cases {
+            assert_names(&refused(mutate), fragments);
+        }
+        // A row without the column fails the parse, naming the field.
+        let missing = refused(|v| {
+            tool(v, "create_note")
+                .as_object_mut()
+                .unwrap()
+                .remove("confirmable");
+        });
+        assert_names(&missing, &["missing field `confirmable`"]);
+    }
+
+    #[test]
+    fn the_shipped_manifest_confirms_exactly_the_four_note_writers() {
+        let rows: Vec<&str> = manifest()
+            .tools
+            .iter()
+            .filter(|row| row.confirmable)
+            .map(|row| row.name.as_str())
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                "create_note",
+                "update_frontmatter",
+                "append_to_note",
+                "edit_note"
+            ]
+        );
+        assert!(!generated().confirmable);
+        assert_eq!(
+            confirmable_names(),
+            [
+                "mcp__cerebro__create_note",
+                "mcp__cerebro__update_frontmatter",
+                "mcp__cerebro__append_to_note",
+                "mcp__cerebro__edit_note"
+            ]
+        );
+        // Every spelling the one name test takes, and nothing else.
+        for name in [
+            "create_note",
+            " Create_Note ",
+            "mcp__cerebro__create_note",
+            "MCP__CEREBRO__EDIT_NOTE",
+        ] {
+            assert!(confirmable(name), "{name}");
+        }
+        for name in [
+            "get_note",
+            "write_concept",
+            "propose_organize",
+            "Write",
+            "mcp__other__create_note",
+            "",
+        ] {
+            assert!(!confirmable(name), "{name}");
+        }
+    }
+
+    // --- Door comment (M70.3) ------------------------------------------------
+
+    /// The one refusal a misplaced comment row hears, in src/lib/policy/
+    /// tools.ts's words too.
+    fn comment_door_refusal(name: &str) -> String {
+        format!(
+            "{TOOLS_PATH}: tool {name}: `door` comment takes only axis read, a note target, kind \
+             additive and renderer step"
+        )
+    }
+
+    #[test]
+    fn door_comment_holds_only_reads_of_one_note_drawn_as_steps() {
+        type Named = (&'static str, Box<dyn FnOnce(&mut Value)>);
+        let cases: Vec<Named> = vec![
+            (
+                "comment_on_note",
+                Box::new(|v| tool(v, "comment_on_note")["axis"] = json!("read_write")),
+            ),
+            (
+                "reply_to_comment",
+                Box::new(|v| {
+                    tool(v, "reply_to_comment")["target"] = json!({ "arg": null, "kind": "bundle" })
+                }),
+            ),
+            (
+                "resolve_comment",
+                Box::new(|v| tool(v, "resolve_comment")["renderer"] = json!("change")),
+            ),
+            (
+                "comment_on_note",
+                Box::new(|v| tool(v, "comment_on_note")["kind"] = json!("destructive")),
+            ),
+            (
+                "get_note",
+                Box::new(|v| tool(v, "get_note")["door"] = json!("comment")),
+            ),
+        ];
+        for (name, mutate) in cases {
+            assert_eq!(refused(mutate), comment_door_refusal(name));
+        }
+        // A comment row is never confirmable: its door writes nothing.
+        assert_names(
+            &refused(|v| tool(v, "comment_on_note")["confirmable"] = json!(true)),
+            &["tool comment_on_note", "`confirmable`", "door comment"],
+        );
+    }
+
+    #[test]
+    fn the_comment_door_writes_nothing_and_holds_the_three_comment_tools() {
+        let door = door(COMMENT_DOOR).expect("door comment is declared");
+        assert!(!door.writes);
+        let rows: Vec<&str> = manifest()
+            .tools
+            .iter()
+            .filter(|row| row.door == COMMENT_DOOR)
+            .map(|row| row.name.as_str())
+            .collect();
+        assert_eq!(
+            rows,
+            ["comment_on_note", "reply_to_comment", "resolve_comment"]
+        );
+        for name in rows {
+            assert!(!writes_disk(name), "{name}");
+            assert_eq!(row(name).unwrap().toolset.as_deref(), Some("comment"));
+        }
+    }
+
+    // --- An edited draft's shape (M57.4b) -----------------------------------
+
+    /// A value of the first type a property declares.
+    fn sample_of(schema: &Value) -> Value {
+        let first = match schema.get("type") {
+            Some(Value::String(one)) => one.as_str(),
+            Some(Value::Array(many)) => many.first().and_then(Value::as_str).unwrap_or("string"),
+            _ => "string",
+        };
+        match first {
+            "boolean" => json!(true),
+            "integer" => json!(1),
+            "number" => json!(1.5),
+            "object" => json!({}),
+            "array" => json!([]),
+            "null" => Value::Null,
+            _ => json!("x"),
+        }
+    }
+
+    #[test]
+    fn every_confirmable_row_accepts_a_valid_sample() {
+        for row in manifest().tools.iter().filter(|row| row.confirmable) {
+            let properties = row.input_schema["properties"].as_object().unwrap();
+            let full: serde_json::Map<String, Value> = properties
+                .iter()
+                .map(|(key, schema)| (key.clone(), sample_of(schema)))
+                .collect();
+            let required: serde_json::Map<String, Value> = full
+                .iter()
+                .filter(|(key, _)| {
+                    row.input_schema["required"]
+                        .as_array()
+                        .unwrap()
+                        .contains(&json!(key))
+                })
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect();
+            for sample in [Value::Object(full), Value::Object(required)] {
+                assert_eq!(validate_input(&row.name, &sample), Ok(()), "{}", row.name);
+                let spelled = format!("mcp__cerebro__{}", row.name);
+                assert_eq!(validate_input(&spelled, &sample), Ok(()), "{spelled}");
+            }
+        }
+    }
+
+    #[test]
+    fn validate_input_refuses_a_misshapen_draft_naming_the_key() {
+        let create = |value: Value| validate_input("create_note", &value);
+        let good = json!({ "folder": "records/risks", "slug": "v", "body": "# V\n" });
+        assert_eq!(create(good.clone()), Ok(()));
+        assert_eq!(
+            create(json!(["not", "an", "object"])),
+            Err("The edited draft must be a JSON object.".into())
+        );
+        assert_eq!(
+            create(json!("{\"folder\": \"\"}")),
+            Err("The edited draft must be a JSON object.".into())
+        );
+        assert_eq!(
+            create(json!({ "folder": "", "body": "# V\n" })),
+            Err("The edited draft leaves out slug, which this tool requires.".into())
+        );
+        let mut undeclared = good.clone();
+        undeclared["path"] = json!("records/risks/other.md");
+        assert_eq!(
+            create(undeclared),
+            Err("The edited draft has path, which this tool does not take.".into())
+        );
+        let mut wrong = good.clone();
+        wrong["body"] = json!(7);
+        assert_eq!(
+            create(wrong),
+            Err("The edited draft's body must be a string.".into())
+        );
+        let mut nulled = good;
+        nulled["frontmatter"] = Value::Null;
+        assert_eq!(
+            create(nulled),
+            Err("The edited draft's frontmatter must be an object.".into())
+        );
+        let hashed = |hash: Value| {
+            validate_input(
+                "edit_note",
+                &json!({ "path": "a.md", "edits": [], "expect_hash": hash }),
+            )
+        };
+        assert_eq!(
+            hashed(json!(2)),
+            Err("The edited draft's expect_hash must be a string.".into())
+        );
+        assert_eq!(
+            validate_input("get_vault_context_nope", &json!({})),
+            Err("get_vault_context_nope takes no edited draft.".into())
+        );
+        // A whole number is a number too; a fraction is no whole number.
+        assert!(has_type(&Value::Null, "null") && has_type(&json!(3), "number"));
+        assert!(!has_type(&json!(1.5), "integer"));
     }
 
     #[test]
@@ -1496,6 +1925,39 @@ mod tests {
     }
 
     #[test]
+    fn cli_rows_carry_family_and_subject() {
+        let families: Vec<(&str, Option<&str>, Option<&str>)> = manifest()
+            .cli_tools
+            .iter()
+            .map(|t| (t.name.as_str(), t.family.as_deref(), t.subject.as_deref()))
+            .collect();
+        assert_eq!(
+            families,
+            [
+                ("Write", Some("file_write"), Some("file_path")),
+                ("Edit", Some("file_write"), Some("file_path")),
+                ("MultiEdit", Some("file_write"), Some("file_path")),
+                ("NotebookEdit", Some("file_write"), Some("notebook_path")),
+                ("Bash", Some("shell"), Some("command")),
+                ("Read", Some("file_read"), Some("file_path")),
+                ("Glob", Some("file_read"), Some("pattern")),
+                ("Grep", Some("file_read"), Some("pattern")),
+                ("WebFetch", Some("web"), Some("url")),
+                ("WebSearch", Some("web"), Some("query")),
+                ("Task", Some("delegate"), Some("description")),
+                ("AskUserQuestion", Some("question"), None),
+                ("ExitPlanMode", Some("plan"), None),
+            ]
+        );
+        assert_eq!(cli_tool("Bash").unwrap().icon, "terminal");
+        assert!(cli_tool("bash").is_none(), "the CLI's spelling, exactly");
+        for tool in ["AskUserQuestion", "ExitPlanMode"] {
+            assert!(!writes_disk(tool));
+            assert_eq!(renderer(tool), Renderer::Step);
+        }
+    }
+
+    #[test]
     fn the_cli_refusals_name_the_row_and_the_field() {
         let cases: Vec<Case> = vec![
             (
@@ -1503,16 +1965,12 @@ mod tests {
                 &["cli tool task", "`name`", "[A-Z][A-Za-z]*"],
             ),
             (
-                Box::new(|v| cli(v, "Read")["denied_when_read_scoped"] = json!(false)),
-                &["cli tool Read", "`with_shell`"],
+                Box::new(|v| cli(v, "Read")["family"] = json!(null)),
+                &["cli tool Read", "`family`", "tool-approval family"],
             ),
             (
-                Box::new(|v| cli(v, "Bash")["denied_when_read_scoped"] = json!(true)),
-                &["cli tool Bash", "`denied_when_read_scoped`"],
-            ),
-            (
-                Box::new(|v| cli(v, "WebFetch")["writes"] = json!(true)),
-                &["cli tool WebFetch", "`denied_without_shell`"],
+                Box::new(|v| cli(v, "Bash")["subject"] = json!("Command")),
+                &["cli tool Bash", "`subject`", "null or an input field"],
             ),
             (
                 Box::new(|v| cli(v, "WebFetch")["renderer"] = json!("change")),
@@ -1693,6 +2151,7 @@ mod tests {
             BTreeSet::from([
                 "get_vault_context",
                 "search_notes",
+                "list_notes",
                 "get_note",
                 "knowledge_about",
                 "list_inbox"

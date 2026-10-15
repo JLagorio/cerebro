@@ -3,20 +3,30 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   abortMockAnswer,
+  ANSWER_THE_QUESTION,
+  answeredText,
   answerMockInteraction,
   cancelMockInteraction,
   confirmMockInteraction,
   DECLINED,
   declinedText,
+  EDIT_MISFIT,
   finishMockAnswer,
   listMockInteractions,
+  MALFORMED_ARGUMENTS,
+  markMockQuestion,
   mockAsks,
+  mockQuestions,
   NO_LONGER_WAITING,
+  NOT_A_QUESTION,
   registerMockInteraction,
   resetMockInteractions,
   settleMockSession,
   STALE,
 } from '@/agent/mockInteractions';
+import CASES from '../../src-tauri/fixtures/question-answers.json';
+import type { QuestionAnswer } from '@/engine/questionForm';
+import { questionMalformed } from '@/lib/policy/toolApproval';
 
 /**
  * The browser's ask seam (M57.1) mirrors Rust's book: these are the rules
@@ -139,5 +149,167 @@ describe('the mock ask seam', () => {
       `${DECLINED} They said: not today`,
     );
     expect(RUST).toContain('format!("{DECLINED} They said: {said}")');
+  });
+});
+
+describe('the mock question card (M57.3)', () => {
+  const FORMAT = {
+    questions: [
+      {
+        question: 'Which format?',
+        header: 'Format',
+        options: [{ label: 'Markdown' }, { label: 'Plain text' }],
+      },
+      {
+        question: 'Which sections?',
+        header: 'Sections',
+        multiSelect: true,
+        options: [{ label: 'Summary' }, { label: 'Risks' }, { label: 'Next steps' }],
+      },
+    ],
+  };
+
+  /** A confirmed question card in /v, as the mock agent registers one. */
+  function asked(resume = vi.fn()) {
+    const read = mockQuestions(FORMAT);
+    if (!('questions' in read)) throw new Error(read.deny);
+    const id = registerMockInteraction(
+      '/v',
+      's-1',
+      't-1',
+      'AskUserQuestion',
+      JSON.stringify(FORMAT),
+      resume,
+    );
+    const card = confirmMockInteraction(id);
+    if (card === null) throw new Error('a confirmed card');
+    markMockQuestion(card, read.questions);
+    return card;
+  }
+
+  const answers = (format: string[], sections: string[]): QuestionAnswer[] => [
+    { question: 'Which format?', picked: format, other: null },
+    { question: 'Which sections?', picked: sections, other: null },
+  ];
+
+  it('carries a question payload on its card, and the book lists it', () => {
+    const card = asked();
+    expect(card.kind).toBe('question');
+    expect(card.questions?.map((q) => q.question)).toEqual(['Which format?', 'Which sections?']);
+    expect(card.questions?.[1].multiSelect).toBe(true);
+    expect(listMockInteractions('/v')).toEqual([card]);
+  });
+
+  it('refuses a malformed set in Rust’s words, so no card shows', () => {
+    const refused = mockQuestions({ questions: [{ question: 'Which release?', options: [] }] });
+    expect(refused).toEqual({
+      deny: questionMalformed('"Which release?" offers 0 options; a question offers 2 to 4.'),
+    });
+    expect('deny' in refused && refused.deny).toBe(
+      'Cerebro couldn\'t show this question ("Which release?" offers 0 options; a question offers 2 to 4). Ask again with 1 to 4 questions, each with 2 to 4 distinct options.',
+    );
+    // Every refused parse case refuses here too.
+    for (const c of CASES.parse_cases) {
+      if (typeof c.refused === 'string') {
+        expect(mockQuestions(c.input), c.why).toEqual({ deny: questionMalformed(c.refused) });
+      }
+    }
+  });
+
+  it('takes answers as the shared cases say, and refuses a misfit with the card still waiting', () => {
+    const card = asked();
+    for (const [answer, words] of [
+      [answers(['HTML'], ['Risks']), '"HTML" is not an option of "Which format?".'],
+      [answers(['Markdown'], []), 'Answer every question: "Which sections?" has no answer.'],
+    ] as const) {
+      expect(
+        answerMockInteraction('/v', card.id, { kind: 'answers', answers: [...answer] }),
+      ).toEqual({ refused: { code: MALFORMED_ARGUMENTS, message: words } });
+      expect(listMockInteractions('/v')).toEqual([card]);
+    }
+    expect(answerMockInteraction('/v', card.id, { kind: 'allow' })).toEqual({
+      refused: { code: MALFORMED_ARGUMENTS, message: ANSWER_THE_QUESTION },
+    });
+    const taken = answerMockInteraction('/v', card.id, {
+      kind: 'answers',
+      answers: answers(['Markdown'], ['Summary', 'Risks']),
+    });
+    expect('resume' in taken).toBe(true);
+    expect(RUST).toContain(`pub const ANSWER_THE_QUESTION: &str = "${ANSWER_THE_QUESTION}";`);
+    expect(RUST).toContain(`pub const NOT_A_QUESTION: &str = "${NOT_A_QUESTION}";`);
+  });
+
+  it('takes no answers for a card that asks no question', () => {
+    const card = waiting();
+    expect(
+      answerMockInteraction('/v', card.id, {
+        kind: 'answers',
+        answers: answers(['Markdown'], ['Risks']),
+      }),
+    ).toEqual({ refused: { code: MALFORMED_ARGUMENTS, message: NOT_A_QUESTION } });
+    expect(answerMockInteraction('/v', card.id, { kind: 'deny' })).toHaveProperty('resume');
+  });
+
+  it('names the labels as given in what the resume tells the model', () => {
+    expect(answeredText({ 'Which format?': 'Markdown', 'Which sections?': 'Summary, Risks' })).toBe(
+      'User has answered your questions: "Which format?"="Markdown", "Which sections?"="Summary, Risks".',
+    );
+  });
+});
+
+describe('the mock edited draft (M57.4b)', () => {
+  const TOOLS_RS = readFileSync(join(__dirname, '../../src-tauri/src/policy/tools.rs'), 'utf8');
+  const draft = { folder: 'records/risks', slug: 'vendor-delay', body: '# Vendor delay\n' };
+
+  /** A confirmed write card for create_note, as the mock agent marks it. */
+  function writeCard(resume = vi.fn()) {
+    const id = registerMockInteraction(
+      '/v',
+      's-1',
+      't-1',
+      'create_note',
+      JSON.stringify(draft),
+      resume,
+    );
+    const card = confirmMockInteraction(id);
+    if (card === null) throw new Error('a confirmed card');
+    Object.assign(card, { kind: 'write' });
+    return card;
+  }
+
+  it('takes an edit with an Allow of a write card, and hands it to the resume', () => {
+    const resume = vi.fn();
+    const card = writeCard(resume);
+    const updatedInput = { ...draft, body: '# Vendor delay risk\n' };
+    const taken = answerMockInteraction('/v', card.id, {
+      kind: 'allow',
+      remember: 'once',
+      updatedInput,
+    });
+    if ('refused' in taken) throw new Error(taken.refused.message);
+    taken.resume({ kind: 'allow', updatedInput });
+    expect(resume).toHaveBeenCalledWith({ kind: 'allow', updatedInput });
+  });
+
+  it('refuses a misshapen edit in Rust’s words, and the card waits on', () => {
+    const card = writeCard();
+    const message = 'The edited draft leaves out slug, which this tool requires.';
+    expect(
+      answerMockInteraction('/v', card.id, {
+        kind: 'allow',
+        updatedInput: { folder: '', body: '# X' },
+      }),
+    ).toEqual({ refused: { code: MALFORMED_ARGUMENTS, message } });
+    expect(TOOLS_RS).toContain('"The edited draft leaves out {key}, which this tool requires."');
+    expect(listMockInteractions('/v').map((c) => c.id)).toEqual([card.id]);
+    expect(answerMockInteraction('/v', card.id, { kind: 'allow' })).toHaveProperty('resume');
+  });
+
+  it('takes no edit on a card that is no page write', () => {
+    const card = waiting();
+    expect(
+      answerMockInteraction('/v', card.id, { kind: 'allow', updatedInput: { path: 'a.md' } }),
+    ).toEqual({ refused: { code: MALFORMED_ARGUMENTS, message: EDIT_MISFIT } });
+    expect(RUST).toContain(`"${EDIT_MISFIT}"`);
   });
 });

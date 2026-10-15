@@ -78,6 +78,42 @@ describe('AgentMemoryTab', () => {
     expect(box.value).toBe('Later from the disk');
   });
 
+  // M56.13 — `preferences: "Ask [[maya-chen]] before touching [[atlas]]"`
+  // reaches the app as a relation, its prose dropped by the scan. Saving the
+  // rebuilt links would erase "Ask" and "before touching" from disk.
+  it('never saves over corrections whose value holds [[links]]', () => {
+    act(() =>
+      useVaultStore.setState({
+        entries: useVaultStore
+          .getState()
+          .entries.map((e) =>
+            e.path === SCOUT
+              ? { ...e, relationships: { ...e.relationships, preferences: ['maya-chen', 'atlas'] } }
+              : e,
+          ),
+      }),
+    );
+    render(<Host path={SCOUT} />);
+    const box = screen.getByTestId('agent-preferences') as HTMLTextAreaElement;
+    expect(box.value).toBe('[[maya-chen]]\n[[atlas]]');
+    expect(box.readOnly).toBe(true);
+    expect(screen.getByTestId('agent-preferences-linked').textContent).toMatch(
+      /holds \[\[links\]\].*keeps only the\s+links/s,
+    );
+    fireEvent.focus(box);
+    fireEvent.change(box, {
+      target: { value: '[[maya-chen]]\n[[atlas]]\nNever file a risk without an owner.' },
+    });
+    fireEvent.blur(box);
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it('keeps the box editable, with no notice, for plain corrections', () => {
+    render(<Host path={SCOUT} />);
+    expect((screen.getByTestId('agent-preferences') as HTMLTextAreaElement).readOnly).toBe(false);
+    expect(screen.queryByTestId('agent-preferences-linked')).toBeNull();
+  });
+
   it('shows the agent’s own notes read-only, and says when there are none', () => {
     render(<Host path={SCOUT} />);
     const recent = screen.getByTestId('agent-recent');

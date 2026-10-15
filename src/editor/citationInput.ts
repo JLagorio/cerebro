@@ -27,8 +27,7 @@ import { protectFootnotes } from './markdown';
  *   what the next load reads there unless a `:` follows, and a `:` typed after
  *   a line-opening chip makes it the definition the file will then say.
  *
- * Handed to TipTap as a view prop rather than a plugin: `prosemirror-state`
- * is not a dependency of the app, only of BlockNote, and a direct prop needs
+ * Handed to TipTap as a view prop rather than a plugin: a direct prop needs
  * no Plugin to exist.
  */
 

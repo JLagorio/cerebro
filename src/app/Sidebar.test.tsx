@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DESTINATIONS, destination } from '@/engine/destinations';
 import type { Entry, Selection } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
 import { useRootsStore } from '@/stores/rootsStore';
@@ -151,6 +152,53 @@ describe('Sidebar', () => {
       expect(labels).not.toContain('Assistant');
       expect(labels).not.toContain('Work');
       expect(labels).not.toContain('Base');
+    });
+
+    // M59.1 — the rows, doors and footer are engine/destinations.ts's.
+    describe('read from the destination table (M59.1)', () => {
+      const navRows = DESTINATIONS.filter((d) => d.nav === 'row');
+      const rowButton = (label: string) =>
+        screen
+          .getAllByTestId('nav-surfaces')
+          .map((group) => within(group).queryByRole('button', { name: new RegExp(`^${label}`) }))
+          .find((button) => button != null);
+
+      it("draws the table's nav rows, in its order", () => {
+        render(<Sidebar />);
+        expect(surfaceLabels().slice(0, navRows.length)).toEqual(navRows.map((d) => d.label));
+      });
+
+      it('has no Inbox row with the inbox workflow off', () => {
+        useUiStore.setState({ inboxEnabled: false });
+        render(<Sidebar />);
+        expect(surfaceLabels()).not.toContain('Inbox');
+        expect(surfaceLabels()[0]).toBe('Home');
+      });
+
+      it('lights History on Changes', () => {
+        useNavStore.setState({ selection: { kind: 'changes' } });
+        render(<Sidebar />);
+        expect(rowButton('History')?.getAttribute('aria-current')).toBe('page');
+      });
+
+      it('names the Work, Knowledge and Agents sections and their doors from the table', () => {
+        render(<Sidebar />);
+        for (const kind of ['workspace', 'knowledge', 'agents'] as const) {
+          const d = destination(kind);
+          expect(screen.getByRole('button', { name: d.label, expanded: true })).toBeTruthy();
+          expect(screen.getByRole('button', { name: d.door })).toBeTruthy();
+        }
+      });
+
+      it("goes to each row's selection", () => {
+        render(<Sidebar />);
+        for (const d of navRows) {
+          const button = rowButton(d.label);
+          if (button == null) throw new Error(`no ${d.label} row`);
+          fireEvent.click(button);
+          expect(useNavStore.getState().selection, d.label).toEqual(d.selection);
+        }
+      });
     });
 
     it('renders on every surface — the SIDEBARLESS set retired with the rail (M37.3)', () => {

@@ -1,5 +1,8 @@
 import type { PendingInteraction, PersonAnswer } from './types';
-import { bareToolName } from '@/lib/policy/tools';
+import { answersFor, parseQuestions, type QuestionSet } from '@/engine/questionForm';
+import { draftRefusal } from '@/engine/writeDraft';
+import { questionMalformed } from '@/lib/policy/toolApproval';
+import { bareToolName, toolSchema } from '@/lib/policy/tools';
 
 /**
  * The browser's ask seam (M57.1): the mock of Rust's book
@@ -12,11 +15,32 @@ import { bareToolName } from '@/lib/policy/tools';
  * a card that is waiting in the same vault, one at a time; a late one is
  * refused `no_longer_waiting` in Rust's words. A call nobody answered is
  * refused as not answered when its thread sends again (the settle).
+ *
+ * A question card (M57.3) is Rust's too: its questions parse by the shared
+ * rules (`mockQuestions`), a set no card can show is refused in Rust's words,
+ * and its answers are checked by the same membership and count rules before
+ * the book takes them (`answerMockInteraction`).
+ *
+ * An edited draft (M57.4b) is taken as Rust's book takes it: only with an
+ * Allow of a write card, and only once it fits the tool's schema, refused
+ * in Rust's words otherwise (`draftRefusal`, `validate_input`'s twin). The
+ * mock's write then judges the edited input through the tool's own
+ * refusals (`agentCreate`), as Rust's dispatch does.
  */
 
 /** The refusal code and the words Rust's book gives a late answer. */
 export const NO_LONGER_WAITING = 'no_longer_waiting';
 export const STALE = 'No longer waiting: this request was already answered or cancelled.';
+
+/** An answer that does not fit its card (Rust's `MALFORMED_ARGUMENTS`). */
+export const MALFORMED_ARGUMENTS = 'malformed_arguments';
+/** Rust's words for an Allow on a question card (M57.3). */
+export const ANSWER_THE_QUESTION = 'A question is answered with its answers.';
+/** Rust's words for answers sent to a card that asks no question (M57.3). */
+export const NOT_A_QUESTION = 'Only a question takes answers.';
+/** Rust's words for an edited draft on anything but an Allow of a write
+ * card (M57.4b, `EDIT_MISFIT`). */
+export const EDIT_MISFIT = 'Only an Allow of a page write carries an edited draft.';
 
 /** What the model is told when the person declines (Rust's `DECLINED`). */
 export const DECLINED = 'The person declined this call, so it did not run.';
@@ -25,6 +49,48 @@ export const DECLINED = 'The person declined this call, so it did not run.';
 export function declinedText(answer: PersonAnswer): string {
   const said = answer.kind === 'deny' ? (answer.message ?? '').trim() : '';
   return said === '' ? DECLINED : `${DECLINED} They said: ${said}`;
+}
+
+/** A question call's questions (M57.3), as Rust's gate reads them: the set a
+ * card shows, or, for a set no card can show, what the model is told. */
+export function mockQuestions(input: unknown): { questions: QuestionSet } | { deny: string } {
+  const parsed = parseQuestions(input);
+  return 'ok' in parsed ? { questions: parsed.ok } : { deny: questionMalformed(parsed.refused) };
+}
+
+/** Make a registered card the question card Rust's book draws (M57.3). */
+export function markMockQuestion(card: PendingInteraction, questions: QuestionSet): void {
+  Object.assign(card, { kind: 'question', questions });
+}
+
+/** What Claude Code hands the model once a question is answered, in the
+ * shape 2.1.250's tool result takes (the ask-question spike): each question
+ * and its answer, quoted. */
+export function answeredText(answers: Record<string, string>): string {
+  const pairs = Object.entries(answers).map(
+    ([q, a]) => `${JSON.stringify(q)}=${JSON.stringify(a)}`,
+  );
+  return `User has answered your questions: ${pairs.join(', ')}.`;
+}
+
+/** Why `answer` cannot answer `card`, in Rust's words, or null when it fits:
+ * a question card takes its answers, checked by the shared rules, or a
+ * decline; any other card takes no answers; and only a write card's Allow
+ * takes an edited draft of the tool's shape (M57.4b). */
+function misfit(card: PendingInteraction, answer: PersonAnswer): string | null {
+  if (answer.kind === 'allow' && answer.updatedInput !== undefined) {
+    if (card.kind !== 'write') return EDIT_MISFIT;
+    const schema = toolSchema(card.tool_name);
+    if (schema === null) return `${bareToolName(card.tool_name)} takes no edited draft.`;
+    return draftRefusal(schema, answer.updatedInput);
+  }
+  if (card.kind === 'question') {
+    if (answer.kind === 'allow') return ANSWER_THE_QUESTION;
+    if (answer.kind !== 'answers') return null;
+    const checked = answersFor(card.questions ?? [], answer.answers);
+    return 'refused' in checked ? checked.refused : null;
+  }
+  return answer.kind === 'answers' ? NOT_A_QUESTION : null;
 }
 
 /** Starts the turn that resumes after an answer; the mock agent builds it. */
@@ -118,15 +184,21 @@ export function confirmMockInteraction(id: string): PendingInteraction | null {
 }
 
 export type MockAnswer =
-  | { resume: MockResume; card: PendingInteraction }
-  | { refused: { code: string; message: string } };
+  { resume: MockResume; card: PendingInteraction } | { refused: { code: string; message: string } };
 
-/** Take an answer: only for a card waiting in `vault`. */
-export function answerMockInteraction(vault: string, id: string): MockAnswer {
+/** Take an answer: only for a card waiting in `vault`, and only one that
+ * fits its card (M57.3); a misfit is refused and the card waits on. */
+export function answerMockInteraction(
+  vault: string,
+  id: string,
+  answer?: PersonAnswer,
+): MockAnswer {
   const entry = book.get(id);
   if (entry === undefined || entry.state !== 'waiting' || entry.vault !== vault) {
     return { refused: { code: NO_LONGER_WAITING, message: STALE } };
   }
+  const refused = answer === undefined ? null : misfit(entry.card, answer);
+  if (refused !== null) return { refused: { code: MALFORMED_ARGUMENTS, message: refused } };
   entry.state = 'answering';
   return { resume: entry.resume, card: entry.card };
 }

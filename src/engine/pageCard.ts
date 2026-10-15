@@ -80,9 +80,73 @@ export function isLinkablePage(entry: Entry): boolean {
   return /\.md$/i.test(entry.filename) && entry.type !== 'Type' && !isTemplate(entry);
 }
 
-/** What a link to `entry` names: its filename stem, the `[[` menu's rule. */
-export function linkTargetOf(entry: Entry): string {
-  return entry.filename.replace(/\.md$/i, '');
+/**
+ * The name a new link to a page is written with, or null when no name reaches
+ * it. `section`, when given, is the heading the link points into.
+ */
+export type LinkTargetOf = (entry: Entry, section?: string | null) => string | null;
+
+/** A name the scanners read whole: no bracket, `|` or line break, no edge space. */
+function writable(name: string): boolean {
+  return name !== '' && name === name.trim() && !/[[\]|\n]/.test(name);
+}
+
+/**
+ * What a link to a page should name, over `entries` (M55.14): the first of
+ * its filename stem and its title — a `project.md` tries its folder before
+ * both — that `resolveTarget` reads back as THAT page, or null when none does.
+ *
+ * A stem is not enough on its own. `resolveTarget`'s stem pass is vault-wide
+ * and first-wins, so two `meetings/kickoff.md` files share `[[kickoff]]` and
+ * only the first is reached by it; the rest are written by title. A page
+ * whose every name belongs to another is not offered: a link to it would land
+ * somewhere else.
+ *
+ * Built once per vault: one pass records who each name resolves to, in
+ * `resolveName`'s order (stem, then project folder, then title, each
+ * first-wins), so the `[[` menu can ask for every page without a vault scan
+ * per row. The test replays `resolveLink` over the result.
+ */
+export function linkTargetsFor(entries: Entry[]): LinkTargetOf {
+  const byStem = new Map<string, Entry>();
+  const byFolder = new Map<string, Entry>();
+  const byTitle = new Map<string, Entry>();
+  const first = (map: Map<string, Entry>, key: string, entry: Entry) => {
+    if (key !== '' && !map.has(key)) map.set(key, entry);
+  };
+  for (const entry of entries) {
+    first(byStem, entry.filename.replace(/\.md$/i, '').toLowerCase(), entry);
+    if (entry.filename.toLowerCase() === 'project.md') {
+      first(byFolder, entry.folder.slice(entry.folder.lastIndexOf('/') + 1).toLowerCase(), entry);
+    }
+    first(byTitle, entry.title.toLowerCase(), entry);
+  }
+  // Who a whole name reaches, exactly as `resolveName` ranks the passes.
+  const reaches = (name: string): Entry | null => {
+    const key = name.trim().toLowerCase();
+    return byStem.get(key) ?? byFolder.get(key) ?? byTitle.get(key) ?? null;
+  };
+  return (entry, section = null) => {
+    const stem = entry.filename.replace(/\.md$/i, '');
+    const folder = entry.folder.slice(entry.folder.lastIndexOf('/') + 1);
+    // A project goes by its folder first: `project` is every project's stem.
+    const names =
+      stem.toLowerCase() === 'project' ? [folder, stem, entry.title] : [stem, entry.title];
+    for (const name of names) {
+      if (!writable(name) || reaches(name) !== entry) continue;
+      if (section === null) return name;
+      // `name#section` resolves whole first, then at its FIRST `#`: the whole
+      // must name nothing, and the name must hold no `#` of its own.
+      const target = `${name}#${section}`;
+      if (!name.includes('#') && writable(target) && reaches(target) === null) return target;
+    }
+    return null;
+  };
+}
+
+/** What a link to `entry` names among `entries`: `linkTargetsFor`, for one page. */
+export function linkTargetOf(entry: Entry, entries: Entry[]): string | null {
+  return linkTargetsFor(entries)(entry);
 }
 
 /**

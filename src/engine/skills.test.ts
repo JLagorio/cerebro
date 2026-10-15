@@ -157,26 +157,38 @@ describe('the catalogue names only the tools the run holds', () => {
     attended: true,
   });
 
-  it('reads byte for byte as before under a full grant', () => {
+  it('reads byte for byte as before under a full grant, the overflow aside', () => {
     expect(skillIndex(listSkills([skill('Weekly review')]), FULL)).toBe(
       'This vault defines skills: records of type Skill whose body is a reusable instruction set. ' +
         "The user runs one by typing /name in this panel. When a request matches a skill's purpose, " +
         'read its note with get_note and follow it. Skills: /weekly-review — Run Weekly review..',
     );
+  });
+
+  it('sends a run holding list_notes to list every Skill (M59.5)', () => {
     const index = skillIndex(listSkills(many), FULL)!;
+    expect(index).toMatch(
+      / \d+ more skills are defined but not listed here — call list_notes with type Skill to see them all\.$/,
+    );
+    const listing = skillIndex(listSkills(many), holding('list_notes', 'search_notes'))!;
+    expect(mentionedTools(listing)).toEqual(['list_notes']);
+  });
+
+  it('sends a run holding only search_notes to search for type Skill', () => {
+    const index = skillIndex(listSkills(many), holding('search_notes'))!;
     expect(index).toMatch(
       / \d+ more skills are defined but not listed here — search_notes for type Skill to find them\.$/,
     );
+    expect(mentionedTools(index)).toEqual(['search_notes']);
   });
 
   it('offers no read of a skill’s note to a run without get_note', () => {
     const index = skillIndex(listSkills(many), holding('search_notes'))!;
     expect(index).not.toContain('read its note with get_note');
     expect(index).toContain('The user runs one by typing /name in this panel. Skills: /');
-    expect(mentionedTools(index)).toEqual(['search_notes']);
   });
 
-  it('says the unlisted skills exist, and names no tool, to a run without search_notes', () => {
+  it('says the unlisted skills exist, and names no tool, to a run holding neither lister', () => {
     const index = skillIndex(listSkills(many), holding('get_note'))!;
     expect(index).toMatch(/ \d+ more skills are defined but not listed here\.$/);
     expect(mentionedTools(index)).toEqual(['get_note']);
@@ -319,7 +331,7 @@ describe('the catalogue is budgeted', () => {
     // does not exist.
     const index = skillIndex(listSkills(many), FULL)!;
     expect(index).toMatch(/\d+ more skills are defined but not listed here/);
-    expect(index).toContain('search_notes');
+    expect(index).toContain('list_notes with type Skill');
   });
 
   it('always ships at least one, however long its description', () => {

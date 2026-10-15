@@ -187,6 +187,37 @@
       "refused": "not a note",
       "why": "edit_note edits markdown only (Q10): a diagram's whole file is its source."
     },
-    { "door": "edit_note", "path": "notes/edit-target.md", "lands": "notes/edit-target.md" }
+    { "door": "edit_note", "path": "notes/edit-target.md", "lands": "notes/edit-target.md" },
+    { "door": "restore_version", "path": ".git/config", "refused": "not a note" },
+    { "door": "restore_version", "path": "views/x.md", "refused": "not a note" },
+    { "door": "restore_version", "path": "data/table.csv", "refused": "not a note" },
+    {
+      "door": "restore_version",
+      "path": "Knowledge/x.md",
+      "refused": "inside knowledge/ by another name",
+      "why": "Restore judges the note target before the bundle guard mints its receipt (M58.4), so it refuses this spelling in save_note's words."
+    },
+    {
+      "door": "restore_version",
+      "path": "\u200c.claude/agents/note-target-probe.md",
+      "seed": false,
+      "refused": "not a note"
+    },
+    {
+      "door": "save_note",
+      "path": ".trash/20261014T093000Z-a1b2/notes/a.md",
+      "refused": "not a note",
+      "why": "M60.8: a page in the vault's Trash is outside every note door until it is restored."
+    },
+    {
+      "door": "update_frontmatter",
+      "path": ".trash/20261014T093000Z-a1b2/notes/a.md",
+      "refused": "not a note"
+    },
+    {
+      "door": "set_note_title",
+      "path": ".trash/20261014T093000Z-a1b2/notes/a.md",
+      "refused": "not a note"
+    }
   ]
 }

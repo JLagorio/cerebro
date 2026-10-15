@@ -1,0 +1,50 @@
+{
+  "why": "A scheduled run under Ask: nobody can answer, so every ask becomes a deny and its tools are withheld, recorded as one capability_unavailable row.",
+  "input": {
+    "kind": "unattended",
+    "shell": "ask",
+    "ask_first": false,
+    "read_scoped": false,
+    "narrowing": null
+  },
+  "expected": {
+    "permission_mode": "acceptEdits",
+    "allowed": [],
+    "disallowed": [
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "NotebookEdit",
+      "Bash",
+      "AskUserQuestion",
+      "ExitPlanMode"
+    ],
+    "matcher": [],
+    "withheld": [
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "NotebookEdit",
+      "Bash"
+    ],
+    "decisions": {
+      "Write": "deny",
+      "Edit": "deny",
+      "MultiEdit": "deny",
+      "NotebookEdit": "deny",
+      "Bash": "deny",
+      "Read": "cli",
+      "Glob": "cli",
+      "Grep": "cli",
+      "WebFetch": "cli",
+      "WebSearch": "cli",
+      "Task": "cli",
+      "AskUserQuestion": "deny",
+      "ExitPlanMode": "deny",
+      "mcp__cerebro__create_note": "allow",
+      "mcp__cerebro__update_frontmatter": "allow",
+      "mcp__cerebro__append_to_note": "allow",
+      "mcp__cerebro__edit_note": "allow"
+    }
+  }
+}

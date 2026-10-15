@@ -1,5 +1,8 @@
+import { useMemo } from 'react';
 import { Icon } from '@/components/ui/Icon';
-import { useFileHistory } from '@/git/useGit';
+import type { CommitQuery, FileCommit } from '@/engine/git';
+import { CommitAuthor } from '@/git/CommitAuthor';
+import { useCommitRuns, useFileHistory, useGit } from '@/git/useGit';
 import { useUiStore } from '@/stores/uiStore';
 
 /** Relative dates, because "3d ago" answers the question "is this current?"
@@ -13,24 +16,67 @@ export function relativeDate(unixSeconds: number, now = Date.now()): string {
   return months === 1 ? '1mo ago' : `${months}mo ago`;
 }
 
+/** What a version did to the page, in words, or null for an edit. */
+export function changeWords(commit: FileCommit): string | null {
+  if (commit.change === 'added') return 'created it';
+  if (commit.change === 'deleted') return 'removed it';
+  if (commit.previousPath !== null) {
+    return `renamed from ${commit.previousPath.split('/').pop() ?? commit.previousPath}`;
+  }
+  return null;
+}
+
+/** The attribution read for a page's rows: each commit, under the path it
+ * had, from the page's previous commit on. */
+export function historyQueries(rows: FileCommit[]): CommitQuery[] {
+  return rows.map((r) => ({ hash: r.hash, path: r.pathAt, since: r.previousAt }));
+}
+
+const NO_ROWS: FileCommit[] = [];
+
 /**
- * One note's history (M9.4). Ported from tolaria's GitHistoryPanel; lifts
- * cleanly because it is genuinely small.
+ * One page's history (M9.4, M58.4): a row per version, its subject, who made
+ * it from the commit record (`CommitAuthor`), when, and what it did to the
+ * page. A row opens the version lens (M9.7: in place of the editor).
  *
- * Renders nothing while the read is out, and nothing when the note has no
- * commits — a heading over an empty list is chrome, and a note you just
- * created has no history to show. A read that FAILED is said, under the
- * heading (M53.15): rendering nothing for it would claim the note has no
+ * Two hosts. The page's side panel (`variant="tab"`, D18) speaks every
+ * answer: "History is off" for a vault that keeps none, "No versions yet"
+ * for a page nobody has committed, the failed read said, and a "Not in
+ * history yet" row while the page holds changes no commit has. The record
+ * peek's foot (`variant="foot"`) stays silent until there is something to
+ * show: a heading over an empty list is chrome there. Either says a read
+ * that FAILED (M53.15): rendering nothing for it would claim the page has no
  * history when nobody could tell.
  */
-export function GitHistoryPanel({ path }: { path: string }) {
+export function GitHistoryPanel({
+  path,
+  variant = 'foot',
+}: {
+  path: string;
+  variant?: 'foot' | 'tab';
+}) {
   const history = useFileHistory(path);
-  // M9.7: the diff replaces the editor in place rather than opening over it.
+  const git = useGit();
   const openDiff = useUiStore((s) => s.openDiff);
+  const rows = history.kind === 'ready' ? history.data : NO_ROWS;
+  const queries = useMemo(() => historyQueries(rows), [rows]);
+  const runs = useCommitRuns(queries);
+  const tab = variant === 'tab';
+
+  if (tab && git.ready && !git.isRepo) {
+    return (
+      <div data-testid="git-history" data-variant="tab" className="px-1.5 py-3">
+        <p className="m-0 text-sm font-medium text-n-800">History is off</p>
+        <p className="m-0 mt-1 text-xs text-n-500">
+          This vault keeps no history. Turn it on in Settings to keep every version of every page.
+        </p>
+      </div>
+    );
+  }
 
   if (history.kind === 'loading') return null;
 
-  const heading = (
+  const heading = tab ? null : (
     <div className="mb-2 flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
       <Icon name="history" size={12} />
       History
@@ -39,38 +85,74 @@ export function GitHistoryPanel({ path }: { path: string }) {
 
   if (history.kind === 'unavailable') {
     return (
-      <div data-testid="git-history" className="mt-5">
+      <div
+        data-testid="git-history"
+        data-variant={variant}
+        className={tab ? 'px-1.5 py-3' : 'mt-5'}
+      >
         {heading}
         <p data-testid="section-unavailable" className="m-0 text-xs text-n-500">
-          This note's history could not be read.
+          This page's history could not be read.
         </p>
       </div>
     );
   }
 
-  if (history.data.length === 0) return null;
+  const pending = git.modified.some((f) => f.path === path);
+  if (rows.length === 0 && !(tab && pending)) {
+    if (!tab) return null;
+    return (
+      <div data-testid="git-history" data-variant="tab" className="px-1.5 py-3">
+        <p className="m-0 text-sm font-medium text-n-800">No versions yet</p>
+        <p className="m-0 mt-1 text-xs text-n-500">
+          A version appears here each time this page is committed to history.
+        </p>
+      </div>
+    );
+  }
 
   return (
-    <div data-testid="git-history" className="mt-5">
+    <div data-testid="git-history" data-variant={variant} className={tab ? 'py-1.5' : 'mt-5'}>
       {heading}
       <div className="flex flex-col gap-2">
-        {history.data.map((c) => (
-          <div key={c.hash} data-testid="git-commit" className="border-l-2 border-n-200 pl-2.5">
+        {tab && pending && (
+          <div data-testid="git-uncommitted" className="border-l-2 border-warn-300 pl-2.5">
             <button
               type="button"
-              onClick={() => openDiff(path, c.hash)}
+              onClick={() => openDiff(path, null)}
               className="w-full truncate border-0 bg-transparent p-0 text-left text-xs text-cortex-600 hover:underline"
-              title={`View what ${c.shortHash} changed`}
             >
-              <span className="[font-family:var(--font-mono)] text-2xs">{c.shortHash}</span>
-              {' · '}
-              {c.message}
+              Not in history yet
             </button>
-            <div className="text-2xs text-n-400">
-              {c.author} · {relativeDate(c.date)}
-            </div>
+            <div className="text-2xs text-n-400">Changes since the last version</div>
           </div>
-        ))}
+        )}
+        {rows.map((c) => {
+          const words = changeWords(c);
+          return (
+            <div key={c.hash} data-testid="git-commit" className="border-l-2 border-n-200 pl-2.5">
+              <button
+                type="button"
+                onClick={() => openDiff(path, c.hash)}
+                className="w-full truncate border-0 bg-transparent p-0 text-left text-xs text-cortex-600 hover:underline"
+                title={`Open version ${c.shortHash}`}
+              >
+                {c.message}
+              </button>
+              <div className="flex flex-wrap items-center gap-x-1 text-2xs text-n-400">
+                <CommitAuthor commit={c} runs={runs} />
+                {runs.kind !== 'loading' && <span aria-hidden>·</span>}
+                <span>{relativeDate(c.date)}</span>
+                {words !== null && (
+                  <>
+                    <span aria-hidden>·</span>
+                    <span data-testid="git-commit-change">{words}</span>
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

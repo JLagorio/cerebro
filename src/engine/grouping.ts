@@ -1,3 +1,4 @@
+import { kindMeta } from './properties';
 import { humanize } from './schema';
 import { bandLevels } from './types';
 import { formatWikilink } from './wikilink';
@@ -30,14 +31,7 @@ function firstValue(raw: unknown): string | null {
  * - Entry order within groups preserves the caller's input order (caller sorts first).
  */
 export function groupEntries(entries: Entry[], field: string, schema: Schema): Group[] {
-  let def: FieldDef | null = null;
-  for (const e of entries) {
-    const found = schema.resolveField(e, field).def;
-    if (found !== null) {
-      def = found;
-      break;
-    }
-  }
+  const def = bandDef(entries, field, schema);
   const kind: FieldKind = def?.kind ?? 'text';
 
   let known: FieldOption[] = [];
@@ -51,8 +45,9 @@ export function groupEntries(entries: Entry[], field: string, schema: Schema): G
   const buckets = new Map<string, Entry[]>();
   const ungrouped: Entry[] = [];
   for (const e of entries) {
-    const raw = e.relationships[field] !== undefined ? e.relationships[field] : e.properties[field];
-    const key = firstValue(raw);
+    // The value a filter reads too (M60.1), so a derived relation bands by
+    // its linking records and a rollup by its result, not by an empty key.
+    const key = firstValue(schema.fieldValue(e, field));
     if (key === null) {
       ungrouped.push(e);
       continue;
@@ -138,11 +133,30 @@ export function groupEntries(entries: Entry[], field: string, schema: Schema): G
  * the same question — did not.
  */
 export function bandKind(entries: Entry[], field: string, schema: Schema): FieldKind | undefined {
+  return bandDef(entries, field, schema)?.kind;
+}
+
+/** The def a band resolves against: the first entry that declares `field`,
+ * or null when none does (M60.1; `bandKind`'s rule, whole). */
+export function bandDef(entries: Entry[], field: string, schema: Schema): FieldDef | null {
   for (const e of entries) {
     const def = schema.resolveField(e, field).def;
-    if (def !== null) return def.kind;
+    if (def !== null) return def;
   }
-  return undefined;
+  return null;
+}
+
+/**
+ * Whether a band's value can be written by moving or creating a record in it
+ * (M60.1). A computed kind (created and edited time, a rollup) stores nothing,
+ * and a relation or person with `from` is derived from the OTHER side's
+ * links, so a write would only plant a mirror key nothing reads. An
+ * undeclared field (null) is plain frontmatter, and writable.
+ */
+export function bandWritable(def: FieldDef | null): boolean {
+  if (def === null) return true;
+  if (kindMeta(def.kind).computed) return false;
+  return !((def.kind === 'relation' || def.kind === 'person') && def.from !== undefined);
 }
 
 /**

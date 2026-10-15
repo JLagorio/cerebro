@@ -4,15 +4,17 @@ import type { OrganizeProposal } from '@/agent/types';
 import { scrubStdioApprovals } from '@/engine/connectors';
 import type { InboxPeriod } from '@/engine/inbox';
 import { getPanelAgent, setPanelAgent as writePanelAgent } from '@/lib/ipc';
+import { parseShellCeiling, type ShellCeiling } from '@/lib/policy/toolApproval';
 
 /** A page's side panel tabs (DocSidePanel). Comments (M70.2b) holds the
- *  page's threads. */
-export type DocPanelTab = 'outline' | 'info' | 'links' | 'knowledge' | 'comments';
+ *  page's threads; History (M58.4) its versions. */
+export type DocPanelTab = 'outline' | 'info' | 'links' | 'knowledge' | 'comments' | 'history';
 /** The side panel on a concept page (M50.1): its provenance comes first. A
  *  concept has no Info (its frontmatter is provenance) and no Knowledge tab
- *  (its related knowledge is part of the details), and takes comments like
- *  any page (M70.2b). The review itself is the bar under the title since M51. */
-export type ConceptPanelTab = 'details' | 'outline' | 'links' | 'comments';
+ *  (its related knowledge is part of the details), and takes comments and
+ *  shows its history like any page (M70.2b, M58.4). The review itself is the
+ *  bar under the title since M51. */
+export type ConceptPanelTab = 'details' | 'outline' | 'links' | 'comments' | 'history';
 
 /**
  * What the person chose, NOT what is on screen (M16.36).
@@ -40,12 +42,28 @@ function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** A prompt on its way to the Assistant — see `agentPendingPrompt`. */
-export interface PendingPrompt {
+function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  if (!(key in record)) return record;
+  const { [key]: _gone, ...rest } = record;
+  return rest;
+}
+
+/** Where notes on a turn's diff go back to (M58.5): its conversation, and
+ * the run whose commit it is when the panel knew it. */
+export interface DiffReview {
+  conversationId: string;
+  runId: string | null;
+}
+
+/** A prompt on its way to the Assistant — see `handoffs`. */
+export interface Handoff {
+  id: string;
   text: string;
   subject: string | null;
   label: string | null;
 }
+
+let handoffSeq = 0;
 
 interface UiState {
   /**
@@ -60,14 +78,15 @@ interface UiState {
    * exclusivity had a consequence nobody costed. The assistant's system prompt
    * tells it to call `open_note`; `open_note` routes to `openDetail`;
    * `openDetail` closed the assistant; the panel is rendered conditionally, so
-   * closing it UNMOUNTED it; and its unmount cleanup kills the in-flight run.
-   * The agent could not show you a note without killing its own answer
+   * closing it UNMOUNTED it; and its unmount cleanup killed the in-flight
+   * run. The agent could not show you a note without killing its own answer
    * mid-sentence — and neither could you, by clicking a [[wikilink]] in one.
    *
    * So they are independent again, and the width problem is solved where it
    * actually lives: in the layout (see `shellPlan` in app/shellLayout.ts), which
    * draws both when there is room and hides one WITHOUT unmounting when there
-   * is not. A hidden panel keeps streaming; a closed one still stops.
+   * is not. A hidden panel keeps streaming. Since M57.6 a closed one no
+   * longer stops its turn either: it detaches, and reopening re-attaches.
    */
   detailPath: string | null;
   openDetail(path: string): void;
@@ -145,9 +164,12 @@ interface UiState {
    * separate thing that interrupts it — a modal makes it impossible to
    * scroll the note beside its own history, and traps focus for something
    * you are only reading.
+   *
+   * `review` is set when the assistant panel opened a turn's diff (M58.5):
+   * the conversation and run that notes left on its lines go back to.
    */
-  diffView: { path: string; commit: string | null } | null;
-  openDiff(path: string, commit?: string | null): void;
+  diffView: { path: string; commit: string | null; review?: DiffReview } | null;
+  openDiff(path: string, commit?: string | null, review?: DiffReview): void;
   closeDiff(): void;
   /**
    * The type whose layout editor is open (M45.2), or null.
@@ -288,9 +310,18 @@ interface UiState {
   // --- Local agent (M6) ---
   aiPanelOpen: boolean;
   setAiPanelOpen(v: boolean): void;
-  /** The one agent ceiling (M8.1) — see AgentPolicy. Persisted. */
-  agentShellAccess: boolean;
-  setAgentShellAccess(v: boolean): void;
+  /** The conversation the panel should show when it next looks (M57.6): the
+   * run list names the thread a detached run belongs to. Memory only; the
+   * panel takes it once (`takePanelConversation`). */
+  panelConversation: string | null;
+  /** Open the panel on conversation `id`. */
+  showConversation(id: string): void;
+  /** The requested conversation, cleared as it is read; null when none. */
+  takePanelConversation(): string | null;
+  /** The shell ceiling (M57.2): off, ask or on — see AgentPolicy.
+   * Persisted under `cerebro.agentShell`. */
+  agentShell: ShellCeiling;
+  setAgentShell(v: ShellCeiling): void;
   /** Let the agent reach the user's own MCP servers (M8.2). Persisted. */
   agentConnectors: boolean;
   setAgentConnectors(v: boolean): void;
@@ -319,7 +350,13 @@ interface UiState {
    * be able to choose who the panel answers as.
    */
   panelAgents: Record<string, string | null>;
-  /** Read this vault's binding. A failed read toasts and changes nothing. */
+  /** The vaults whose binding could not be read (M56.6), so a handoff waiting
+   * on the read goes ahead under the plain assistant instead of waiting
+   * forever. A later good read clears it. */
+  panelAgentsUnreadable: Record<string, true>;
+  /** Read this vault's binding. The vault store calls it when a vault opens,
+   * before the panel can mount. A failed read toasts, keeps any binding
+   * already read, and marks the vault unreadable. */
   loadPanelAgent(vault: string): Promise<void>;
   /** Bind this vault's panel, or unbind it with null. Never throws (CV-03):
    * a refusal toasts and answers false, and the binding stays as it was. */
@@ -330,9 +367,13 @@ interface UiState {
   issuePrefixes: string;
   setIssuePrefixes(v: string): void;
   /**
-   * A prompt handed to the panel from elsewhere ("Ask to revise").
+   * Prompts handed to the panel from elsewhere ("Ask to revise"), oldest
+   * first.
    *
-   * M17.6: it carries its SUBJECT. Six call sites used to hand over a prompt
+   * M57.5: a list, so a second ask never overwrites the first. The panel
+   * takes each in turn into Up next, which holds it while a turn runs.
+   *
+   * M17.6: each carries its SUBJECT. Six call sites used to hand over a prompt
    * string naming a record and drop the record itself on the floor — so the
    * agent was told to revise a concept and then handed whatever surface the
    * user happened to be standing on as context. The subject arrives as a
@@ -344,8 +385,11 @@ interface UiState {
    * at knowledge/…". Null sends `text` as the bubble: words a person typed
    * are already their own label.
    */
-  agentPendingPrompt: PendingPrompt | null;
-  setAgentPendingPrompt(v: PendingPrompt | null): void;
+  handoffs: Handoff[];
+  /** The panel attached this handoff's subject as a chip: it clears. */
+  markHandoffAttached(id: string): void;
+  /** The panel took this handoff into Up next: it leaves the list. */
+  takeHandoff(id: string): void;
   /** Open the panel and hand it a prompt about `subject`, shown as `label`.
    * One action because the two halves were always done together, and doing
    * only the second is a prompt that lands in a panel nobody can see. */
@@ -445,8 +489,9 @@ interface UiState {
    */
   runs: RunRecord[];
   startRun(record: RunRecord): void;
-  /** Record the child once it exists, so Stop has something to kill. */
-  attachChild(id: string, run: number): void;
+  /** Record the child once it exists, so Stop has something to kill, and
+   * the key a host re-attaches to it by (M57.6, `RunRecord.attach`). */
+  attachChild(id: string, run: number, attach?: string): void;
   endRun(id: string): void;
   /**
    * Home insight cards the user has waved away (M8.3), by concept path.
@@ -483,7 +528,9 @@ const INBOX_ADVANCE_KEY = 'cerebro.inboxAutoAdvance';
 const INBOX_PERIOD_KEY = 'cerebro.inboxPeriod';
 const ACTOR_ID_KEY = 'cerebro.actorId';
 const AI_PANEL_KEY = 'cerebro.aiPanelOpen';
-const AGENT_SHELL_KEY = 'cerebro.agentShellAccess';
+const AGENT_SHELL_KEY = 'cerebro.agentShell';
+/** The boolean M8.1 stored, read once to migrate (M57.2), then removed. */
+const LEGACY_SHELL_KEY = 'cerebro.agentShellAccess';
 const AGENT_CONNECTORS_KEY = 'cerebro.agentConnectors';
 const ISSUE_PREFIXES_KEY = 'cerebro.issuePrefixes';
 const DISMISSED_INSIGHTS_KEY = 'cerebro.dismissedInsights';
@@ -725,9 +772,31 @@ function storeString(key: string, v: string): void {
   }
 }
 
+function removeKey(key: string): void {
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // Storage unavailable: nothing to remove.
+  }
+}
+
+/** The stored shell ceiling (M57.2). With none stored, the boolean M8.1
+ * kept migrates once: 'true' is on, anything else off. */
+function loadShellCeiling(): ShellCeiling {
+  try {
+    const stored = window.localStorage.getItem(AGENT_SHELL_KEY);
+    if (stored !== null) return parseShellCeiling(stored);
+    return window.localStorage.getItem(LEGACY_SHELL_KEY) === 'true' ? 'on' : 'off';
+  } catch {
+    return 'off';
+  }
+}
+
 function loadPanelTab(): DocPanelTab {
   const v = loadString(PANEL_TAB_KEY, 'outline');
-  return v === 'info' || v === 'links' || v === 'knowledge' || v === 'comments' ? v : 'outline';
+  return v === 'info' || v === 'links' || v === 'knowledge' || v === 'comments' || v === 'history'
+    ? v
+    : 'outline';
 }
 
 function loadInboxPeriod(): InboxPeriod {
@@ -821,7 +890,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
 
   diffView: null,
-  openDiff: (path, commit = null) => set({ diffView: { path, commit } }),
+  openDiff: (path, commit = null, review) =>
+    set({ diffView: review === undefined ? { path, commit } : { path, commit, review } }),
   closeDiff: () => set({ diffView: null }),
 
   layoutEditor: null,
@@ -999,12 +1069,24 @@ export const useUiStore = create<UiState>((set, get) => ({
     // so only whatever was baked into the prompt string survived.
     set({ aiPanelOpen: v });
   },
-  // Defaults off: shell access is a choice the user makes, never one they
-  // inherit. Everything else the agent can do follows from the folder model.
-  agentShellAccess: loadString(AGENT_SHELL_KEY, 'false') === 'true',
-  setAgentShellAccess: (v) => {
-    storeString(AGENT_SHELL_KEY, String(v));
-    set({ agentShellAccess: v });
+  panelConversation: null,
+  showConversation: (id) => {
+    storeString(AI_PANEL_KEY, 'true');
+    set({ aiPanelOpen: true, panelConversation: id });
+  },
+  takePanelConversation: () => {
+    const id = get().panelConversation;
+    if (id !== null) set({ panelConversation: null });
+    return id;
+  },
+  // Off unless stored: the shell ceiling is a choice the person makes, and
+  // an unknown stored value reads off.
+  agentShell: loadShellCeiling(),
+  setAgentShell: (v) => {
+    storeString(AGENT_SHELL_KEY, v);
+    // The old key goes, so a build that only knows the boolean reads off.
+    removeKey(LEGACY_SHELL_KEY);
+    set({ agentShell: v });
   },
   // Also off by default: reaching other systems is a choice, never one
   // inherited from opening the panel.
@@ -1014,11 +1096,16 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ agentConnectors: v });
   },
   panelAgents: {},
+  panelAgentsUnreadable: {},
   loadPanelAgent: async (vault) => {
     try {
       const handle = await getPanelAgent(vault);
-      set((s) => ({ panelAgents: { ...s.panelAgents, [vault]: handle } }));
+      set((s) => ({
+        panelAgents: { ...s.panelAgents, [vault]: handle },
+        panelAgentsUnreadable: withoutKey(s.panelAgentsUnreadable, vault),
+      }));
     } catch (err) {
+      set((s) => ({ panelAgentsUnreadable: { ...s.panelAgentsUnreadable, [vault]: true } }));
       get().toast(`Couldn't read who answers in the assistant panel: ${messageOf(err)}`);
     }
   },
@@ -1030,7 +1117,10 @@ export const useUiStore = create<UiState>((set, get) => ({
       return false;
     }
     const bound = handle?.trim() ?? '';
-    set((s) => ({ panelAgents: { ...s.panelAgents, [vault]: bound === '' ? null : bound } }));
+    set((s) => ({
+      panelAgents: { ...s.panelAgents, [vault]: bound === '' ? null : bound },
+      panelAgentsUnreadable: withoutKey(s.panelAgentsUnreadable, vault),
+    }));
     return true;
   },
   stdioApprovals: loadStdioApprovals(STDIO_APPROVALS_KEY),
@@ -1055,11 +1145,17 @@ export const useUiStore = create<UiState>((set, get) => ({
     storeString(ISSUE_PREFIXES_KEY, v);
     set({ issuePrefixes: v });
   },
-  agentPendingPrompt: null,
-  setAgentPendingPrompt: (v) => set({ agentPendingPrompt: v }),
+  handoffs: [],
+  markHandoffAttached: (id) =>
+    set((s) => ({
+      handoffs: s.handoffs.map((h) => (h.id === id ? { ...h, subject: null } : h)),
+    })),
+  takeHandoff: (id) => set((s) => ({ handoffs: s.handoffs.filter((h) => h.id !== id) })),
   askAgent: (text, subject = null, label = null) => {
     storeString(AI_PANEL_KEY, 'true');
-    set({ aiPanelOpen: true, agentPendingPrompt: { text, subject, label } });
+    handoffSeq += 1;
+    const handoff: Handoff = { id: `handoff-${handoffSeq}`, text, subject, label };
+    set((s) => ({ aiPanelOpen: true, handoffs: [...s.handoffs, handoff] }));
   },
   settingsFocus: null,
   setSettingsFocus: (v) => set({ settingsFocus: v }),
@@ -1128,11 +1224,15 @@ export const useUiStore = create<UiState>((set, get) => ({
     }),
   runs: [],
   startRun: (record) => set((s) => ({ runs: [...s.runs, record] })),
-  attachChild: (id, run) =>
-    set((s) => ({ runs: s.runs.map((r) => (r.id === id ? { ...r, run } : r)) })),
-  // Idempotent: a turn can end through Done, through Error, through the panel
-  // unmounting, or through Stop, and more than one of those routinely happens
-  // for the same run.
+  attachChild: (id, run, attach) =>
+    set((s) => ({
+      runs: s.runs.map((r) =>
+        r.id === id ? { ...r, run, ...(attach === undefined ? {} : { attach }) } : r,
+      ),
+    })),
+  // Idempotent: a turn can end through Done (ChatTurnsHost, M57.6), through a
+  // failure before its child existed, or through a lost Done after Stop, and
+  // more than one of those can happen for the same run.
   endRun: (id) => set((s) => ({ runs: s.runs.filter((r) => r.id !== id) })),
 
   dismissedInsights: loadStringList(DISMISSED_INSIGHTS_KEY),

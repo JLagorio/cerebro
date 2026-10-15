@@ -56,18 +56,21 @@ export interface RollupCalcMeta {
   needsProperty: boolean;
   /** Only meaningful over numeric properties. */
   numeric: boolean;
+  /** The result is a number a view compares and sums as one (M60.1); the
+   * others yield text (a date string, or a list of values). */
+  yieldsNumber: boolean;
 }
 
 /** Every aggregation the engine can compute, with what it needs configured. */
 export const ROLLUP_CALCS: RollupCalcMeta[] = [
-  { calc: 'count', label: 'Count', needsProperty: false, numeric: false },
-  { calc: 'sum', label: 'Sum', needsProperty: true, numeric: true },
-  { calc: 'avg', label: 'Average', needsProperty: true, numeric: true },
-  { calc: 'min', label: 'Min', needsProperty: true, numeric: true },
-  { calc: 'max', label: 'Max', needsProperty: true, numeric: true },
-  { calc: 'earliest', label: 'Earliest', needsProperty: true, numeric: false },
-  { calc: 'latest', label: 'Latest', needsProperty: true, numeric: false },
-  { calc: 'show', label: 'Show values', needsProperty: true, numeric: false },
+  { calc: 'count', label: 'Count', needsProperty: false, numeric: false, yieldsNumber: true },
+  { calc: 'sum', label: 'Sum', needsProperty: true, numeric: true, yieldsNumber: true },
+  { calc: 'avg', label: 'Average', needsProperty: true, numeric: true, yieldsNumber: true },
+  { calc: 'min', label: 'Min', needsProperty: true, numeric: true, yieldsNumber: true },
+  { calc: 'max', label: 'Max', needsProperty: true, numeric: true, yieldsNumber: true },
+  { calc: 'earliest', label: 'Earliest', needsProperty: true, numeric: false, yieldsNumber: false },
+  { calc: 'latest', label: 'Latest', needsProperty: true, numeric: false, yieldsNumber: false },
+  { calc: 'show', label: 'Show values', needsProperty: true, numeric: false, yieldsNumber: false },
 ];
 
 export const rollupCalcMeta = (calc: RollupCalc | undefined): RollupCalcMeta =>
@@ -356,10 +359,9 @@ const KIND_META = {
     seed: null,
     groupable: false,
     orderable: true,
-    // Every rollup calculation but `show` produces a number, and a `show`
-    // rollup asked for a Sum answers with nothing — which is the truth about
-    // a column holding no numbers, and cheaper than a second registry of
-    // which calculations return which shape.
+    // Most rollup calculations produce a number (`yieldsNumber` on the calc
+    // catalog says which), and one that does not, asked for a Sum, answers
+    // with nothing — which is the truth about a column holding no numbers.
     media: false,
     numeric: true,
     filters: 'any',
@@ -1048,12 +1050,9 @@ export function computeRollup(
   switch (calc) {
     case 'show':
       return values.map(String).join(', ');
-    // Sum of nothing-numeric has always reported 0 where the other three
-    // report ''. Preserved verbatim through the extraction rather than
-    // quietly changed — that is a decision about what a rollup says, not a
-    // side effect of sharing the arithmetic with a chart (M16.27).
+    // A sum over values none of which is a number is blank, like the other
+    // three (M60.1, CV-05): a 0 there claims a measured zero nobody recorded.
     case 'sum':
-      return String(aggregateNumbers(values, 'sum') ?? 0);
     case 'avg':
     case 'min':
     case 'max': {

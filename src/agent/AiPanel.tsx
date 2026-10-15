@@ -7,6 +7,7 @@ import { ResizeHandle } from '@/components/ui/ResizeHandle';
 import { checkAgent } from '@/agent/agentIpc';
 import { historyOf, type GitHistory } from '@/agent/AiActionCard';
 import { TranscriptRows } from '@/agent/toolRenderers';
+import { TurnChangeset } from '@/agent/TurnChangeset';
 import { ChatInput } from '@/agent/ChatInput';
 import { buildSnapshot, extractReferences, renderSnapshot } from '@/agent/context';
 import {
@@ -19,11 +20,18 @@ import {
 import { ConversationSwitcher } from '@/agent/ConversationSwitcher';
 import { FailureNoticeCard } from '@/agent/FailureNoticeCard';
 import { InteractionCard } from '@/agent/InteractionCard';
+import { PermissionCard } from '@/agent/PermissionCard';
+import { WriteApprovalCard } from '@/agent/WriteApprovalCard';
 import { RunOptionsPicker } from '@/agent/RunOptionsPicker';
 import { MessageText } from '@/agent/MessageMarkdown';
 import { TranscriptNotice } from '@/agent/TranscriptNotice';
 import { useConversations } from '@/agent/useConversations';
+import { loadDraft, pruneDrafts, saveDraft } from '@/agent/drafts';
 import { useAgentChat, type TurnContext } from '@/agent/useAgentChat';
+import { UpNext } from '@/agent/UpNext';
+import { ReviewNotesDock } from '@/agent/ReviewNotesDock';
+import { useUpNext, type SkillResolution } from '@/agent/useUpNext';
+import { useUpNextStore } from '@/stores/upNextStore';
 import { type AgentStatus, type ChatMessage, type PrLink } from '@/agent/types';
 import { listSkills, matchSkillInvocation, skillPrompt } from '@/engine/skills';
 import { buildSystemPrompt } from '@/agent/systemPrompt';
@@ -47,7 +55,7 @@ import { resolveSurface } from '@/engine/surface';
 import { resolveView } from '@/engine/views';
 import { pausedAgents, readNote } from '@/lib/ipc';
 import { todayIso } from '@/lib/templates';
-import { useAgentCheckpoint, useGit } from '@/git/useGit';
+import { useGit } from '@/git/useGit';
 import { useSchema } from '@/stores/vaultStore';
 import { resolveTarget } from '@/engine/wikilink';
 import { useOpenPath } from '@/app/useOpenPath';
@@ -122,7 +130,9 @@ function Message({
   message: ChatMessage;
   onOpen: (t: string) => void;
   onOpenPath: (p: string) => void;
-  onViewDiff?: (p: string) => void;
+  /** Open a file's diff: at `commit` when this reply's run committed it
+   * (M58.3), else in the working tree. */
+  onViewDiff?: (p: string, commit: string | null) => void;
   /** The call a card waits on in this message (M57.1), whose row reads
    * waiting. */
   waitingToolId?: string | null;
@@ -136,6 +146,10 @@ function Message({
 }) {
   if (message.role === 'user')
     return <UserMessage text={message.text} addressed={message.addressed} />;
+  // M58.3: a card's View diff opens the file at the commit this reply's run
+  // made of it, so it still shows the run's change after the commit lands.
+  const cardDiff =
+    onViewDiff === undefined ? undefined : (p: string) => onViewDiff(p, commitOf(message, p));
   return (
     <div className="flex flex-col gap-1.5" data-testid="chat-message" data-role="assistant">
       {/* M56.8: rows by the tool manifest's renderer, consecutive reads
@@ -147,7 +161,7 @@ function Message({
           tools={message.tools}
           streaming={message.streaming === true}
           onOpenPath={onOpenPath}
-          onViewDiff={onViewDiff}
+          onViewDiff={cardDiff}
           history={history}
           waitingToolId={waitingToolId}
         />
@@ -188,9 +202,33 @@ function Message({
       {message.streaming === true && message.text === '' && message.error === undefined && (
         <span className="text-sm text-n-400">Thinking…</span>
       )}
+      {/* M57.6: the journal dropped some of this turn's live events while the
+          panel was closed, so what shows is partial until the turn ends and
+          its reply is read back from the session file. */}
+      {message.gap === true && (
+        <span data-testid="turn-gap" className="text-sm text-n-400">
+          {GAP_LINE}
+        </span>
+      )}
+      {/* M58.3: what each of this reply's runs changed, from its own commit. */}
+      {message.changesets !== undefined && message.changesets.length > 0 && (
+        <TurnChangeset
+          changesets={message.changesets}
+          onViewDiff={onViewDiff}
+          onOpenPath={onOpenPath}
+        />
+      )}
+      {/* M57.5: a turn a person stopped (Stop, or Steer past it) says so,
+          under whatever it wrote first. */}
+      {message.cancelled === true && message.streaming !== true && (
+        <span data-testid="turn-cancelled" className="text-sm text-n-400">
+          Cancelled
+        </span>
+      )}
       {/* M56.3: a turn stopped or cut off before it said anything says so,
           rather than leaving an empty bubble. */}
-      {message.interrupted === true &&
+      {message.cancelled !== true &&
+        message.interrupted === true &&
         message.streaming !== true &&
         message.text === '' &&
         message.tools.length === 0 &&
@@ -202,6 +240,24 @@ function Message({
     </div>
   );
 }
+
+/** The commit this reply's run made of `path` (M58.3), the latest first, or
+ * null when no run of it committed that file. */
+function commitOf(message: ChatMessage, path: string): string | null {
+  for (const changeset of [...(message.changesets ?? [])].reverse()) {
+    if (changeset.state === 'committed' && changeset.files.some((f) => f.path === path)) {
+      return changeset.commit;
+    }
+  }
+  return null;
+}
+
+/** What a reply whose live events were dropped says under it (M57.6). */
+const GAP_LINE =
+  "Live updates from while the panel was closed weren't kept. The full reply appears when this turn finishes.";
+
+/** How long the composer waits after the last keystroke to save its draft. */
+const DRAFT_SAVE_MS = 300;
 
 /** What the composer says when a thread cannot continue (Q7). */
 const BLOCKED_WORDS = {
@@ -370,11 +426,12 @@ export function AiPanel({
   room?: number | null;
 } = {}) {
   const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
-  const shell = useUiStore((s) => s.agentShellAccess);
+  const shell = useUiStore((s) => s.agentShell);
   const connectors = useUiStore((s) => s.agentConnectors);
   const issuePrefixes = useUiStore((s) => s.issuePrefixes);
-  const pendingPrompt = useUiStore((s) => s.agentPendingPrompt);
-  const setPendingPrompt = useUiStore((s) => s.setAgentPendingPrompt);
+  const handoff = useUiStore((s) => s.handoffs[0] ?? null);
+  const markHandoffAttached = useUiStore((s) => s.markHandoffAttached);
+  const takeHandoff = useUiStore((s) => s.takeHandoff);
   const setSettingsFocus = useUiStore((s) => s.setSettingsFocus);
   const navigate = useNavStore((s) => s.navigate);
   const detailPath = useUiStore((s) => s.detailPath);
@@ -390,6 +447,15 @@ export function AiPanel({
   const loadPanelAgent = useUiStore((s) => s.loadPanelAgent);
   const boundAgent = useUiStore((s) =>
     vaultPath === null ? null : (s.panelAgents[vaultPath] ?? null),
+  );
+  // Absent from the store means not read yet: a handoff waits for the read
+  // (the vault store starts it when the vault opens) so it cannot run as the
+  // plain assistant in a bound panel. A failed read lets it go.
+  const bindingRead = useUiStore(
+    (s) =>
+      vaultPath === null ||
+      s.panelAgents[vaultPath] !== undefined ||
+      s.panelAgentsUnreadable[vaultPath] === true,
   );
   useEffect(() => {
     if (vaultPath !== null) void loadPanelAgent(vaultPath);
@@ -411,10 +477,10 @@ export function AiPanel({
   const sticky = useRef(true);
   const [atBottom, setAtBottom] = useState(true);
 
-  // M9.4: an agent turn that wrote files becomes its own commit, so its work
-  // is revertible independently of the user's.
-  const { isRepo, ready, refresh } = useGit();
-  const checkpoint = useAgentCheckpoint(refresh);
+  // Whether the vault keeps git history, for the action cards' diff and
+  // revert. A turn's writes are committed in Rust, by the run's own reader,
+  // before its Done (M58.3), so no panel has to be open for it.
+  const { isRepo, ready } = useGit();
 
   // M13.1: the skill catalog — names and descriptions only; a body loads when
   // one is invoked, so the vault can hold many skills at no per-turn cost.
@@ -439,7 +505,7 @@ export function AiPanel({
     conversationId: null,
   });
   const getTurn = useCallback(() => turnRef.current, []);
-  const chat = useAgentChat(getTurn, { shell, connectors }, isRepo ? checkpoint : undefined);
+  const chat = useAgentChat(getTurn, { shell, connectors });
   // M17.5: the SUBJECT of the current selection, with its lenses stripped —
   // the board tab and the table tab of one List are one place. A thread is
   // stamped with it at its first turn, which is what lets a thread be found
@@ -451,6 +517,35 @@ export function AiPanel({
   );
   const conversations = useConversations(chat, place, placeLookup, vaultPath);
   const blocked = conversations.blocked;
+
+  // M57.6: the composer's draft is per thread and outlives the panel. A
+  // thread's draft loads when it opens, saves 300 ms after typing stops, and
+  // is flushed when the thread changes and when the panel closes.
+  const activeConversation = conversations.activeId;
+  const draftOwner = useRef<string | null>(null);
+  const draftNow = useRef(draft);
+  draftNow.current = draft;
+  useEffect(() => {
+    if (draftOwner.current !== null) saveDraft(draftOwner.current, draftNow.current);
+    draftOwner.current = activeConversation;
+    // Mirrored at once, so a flush before the next render saves what was
+    // loaded, never the empty draft it replaces.
+    const loaded = loadDraft(activeConversation);
+    draftNow.current = loaded;
+    setDraft(loaded);
+  }, [activeConversation]);
+  useEffect(() => {
+    const owner = draftOwner.current;
+    if (owner === null) return;
+    const timer = setTimeout(() => saveDraft(owner, draft), DRAFT_SAVE_MS);
+    return () => clearTimeout(timer);
+  }, [draft]);
+  useEffect(
+    () => () => {
+      if (draftOwner.current !== null) saveDraft(draftOwner.current, draftNow.current);
+    },
+    [],
+  );
   // M56.5: the composer's model and effort picker, opened by its button or
   // by a failure card's "Choose another model".
   const [runOptionsOpen, setRunOptionsOpen] = useState(false);
@@ -642,17 +737,78 @@ export function AiPanel({
 
   // Every send goes through here so no path can leave a thread unanchored —
   // there are three (the composer, a suggestion chip, and a retry) plus the
-  // handoff below, and "remember to call anchorNow" at four call sites is a
-  // convention, not a guarantee.
+  // handoffs and Up next below, and "remember to call anchorNow" at every
+  // call site is a convention, not a guarantee. An Up next entry carries the
+  // turn it was queued in (M57.5), and its thread was anchored by the turn it
+  // waited behind, so it is not anchored again where the person stands now.
   const anchorNow = conversations.anchorNow;
   const chatSend = chat.send;
   const ask = useCallback(
-    (text: string, message?: string | (() => Promise<string>), allowedTools?: string[] | null) => {
-      anchorNow();
-      chatSend(text, message, allowedTools);
+    (
+      text: string,
+      message?: string | (() => Promise<string>),
+      allowedTools?: string[] | null,
+      turn?: TurnContext,
+    ) => {
+      if (turn === undefined) anchorNow();
+      chatSend(text, message, allowedTools, turn);
     },
     [anchorNow, chatSend],
   );
+
+  // M13.1: `/name …` expands to the skill's body — the transcript shows what
+  // was typed, the agent gets the instructions. The expansion is a read, run
+  // inside the turn for a send and at once for an Up next entry (M57.5), so
+  // the entry keeps the skill as it was when it was queued; an unreadable
+  // skill file falls back to sending the message as typed. A draft STARTING
+  // with a space is the opt-out: sent literally, never expanded — the one way
+  // to say `/weekly-review` to the agent as text. Shared by the composer and
+  // an entry's editor.
+  const resolveSkill = useCallback(
+    (raw: string): SkillResolution => {
+      const text = raw.trim();
+      const invocation = raw.startsWith(' ') ? null : matchSkillInvocation(text, skills);
+      if (invocation === null || vaultPath === null) {
+        return { text, skill: null, expand: null, allowedTools: null };
+      }
+      const { skill, request } = invocation;
+      return {
+        text,
+        skill: { path: skill.path },
+        expand: () =>
+          readNote(vaultPath, skill.path).then((body) => skillPrompt(skill, body, request)),
+        // M17.8: a skill's `allowed-tools:` narrows THIS turn. Passed as data
+        // to Rust, which intersects it with the granted policy — a vault file
+        // may subtract from what Settings allowed and can never add to it.
+        allowedTools: skill.allowedTools,
+      };
+    },
+    [skills, vaultPath],
+  );
+
+  // M57.5: Up next, one queue per conversation. Text sent mid-turn waits
+  // there, frozen in the context it was sent in, instead of being dropped.
+  const upNext = useUpNext({
+    chat,
+    conversationId: conversations.activeId,
+    vault: vaultPath,
+    getTurn,
+    resolve: resolveSkill,
+    sendNow: ask,
+  });
+  const conversationIds = useMemo(
+    () => conversations.conversations.map((c) => c.id),
+    [conversations.conversations],
+  );
+  useEffect(() => {
+    useUpNextStore.getState().prune(conversationIds);
+    pruneDrafts(conversationIds);
+  }, [conversationIds]);
+  // An entry queued in another vault cannot run here: its context, its skill
+  // and its session all belong to that vault.
+  useEffect(() => {
+    if (vaultPath !== null) useUpNextStore.getState().keepVault(vaultPath);
+  }, [vaultPath]);
 
   useEffect(() => {
     void checkAgent()
@@ -672,13 +828,15 @@ export function AiPanel({
   useFocusRestore();
 
   // A prompt handed over from elsewhere in the app ("Ask to revise" on a
-  // concept) is sent once and then cleared. Held while a turn is streaming —
-  // sending mid-turn would be dropped by the hook's one-turn guard — and
-  // delivered when the stream ends (PR #5 review).
-  const streaming = chat.streaming;
+  // concept), oldest first, each taken into Up next once (M57.5): sent now
+  // when the conversation is idle, queued behind its turn when it is not.
+  const submitUpNext = upNext.submit;
   const startConversation = conversations.start;
   useEffect(() => {
-    if (pendingPrompt === null || streaming) return;
+    if (handoff === null) return;
+    // M56.6: not before the panel's binding is read; this effect runs again
+    // when it is.
+    if (!bindingRead) return;
     // M56.3: a thread that cannot continue takes no handoff. A new
     // conversation opens first, and the handoff is delivered on the next pass.
     if (blocked !== null) {
@@ -692,11 +850,11 @@ export function AiPanel({
     //
     // Attaching is its own pass, ending with the subject consumed rather than
     // the whole handoff: the prompt is built from the chips DURING RENDER, so
-    // sending in the same tick would send the context from before the chip
-    // existed — the exact staleness this milestone is about.
-    if (pendingPrompt.subject !== null) {
-      const chip = recordChip(pendingPrompt.subject, entries);
-      setPendingPrompt({ ...pendingPrompt, subject: null });
+    // sending or queueing in the same tick would freeze the context from
+    // before the chip existed — the exact staleness M17.6 is about.
+    if (handoff.subject !== null) {
+      const chip = recordChip(handoff.subject, entries);
+      markHandoffAttached(handoff.id);
       if (chip !== null) {
         const id = chipId(chip);
         setDismissed((prev) => prev.filter((d) => d !== id));
@@ -704,49 +862,52 @@ export function AiPanel({
       }
       return;
     }
-    setPendingPrompt(null);
+    takeHandoff(handoff.id);
     // M52.3: a labelled handoff goes the way a suggestion does — the label is
     // the bubble and the thread's title, the prompt is what the agent reads.
-    if (pendingPrompt.label === null) ask(pendingPrompt.text);
-    else ask(pendingPrompt.label, pendingPrompt.text);
-  }, [ask, blocked, entries, pendingPrompt, setPendingPrompt, startConversation, streaming]);
-
-  const submit = () => {
-    // Mid-turn, Enter is a no-op: the Send button is already replaced by
-    // Stop, and the keyboard must match it. The draft stays in the composer
-    // rather than vanishing into a send the hook would drop (PR #5 review).
-    if (chat.streaming) return;
-    const trimmed = draft.trim();
-    if (trimmed === '') return;
-    // M13.1: `/name …` expands to the skill's body — the transcript shows what
-    // was typed, the agent gets the instructions. The expansion is handed to
-    // send() as a deferred read so the turn starts synchronously; an
-    // unreadable skill file falls back to sending the message as typed.
-    // A draft STARTING with a space is the opt-out: sent literally, never
-    // expanded — the one way to say `/weekly-review` to the agent as text.
-    const literal = draft.startsWith(' ');
-    const invocation = literal ? null : matchSkillInvocation(trimmed, skills);
-    setDraft('');
-    if (invocation === null || vaultPath === null) {
-      ask(trimmed);
-      return;
-    }
-    const { skill, request } = invocation;
-    // M17.8: a skill's `allowed-tools:` narrows THIS turn. Passed as data to
-    // Rust, which intersects it with the granted policy — a vault file may
-    // subtract from what Settings allowed and can never add to it.
-    ask(
-      trimmed,
-      () => readNote(vaultPath, skill.path).then((raw) => skillPrompt(skill, raw, request)),
-      skill.allowedTools,
+    // A full Up next refuses it with one toast (useUpNext).
+    void submitUpNext(
+      handoff.label === null
+        ? { text: handoff.text, handoff: true }
+        : { text: handoff.label, prompt: handoff.text, handoff: true },
     );
+  }, [
+    bindingRead,
+    blocked,
+    entries,
+    handoff,
+    markHandoffAttached,
+    startConversation,
+    submitUpNext,
+    takeHandoff,
+  ]);
+
+  // Enter sends when the conversation is idle and adds to Up next while it is
+  // busy (M57.5); a full Up next keeps the draft and says why.
+  const submit = () => {
+    if (draft.trim() === '') return;
+    if (upNext.submit({ text: draft }) !== 'full') {
+      setDraft('');
+      saveDraft(activeConversation, '');
+    }
   };
 
   // M9.7: open the note and show its diff there, rather than stacking a
-  // dialog over the panel that produced it.
-  const viewDiff = (path: string) => {
+  // dialog over the panel that produced it. At the run's commit when there is
+  // one (M58.3): the working tree is clean once the run commits. A turn's
+  // commit opens with this conversation and its run, so notes left on its
+  // lines come back here (M58.5).
+  const viewDiff = (path: string, commit: string | null = null) => {
     openPath(path);
-    openDiff(path);
+    const conversationId = conversations.activeId;
+    if (commit === null || conversationId === null) {
+      openDiff(path, commit);
+      return;
+    }
+    const run = chat.messages
+      .flatMap((m) => m.changesets ?? [])
+      .find((c) => c.state === 'committed' && c.commit === commit);
+    openDiff(path, commit, { conversationId, runId: run?.run_id ?? null });
   };
 
   const openTarget = (target: string) => {
@@ -758,7 +919,7 @@ export function AiPanel({
   // one click rather than retyping it from memory. The failed exchange stays
   // visible: it is what the error refers to.
   const retry = (assistantId: string) => {
-    if (chat.streaming) return;
+    if (chat.busy()) return;
     const index = chat.messages.findIndex((m) => m.id === assistantId);
     const question = index > 0 ? chat.messages[index - 1] : undefined;
     if (question === undefined || question.role !== 'user') return;
@@ -907,10 +1068,23 @@ export function AiPanel({
             />
           ))
         )}
-        {/* M57.1: the call the turn waits on, after the last message. */}
-        {chat.interaction !== null && (
-          <InteractionCard interaction={chat.interaction} onAnswer={chat.answer} />
-        )}
+        {/* M57.1: the call the turn waits on, after the last message. An
+            ask-first agent's page write draws as a write card (M57.4); the
+            agent's questions as InteractionCard's question card (M57.3); any
+            other tool-approval ask (one that names its family, M57.2) as a
+            permission card with This conversation; any other as M57.1's. */}
+        {chat.interaction !== null &&
+          (chat.interaction.card.kind === 'write' ? (
+            <WriteApprovalCard interaction={chat.interaction} onAnswer={chat.answer} />
+          ) : chat.interaction.card.kind !== 'question' && chat.interaction.card.family != null ? (
+            <PermissionCard
+              interaction={chat.interaction}
+              onAnswer={chat.answer}
+              vaultPath={vaultPath}
+            />
+          ) : (
+            <InteractionCard interaction={chat.interaction} onAnswer={chat.answer} />
+          ))}
         {chat.prLinks.length > 0 && <PrLinks links={chat.prLinks} />}
       </div>
 
@@ -1005,6 +1179,21 @@ export function AiPanel({
             ))}
           </ul>
         )}
+        {/* M57.5: what this conversation holds for after its turn. */}
+        <UpNext upNext={upNext} />
+        <ReviewNotesDock
+          vault={vaultPath}
+          conversationId={conversations.activeId}
+          blocked={blocked !== null}
+          submit={upNext.submit}
+          onOpenNote={(note) => {
+            openPath(note.path);
+            openDiff(note.path, note.commit, {
+              conversationId: note.conversationId,
+              runId: note.runId,
+            });
+          }}
+        />
         {blocked !== null ? (
           <div data-testid="thread-blocked" className="flex flex-col items-start gap-2 px-1 py-1">
             <p className="m-0 text-xs leading-[17px] text-n-600">
@@ -1057,9 +1246,11 @@ export function AiPanel({
               >
                 {chat.waiting
                   ? 'Waiting for your answer'
-                  : chat.streaming
-                    ? 'Working…'
-                    : 'Enter to send · [[ to reference a note'}
+                  : chat.stopping
+                    ? 'Stopping…'
+                    : chat.streaming
+                      ? 'Working… · Enter adds to Up next'
+                      : 'Enter to send · [[ to reference a note'}
               </span>
               <RunOptionsPicker
                 key={conversations.activeId}
@@ -1072,10 +1263,30 @@ export function AiPanel({
                 onOpenChange={setRunOptionsOpen}
                 disabled={chat.streaming}
               />
-              {chat.streaming ? (
-                <Button variant="secondary" size="sm" icon="square" onClick={chat.stop}>
-                  Stop
-                </Button>
+              {chat.streaming || chat.stopping ? (
+                <>
+                  <IconButton
+                    icon="list-plus"
+                    label="Add to Up next"
+                    size="sm"
+                    disabled={draft.trim() === ''}
+                    onClick={submit}
+                  />
+                  {/* Stop holds Up next until Resume (M57 Q23), then stops the
+                      turn, which ends once its run's Done has come. */}
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon="square"
+                    disabled={chat.stopping}
+                    onClick={() => {
+                      upNext.hold();
+                      chat.stop();
+                    }}
+                  >
+                    {chat.stopping ? 'Stopping…' : 'Stop'}
+                  </Button>
+                </>
               ) : (
                 <Button variant="primary" size="sm" icon="send" onClick={submit}>
                   Send

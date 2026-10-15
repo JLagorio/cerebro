@@ -39,6 +39,10 @@ export interface RunRecord {
   conversationId: string | null;
   /** The child, once it exists. Null while starting up; what Stop needs. */
   run: number | null;
+  /** The key a host re-attaches to the child by (M57.6): the durable run id,
+   * or the browser's mock key. A chat run's Done side effects are settled by
+   * ChatTurnsHost through it; absent until the child exists. */
+  attach?: string;
   startedAt: number;
 }
 

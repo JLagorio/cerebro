@@ -32,6 +32,8 @@ const CASES: [string, string][] = [
   ['a Linux home path', '{ "cwd": "/home/someone/vault" }'],
   ['a macOS temporary folder', '{ "cwd": "/var/folders/ab/cdef/T/cerebro-cli-record" }'],
   ["macOS's private /var", '{ "cwd": "/private/var/db/record" }'],
+  ["macOS's private /tmp", '{ "file_path": "/private/tmp/claude-501/x/scratchpad/notes/a.md" }'],
+  ['a /tmp path', '{ "cwd": "/tmp/cerebro-cli-record/vault" }'],
   ['an email or other @-address', '{ "text": "write to someone@example.com" }'],
   ['a real UUID', '{ "session_id": "1b4e28ba-2fa1-41d2-883f-0016d3cca427" }'],
   ['a real message, tool or request id', '{ "id": "toolu_01AbCdEfGhIjKlMnOp" }'],
@@ -92,6 +94,13 @@ describe('scan', () => {
       tool: 'mcp__cerebro__search_notes',
     });
     expect(scan(clean)).toEqual([]);
+  });
+
+  it('names a /private/tmp path once, as the private one', () => {
+    expect(scan('/private/tmp/x and /tmp/y')).toEqual([
+      "macOS's private /tmp: /private/tmp/",
+      'a /tmp path: /tmp/',
+    ]);
   });
 
   it('names the pattern and the text of every hit', () => {

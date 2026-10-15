@@ -4,6 +4,7 @@ import { IconButton } from '@/components/ui/IconButton';
 import { MenuItem, MenuSeparator, MenuSurface } from '@/components/ui/Menu';
 import { Popover } from '@/components/ui/Popover';
 import { copyText, deleteRecord, duplicateRecord } from '@/views/recordActions';
+import { TRASH_WORDS } from '@/engine/trash';
 import type { Entry } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -124,12 +125,12 @@ export function RecordRowMenu({ entry, onOpen }: { entry: Entry; onOpen: () => v
           onClose={() => setConfirmDelete(false)}
           title={`Delete "${entry.title}"?`}
           width={420}
-          footerNote="Recoverable from git history, not from the app."
+          footerNote={TRASH_WORDS.footer}
           secondaryAction={{ label: 'Cancel', onClick: () => setConfirmDelete(false) }}
           primaryAction={{ label: 'Delete', onClick: remove }}
         >
           <p className="m-0 text-sm leading-relaxed text-n-600">
-            The file leaves the vault.
+            {TRASH_WORDS.body}
             {links > 0
               ? ` ${links === 1 ? 'One record links' : `${links} records link`} here, and those links will point at nothing.`
               : ' Nothing links to it.'}

@@ -1,17 +1,21 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
-import { useDecisions, usePendingVersion } from '@/knowledge/usePendingCards';
+import { useDecisions, usePendingVersion, usePendingWrites } from '@/knowledge/usePendingCards';
 import * as ipc from '@/lib/ipc';
 import type { ReviewCard, RevertableApplication } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import { PendingWriteCard } from './PendingWriteCard';
 import { ProposalCard } from './ProposalCard';
 import { opVerb, reasonSentence } from './proposalText';
 
 /**
- * The proposal queue, as a section of the Status hub (M33.3) — and, since
- * M33a.2 folded that hub into Knowledge, as its "Waiting on you" tab. The
+ * What waits on a person's decision, as a section of the Status hub (M33.3)
+ * — and, since M33a.2 folded that hub into Knowledge, as its "Waiting on
+ * you" tab: the proposals agents queued in the ledger, the applications
+ * still undoable, and since M57.4c the page writes ask-first agents queued
+ * in runtime.db while nobody watched (`PendingWriteCard`), one queue. The
  * rename is not cosmetic: Knowledge already had a "Needs review" row for
  * CONCEPTS a human has not verified, and two unrelated queues under one
  * string is a nav that lies about where a click lands.
@@ -30,10 +34,14 @@ import { opVerb, reasonSentence } from './proposalText';
  * `Feed<T>` contract (`knowledge/BaseItself.tsx`) exists to prevent. A read
  * that did not come back now says so.
  *
- * Every card is still rebuilt from the ledger on each load — nothing here is
- * cached, so this list cannot drift from what the vault actually holds. A
+ * Every card is still rebuilt on each load — proposals from the ledger,
+ * queued page writes from runtime.db (`usePendingWrites`) — and nothing here
+ * is cached, so this list cannot drift from what is actually waiting. A
  * decision made anywhere (here, or on the concept it targets) bumps the
- * queue's version and this section re-reads.
+ * queue's version and this section re-reads. The two stores are read
+ * separately and fail separately: a write queue that could not be read says
+ * so beside the proposals, and "Nothing is waiting" needs every read to
+ * have come back empty.
  */
 
 /** Columns of a reading width that fill the tab: three across at 2000px,
@@ -76,6 +84,8 @@ export function NeedsYouSection({ vaultPath }: { vaultPath: string | null }) {
   const version = usePendingVersion();
   const { busy, decide, undo, isSettled, isReverted } = useDecisions(vaultPath);
   const [state, setState] = useState<State>({ kind: 'loading' });
+  // M57.4c: the page writes, their own read beside the proposals.
+  const writes = usePendingWrites(vaultPath);
 
   // `version` is the one deliberate re-read: a decision anywhere bumps it.
   // `live` (M52.4) drops an answer that lands after a newer read started or
@@ -106,17 +116,20 @@ export function NeedsYouSection({ vaultPath }: { vaultPath: string | null }) {
     };
   }, [vaultPath, version]);
 
-  if (state.kind === 'loading') return <p className="text-xs text-n-400">Reading…</p>;
-  if (state.kind === 'unavailable') {
-    return (
-      <p data-testid="section-unavailable" className="text-xs text-n-500">
-        The review queue could not be read, so nothing here is a statement about this vault.
-      </p>
-    );
+  if (state.kind === 'loading' || writes.kind === 'loading') {
+    return <p className="text-xs text-n-400">Reading…</p>;
   }
 
-  const { cards, applications } = state.data;
-  if (cards.length === 0 && applications.length === 0) {
+  const { cards, applications } =
+    state.kind === 'ready' ? state.data : { cards: [], applications: [] };
+  const queued = writes.kind === 'ready' ? writes.data : [];
+  if (
+    state.kind === 'ready' &&
+    writes.kind === 'ready' &&
+    cards.length === 0 &&
+    applications.length === 0 &&
+    queued.length === 0
+  ) {
     return (
       <p data-testid="section-empty" className="text-xs text-n-500">
         Nothing is waiting on a decision.
@@ -126,11 +139,21 @@ export function NeedsYouSection({ vaultPath }: { vaultPath: string | null }) {
 
   return (
     <>
+      {state.kind === 'unavailable' && (
+        <p data-testid="section-unavailable" className="text-xs text-n-500">
+          The review queue could not be read, so nothing here is a statement about this vault.
+        </p>
+      )}
+      {writes.kind === 'unavailable' && (
+        <p data-testid="pending-writes-unavailable" className="text-xs text-n-500">
+          Queued page writes could not be read, so this list may be missing some.
+        </p>
+      )}
       {/* The cards fill the tab's width in columns of a reading width
           (M52.5), rather than one 880px column beside 800px of nothing:
           three across at 2000px, two at 1440, one where there is room for
           one. A row's cards share a height, so their answers line up. */}
-      {cards.length > 0 && (
+      {(cards.length > 0 || queued.length > 0) && (
         <div data-testid="review-cards" className={GRID}>
           {cards.map((card) => (
             <ProposalCard
@@ -140,6 +163,11 @@ export function NeedsYouSection({ vaultPath }: { vaultPath: string | null }) {
               onDecide={(c, approve, reason) => void decide(c, approve, reason)}
             />
           ))}
+          {/* M57.4c: the page writes, after the proposals, in the same grid. */}
+          {vaultPath !== null &&
+            queued.map((write) => (
+              <PendingWriteCard key={write.pending_id} write={write} vaultPath={vaultPath} />
+            ))}
         </div>
       )}
 

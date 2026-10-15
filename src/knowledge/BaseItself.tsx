@@ -787,7 +787,7 @@ export function WaitingOnYou({ vaultPath }: { vaultPath: string | null }) {
     <Section
       id="needs-review"
       title="Waiting on you"
-      blurb="What agents want to change in Knowledge, waiting for you to decide."
+      blurb="What agents want to change, in Knowledge and in your pages, waiting for you to decide."
     >
       {/* M33.3: the cards themselves, not a count and a door. The section
           owns its own read. */}

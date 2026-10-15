@@ -18,6 +18,7 @@ import { buildSchema } from '@/engine/schema';
 import { ROW_HEIGHT_MAX, ROW_HEIGHT_MIN } from '@/engine/types';
 import { makeEntry } from '@/test/factories';
 import type { DashboardSpec, DashboardWidget, Entry, FilterRule } from '@/engine/types';
+import { computedVault, epics } from '@/test/computedVault';
 
 /**
  * The dashboard's number block (M16.28).
@@ -102,6 +103,25 @@ describe('dashboardNumber', () => {
       schema,
     );
     expect(avg.value).toBe(4);
+  });
+
+  // M60.1: the tile reads `schema.fieldValue`, so a rollup sums like a stored
+  // number. Empty's sum of nothing is absent, so the subtitle counts two.
+  it('sums a rollup field', () => {
+    const tile = dashboardNumber(
+      epics(),
+      numberBlock({ agg: 'sum', value: 'points' }),
+      buildSchema(computedVault()),
+    );
+    expect(tile.blocked).toBeNull();
+    expect(tile.value).toBe(28);
+    expect(tile.count).toBe(2);
+    const count = dashboardNumber(
+      epics(),
+      numberBlock({ agg: 'sum', value: 'task_count' }),
+      buildSchema(computedVault()),
+    );
+    expect(count.value).toBe(19);
   });
 
   it('keeps the property’s own number format', () => {

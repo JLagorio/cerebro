@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { create } from 'zustand';
 import type {
+  CommitQuery,
+  CommitRun,
   ConflictMode,
-  GitCommit,
+  FileAt,
+  FileCommit,
+  FilePatch,
   GitRemoteStatus,
   ModifiedFile,
   VaultPulse,
 } from '@/engine/git';
 import { syncState, type SyncState } from '@/engine/git';
+import { announceExternalWrites, flushOpenPages } from '@/editor/openPages';
 import * as git from '@/lib/gitIpc';
 import { ledgerHead } from '@/lib/ipc';
 import { useUiStore } from '@/stores/uiStore';
@@ -251,12 +256,23 @@ function useGitRead<T>(run: (() => Promise<T>) | null): { read: GitRead<T>; relo
   return { read: answered ? answer.read : LOADING, reload };
 }
 
-/** One note's commit history, read again when the note or the vault changes. */
-export function useFileHistory(path: string): GitRead<GitCommit[]> {
+/** Bumped by every Restore (M58.4): a page's history has a new top row. */
+const useHistoryRevision = create<{ n: number }>(() => ({ n: 0 }));
+
+/** One page's history as `FileCommit` rows (M58.4): each commit with the
+ * path the page had in it, its parent and what it did. Read again when the
+ * page or the vault changes, when the page goes in or out of the changed
+ * files (a checkpoint or a run's commit took it), and after a Restore. */
+export function useFileHistory(path: string): GitRead<FileCommit[]> {
   const vaultPath = useVaultStore((s) => s.vaultPath);
+  const pending = useGitStore((s) => s.modified.some((f) => f.path === path));
+  const revision = useHistoryRevision((s) => s.n);
   const run = useMemo(
     () => (vaultPath === null ? null : () => git.getFileHistory(vaultPath, path)),
-    [vaultPath, path],
+    // `pending` and `revision` are the request's identity, not its inputs:
+    // either moving means the history may have a row it did not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-read keys, named above
+    [vaultPath, path, pending, revision],
   );
   const { read } = useGitRead(run);
   return vaultPath === null ? UNAVAILABLE : read;
@@ -286,6 +302,128 @@ export function useCommitDiff(hash: string | null): GitRead<string> {
   return vaultPath === null ? UNAVAILABLE : read;
 }
 
+/** One file's patch in one commit (M58.3), read when a turn's changeset
+ * expands the file, and not before: `null` for either asks nothing and stays
+ * `loading`. */
+export function useFilePatch(path: string | null, commit: string | null): GitRead<FilePatch> {
+  const vaultPath = useVaultStore((s) => s.vaultPath);
+  const run = useMemo(
+    () =>
+      vaultPath === null || path === null || commit === null
+        ? null
+        : () => git.getFilePatch(vaultPath, path, commit),
+    [vaultPath, path, commit],
+  );
+  const { read } = useGitRead(run);
+  if (path === null || commit === null) return LOADING;
+  return vaultPath === null ? UNAVAILABLE : read;
+}
+
+/**
+ * Which recorded runs made these commits (M58.4, CV-35), keyed by the
+ * hashes asked, so a new list asks again and the same list does not. A
+ * commit missing from the answer has no record and reads "unattributed"; a
+ * rejected read is `unavailable`, which reads "attribution unknown", never
+ * the same thing. No queries asks nothing and answers an empty list.
+ */
+export function useCommitRuns(queries: CommitQuery[]): GitRead<CommitRun[]> {
+  const vaultPath = useVaultStore((s) => s.vaultPath);
+  // The request's identity is its content: callers build a fresh array each
+  // render, and keying on the array itself would ask again forever.
+  const key = JSON.stringify(queries.map((q) => [q.hash, q.path, q.since]));
+  const asked = useMemo(
+    () =>
+      (JSON.parse(key) as [string, string | null, string | null][]).map(
+        ([hash, path, since]): CommitQuery => ({ hash, path, since }),
+      ),
+    [key],
+  );
+  const run = useMemo(
+    () =>
+      vaultPath === null
+        ? null
+        : asked.length === 0
+          ? () => Promise.resolve([] as CommitRun[])
+          : () => git.commitRuns(vaultPath, asked),
+    [vaultPath, asked],
+  );
+  const { read } = useGitRead(run);
+  return vaultPath === null ? UNAVAILABLE : read;
+}
+
+/** Both sides of one version (M58.4): `after` as the commit held the page,
+ * `before` as its parent held it. A side with nothing to read is null. */
+export interface FileVersions {
+  before: FileAt | null;
+  after: FileAt | null;
+}
+
+/**
+ * Read one version and the one before it (M58.4): `after` at the commit
+ * under `pathAt`, `before` at its parent under `previousPath ?? pathAt`, so
+ * a version from before a rename opens its own file. No read for a side
+ * there is nothing to read on: a root commit or an added page has no
+ * before, a deleted page no after. Either read failing is `unavailable`.
+ */
+export function useFileVersions(commit: FileCommit | null): GitRead<FileVersions> {
+  const vaultPath = useVaultStore((s) => s.vaultPath);
+  const run = useMemo(() => {
+    if (vaultPath === null || commit === null || commit.pathAt === null) return null;
+    const pathAt = commit.pathAt;
+    const readAfter = commit.change !== 'deleted';
+    const readBefore = commit.parent !== null && commit.change !== 'added';
+    const beforePath = commit.previousPath ?? pathAt;
+    const parent = commit.parent;
+    return async (): Promise<FileVersions> => {
+      const [after, before] = await Promise.all([
+        readAfter ? git.getFileAtCommit(vaultPath, pathAt, commit.hash) : null,
+        readBefore && parent !== null ? git.getFileAtCommit(vaultPath, beforePath, parent) : null,
+      ]);
+      return { before, after };
+    };
+  }, [vaultPath, commit]);
+  const { read } = useGitRead(run);
+  if (commit === null) return LOADING;
+  if (vaultPath === null || commit.pathAt === null) return UNAVAILABLE;
+  return read;
+}
+
+/**
+ * Restore a page to one version (M58.4), as a person's action: land every
+ * open page's pending save first, so the restore is not overwritten by an
+ * edit typed before it, then restore, tell the page its file changed, read
+ * git again, and say what happened. Never throws (CV-03): a refusal toasts
+ * and answers false.
+ */
+export async function restoreVersion(
+  vault: string,
+  path: string,
+  commit: string,
+  title: string,
+): Promise<boolean> {
+  const toast = useUiStore.getState().toast;
+  try {
+    await flushOpenPages();
+    const result = await git.restoreNoteVersion(vault, path, commit);
+    if (result.unchanged) {
+      toast('This page already matches that version.');
+      return true;
+    }
+    await announceExternalWrites([path], () => useVaultStore.getState().rescan());
+    useHistoryRevision.setState((s) => ({ n: s.n + 1 }));
+    void refreshGit();
+    toast(
+      result.commitError === null
+        ? `Restored ${title}. The version it replaced is in History.`
+        : `Restored ${title}. History will record it at the next checkpoint.`,
+    );
+    return true;
+  } catch (err) {
+    toast(`Couldn't restore ${title}: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+}
+
 /** Idle thresholds, in seconds. */
 const IDLE_SECONDS = 120;
 const INACTIVE_SECONDS = 30;
@@ -299,7 +437,10 @@ const INACTIVE_SECONDS = 30;
  * finished than merely pausing.
  *
  * Never fires while a note has unsaved edits: committing a half-written file
- * captures a state the user never chose.
+ * captures a state the user never chose. And never takes a path a live run
+ * owns (M58.3): Rust's `commit_all` leaves those for the run's own commit,
+ * so the message names only the files with no owner, and a tick where only
+ * owned files changed commits nothing.
  */
 export function useAutoCheckpoint(enabled: boolean, onCommitted: () => void): void {
   const vaultPath = useVaultStore((s) => s.vaultPath);
@@ -324,7 +465,7 @@ export function useAutoCheckpoint(enabled: boolean, onCommitted: () => void): vo
 
       committing.current = true;
       try {
-        const files = await git.getModifiedFiles(vaultPath);
+        const files = (await git.getModifiedFiles(vaultPath)).filter((f) => f.owner == null);
         if (files.length === 0) return;
         const message = await withLedgerTrailer(vaultPath, checkpointMessage(files));
         const hash = await git.gitCommit(vaultPath, message);
@@ -413,34 +554,4 @@ export function checkpointMessage(files: ModifiedFile[]): string {
     return `Update ${files.length} notes in ${folder}`;
   }
   return `Update ${files.length} notes`;
-}
-
-/**
- * Commit what an assistant turn wrote, as its own commit.
- *
- * This is the cerebro-specific trigger and the reason git is in this
- * milestone: the background distiller writes to `knowledge/` unattended.
- * Giving its work a separate commit is what makes it independently
- * reviewable and revertible, rather than tangled into the next checkpoint
- * alongside the user's own edits.
- */
-export function useAgentCheckpoint(refresh: () => void): (summary: string) => void {
-  const vaultPath = useVaultStore((s) => s.vaultPath);
-  const toast = useUiStore((s) => s.toast);
-
-  return useCallback(
-    (summary: string) => {
-      if (vaultPath === null) return;
-      void (async () => {
-        try {
-          const message = await withLedgerTrailer(vaultPath, `assistant: ${summary}`);
-          const hash = await git.gitCommit(vaultPath, message);
-          if (hash !== null) refresh();
-        } catch (err) {
-          toast(`Couldn't checkpoint the assistant's edits: ${String(err)}`);
-        }
-      })();
-    },
-    [vaultPath, refresh, toast],
-  );
 }

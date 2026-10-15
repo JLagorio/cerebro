@@ -1,0 +1,165 @@
+{
+  "format": 1,
+  "about": "What of a note's frontmatter keyword search reads (M59.2): one rule, so the agent's search_notes and a database view's search see the same text. Properties come in frontmatter order, then relationships (wikilink fields, bracket-stripped by the scanner) in key order. A string gives its trimmed text, and a blank one gives nothing. An integer gives its digits, a float its shortest decimal (1.0 reads 1), and a boolean true or false. An array gives each item by the same rule, nested arrays included. An object or null gives nothing. A key's texts join with \", \", and a key whose texts are all empty gives no field. A key starting with _ gives nothing (the app's own bookkeeping), and so do the page chrome keys listed in chrome_keys, which equal PAGE_CHROME_KEYS in src/engine/pageChrome.ts. On an Agent record (a reserved type name, CV-08), recent, memory and preferences give nothing: an agent's memory is never searchable (D7). A title property whose text equals the note's title gives nothing, since the title is searched already. Replayed by searchable_fields_replay_the_shared_cases in src-tauri/src/search.rs and by src/engine/searchable.test.ts. `why` is for the reader.",
+  "chrome_keys": ["icon", "cover"],
+  "values": [
+    {
+      "value": "  Interview the user  ",
+      "texts": ["Interview the user"],
+      "why": "A string is its trimmed text."
+    },
+    { "value": "   ", "texts": [], "why": "A blank string says nothing." },
+    { "value": 42, "texts": ["42"], "why": "An integer is its digits." },
+    { "value": -7, "texts": ["-7"], "why": "A negative keeps its sign." },
+    { "value": 2.5, "texts": ["2.5"], "why": "A decimal is its shortest spelling." },
+    { "value": true, "texts": ["true"], "why": "A boolean reads as written." },
+    { "value": null, "texts": [], "why": "Null is not recorded, so there is nothing to find." },
+    {
+      "value": ["infra", " sensor ", ""],
+      "texts": ["infra", "sensor"],
+      "why": "A flat array gives each item by the same rule."
+    },
+    {
+      "value": [["a", 1], [false]],
+      "texts": ["a", "1", "false"],
+      "why": "A nested array is read item by item, never as one joined blob."
+    },
+    {
+      "value": { "by": "human:josef", "at": "2026-10-01" },
+      "texts": [],
+      "why": "An object gives nothing: no [object Object], no keys."
+    },
+    {
+      "value": ["kept", { "by": "dropped" }, 3],
+      "texts": ["kept", "3"],
+      "why": "An object inside an array gives nothing, and its siblings still count."
+    },
+    {
+      "value": "Stra\u00dfe \u2014 \u00c9tat",
+      "texts": ["Stra\u00dfe \u2014 \u00c9tat"],
+      "why": "Non-ASCII text passes through unchanged."
+    }
+  ],
+  "entries": [
+    {
+      "title": "Create an agent",
+      "type": "Skill",
+      "properties": {
+        "slug": "create-an-agent",
+        "description": "Interview the user about a job worth delegating, then draft an Agent record."
+      },
+      "relationships": {},
+      "fields": [
+        { "key": "slug", "text": "create-an-agent" },
+        {
+          "key": "description",
+          "text": "Interview the user about a job worth delegating, then draft an Agent record."
+        }
+      ],
+      "why": "A Skill is found by its description, in frontmatter order."
+    },
+    {
+      "title": "Vendor delay",
+      "type": "Risk",
+      "properties": { "status": "open" },
+      "relationships": { "owner": ["maya-chen"] },
+      "fields": [
+        { "key": "status", "text": "open" },
+        { "key": "owner", "text": "maya-chen" }
+      ],
+      "why": "A relationship's target is searchable, after the properties."
+    },
+    {
+      "title": "Release scout",
+      "type": "Agent",
+      "properties": {
+        "slug": "release-scout",
+        "recent": "Checked the release board.",
+        "memory": ["The user prefers short reports."],
+        "preferences": "Weekdays only",
+        "schedule": "daily"
+      },
+      "relationships": {},
+      "fields": [
+        { "key": "slug", "text": "release-scout" },
+        { "key": "schedule", "text": "daily" }
+      ],
+      "why": "An Agent's recent, memory and preferences are its own notes, never searchable."
+    },
+    {
+      "title": "Standup",
+      "type": "Meeting",
+      "properties": { "recent": "yesterday" },
+      "relationships": {},
+      "fields": [{ "key": "recent", "text": "yesterday" }],
+      "why": "recent is only withheld on an Agent record."
+    },
+    {
+      "title": "Capture",
+      "type": null,
+      "properties": {
+        "_organized": false,
+        "icon": "rocket",
+        "cover": "#ff8800",
+        "status": "doing"
+      },
+      "relationships": {},
+      "fields": [{ "key": "status", "text": "doing" }],
+      "why": "App bookkeeping and page chrome are not page data."
+    },
+    {
+      "title": "Pick queue drain",
+      "type": "Reference",
+      "properties": { "title": " Pick queue drain " },
+      "relationships": {},
+      "fields": [],
+      "why": "A title property equal to the title is the title, searched already."
+    },
+    {
+      "title": "Pick queue drain",
+      "type": "Reference",
+      "properties": { "title": "Drain the pick queue" },
+      "relationships": {},
+      "fields": [{ "key": "title", "text": "Drain the pick queue" }],
+      "why": "A title property that differs says something the title does not."
+    },
+    {
+      "title": "Calibrate sensors",
+      "type": "Task",
+      "properties": { "tags": ["infra", "sensor"], "weight": 10 },
+      "relationships": {},
+      "fields": [
+        { "key": "tags", "text": "infra, sensor" },
+        { "key": "weight", "text": "10" }
+      ],
+      "why": "An array's texts join with a comma and a space."
+    },
+    {
+      "title": "Wire the harness",
+      "type": "Task",
+      "properties": {},
+      "relationships": { "project": ["flight-deck"], "assignee": ["ana-marte", "bo-riis"] },
+      "fields": [
+        { "key": "assignee", "text": "ana-marte, bo-riis" },
+        { "key": "project", "text": "flight-deck" }
+      ],
+      "why": "Relationship keys come in key order, whatever order the file wrote them in."
+    },
+    {
+      "title": "Decision",
+      "type": "Type",
+      "properties": { "fields": { "status": { "kind": "select" } } },
+      "relationships": {},
+      "fields": [],
+      "why": "A property holding only an object gives no field."
+    },
+    {
+      "title": "Filed note",
+      "type": "Note",
+      "properties": {},
+      "relationships": { "_source": ["inbox"], "about": ["atlas"] },
+      "fields": [{ "key": "about", "text": "atlas" }],
+      "why": "A relationship under an _ key is bookkeeping too."
+    }
+  ]
+}

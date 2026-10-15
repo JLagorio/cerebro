@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { useEscapeLayer } from '@/components/ui/Popover';
-import { quickOpenScore } from '@/lib/quickOpenScore';
+import { rankNames } from '@/lib/nameRank';
+import { UNTYPED_LABEL } from '@/engine/destinations';
 import { argumentHint, listSkills, type SkillRef } from '@/engine/skills';
 import { isAgentEntry, listAgents } from '@/engine/agents';
 import { chipId, placeChip, recordChip, type ContextChip } from '@/agent/contextChips';
 import type { Place } from '@/engine/place';
 import type { Entry } from '@/engine/types';
 import { typeStyle } from '@/engine/typeCatalog';
+import { useRecency } from '@/stores/openLogStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 /**
@@ -101,6 +103,7 @@ export function ChatInput({
   const views = useVaultStore((s) => s.views);
   const collections = useVaultStore((s) => s.collections);
   const schema = useSchema();
+  const recency = useRecency();
   const ref = useRef<HTMLTextAreaElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState(0);
@@ -203,58 +206,73 @@ export function ChatInput({
     requestAnimationFrame(() => ref.current?.focus());
   };
 
+  // Every menu here ranks through the one name ranker (M59.3): the match
+  // tier first, then your own recent opens within it.
   const wikilinkMenu = useMemo((): Menu | null => {
-    if (query === null) return null;
-    const items = entries
-      .filter((e) => e.type !== 'Type')
-      .map((e) => ({ entry: e, score: quickOpenScore(query.fragment, e.title) }))
-      .filter((m) => m.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 6)
-      .map(({ entry }) => {
-        const style = typeStyle(entry.type, schema);
-        return {
-          key: entry.path,
-          icon: style.icon,
-          color: style.color ?? 'var(--n-400)',
-          label: entry.title,
-          hint: entry.type ?? 'Note',
-          run: () => complete(entry),
-        };
-      });
+    // A bare `[[` offers nothing until something is typed, as before.
+    if (query === null || query.fragment.trim() === '') return null;
+    const items = rankNames({
+      query: query.fragment,
+      items: entries.filter((e) => e.type !== 'Type'),
+      texts: (e) => [e.title],
+      path: (e) => e.path,
+      recency,
+      limit: 6,
+    }).items.map((entry) => {
+      const style = typeStyle(entry.type, schema);
+      return {
+        key: entry.path,
+        icon: style.icon,
+        color: style.color ?? 'var(--n-400)',
+        label: entry.title,
+        hint: entry.type ?? UNTYPED_LABEL,
+        run: () => complete(entry),
+      };
+    });
     return items.length === 0
       ? null
       : { testid: 'wikilink-menu', anchor: `wiki:${query.start}`, items };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, entries, schema, value]);
+  }, [query, entries, schema, value, recency]);
 
   const skillMenu = useMemo((): Menu | null => {
     if (slashFragment === null) return null;
-    const items = skills
-      .filter((s) => s.name.startsWith(slashFragment))
-      .slice(0, 6)
-      .map((skill) => {
-        // M17.8: the declared inputs, in the row that offers the skill. A
-        // skill that wants a project name should say so where you pick it,
-        // not after the turn comes back asking.
-        const args = argumentHint(skill);
-        return {
-          key: skill.path,
-          icon: 'zap',
-          color: 'var(--synapse-500)',
-          label: `/${skill.name}${args === '' ? '' : ` ${args}`}`,
-          hint: skill.description,
-          run: () => completeSkill(skill),
-        };
-      });
+    // A prefix still ranks first; a word inside a name (`sweep` in
+    // `risk-sweep`) now matches below it.
+    const items = rankNames({
+      query: slashFragment,
+      items: skills,
+      texts: (s) => [s.name],
+      path: (s) => s.path,
+      recency,
+      limit: 6,
+    }).items.map((skill) => {
+      // M17.8: the declared inputs, in the row that offers the skill. A
+      // skill that wants a project name should say so where you pick it,
+      // not after the turn comes back asking.
+      const args = argumentHint(skill);
+      return {
+        key: skill.path,
+        icon: 'zap',
+        color: 'var(--synapse-500)',
+        label: `/${skill.name}${args === '' ? '' : ` ${args}`}`,
+        hint: skill.description,
+        run: () => completeSkill(skill),
+      };
+    });
     return items.length === 0 ? null : { testid: 'skill-menu', anchor: 'slash', items };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slashFragment, skills]);
+  }, [slashFragment, skills, recency]);
 
   const attachMenu = useMemo((): Menu | null => {
     if (at === null) return null;
     const taken = new Set(attached ?? []);
-    const match = (label: string) => (at.fragment === '' ? 1 : quickOpenScore(at.fragment, label));
+    const rank = <T,>(
+      items: readonly T[],
+      texts: (item: T) => string[],
+      limit: number,
+      path?: (item: T) => string,
+    ) => rankNames({ query: at.fragment, items, texts, path, recency, limit }).items;
 
     // Surfaces first — the thing you are least able to name any other way. A
     // record can always be mentioned with `[[`; a List has no such token.
@@ -264,74 +282,71 @@ export function ChatInput({
       ...[...schema.types.keys()].map((name) => ({ kind: 'type' as const, name })),
     ];
     const lookup = { entries, views, collections };
-    const placeItems = places
-      .map((place) => placeChip(place, lookup))
-      .map((chip) => ({ chip, score: match(chip.label) }))
-      .filter((m) => m.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 4)
-      .map(({ chip }) => ({
-        key: chipId(chip),
-        icon: 'map-pin',
-        color: 'var(--n-400)',
-        label: chip.label,
-        hint: 'Surface',
-        group: 'Surfaces',
-        run: () => attach(chip),
-      }));
+    const placeItems = rank(
+      places.map((place) => placeChip(place, lookup)),
+      (chip) => [chip.label],
+      4,
+    ).map((chip) => ({
+      key: chipId(chip),
+      icon: 'map-pin',
+      color: 'var(--n-400)',
+      label: chip.label,
+      hint: 'Surface',
+      group: 'Surfaces',
+      run: () => attach(chip),
+    }));
 
     // Agent records are deliberately absent from here: they get their own rows
     // below, which ADDRESS them. Offering one record two ways — "attach this
     // page" and "talk to this agent" — reads as a duplicate long before it
     // reads as a choice, and addressing already carries everything attaching
     // would have (its brief, its memory, its scope).
-    const recordItems = entries
-      .filter((e) => e.type !== 'Type' && !isAgentEntry(e))
-      .map((e) => ({ entry: e, score: match(e.title) }))
-      .filter((m) => m.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 6)
-      .map(({ entry }) => {
-        const style = typeStyle(entry.type, schema);
-        const chip = recordChip(entry.path, entries);
-        return {
-          key: `record:${entry.path}`,
-          icon: style.icon,
-          color: style.color ?? 'var(--n-400)',
-          label: entry.title,
-          hint: entry.type ?? 'Note',
-          group: 'Records',
-          run: () => {
-            if (chip !== null) attach(chip);
-          },
-        };
-      });
+    const recordItems = rank(
+      entries.filter((e) => e.type !== 'Type' && !isAgentEntry(e)),
+      (e) => [e.title],
+      6,
+      (e) => e.path,
+    ).map((entry) => {
+      const style = typeStyle(entry.type, schema);
+      const chip = recordChip(entry.path, entries);
+      return {
+        key: `record:${entry.path}`,
+        icon: style.icon,
+        color: style.color ?? 'var(--n-400)',
+        label: entry.title,
+        hint: entry.type ?? UNTYPED_LABEL,
+        group: 'Records',
+        run: () => {
+          if (chip !== null) attach(chip);
+        },
+      };
+    });
 
     // M33b.6 — the agents this vault holds, addressable by the handle their
     // writes are already stamped with. LAST, and not for lack of importance:
     // every row above consumes the token and produces a chip, and these do the
     // opposite, so they are grouped apart from the rows that behave alike
     // rather than interleaved with them.
-    const agentItems = listAgents(entries)
-      .map((agent) => ({ agent, score: Math.max(match(agent.handle), match(agent.title)) }))
-      .filter((m) => m.score > 0 && m.agent.handle !== '')
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 4)
-      .map(({ agent }) => ({
-        key: `agent:${agent.handle}`,
-        icon: 'bot',
-        color: 'var(--synapse-500)',
-        label: `@${agent.handle}`,
-        hint: agent.title,
-        group: 'Agents',
-        run: () => addressAgent(agent.handle),
-      }));
+    const agentItems = rank(
+      listAgents(entries).filter((agent) => agent.handle !== ''),
+      (agent) => [agent.handle, agent.title],
+      4,
+      (agent) => agent.path,
+    ).map((agent) => ({
+      key: `agent:${agent.handle}`,
+      icon: 'bot',
+      color: 'var(--synapse-500)',
+      label: `@${agent.handle}`,
+      hint: agent.title,
+      group: 'Agents',
+      run: () => addressAgent(agent.handle),
+    }));
 
     const chipItems = onAttach === undefined ? [] : [...placeItems, ...recordItems];
     const items = [...chipItems, ...agentItems].filter((i) => !taken.has(i.key));
     return items.length === 0 ? null : { testid: 'attach-menu', anchor: `at:${at.start}`, items };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [at, attached, collections, entries, onAttach, schema, views, value]);
+  }, [at, attached, collections, entries, onAttach, schema, views, value, recency]);
 
   // One menu at a time. Order is deliberate: `/` only matches when the whole
   // draft is the token, `[[` needs its own brackets, and `@` is the fallback —

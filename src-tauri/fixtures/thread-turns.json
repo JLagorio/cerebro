@@ -1,0 +1,413 @@
+{
+  "about": "M70.4: a person's @mention in a comment thread. Rust (src-tauri/src/agent/thread_turn.rs) and the mock (src/lib/mockIpc.ts threadTurnRefusal, settleWords) replay every row: each refusal in its exact words, checked in order, and the words each ending settles a placeholder with. Handles here are not the demo vault's, so the mock can seed these files beside it.",
+  "limits": {
+    "answer_chars": 8000,
+    "earlier_messages": 20,
+    "earlier_chars": 2000,
+    "failure_chars": 300
+  },
+  "files": {
+    "records/agents/proofreader.md": "---\ntype: Agent\ntitle: Proofreader\nslug: proofreader\n---\n\n# Proofreader\n\nLook closely.\n",
+    "records/agents/twin-one.md": "---\ntype: Agent\ntitle: Twin one\nslug: twin\n---\n\n# Twin one\n\nLook closely.\n",
+    "records/agents/twin-two.md": "---\ntype: Agent\ntitle: Twin two\nslug: twin\n---\n\n# Twin two\n\nLook closely.\n",
+    "records/agents/sleeper.md": "---\ntype: Agent\ntitle: Sleeper\nslug: sleeper\npaused: true\n---\n\n# Sleeper\n\nLook closely.\n",
+    "records/agents/narrow.md": "---\ntype: Agent\ntitle: Narrow reader\nslug: narrow\nread-scope:\n  - records/risks\n---\n\n# Narrow reader\n\nLook closely.\n",
+    "records/agents/blind.md": "---\ntype: Agent\ntitle: Blind reader\nslug: blind\nread-scope: []\n---\n\n# Blind reader\n\nLook closely.\n",
+    "records/agents/odd.md": "---\ntype: Agent\ntitle: Odd effort\nslug: odd\neffort: turbo\n---\n\n# Odd effort\n\nLook closely.\n",
+    "records/agents/scoped.md": "---\ntype: Agent\ntitle: Scoped\nslug: scoped\npreferences: Be terse.\nscope:\n  - records/risks\nread-scope:\n  - notes\n  - records\nallowed-tools:\n  - get_note\n  - search_notes\nmodel: sonnet\neffort: low\nask-first: true\n---\n\n# Scoped\n\nAnswer plainly.\n",
+    "notes/plan.md": "---\ntitle: Plan\nstatus: draft\n---\n\n# Plan\n\nWe ship on Thursdays, after the freeze.\n",
+    "notes/broken.md": "---\ntitle: Broken\n---\n\n# Broken\n"
+  },
+  "sidecars": {
+    "notes/plan.md": {
+      "format": 1,
+      "threads": [
+        {
+          "anchor": {
+            "quote": "after the freeze",
+            "occurrence": 1,
+            "before": "We ship on Thursdays, ",
+            "after": "."
+          },
+          "comments": [
+            {
+              "id": "0000000000000001",
+              "author": "human:owner",
+              "created": "2026-10-14T09:00:00Z",
+              "body": "@proofreader check this"
+            },
+            {
+              "id": "0000000000000002",
+              "author": "process:other",
+              "created": "2026-10-14T09:00:00Z",
+              "body": "@proofreader look here"
+            },
+            {
+              "id": "0000000000000003",
+              "author": "claude-code",
+              "created": "2026-10-14T09:00:00Z",
+              "body": "@proofreader see"
+            },
+            {
+              "id": "0000000000000004",
+              "author": "agent:abc123",
+              "created": "2026-10-14T09:00:00Z",
+              "body": "@proofreader see too"
+            },
+            {
+              "id": "0000000000000005",
+              "author": "human:owner",
+              "created": "2026-10-14T09:00:00Z",
+              "body": "",
+              "deleted": {
+                "at": "2026-10-14T09:05:00Z",
+                "by": "human:owner"
+              }
+            }
+          ]
+        },
+        {
+          "deleted": {
+            "at": "2026-10-14T09:05:00Z",
+            "by": "human:owner"
+          },
+          "comments": [
+            {
+              "id": "0000000000000010",
+              "author": "human:owner",
+              "created": "2026-10-14T09:00:00Z",
+              "body": "",
+              "deleted": {
+                "at": "2026-10-14T09:05:00Z",
+                "by": "human:owner"
+              }
+            }
+          ]
+        },
+        {
+          "comments": [
+            {
+              "id": "0000000000000020",
+              "author": "human:owner",
+              "created": "2026-10-14T09:00:00Z",
+              "body": "@proofreader once more"
+            },
+            {
+              "id": "0000000000000021",
+              "author": "process:proofreader",
+              "created": "2026-10-14T09:00:00Z",
+              "body": "",
+              "run_id": "run-a",
+              "state": "pending",
+              "answers": "0000000000000020"
+            }
+          ]
+        },
+        {
+          "comments": [
+            {
+              "id": "0000000000000030",
+              "author": "human:owner",
+              "created": "2026-10-14T09:00:00Z",
+              "body": "@proofreader again"
+            },
+            {
+              "id": "0000000000000031",
+              "author": "process:proofreader",
+              "created": "2026-10-14T09:00:00Z",
+              "body": "Done.",
+              "run_id": "run-b",
+              "state": "answered",
+              "answers": "0000000000000030"
+            }
+          ]
+        }
+      ]
+    },
+    "notes/broken.md": "{not json"
+  },
+  "refusals": [
+    {
+      "why": "a person's comment naming one agent starts a turn",
+      "request": {
+        "page": "notes/plan.md",
+        "thread": "0000000000000001",
+        "message": "0000000000000001",
+        "handle": "proofreader"
+      },
+      "error": null
+    },
+    {
+      "why": "nobody answers the handle",
+      "request": {
+        "page": "notes/plan.md",
+        "thread": "0000000000000001",
+        "message": "0000000000000001",
+        "handle": "nobody"
+      },
+      "error": "No agent answers to @nobody, so nobody was asked."
+    },
+    {
+      "why": "two records answer the handle",
+      "request": {
+        "page": "notes/plan.md",
+        "thread": "0000000000000001",
+        "message": "0000000000000001",
+        "handle": "twin"
+      },
+      "error": "More than one agent answers to @twin (records/agents/twin-one.md, records/agents/twin-two.md), so nobody was asked. Give each its own `slug:`."
+    },
+    {
+      "why": "the record is paused",
+      "request": {
+        "page": "notes/plan.md",
+        "thread": "0000000000000001",
+        "message": "0000000000000001",
+        "handle": "sleeper"
+      },
+      "error": "Sleeper is paused, so it can't answer here."
+    },
+    {
+      "why": "the page is not a note",
+      "request": {
+        "page": "notes/missing.md",
+        "thread": "0000000000000001",
+        "message": "0000000000000001",
+        "handle": "proofreader"
+      },
+      "error": "no note at notes/missing.md"
+    },
+    {
+      "why": "the record may not read the page",
+      "request": {
+        "page": "notes/plan.md",
+        "thread": "0000000000000001",
+        "message": "0000000000000001",
+        "handle": "narrow"
+      },
+      "error": "Narrow reader can't read notes/plan.md (it may read only records/risks), so it can't answer here."
+    },
+    {
+      "why": "the record may read nothing",
+      "request": {
+        "page": "notes/plan.md",
+        "thread": "0000000000000001",
+        "message": "0000000000000001",
+        "handle": "blind"
+      },
+      "error": "Blind reader can't read notes/plan.md (it may read nothing), so it can't answer here."
+    },
+    {
+      "why": "the sidecar can't be read",
+      "request": {
+        "page": "notes/broken.md",
+        "thread": "0000000000000001",
+        "message": "0000000000000001",
+        "handle": "proofreader"
+      },
+      "error": "Cerebro could not read the comments on notes/broken.md (it is not valid JSON), so nobody was asked."
+    },
+    {
+      "why": "no such thread",
+      "request": {
+        "page": "notes/plan.md",
+        "thread": "0000000000000099",
+        "message": "0000000000000001",
+        "handle": "proofreader"
+      },
+      "error": "That thread is gone, so nobody was asked."
+    },
+    {
+      "why": "a deleted thread",
+      "request": {
+        "page": "notes/plan.md",
+        "thread": "0000000000000010",
+        "message": "0000000000000010",
+        "handle": "proofreader"
+      },
+      "error": "That thread is gone, so nobody was asked."
+    },
+    {
+      "why": "no such comment",
+      "request": {
+        "page": "notes/plan.md",
+        "thread": "0000000000000001",
+        "message": "0000000000000099",
+        "handle": "proofreader"
+      },
+      "error": "That comment is gone, so nobody was asked."
+    },
+    {
+      "why": "a deleted comment",
+      "request": {
+        "page": "notes/plan.md",
+        "thread": "0000000000000001",
+        "message": "0000000000000005",
+        "handle": "proofreader"
+      },
+      "error": "That comment is gone, so nobody was asked."
+    },
+    {
+      "why": "an agent's comment",
+      "request": {
+        "page": "notes/plan.md",
+        "thread": "0000000000000001",
+        "message": "0000000000000002",
+        "handle": "proofreader"
+      },
+      "error": "Only a person's comment can ask an agent, so nobody was asked."
+    },
+    {
+      "why": "the panel's comment",
+      "request": {
+        "page": "notes/plan.md",
+        "thread": "0000000000000001",
+        "message": "0000000000000003",
+        "handle": "proofreader"
+      },
+      "error": "Only a person's comment can ask an agent, so nobody was asked."
+    },
+    {
+      "why": "an agent: author's comment",
+      "request": {
+        "page": "notes/plan.md",
+        "thread": "0000000000000001",
+        "message": "0000000000000004",
+        "handle": "proofreader"
+      },
+      "error": "Only a person's comment can ask an agent, so nobody was asked."
+    },
+    {
+      "why": "an answer is pending",
+      "request": {
+        "page": "notes/plan.md",
+        "thread": "0000000000000020",
+        "message": "0000000000000020",
+        "handle": "proofreader"
+      },
+      "error": "Proofreader is already answering that comment."
+    },
+    {
+      "why": "an answer is posted",
+      "request": {
+        "page": "notes/plan.md",
+        "thread": "0000000000000030",
+        "message": "0000000000000030",
+        "handle": "proofreader"
+      },
+      "error": "Proofreader has already answered that comment."
+    },
+    {
+      "why": "another agent may answer a comment one agent answered",
+      "request": {
+        "page": "notes/plan.md",
+        "thread": "0000000000000030",
+        "message": "0000000000000030",
+        "handle": "scoped"
+      },
+      "error": null
+    },
+    {
+      "why": "the record's effort is not one Claude Code takes",
+      "request": {
+        "page": "notes/plan.md",
+        "thread": "0000000000000001",
+        "message": "0000000000000001",
+        "handle": "odd"
+      },
+      "error": "Odd effort's record: effort \"turbo\" is not one Claude Code accepts — use low, medium, high, xhigh or max, or remove it for Claude Code's default. Nothing was started."
+    }
+  ],
+  "settle": [
+    {
+      "why": "an answer",
+      "title": "Proofreader",
+      "outcome": "succeeded",
+      "answer": "It ships Thursday.",
+      "failure": null,
+      "text": "It ships Thursday.",
+      "state": "answered"
+    },
+    {
+      "why": "an empty answer",
+      "title": "Proofreader",
+      "outcome": "succeeded",
+      "answer": null,
+      "failure": null,
+      "text": "Proofreader finished without writing a reply.",
+      "state": "answered"
+    },
+    {
+      "why": "a blank answer",
+      "title": "Proofreader",
+      "outcome": "succeeded",
+      "answer": "  \n",
+      "failure": null,
+      "text": "Proofreader finished without writing a reply.",
+      "state": "answered"
+    },
+    {
+      "why": "a long answer is cut",
+      "title": "Proofreader",
+      "outcome": "succeeded",
+      "answer_repeat": 8001,
+      "failure": null,
+      "text_repeat": 8000,
+      "state": "answered"
+    },
+    {
+      "why": "a failure with words",
+      "title": "Proofreader",
+      "outcome": "failed",
+      "answer": null,
+      "failure": "Not signed in to Claude Code",
+      "text": "Proofreader couldn't answer: Not signed in to Claude Code",
+      "state": "failed"
+    },
+    {
+      "why": "a quota failure",
+      "title": "Proofreader",
+      "outcome": "quota_failed",
+      "answer": null,
+      "failure": "Usage limit reached",
+      "text": "Proofreader couldn't answer: Usage limit reached",
+      "state": "failed"
+    },
+    {
+      "why": "a failure without words",
+      "title": "Proofreader",
+      "outcome": "failed",
+      "answer": "partial",
+      "failure": null,
+      "text": "Proofreader couldn't answer. The run's detail in Fleet says what happened.",
+      "state": "failed"
+    },
+    {
+      "why": "stopped",
+      "title": "Proofreader",
+      "outcome": "cancelled",
+      "answer": "partial",
+      "failure": null,
+      "text": "Proofreader was stopped before it answered.",
+      "state": "failed"
+    },
+    {
+      "why": "out of time",
+      "title": "Proofreader",
+      "outcome": "elapsed_aborted",
+      "answer": null,
+      "failure": null,
+      "text": "Proofreader ran out of time before it answered.",
+      "state": "failed"
+    },
+    {
+      "why": "abandoned",
+      "title": "Proofreader",
+      "outcome": "abandoned_usage_unknown",
+      "answer": null,
+      "failure": null,
+      "text": "Proofreader ended before it finished answering.",
+      "state": "failed"
+    }
+  ]
+}

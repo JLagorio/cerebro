@@ -9,12 +9,19 @@ import {
   saveActiveId,
   saveConversations,
 } from '@/agent/conversations';
-import { readCliTranscript } from '@/agent/agentIpc';
+import {
+  cancelInteraction,
+  listInteractions,
+  readCliTranscript,
+  stopAgent,
+} from '@/agent/agentIpc';
 import { healFromTranscript, replayTranscript } from '@/agent/transcript';
 import { placeLabel, samePlace, type Place } from '@/engine/place';
 import type { AgentChat } from '@/agent/useAgentChat';
 import type { Conversation } from '@/agent/types';
 import type { RunChoice } from '@/engine/runOptions';
+import { useReviewNotesStore } from '@/stores/reviewNotesStore';
+import { useUiStore } from '@/stores/uiStore';
 
 /**
  * Where the active thread's transcript stands (M56.3): not asked for
@@ -82,6 +89,12 @@ export type PlaceLookup = Parameters<typeof placeLabel>[1];
  * the copy never keeps; the wording kept), and a
  * file Claude Code no longer has blocks the thread rather than letting a send
  * fail with the CLI's own error (Q7).
+ *
+ * A turn outlives its panel (M57.6). Switching threads, starting a new one
+ * and closing the panel detach a running turn, and every save of the active
+ * thread carries the turn's `live` with its messages (`saveActive`), so the
+ * thread re-attaches when it opens again. Deleting a thread is the one way
+ * this list ends a turn: its run is stopped and its card cancelled.
  */
 export function useConversations(
   chat: AgentChat,
@@ -101,7 +114,11 @@ export function useConversations(
   // second loadConversations() call, which on a first run minted a whole
   // second conversation whose id matched nothing in the list, so the mirror
   // effect below had no record to write the transcript into (M15).
+  // A thread the run list asked for (M57.6) beats the remembered one, and is
+  // taken once.
   const [activeId, setActiveId] = useState<string>(() => {
+    const requested = useUiStore.getState().takePanelConversation();
+    if (requested !== null && conversations.some((c) => c.id === requested)) return requested;
     const remembered = loadActiveId();
     return remembered !== null && conversations.some((c) => c.id === remembered)
       ? remembered
@@ -127,10 +144,13 @@ export function useConversations(
     (c: Conversation) => {
       restoreEpoch.current += 1;
       const epoch = restoreEpoch.current;
-      restore(c.messages, c.sessionId);
+      restore(c.messages, c.sessionId, undefined, c.live ?? null);
       setReadBlock(null);
       const session = c.sessionId;
-      if (session === null || vault === null) {
+      // A thread with a turn still running re-attaches to it (M57.6), and
+      // the run's own events, or its rebuild at the end, say what the file
+      // would: a heal read now would race the re-attach.
+      if (session === null || vault === null || c.live != null) {
         setTranscript({ state: 'idle' });
         return;
       }
@@ -175,34 +195,53 @@ export function useConversations(
     if (first !== undefined) restoreThread(first);
   }, [activeId, conversations, restoreThread]);
 
-  // Mirror the live transcript into the active record, and auto-title from
-  // the first user message. Skipped while streaming: persisting a half-
-  // written reply would restore a conversation frozen mid-sentence.
   const messages = chat.messages;
   const sessionId = chat.sessionId;
   const streaming = chat.streaming;
   const turnEndedAt = chat.turnEndedAt;
-  useEffect(() => {
-    if (!hydrated.current || streaming) return;
+  const live = chat.live;
+
+  /**
+   * Write the active thread as the chat hook holds it (M57.6): its messages,
+   * its session and the turn it has running, read when this is called, never
+   * later, so a save before a thread switch writes the thread being left.
+   * The one writer every save of the active thread goes through, so `live`
+   * and the reply's cursor never disagree with the messages they belong to.
+   */
+  const chatRef = useRef(chat);
+  chatRef.current = chat;
+  const saveActive = useCallback((id: string, extra: Partial<Conversation> = {}) => {
+    const { messages: held, sessionId: session, live: turn } = chatRef.current;
     setConversations((prev) => {
       const next = prev.map((c) =>
-        c.id === activeId
-          ? retitle({
-              ...c,
-              messages,
-              sessionId,
-              ...(turnEndedAt === null ? {} : { updatedAt: turnEndedAt }),
-            })
+        c.id === id
+          ? retitle({ ...c, messages: held, sessionId: session, live: turn, ...extra })
           : c,
       );
       saveConversations(next);
       return next;
     });
-  }, [messages, sessionId, streaming, activeId, turnEndedAt]);
+  }, []);
 
-  // …except the session id, which is stored the moment it is known, streaming
-  // or not (M56.3): a reload mid-turn must still know which session file the
-  // thread rebuilds from.
+  // Mirror the transcript into the active record, and auto-title from the
+  // first user message. Skipped while streaming: the turn's skeleton was
+  // saved with its `live` when the run started (below), and the turn's end
+  // saves it whole.
+  useEffect(() => {
+    if (!hydrated.current || streaming) return;
+    saveActive(activeId, turnEndedAt === null ? {} : { updatedAt: turnEndedAt });
+  }, [messages, sessionId, streaming, activeId, turnEndedAt, saveActive]);
+
+  // A turn that just got its run (M57.6): the skeleton, the question and its
+  // empty reply, is saved with `live`, so a reload mid-turn re-attaches.
+  useEffect(() => {
+    if (!hydrated.current || live === null) return;
+    saveActive(activeId);
+  }, [live, activeId, saveActive]);
+
+  // …except the session id, which is stored the moment the run names it,
+  // streaming or not (M56.3): a reload mid-turn must still know which session
+  // file the thread rebuilds from.
   useEffect(() => {
     if (!hydrated.current || sessionId === null) return;
     setConversations((prev) => {
@@ -214,25 +253,28 @@ export function useConversations(
     });
   }, [sessionId, activeId]);
 
-  // …but the panel can be closed MID-TURN, and the effect above deliberately
-  // skips streaming, so the question and everything already written were
-  // thrown away on the way out (M15). Persist once more as this unmounts,
-  // streaming or not — saveConversations strips the streaming flags, so what
-  // comes back reads as a finished turn rather than one frozen mid-sentence.
-  const snapshot = useRef({ conversations, activeId, messages, sessionId });
-  snapshot.current = { conversations, activeId, messages, sessionId };
+  // …and once more as the panel closes, streaming or not (M15): the turn
+  // detaches and keeps running (M57.6), so the thread is saved with its
+  // `live` and its reply's cursor, and reopening re-attaches from there. A
+  // reply streaming with no live turn was a send still parked before its
+  // child, which the close cancels: it reopens saying it was cut off.
+  const snapshot = useRef({ conversations, activeId, messages, sessionId, live });
+  snapshot.current = { conversations, activeId, messages, sessionId, live };
   useEffect(() => {
     return () => {
       const s = snapshot.current;
       if (!hydrated.current || s.messages.length === 0) return;
-      // A reply still streaming was cut off by the close: it reopens saying
-      // so rather than as a finished turn.
-      const kept = s.messages.map((m) =>
-        m.streaming === true ? { ...m, streaming: false, interrupted: true } : m,
-      );
+      const kept =
+        s.live !== null
+          ? s.messages
+          : s.messages.map((m) =>
+              m.streaming === true ? { ...m, streaming: false, interrupted: true } : m,
+            );
       saveConversations(
         s.conversations.map((c) =>
-          c.id === s.activeId ? retitle({ ...c, messages: kept, sessionId: s.sessionId }) : c,
+          c.id === s.activeId
+            ? retitle({ ...c, messages: kept, sessionId: s.sessionId, live: s.live })
+            : c,
         ),
       );
     };
@@ -268,28 +310,36 @@ export function useConversations(
 
   const start = useCallback(() => {
     const created = newConversation();
-    setConversations((prev) => {
-      const next = [created, ...prev];
-      saveConversations(next);
-      return next;
-    });
+    // The thread being left keeps its turn running (M57.6): saved with it.
+    setConversations((prev) => [created, ...prev]);
+    saveActive(activeId);
     setActiveId(created.id);
     restoreEpoch.current += 1;
     setTranscript({ state: 'idle' });
     setReadBlock(null);
     chat.reset();
-  }, [chat]);
+  }, [activeId, chat, saveActive]);
 
   const select = useCallback(
     (id: string) => {
       if (id === activeId) return;
       const target = conversations.find((c) => c.id === id);
       if (target === undefined) return;
+      // The thread being left keeps its turn running (M57.6): saved with it.
+      saveActive(activeId);
       setActiveId(id);
       restoreThread(target);
     },
-    [activeId, conversations, restoreThread],
+    [activeId, conversations, restoreThread, saveActive],
   );
+
+  // A thread the run list asks for while the panel is open (M57.6).
+  const requested = useUiStore((s) => s.panelConversation);
+  useEffect(() => {
+    if (requested === null) return;
+    const id = useUiStore.getState().takePanelConversation();
+    if (id !== null) select(id);
+  }, [requested, select]);
 
   const rename = useCallback((id: string, title: string) => {
     const trimmed = title.trim();
@@ -317,6 +367,24 @@ export function useConversations(
 
   const remove = useCallback(
     (id: string) => {
+      // Deleting a thread ends its turn (M57.6), active or not: its run is
+      // stopped and the card it waits on cancelled, since nothing could
+      // answer either once the thread is gone.
+      const doomed = conversations.find((c) => c.id === id);
+      const turn = id === activeId ? chat.live : (doomed?.live ?? null);
+      const session = id === activeId ? chat.sessionId : (doomed?.sessionId ?? null);
+      if (turn != null) void stopAgent(turn.run).catch(() => undefined);
+      if (session !== null && vault !== null) {
+        void listInteractions(vault)
+          .then((cards) => {
+            for (const card of cards) {
+              if (card.session_id === session) void cancelInteraction(card.id);
+            }
+          })
+          .catch(() => undefined);
+      }
+      // Its review notes go with it (M58.5): nothing could send them now.
+      useReviewNotesStore.getState().prune(id);
       setConversations((prev) => {
         const remaining = prev.filter((c) => c.id !== id);
         const next = remaining.length > 0 ? remaining : [newConversation()];
@@ -329,7 +397,7 @@ export function useConversations(
         return next;
       });
     },
-    [activeId, restoreThread],
+    [activeId, chat.live, chat.sessionId, conversations, restoreThread, vault],
   );
 
   const active = conversations.find((c) => c.id === activeId) ?? null;

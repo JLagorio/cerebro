@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { diffStats, isFailure, parseDiff, syncState } from '@/engine/git';
-import type { RemoteResult } from '@/engine/git';
+import {
+  RESTORE_KNOWLEDGE,
+  RESTORE_NOT_TEXT,
+  RESTORE_OUTSIDE,
+  RESTORE_REMOVED,
+  RESTORE_TOO_LARGE,
+  diffStats,
+  isFailure,
+  parseDiff,
+  restoreBlock,
+  syncState,
+} from '@/engine/git';
+import type { FileCommit, RemoteResult } from '@/engine/git';
 
 const result = (status: RemoteResult['status']): RemoteResult => ({
   status,
@@ -27,6 +38,91 @@ describe('parseDiff', () => {
       ['diff --git a/x b/x', 'index 111..222 100644', 'new file mode 100644'].join('\n'),
     );
     expect(lines.every((l) => l.kind === 'meta')).toBe(true);
+  });
+});
+
+describe('parseDiff line numbers (M58.5)', () => {
+  const numbers = (diff: string[]) =>
+    parseDiff(diff.join('\n')).map((l) => [l.kind, l.oldLine, l.newLine]);
+
+  it('numbers context, removed and added lines from a header with counts', () => {
+    expect(numbers(['@@ -3,3 +3,4 @@', ' keep', '-old', '+new', '+more', ' tail'])).toEqual([
+      ['hunk', null, null],
+      ['context', 3, 3],
+      ['del', 4, null],
+      ['add', null, 4],
+      ['add', null, 5],
+      ['context', 5, 6],
+    ]);
+  });
+
+  it('reads a header without counts as one line each', () => {
+    expect(numbers(['@@ -7 +9 @@', '-old', '+new', ' after'])).toEqual([
+      ['hunk', null, null],
+      ['del', 7, null],
+      ['add', null, 9],
+      // Past the hunk's counts: still context, never numbered.
+      ['context', null, null],
+    ]);
+  });
+
+  it('restarts at each hunk and at each file', () => {
+    const lines = parseDiff(
+      [
+        'diff --git a/a.md b/a.md',
+        '--- a/a.md',
+        '+++ b/a.md',
+        '@@ -1,1 +1,1 @@',
+        '-a',
+        '+A',
+        '@@ -10,1 +10,1 @@',
+        '-j',
+        '+J',
+        'diff --git a/b.md b/b.md',
+        '--- a/b.md',
+        '+++ b/b.md',
+        '@@ -2,1 +2,1 @@',
+        '-b',
+        '+B',
+      ].join('\n'),
+    );
+    expect(lines.filter((l) => l.kind === 'del').map((l) => l.oldLine)).toEqual([1, 10, 2]);
+    expect(lines.filter((l) => l.kind === 'add').map((l) => l.newLine)).toEqual([1, 10, 2]);
+    expect(lines.filter((l) => l.kind === 'meta').every((l) => l.oldLine === null)).toBe(true);
+  });
+
+  it('reads git\u2019s no-newline marker as meta with no number', () => {
+    const lines = parseDiff(
+      ['@@ -1,1 +1,1 @@', '-old', '\\ No newline at end of file', '+new', ''].join('\n'),
+    );
+    expect(lines.map((l) => [l.kind, l.oldLine, l.newLine])).toEqual([
+      ['hunk', null, null],
+      ['del', 1, null],
+      ['meta', null, null],
+      ['add', null, 1],
+      // The trailing empty line is outside the hunk.
+      ['context', null, null],
+    ]);
+  });
+
+  it('numbers nothing outside a hunk', () => {
+    const lines = parseDiff(['diff --git a/x b/x', 'index 1..2', '--- a/x', '+++ b/x'].join('\n'));
+    expect(lines.every((l) => l.oldLine === null && l.newLine === null)).toBe(true);
+  });
+
+  it('keeps the kinds it always gave', () => {
+    const lines = parseDiff(
+      ['--- a/x.md', '+++ b/x.md', '@@ -1,2 +1,2 @@', '-a', '+b', ' c', ''].join('\n'),
+    );
+    expect(lines.map((l) => l.kind)).toEqual([
+      'meta',
+      'meta',
+      'hunk',
+      'del',
+      'add',
+      'context',
+      'context',
+    ]);
   });
 });
 
@@ -76,5 +172,42 @@ describe('isFailure', () => {
     for (const status of ['ok', 'up_to_date', 'updated', 'no_remote', 'conflict'] as const) {
       expect(isFailure(result(status))).toBe(false);
     }
+  });
+});
+
+// M58.4: Restore is offered for a text version of a page inside the vault
+// that did not remove it, and never for a concept.
+describe('restoreBlock', () => {
+  const commit = (patch: Partial<FileCommit> = {}): FileCommit => ({
+    hash: 'a'.repeat(40),
+    shortHash: 'aaaaaaa',
+    message: 'edit',
+    author: 'Ana Rios',
+    date: 1_753_700_000,
+    parent: 'b'.repeat(40),
+    previousAt: null,
+    pathAt: 'notes/plan.md',
+    previousPath: null,
+    change: 'modified',
+    ...patch,
+  });
+  const text = { kind: 'text' as const, text: '# Plan\n' };
+
+  it('offers Restore for a text version of a page', () => {
+    expect(restoreBlock('notes/plan.md', commit(), text)).toBeNull();
+    expect(restoreBlock('notes/plan.md', commit(), null)).toBeNull();
+  });
+
+  it('gives each reason it is not offered', () => {
+    expect(restoreBlock('knowledge/c.md', commit(), text)).toBe(RESTORE_KNOWLEDGE);
+    expect(restoreBlock('notes/plan.md', commit({ pathAt: null }), text)).toBe(RESTORE_OUTSIDE);
+    expect(restoreBlock('notes/plan.md', commit({ change: 'deleted' }), null)).toBe(
+      RESTORE_REMOVED,
+    );
+    expect(restoreBlock('notes/plan.md', commit(), { kind: 'absent' })).toBe(RESTORE_REMOVED);
+    expect(restoreBlock('notes/plan.md', commit(), { kind: 'binary' })).toBe(RESTORE_NOT_TEXT);
+    expect(restoreBlock('notes/plan.md', commit(), { kind: 'too_large', bytes: 9e6 })).toBe(
+      RESTORE_TOO_LARGE,
+    );
   });
 });

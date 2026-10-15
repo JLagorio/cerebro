@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
+import COMMENT_TOOLS from '../../src-tauri/fixtures/comment-tools.json';
 import QUOTE_CASES from '../../src-tauri/fixtures/quote-cases.json';
-import { occurrencesOf, planEdits, QUOTE_LIMITS, type QuoteEdit } from './quote';
+import {
+  anchorContext,
+  commentMatches,
+  lineAt,
+  occurrencesOf,
+  planEdits,
+  QUOTE_LIMITS,
+  quoteMarkdown,
+  type QuoteEdit,
+} from './quote';
 
 /**
  * The TS half of edit_note's quote rules (M55.5). Rust replays the same file
@@ -65,5 +75,29 @@ describe('occurrencesOf', () => {
   it('finds nothing for a missing or an empty quote', () => {
     expect(occurrencesOf('abc', 'x')).toEqual([]);
     expect(occurrencesOf('abc', '')).toEqual([]);
+  });
+});
+
+describe('comment quotes (M70.3)', () => {
+  // The twin of comment_tools.rs's replays_the_shared_quote_filter: the same
+  // cases, so the mock finds an agent's quote where the packaged app does.
+  it.each(COMMENT_TOOLS.quotes.map((c) => [c.quote, c.markdown] as const))(
+    'names the markdown in %j as %j',
+    (quote, markdown) => {
+      expect(quoteMarkdown(quote)).toBe(markdown);
+    },
+  );
+
+  it.each(COMMENT_TOOLS.matches.map((c) => [c.why, c] as const))('%s', (_why, c) => {
+    const found = commentMatches(c.body, c.quote);
+    expect(found.map((at) => lineAt(c.body, at))).toEqual(c.lines);
+    expect(found.map((at) => anchorContext(c.body, at, at + c.quote.length))).toEqual(c.anchors);
+  });
+
+  it('keeps only matches the finder found', () => {
+    const body = 'a freeze, then [a freeze](freeze.md)\n';
+    expect(commentMatches(body, 'freeze')).toEqual(
+      occurrencesOf(body, 'freeze').filter((at) => body.slice(at - 1, at) !== '('),
+    );
   });
 });

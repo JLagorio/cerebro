@@ -263,6 +263,38 @@ describe('FileTree', () => {
     await waitFor(() => expect(fs().has(`${ROOT}/meetings/kickoff.md`)).toBe(false));
   });
 
+  // M60.8: the vault's own Trash, through trashPath, in the new words.
+  it('moves a page into the vault Trash, byte for byte, and says Settings restores it', async () => {
+    const page = `${ROOT}/meetings/kickoff.md`;
+    const bytes = fs().get(page);
+    renderTree();
+    fireEvent.click(screen.getByRole('button', { name: /^Meetings/ }));
+    fireEvent.contextMenu(screen.getByRole('button', { name: KICKOFF_TITLE }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move to Trash' }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toContain('It moves to the Trash.');
+    expect(dialog.textContent).toContain('Restore from Settings → Recently deleted for 30 days.');
+    expect(dialog.textContent).not.toMatch(/system Trash|not from the app/);
+    fireEvent.click(screen.getByRole('button', { name: 'Move to Trash' }));
+    await waitFor(() => expect(fs().has(page)).toBe(false));
+    const trashed = [...fs().keys()].find((p) => p.startsWith('.trash/') && p.endsWith(page));
+    expect(trashed && fs().get(trashed)).toBe(bytes);
+    await waitFor(() =>
+      expect(useUiStore.getState().toasts.map((t) => t.message)).toContain(
+        `Moved “${KICKOFF_TITLE}” to Trash`,
+      ),
+    );
+  });
+
+  it('says the folder and everything inside it move to the Trash', () => {
+    renderTree();
+    fireEvent.contextMenu(screen.getByRole('button', { name: /^Meetings/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move to Trash' }));
+    expect(screen.getByRole('dialog').textContent).toContain(
+      'The folder and everything inside it move to the Trash.',
+    );
+  });
+
   // M2.x docs polish: a folder note renders as its page, its sub-pages beneath.
   it('renders a folder-note as a doc row that opens its main page', async () => {
     fs().set(`${ROOT}/notes/notes.md`, '# Team Notes\n');

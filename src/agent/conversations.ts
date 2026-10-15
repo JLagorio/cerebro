@@ -1,5 +1,6 @@
-import { isPlace, placeLabel, type Place } from '@/engine/place';
+import { isPlace, placeKey, placeLabel, type Place } from '@/engine/place';
 import type { ChatMessage, Conversation, FailureNotice } from '@/agent/types';
+import { isChangeset } from '@/engine/changeset';
 import { effortRefusal, isUnset, modelRefusal } from '@/engine/runOptions';
 
 /**
@@ -136,10 +137,15 @@ function healToolIds(conversation: Conversation): Conversation {
 function healPlace(conversation: Conversation): Conversation {
   const { place } = conversation;
   if (place == null) return conversation;
-  if (isPlace(place) && typeof conversation.placeLabel === 'string') return conversation;
+  if (!isPlace(place)) return { ...conversation, place: null, placeLabel: undefined };
+  // A bare destination's label is the table's, never the stored one (M59.1):
+  // a thread written as "Pulse" or "Workspace" reads History or Work. A
+  // subject keeps the name it had (the M17.5 rule), so a deleted List still
+  // reads as what it was.
+  if (placeKey(place) === place.kind) return { ...conversation, placeLabel: placeLabel(place) };
+  if (typeof conversation.placeLabel === 'string') return conversation;
   // A valid place whose label went missing is worth keeping — re-derive it.
-  if (isPlace(place)) return { ...conversation, placeLabel: placeLabel(place) };
-  return { ...conversation, place: null, placeLabel: undefined };
+  return { ...conversation, placeLabel: placeLabel(place) };
 }
 
 /** A Claude Code session id as Rust accepts one: a lowercase UUID. */
@@ -236,6 +242,65 @@ function healDeferred(conversation: Conversation): Conversation {
   return changed ? { ...conversation, messages } : conversation;
 }
 
+/**
+ * Keep a reply's stored changesets only as this build reads them (M58.3):
+ * an array of changesets whose every field it renders. A malformed entry is
+ * dropped, and a field that is no array goes, so a stale build's write never
+ * draws a footer that says something the run did not.
+ */
+function healChangesets(conversation: Conversation): Conversation {
+  let changed = false;
+  const messages = conversation.messages.map((m) => {
+    const raw = (m as unknown as Record<string, unknown>).changesets;
+    if (raw === undefined) return m;
+    const kept = Array.isArray(raw) ? raw.filter(isChangeset) : [];
+    if (Array.isArray(raw) && kept.length === raw.length) return m;
+    changed = true;
+    const { changesets: _dropped, ...rest } = m;
+    return kept.length > 0 ? { ...rest, changesets: kept } : rest;
+  });
+  return changed ? { ...conversation, messages } : conversation;
+}
+
+/** An attach key as either backend mints one (M57.6): a durable run id, or
+ * the browser's `mock-<page>-<run>`. */
+const ATTACH_KEY = /^[A-Za-z0-9-]{1,80}$/;
+
+/**
+ * Keep a stored live turn only as this build writes one (M57.6): a safe
+ * integer run, an attach key, and a reply this thread still holds. Anything
+ * else would re-attach to nothing, or to a bubble that is not there, so it
+ * reads as no live turn. A reply's cursor stays only as a non-negative
+ * integer, and its gap mark only as `true`.
+ */
+function healLive(conversation: Conversation): Conversation {
+  let changed = false;
+  const messages = conversation.messages.map((m) => {
+    const raw = m as unknown as Record<string, unknown>;
+    const badSeq = 'seq' in raw && !(Number.isSafeInteger(raw.seq) && (raw.seq as number) >= 0);
+    const badGap = 'gap' in raw && raw.gap !== true;
+    if (!badSeq && !badGap) return m;
+    changed = true;
+    const kept = { ...raw };
+    if (badSeq) delete kept.seq;
+    if (badGap) delete kept.gap;
+    return kept as unknown as ChatMessage;
+  });
+  const live = conversation.live as unknown;
+  let keepLive = live === undefined || live === null;
+  if (!keepLive && typeof live === 'object') {
+    const l = live as Record<string, unknown>;
+    keepLive =
+      Number.isSafeInteger(l.run) &&
+      typeof l.attach === 'string' &&
+      ATTACH_KEY.test(l.attach) &&
+      typeof l.assistantId === 'string' &&
+      messages.some((m) => m.id === l.assistantId);
+  }
+  if (!changed && keepLive) return conversation;
+  return { ...conversation, messages, ...(keepLive ? {} : { live: null }) };
+}
+
 export function loadConversations(): Conversation[] {
   try {
     const raw = window.localStorage.getItem(KEY);
@@ -250,7 +315,9 @@ export function loadConversations(): Conversation[] {
       .map(healSessionId)
       .map(healNotices)
       .map(healRunOptions)
-      .map(healDeferred);
+      .map(healDeferred)
+      .map(healLive)
+      .map(healChangesets);
   } catch {
     return [];
   }
@@ -259,7 +326,9 @@ export function loadConversations(): Conversation[] {
 export function saveConversations(conversations: Conversation[]): void {
   try {
     // Streaming flags are per-session; persisting one leaves a conversation
-    // that reopens claiming to still be thinking. The reducer's live state
+    // that reopens claiming to still be thinking. A turn still running keeps
+    // `live` and its reply's `seq` instead (M57.6): reopening re-attaches to
+    // it and sets its own flag from what the run says. The reducer's live state
     // (M56.3) is memory only, for the same reason. So are whole tool payloads
     // (M56.8, Q21): the threads share localStorage's quota, and Claude Code's
     // session file holds them, so a reload heals them back while it exists

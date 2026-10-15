@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
-import { agentRef } from '@/engine/agents';
+import { agentRef, linkedTiers } from '@/engine/agents';
 import { agentDraft, agentPatch } from '@/engine/libraryDraft';
 import type { Entry } from '@/engine/types';
 import { useConcepts } from '@/knowledge/useConcepts';
@@ -20,7 +20,11 @@ export function AgentMemoryTab({ entry }: { entry: Entry }) {
   const ref = agentRef(entry);
   return (
     <div data-testid="agent-memory" className="flex flex-col gap-6">
-      <Corrections entry={entry} saved={draft.preferences} />
+      <Corrections
+        entry={entry}
+        saved={draft.preferences}
+        linked={linkedTiers(entry).preferences}
+      />
       <section>
         <div className={LABEL}>The agent&rsquo;s own notes</div>
         <p className="m-0 mb-1.5 text-xs leading-[17px] text-n-500">
@@ -44,8 +48,13 @@ export function AgentMemoryTab({ entry }: { entry: Entry }) {
  * the agent concluded on its own. Prose, so it commits on blur like any page
  * text; emptied, the key goes. Re-seeded from the record only while it is not
  * focused, so a rescan never eats what you are typing.
+ *
+ * Read-only when the record's value holds `[[links]]` (M56.13): the scan
+ * keeps only the links, so the box shows them alone, and saving it would
+ * erase every word written around them on disk. Nothing here writes a
+ * linked tier; the person edits it in the file instead.
  */
-function Corrections({ entry, saved }: { entry: Entry; saved: string }) {
+function Corrections({ entry, saved, linked }: { entry: Entry; saved: string; linked: boolean }) {
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
   const [text, setText] = useState(saved);
   const focused = useRef(false);
@@ -63,19 +72,32 @@ function Corrections({ entry, saved }: { entry: Entry; saved: string }) {
         to write this key is refused — an agent that can edit the corrections made to it does not
         have preferences, it has notes.
       </p>
+      {linked && (
+        <p
+          data-testid="agent-preferences-linked"
+          className="m-0 mb-1.5 text-xs leading-[17px] text-n-500"
+        >
+          Read-only here: this record&rsquo;s value holds [[links]], and the scan keeps only the
+          links, so saving would erase the words around them. Edit it in the file, or rewrite it
+          with names written plainly.
+        </p>
+      )}
       <textarea
         id="agent-preferences"
         data-testid="agent-preferences"
         rows={4}
         value={text}
+        readOnly={linked}
         placeholder="Never file a risk without an owner."
         onFocus={() => {
           focused.current = true;
         }}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          if (!linked) setText(e.target.value);
+        }}
         onBlur={() => {
           focused.current = false;
-          if (text.trim() === saved.trim()) return;
+          if (linked || text.trim() === saved.trim()) return;
           void patchFrontmatter(
             entry.path,
             agentPatch({ ...agentDraft(entry, ''), preferences: text }, ['preferences']),

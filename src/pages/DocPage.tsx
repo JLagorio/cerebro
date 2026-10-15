@@ -20,17 +20,18 @@ import type { CerebroEditor, EditorReadyInfo } from '@/editor/MarkdownEditor';
 import { hasTitleBlock, spliceTitleIntoBlocks } from '@/editor/markdown';
 import { NoteBodyEditor, type SaveState } from '@/editor/NoteBodyEditor';
 import { PageCommentsContext } from '@/editor/PageCommentsContext';
-import { GitHistoryPanel } from '@/git/GitHistoryPanel';
 import { InlineDiff } from '@/git/InlineDiff';
 import { HeadingProperties, stripCells } from '@/detail/HeadingProperties';
 import { RecordProperties } from '@/detail/RecordProperties';
 import { RecordTabs, recordTabSet } from '@/detail/RecordTabs';
 import { TabSections } from '@/detail/TabSections';
 import { addSubPage } from '@/app/pageActions';
+import { trashPath } from '@/app/trashActions';
 import { setTypeTabs } from '@/app/typeActions';
 import { isAgentEntry } from '@/engine/agents';
 import { isCollectionPage } from '@/engine/collections';
 import { isCommentPage } from '@/engine/comments';
+import { TRASH_WORDS } from '@/engine/trash';
 import {
   canHaveSubPages,
   crumbTrail,
@@ -53,7 +54,7 @@ import { KnowledgeStrip } from '@/knowledge/KnowledgeStrip';
 import { ReviewPager } from '@/knowledge/ReviewQueue';
 import { useConcept } from '@/knowledge/useConcepts';
 import { askedAbout, conceptAsk } from '@/lib/prompts';
-import { createFolder, deleteNote, readNote, saveNote, setNoteTitle } from '@/lib/ipc';
+import { createFolder, readNote, saveNote, setNoteTitle } from '@/lib/ipc';
 import { humanizeSlug, slugify } from '@/lib/slug';
 import {
   applyTemplateBody,
@@ -530,21 +531,18 @@ export function DocPage({ selection }: { selection: DocSelection }) {
       }
     : { path: entry.path, title: entry.title, extraPages: 0 };
 
+  // M60.8: to the vault's own Trash. trashPath toasts, rescans and never
+  // throws; a refusal keeps the dialog open and the page on screen.
   const submitDelete = async () => {
     if (vaultPath === null || busy) return;
     setBusy(true);
-    try {
-      await deleteNote(vaultPath, deleteSubject.path);
-      await rescan();
-      setConfirmDelete(false);
-      // Home, since M38.3: the page's surface of origin (Docs) is gone, and
-      // after a delete there is no page to stand on.
-      navigate({ kind: 'home' });
-    } catch {
-      toast("Couldn't move to Trash");
-    } finally {
-      setBusy(false);
-    }
+    const item = await trashPath(deleteSubject.path, deleteSubject.title);
+    setBusy(false);
+    if (item === null) return;
+    setConfirmDelete(false);
+    // Home, since M38.3: the page's surface of origin (Docs) is gone, and
+    // after a delete there is no page to stand on.
+    navigate({ kind: 'home' });
   };
 
   /**
@@ -773,9 +771,9 @@ export function DocPage({ selection }: { selection: DocSelection }) {
 
   const separator = <Icon name="chevron-right" size={12} color="var(--n-300)" />;
 
-  // The body editor + this document's history (M9.4 — silent when it has
-  // none): ONE block, shared by the untyped page and a record's Overview tab
-  // so an edit to one cannot silently miss the other.
+  // The body editor: ONE block, shared by the untyped page and a record's
+  // Overview tab so an edit to one cannot silently miss the other. The page's
+  // history lives in the side panel's History tab (M58.4, D18), not here.
   //
   // M70.2b: the selection toolbar's Comment button reads PageCommentsContext,
   // provided here and nowhere else, and not on a read-only page.
@@ -795,7 +793,6 @@ export function DocPage({ selection }: { selection: DocSelection }) {
         sections={concept !== null}
         onBodyLoaded={concept !== null ? (path, body) => setViewed({ path, body }) : undefined}
       />
-      <GitHistoryPanel path={entry.path} />
     </PageCommentsContext.Provider>
   );
 
@@ -1246,12 +1243,9 @@ export function DocPage({ selection }: { selection: DocSelection }) {
             disabled: busy,
           }}
           secondaryAction={{ label: 'Cancel', onClick: () => setConfirmDelete(false) }}
+          footerNote={TRASH_WORDS.footer}
         >
-          <p className="m-0 text-sm text-n-600">
-            {isDocMain
-              ? 'The whole doc — every page in it — moves to the system Trash.'
-              : 'The page moves to the system Trash.'}
-          </p>
+          <p className="m-0 text-sm text-n-600">{isDocMain ? TRASH_WORDS.doc : TRASH_WORDS.body}</p>
         </Dialog>
       )}
     </div>

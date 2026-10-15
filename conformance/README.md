@@ -61,8 +61,14 @@ last in effect, then what the person reads). A test in `agent::fold`
 fails when the committed bytes are stale or missing, and holds a turn's
 stream and session-file content equal. `long-payload` (M56.8) is the case
 whose input and result the previews cut, so its content carries the
-`ToolPayload` events both formats must agree on. `src/agent/transcript.test.ts`
-replays the same files through the one TS reducer, live and restored.
+`ToolPayload` events both formats must agree on. `deferred` (M57.1) is a
+turn a PreToolUse hook held: the stream's result and the session file's
+`hook_deferred_tool` marker each fold to one `ToolDeferred` and no turn end,
+so a deferral closes the half of a turn each format holds. Its pair
+(`transcript-deferred.{stream,session}.json`) is SYNTHETIC, hand-shaped from
+2.1.250's shapes until M57.1's record commit swaps a recorded pair in.
+`src/agent/transcript.test.ts` replays the same files through the one TS
+reducer, live and restored.
 A new or re-recorded fixture regenerates them. From `src-tauri/`:
 
 ```

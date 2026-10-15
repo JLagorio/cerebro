@@ -1,0 +1,45 @@
+{
+  "why": "A panel turn whose agent writes without asking: its page writes pass, and argv is the run's as it always was.",
+  "input": {
+    "kind": "attended",
+    "shell": "off",
+    "ask_first": false,
+    "read_scoped": false,
+    "narrowing": null
+  },
+  "expected": {
+    "permission_mode": "acceptEdits",
+    "allowed": [],
+    "disallowed": [
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "NotebookEdit",
+      "Bash"
+    ],
+    "matcher": [
+      "AskUserQuestion",
+      "ExitPlanMode"
+    ],
+    "withheld": [],
+    "decisions": {
+      "Write": "deny",
+      "Edit": "deny",
+      "MultiEdit": "deny",
+      "NotebookEdit": "deny",
+      "Bash": "deny",
+      "Read": "cli",
+      "Glob": "cli",
+      "Grep": "cli",
+      "WebFetch": "cli",
+      "WebSearch": "cli",
+      "Task": "cli",
+      "AskUserQuestion": "ask",
+      "ExitPlanMode": "refuse",
+      "mcp__cerebro__create_note": "allow",
+      "mcp__cerebro__update_frontmatter": "allow",
+      "mcp__cerebro__append_to_note": "allow",
+      "mcp__cerebro__edit_note": "allow"
+    }
+  }
+}

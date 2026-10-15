@@ -9,6 +9,7 @@ import {
 import { buildSchema } from '@/engine/schema';
 import type { Entry } from '@/engine/types';
 import { makeEntry } from '@/test/factories';
+import { bigTasks, computedVault } from '@/test/computedVault';
 
 const project = makeEntry({
   path: 'projects/atlas/project.md',
@@ -120,7 +121,7 @@ describe('createTarget', () => {
       expect(seed('status', 'todo').status).toBe('todo');
     });
 
-    // The kind is resolved by `bandKind` — the first entry that DECLARES the
+    // The kind is resolved by `bandDef` — the first entry that DECLARES the
     // field — so a heterogeneous surface whose first record does not declare
     // it still takes the right branch (M16.19).
     it('resolves the kind past records that do not declare the field', () => {
@@ -134,6 +135,29 @@ describe('createTarget', () => {
         groupValue: 'epic-bonsai',
       });
       expect(target.frontmatter.epic).toBe('[[epic-bonsai]]');
+    });
+  });
+
+  // M60.1: a computed or derived band is not the new record's to store. A key
+  // written there would be a mirror nothing reads, so nothing is seeded.
+  describe('seeds nothing for a computed or derived band', () => {
+    const entries = computedVault();
+    const schema = buildSchema(entries);
+    const seed = (typeName: string, groupBy: string, groupValue: string) =>
+      createTarget(typeName, { project: null, entries, schema, groupBy, groupValue }).frontmatter;
+
+    it('creating in a derived-relation band seeds nothing', () => {
+      expect(seed('Epic', 'tasks', 'big-1')).toEqual({ type: 'Epic' });
+    });
+
+    it('creating in a rollup or timestamp band seeds nothing', () => {
+      expect(seed('Epic', 'task_count', '10')).toEqual({ type: 'Epic' });
+      expect(seed('Epic', 'edited', '2026-07-25T12:00:00Z')).toEqual({ type: 'Epic' });
+    });
+
+    it('a stored relation band still seeds its wikilink', () => {
+      expect(bigTasks[0].relationships.epic).toEqual(['big']);
+      expect(seed('Task', 'epic', 'big').epic).toBe('[[big]]');
     });
   });
 });

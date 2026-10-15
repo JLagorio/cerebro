@@ -24,8 +24,10 @@ import { useVaultStore } from '@/stores/vaultStore';
  *
  * Nothing set draws nothing. An editable page keeps one row mounted that shows
  * on hover or focus, the FileTree row-actions pattern, offering Add icon and
- * Add cover; a set icon or cover is itself the button that opens its picker,
- * except a lucide icon, which "Customize icon & color…" owns.
+ * Add cover; a set icon or cover is itself the button that opens its picker.
+ * That holds for every icon value, a lucide name or a stray string included:
+ * whatever an agent or an import wrote, the picker replaces it and Remove
+ * deletes it.
  *
  * Every write first lands the open pages' pending saves (`flushOpenPages`,
  * M53.6), so the frontmatter patch never meets a dirty buffer and raises the
@@ -423,10 +425,6 @@ export function PageIconHeader({
   const icon = pageIconOf(entry);
   const cover = pageCoverOf(entry);
   const canSet = canEdit(entry, editable);
-  // A lucide name is a Type doc's or a Collection's own icon, edited through
-  // "Customize icon & color…" with its colour beside it; the page picker
-  // writes only emoji and images, so it leaves that one alone.
-  const iconEditable = canSet && icon?.kind !== 'lucide';
   const offerIcon = canSet && icon === null;
   const offerCover = canSet && cover === null;
   if (icon === null && !offerIcon && !offerCover && children === undefined) return null;
@@ -478,7 +476,7 @@ export function PageIconHeader({
       ].join(' ')}
     >
       {icon !== null &&
-        (iconEditable ? (
+        (canSet ? (
           <button
             type="button"
             data-testid="page-icon"

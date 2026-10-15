@@ -54,8 +54,8 @@ case reads those values, only relations between them. The record test fails whil
 
 ## Facts
 
-Status: `measured` (a recorded fixture), or `derived (source); live run owed`. A row's claim is its
-case's title.
+Status: `measured` (a recorded fixture), or `derived (source); live run owed`, led by `contested
+with` the other row when two readings of the bundle disagree. A row's claim is its case's title.
 
 | Fact | Claim | Status | Fixtures | Feeds |
 | --- | --- | --- | --- | --- |
@@ -63,9 +63,9 @@ case's title.
 | F1 | --session-id names the session: init reports the minted id and the session file is named for it | measured (not signed in); signed-in run owed | `spike/not-signed-in.json`, `spike/resume-usage.json` | M56.3, M56.7 |
 | F2 | -p --resume keeps the session id and appends to the same session file | derived (--help on --fork-session; the resume loader keeps the id); live run owed | `spike/resume-usage.json` | M56.3 |
 | F3 | each -p turn reports only its own calls: num_turns counts them and result.usage sums their prompt tokens | derived (the result and usage schema text); live run owed, with the cache TTL bucket | `spike/resume-usage.json` | M56.12 |
-| F4 | a PreToolUse defer ends the run as success with stop_reason and terminal_reason tool_deferred, names the call in deferred_tool_use, exits 0 and leaves the tool_use unanswered in the session file | derived (the result builder and the SDK output filter); live run owed | `spike/defer-resume.json` | M57.1 |
+| F4 | a PreToolUse defer ends the run as success with stop_reason and terminal_reason tool_deferred, names the call in deferred_tool_use, exits 0 and leaves the tool_use unanswered in the session file, followed by a hook_deferred_tool marker naming it | derived (the result builder, the SDK output filter and the defer case's attachment); live run owed | `spike/defer-resume.json` | M57.1 |
 | F5 | --resume after a defer runs the hook again on the same call: allow runs it under the original tool_use id, and deny returns the hook's reason as an error result | derived (the deferred-tool resume handler); live run owed | `spike/defer-resume.json` | M57.1 |
-| F6 | with two calls in one message, the defer names one; on resume that call runs and the other gets no result | derived (deferred_tool_use is one object; the resume loader drops unanswered calls); live run owed | `spike/defer-resume.json` | M57.1 |
+| F6 | two calls in one message reach the hook one streamed line each, so each defer writes its own hook_deferred_tool marker and the result names the last; on resume that call runs and the other gets no result | contested with F24: derived (the solo-only defer check counts the calls in the call's own streamed line; the result keeps the last marker; the resume loader takes the last marker and drops unanswered calls); live run owed | `spike/defer-resume.json` | M57.1 |
 | F7 | a PreToolUse hook from --settings runs under --setting-sources user | derived (--help: --setting-sources picks user, project, local; --settings is its own source); live run owed | `spike/defer-resume.json` | M57.1, M57.2 |
 | F8 | the prompt tool is asked with tool_name, input and tool_use_id, its allow applies updatedInput and its deny message reaches the model; without it an ungranted Write is a permission denial | derived (the 06-agents study's bundle reading); live run owed | `spike/prompt-tool.json` | M57.2 |
 | F9 | AskUserQuestion is in init's tools only with a prompt tool, and its answer returns in updatedInput's answers, keyed by question | measured (absent without a prompt tool); with one, owed | `spike/not-signed-in.json`, `spike/ask-question.json` | M57.3 |
@@ -118,8 +118,19 @@ from the 06-agents study's earlier bundle reading.
   `is_error: false` and `result: ""` on it. An aborted turn (`aborted_streaming`, `aborted_tools`)
   becomes `error_during_execution`. `terminal_reason` has nineteen values, among them
   `tool_deferred`, `api_error`, `aborted_streaming`, `completed` and `max_turns`.
-- **Resume after a defer (F5, F6):** on `--resume`, the loader keeps the deferred call and drops any
-  other assistant line whose calls all lack a result. Before the new prompt, the deferred call is
+- **A defer's marker (F4, F6):** the defer case writes a `hook_deferred_tool` attachment (`toolUseID`,
+  `toolName`, `toolInput`) after the call; the reducer keeps its type, `toolUseID` and `toolName`. The
+  result's `deferred_tool_use` is the last marker the run produced.
+- **Two calls in one message (F6, contested with F24):** the defer case ignores a defer when the
+  assistant message it reads holds more than one `tool_use` ("defer is solo-only — siblings would be
+  orphaned on resume"). That message is the call's own streamed line: each `content_block_stop`
+  yields a line holding one block, and only a batch tool that decomposes into several calls, or a
+  non-streaming fallback, puts more than one in it. Read that way, two streamed calls each reach the
+  hook and each defers, which is what `defer-resume` pins; F24, written from the log line, says the
+  defer is ignored. The live run settles which, and the losing row and case change with it.
+- **Resume after a defer (F5, F6):** on `--resume`, the loader takes the last marker in the session
+  file's last 1 MiB, keeps that call and drops any other assistant line whose calls all lack a
+  result. Before the new prompt, the deferred call is
   re-emitted through PreToolUse (the CLI logs "Deferred tool resume: re-emitting … through
   PreToolUse"); a second defer ends the run deferred again. If the tool is gone, the run ends
   `tool_deferred_unavailable` with `is_error: true`. `--resume` does not restore the permission mode,
@@ -143,18 +154,20 @@ from the 06-agents study's earlier bundle reading.
 ## Recommendation
 
 **D4 (a) stands.** The rule: (a) stands unless F17 shows a stopped turn cannot resume with its calls
-paired, or F5/F6 show the ask seam cannot work per turn.
+paired, or F5/F6 show the ask seam cannot work per turn. F6 is contested with F24, and neither reading
+trips the rule: per F6, a batch's last call is asked and the other is dropped unrun; per F24, the
+batch skips the hook and argv refuses a gated tool (F23). Either way one call is settled per resume.
 
 - **Steer (F17, F18), derived:** a stop then `--resume` cannot corrupt pairing, because the loader
   drops the unanswered call; it loses that call's result and any partial reply. The call may still
   have run, so the transcript reads "Interrupted, may have completed" (M56.8). That is a limit M57.5
   states, not a reason to switch.
-- **Ask (F4–F6), derived:** a defer ends the run cleanly with the call named, and `--resume` re-runs
-  the hook on the same call id, so an answer recorded before the resume decides it. Two calls in one
-  message defer one at a time.
+- **Ask (F4, F5), derived:** a defer ends the run cleanly with the call named, and `--resume` re-runs
+  the hook on the same call id, so an answer recorded before the resume decides it. How a batch
+  defers is contested (F6, F24), so nothing here rests on it.
 - **Re-attach** never needs (b): the child outlives the panel under either transport.
 
-The live run may change F5, F6 or F17, and this rule is applied again then. A switch is the owner's
+The live run may change F5, F6 or F17, and settles F6 against F24; this rule is applied again then. A switch is the owner's
 call (Q2: default no).
 
 ## What each part does with it
@@ -162,7 +175,8 @@ call (Q2: default no).
 - **M56.3:** mint a v4 `--session-id` for every new run and pass `--resume` alone after (F1, F2; never
   `--fork-session`). The session file is `<config home>/projects/<key>/<id>.jsonl` from the first
   line, even for a run that never reached the API. Read a trailing unanswered `tool_use`, or a prompt
-  with no reply, as interrupted (F17, F18). Classify the session-file kinds the not-signed-in file
+  with no reply, as interrupted (F17, F18), except a call a `hook_deferred_tool` marker names after
+  it: that call is deferred, not interrupted (F4). Classify the session-file kinds the not-signed-in file
   shows (`queue-operation`, `attachment`, `atis-latch`, `last-prompt`). A `<synthetic>` reply
   (message id a UUID) is never a ModelChanged. If TERM turns out to write a result marked
   `interruptedByShutdown`, the fold reads it as interrupted too.
@@ -181,8 +195,11 @@ call (Q2: default no).
   the A/B records them when it runs. What .12 found is the next section.
 - **M57.1:** a defer is an outcome, not a failure: `success`, `is_error: false`, `tool_deferred` and
   the call in `deferred_tool_use` (F4). The answer must be readable by the hook before `--resume`,
-  which needs a prompt (`Continue.` here) and the same `--permission-mode` (F5). Ask one call at a time
-  (F6). The hook may ride `--settings` (F7). A vanished tool ends `tool_deferred_unavailable`.
+  with the same `--permission-mode` (F5); M57.1 resumes with an empty prompt, not `Continue.` (F22,
+  "M57.1: the gate" below). How a batch defers is contested (F6, F24): only the call the result
+  names, with its marker, becomes a card (F24's rule below), and either reading leaves a sibling
+  unrun. The hook may ride `--settings` (F7). A
+  vanished tool ends `tool_deferred_unavailable`.
 - **M57.2:** the prompt tool gets `{tool_name, input, tool_use_id}` and answers one text block of JSON:
   `{"behavior": "allow", "updatedInput": …}`, which replaces the input, or
   `{"behavior": "deny", "message": …}` (F8). Allow rules skip it and hooks run first (F10), so the
@@ -241,6 +258,83 @@ folder's contents, and no other file says `entrypoint: sdk-cli`. The field summa
   `pnpm tsx scripts/cli-record/cache-ab.ts run` (add `--git` when the vault is a git repo) after
   the login above, then `cache-ab.ts reduce`, and update this section; `cache.test.ts` fails while
   its decision disagrees with the numbers.
+
+## M57.1: the gate
+
+Written by M57.1 on 2026-10-14. **Status: derived from the 2.1.250 bundle; live run owed.** The ask
+seam's own transport: an `mcp_tool` PreToolUse hook in the run's `--settings` calls a tool on the
+run's own MCP server, which answers defer, allow or deny as hook JSON. The spike's `defer-gate`
+scenario records it against the probe's unlisted `gate` tool (`scripts/cli-record/probe.ts`); it is
+owed its first live run, so `spike/defer-gate.json` does not exist yet, and each fact's case in
+`facts.test.ts` skips under a title that says so (`RECORD_OWED` in `spike.ts`). The record commit
+(`test(agents): record defer-gate (M57.1)`) adds the fixture, swaps the synthetic `deferred`
+transcript pair for a recorded one, and flips these rows.
+
+| Fact | Claim | Status | Fixtures | Feeds |
+| --- | --- | --- | --- | --- |
+| F21 | an mcp_tool PreToolUse hook calls the named server with the interpolated call, and the text it answers is read as hook JSON | derived (the hook schema's `mcp_tool` type and its `${path}` input interpolation); live run owed | `spike/defer-gate.json` | M57.1 |
+| F22 | an empty-prompt resume runs the hook again for the same tool_use id: allow pairs the result with that id and applies updatedInput, and deny returns its reason as the tool result | derived (the deferred-tool resume handler re-emits the held call through PreToolUse; an empty prompt is taken only with a marker); live run owed | `spike/defer-gate.json` | M57.1 |
+| F23 | a hook that fails or times out leaves the call to argv, which refuses a tool it does not allow | derived (a hook error is non-blocking and gives no decision); live run owed | `spike/defer-gate.json` | M57.1 |
+| F24 | a message with two calls ignores a defer and writes no hook_deferred_tool marker | contested with F6 (M56.1): derived (defer is honoured only for a lone call in print mode); live run owed | `spike/defer-gate.json` | M57.1 |
+| F25 | a resume with new text settles a deferred call first, through the hook, then runs the new prompt | derived (the resume handler runs before the new prompt is queued); live run owed | `spike/defer-gate.json` | M57.1 |
+| F26 | a matcher of names joined by a bar is an exact list: a name it only nearly holds never runs the hook | derived (a matcher of plain names splits on the bar and compares whole names); live run owed | `spike/defer-gate.json` | M57.1 |
+| F27 | the hook reaches a tool the server never lists | derived (the hook calls the server's tool by name, outside the model's tool list); live run owed | `spike/defer-gate.json` | M57.1, M57.3 |
+
+The scenario's nine steps: (0) the gate defers; (1) `-p '' --resume` with the gate allowing and an
+`updatedInput`; (2, 3) a defer, then the gate denying with a reason; (4) the gate failing as a tool
+while the tool is out of `--allowedTools`; (5) two calls in one message; (6, 7) a defer, then a
+resume with new text while the gate denies; (8) a near-miss matcher.
+
+**Where they come from.** The 2.1.250 bundle, read on 2026-10-14: the hook schema
+(`type: "mcp_tool"`, `server`, `tool`, `input` whose strings take `${path}` interpolation from the
+hook input, `timeout` in seconds); the attachment the CLI writes when a hook defers
+(`{type: "hook_deferred_tool", toolUseID, toolName, toolInput, hookName, hookEvent, permissionMode}`);
+the resume loader, which takes the last such marker in the session file's last 1 MiB and calls it
+open while no later line holds its id as a `tool_use_id`, then re-emits that call through PreToolUse
+before anything else ("Deferred tool resume: re-emitting … through PreToolUse").
+
+**What M57.1 built on them.**
+
+- F21, F27: Cerebro's run settings hold one `mcp_tool` hook on server `cerebro`, tool `ask_gate`,
+  which `tools/list` never names (`agent::interaction::hook_settings`, `mcp::answer_gate`).
+- F22: an answer resumes the run's request with message `''` on the same session
+  (`answer_interaction`). The book keys a call on its seat: the run's snapshot and the tool_use id,
+  and it accepts the id init reports as the same session (F1, F2).
+- F23: a tool the gate may defer is never in `--allowedTools`, so a hook that fails, times out or
+  never runs leaves the call refused (CV-27).
+- F24: only a call the run's own stream confirms as deferred becomes a card.
+- F25: resuming a deferred session settles first: the book refuses the marker's call as not
+  answered (its tool joins the hook's matcher), and the new text runs. If F25 fails, the settle is
+  an empty-prompt resume, then the send.
+- F26: the matcher is the asked names joined by a bar, and a name outside `[A-Za-z0-9_-]` is refused,
+  so it stays an exact list.
+
+**If the live run differs** (each names what changes):
+
+- F2: if a resume does not keep its session id, the seat keys on the id init reports, and the book
+  and the approvals follow it.
+- F21: the `mcp_tool` hook fails: an `http` hook to a loopback `/gate` route behind M54.6's checks,
+  with a per-run gate token that can only read decisions.
+- F22: no hook on resume: the answer rides a permission prompt tool for the resumed call; an empty
+  prompt refused: one fixed line the fold hides.
+- F23: a failed hook allowed the call: stop and re-plan, since the seam cannot fail closed.
+- F24: a batch defers: still only the stream-confirmed call becomes a card.
+- F25: the new text is dropped: settle with an empty-prompt resume first, then send.
+- F26: one hook entry per asked tool.
+- F27: both endpoints are listed, described as Cerebro's own; they can only register waits and read
+  answers.
+
+**Checks owed to the owner** (none was run here; the owner asked for no check-ins):
+
+- Record: `CLAUDE_CONFIG_DIR=<record dir>/claude-config pnpm tsx scripts/cli-record/spike.ts run defer-gate`,
+  then `pnpm tsx scripts/cli-record/spike.ts reduce defer-gate` and `pnpm vitest run scripts/cli-record/`.
+- Live (dev, the isolated login):
+  `CLAUDE_CONFIG_DIR=<record dir>/claude-config CEREBRO_ASK_TOOLS=mcp__cerebro__append_to_note pnpm tauri dev`.
+  Allow once; Deny with a message; Stop with a card open, then a next turn; a webview reload with a
+  card open (it returns); quit with a card open, relaunch and send in that thread (it carries on).
+  The session file pairs each deferred call with exactly one result.
+- Packaged (runs on the owner's main config): the bundle's binary started from a terminal with
+  `CEREBRO_ASK_TOOLS` set shows no card, writes no `run-settings-*.json` and keeps its argv.
 
 ## How to re-record
 

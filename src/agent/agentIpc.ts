@@ -14,21 +14,48 @@ import type {
   AgentEvent,
   AgentStatus,
   AgentStreamEvent,
+  ClaudeUserSettings,
   CliWorkspace,
   PendingInteraction,
   PersonAnswer,
   TranscriptRead,
   UiAction,
 } from './types';
+import { ASSISTANT_ACTOR } from '@/engine/authors';
 import type { RunCauseRequest } from '@/engine/jobs';
 import { runOptionsRefusal } from '@/engine/runOptions';
+import { namesTool } from '@/engine/toolGrant';
+import { withheldRun } from '@/lib/demoOperational';
+import { settleMockRun } from '@/lib/mockGit';
 import {
   agentAppend,
+  agentComment,
+  agentCreate,
   agentEdit,
+  agentReply,
+  agentResolve,
+  beginMockRun,
+  bookMockRun,
+  endMockRun,
+  finishMockRun,
+  postThreadPlaceholder,
+  queueAgentWrite,
   readMockCliTranscript,
   recordMockCliTranscript,
   refuseIfAgentPaused,
+  settleThreadPlaceholder,
+  settleWords,
+  threadTurnRefusal,
+  type ThreadTurnEnd,
+  type ThreadTurnRequest,
+  type WriteStamp,
 } from '@/lib/mockIpc';
+import {
+  APPROVAL_MESSAGES,
+  plan as planApproval,
+  type RunApproval,
+  type ShellCeiling,
+} from '@/lib/policy/toolApproval';
 
 /**
  * Agent IPC facade (M6), same shape as lib/ipc.ts: inside Tauri these invoke
@@ -131,8 +158,11 @@ export interface RunOptions {
    * before the run starts. */
   model?: string | null;
   effort?: string | null;
-  /** The Settings ceiling — see AgentPolicy. */
-  shell: boolean;
+  /** The shell ceiling this run may hold (M57.2): the Settings ceiling,
+   * less what an agent's record leaves out (`effectiveCeiling`). Rust plans
+   * it by the tool-approval table, and reads anything but "ask" and "on" as
+   * off. */
+  shell: ShellCeiling;
   /** Let the run reach the user's own MCP servers (M8.2). */
   connectors: boolean;
   /** Whether a person is watching this run. Only an attended run that names
@@ -144,6 +174,10 @@ export interface RunOptions {
    * grant. And only an attended run reaches connectors its record does not
    * name (M54.9). */
   attended: boolean;
+  /** Does the run's agent ask before its page writes (M57.4)? The agent
+   * record's `ask-first:`, false for the plain panel. Rust reads the record
+   * of a `process:` actor again, so this can only tighten the run. */
+  askFirst?: boolean;
   /** Attribute this run's writes to a process identity (M13.4) —
    * `process:<slug>` for an agent record's run; omitted = the default. */
   actor?: string | null;
@@ -226,11 +260,17 @@ let mockRunSeq = 0;
  * `sessionId` is the Claude Code session the run goes to (M56.3), minted or
  * resumed before the child starts, so a conversation stores it before the
  * first event. Optional because older test doubles do not name one.
+ *
+ * `attach` is what a panel re-attaches to the run by (M57.6, `attachRun`):
+ * the durable run id in Tauri, and `mock-<page>-<run>` in the browser, whose
+ * page nonce keeps a key from an earlier load from naming a run of this one.
+ * Optional for the same older test doubles.
  */
 export interface RunHandle {
   run: number;
   durableId: string | null;
   sessionId?: string | null;
+  attach?: string;
 }
 
 /**
@@ -284,12 +324,21 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunS
     // M57.1: a call this session left waiting, or one its card cancelled, is
     // refused as Rust's settle refuses it, and the new text runs.
     settleMockSession(sessionId);
-    const run = startMockRun(vault, options, sessionId, [
-      { kind: 'UserPrompt', text: options.message },
-    ]);
-    // No runtime database in the browser, so no durable row and no id to
-    // invent for it.
-    return { run, durableId: null, sessionId };
+    // M57.2: the run's plan, by the same table Rust plans it with, and the
+    // row a run that withheld tools books, as Rust's meter does.
+    const approval = mockApproval(options);
+    const booked = bookWithheld(options, approval, sessionId);
+    const run = startMockRun(
+      vault,
+      options,
+      sessionId,
+      [{ kind: 'UserPrompt', text: options.message }],
+      undefined,
+      booked,
+    );
+    // The browser keeps no runtime database: only a run that withheld tools
+    // books a row (the mock fleet's), and every other has no id to name.
+    return { run, durableId: booked, sessionId, attach: mockAttach(run) };
   }
   return invokeTauri<{ run: number; run_id: string; session_id: string } | { deferred: string[] }>(
     'run_agent',
@@ -304,6 +353,7 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunS
         shell: options.shell,
         connectors: options.connectors,
         attended: options.attended,
+        ask_first: options.askFirst ?? false,
         actor: options.actor ?? null,
         approved_stdio: options.approvedStdio ?? [],
         allowed_tools: options.allowedTools ?? null,
@@ -318,14 +368,76 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunS
   ).then((result) =>
     'deferred' in result
       ? result
-      : { run: result.run, durableId: result.run_id, sessionId: result.session_id },
+      : {
+          run: result.run,
+          durableId: result.run_id,
+          sessionId: result.session_id,
+          attach: result.run_id,
+        },
   );
+}
+
+/**
+ * A mock run's tool-approval plan (M57.2), as `plan_for` makes Rust's: the
+ * mock's gate is always there for an attended run, so only an attended run
+ * can ask.
+ */
+function mockApproval(options: RunOptions): RunApproval {
+  const narrowing = options.allowedTools ?? null;
+  return planApproval({
+    kind: options.attended ? 'attended' : 'unattended',
+    shell: options.shell,
+    askFirst: options.askFirst ?? false,
+    readScoped: options.readScope != null,
+    narrowing:
+      narrowing === null ? null : (tool) => narrowing.some((entry) => namesTool(entry, tool)),
+  });
+}
+
+let mockRowSeq = 0;
+
+/**
+ * A run that went without the tools its ceiling would have asked for books
+ * its row (M57.2): one `capability_unavailable` refusal under `agent.ask`,
+ * in the mock fleet and on `window.__cerebroMockRefusals`. Returns the row's
+ * id, or null when nothing was withheld or the fleet is unavailable.
+ */
+function bookWithheld(
+  options: RunOptions,
+  approval: RunApproval,
+  sessionId: string,
+): string | null {
+  if (approval.withheld.length === 0) return null;
+  mockRowSeq += 1;
+  const runId = `mock-run-${String(mockRowSeq).padStart(4, '0')}`;
+  const detail = `${APPROVAL_MESSAGES.withheld} ${approval.withheld.join(', ')}`;
+  const holder = window as unknown as { __cerebroMockRefusals?: unknown[] };
+  holder.__cerebroMockRefusals ??= [];
+  holder.__cerebroMockRefusals.push({
+    run: runId,
+    code: 'capability_unavailable',
+    surface: 'agent.ask',
+    detail,
+  });
+  const booked = bookMockRun(
+    withheldRun({
+      runId,
+      actor: options.actor ?? null,
+      mode: options.lane === undefined ? 'attended' : 'ambient',
+      lane: options.lane ?? 'agent',
+      sessionId,
+      at: new Date().toISOString(),
+      detail,
+    }),
+  );
+  return booked ? runId : null;
 }
 
 /**
  * Start one mock run (browser mode) and tag its events, as Rust's reader
  * does, recording its replay under `sessionId`. `resume` makes it the turn
- * that goes on after a held call's answer (M57.1).
+ * that goes on after a held call's answer (M57.1); `booked` is the fleet row
+ * it closes when it ends (M57.2).
  */
 function startMockRun(
   vault: string,
@@ -333,8 +445,28 @@ function startMockRun(
   sessionId: string,
   replay: AgentStreamEvent[],
   resume?: { toolId: string; answer: PersonAnswer },
+  booked: string | null = null,
 ): number {
   const run = ++mockRunSeq;
+  mockJournal.open(run);
+  // M58.1: every write the run makes is stamped with its actor (blank reads
+  // as the assistant, as Rust's normalize_actor reads it) and its run, the
+  // attach id every mock run has, so none is logged as an IPC write's (the
+  // person's, with no run).
+  const actor = options.actor?.trim() ? options.actor : ASSISTANT_ACTOR;
+  const stamp: WriteStamp = { actor, runId: mockAttach(run) };
+  // M58.3: the run's paths are its own from here until its commit lands, as
+  // Rust's claim holds them; the commit comes before its closing events.
+  beginMockRun(stamp.runId, actor);
+  let settled = false;
+  const settle = () => {
+    if (settled) return;
+    settled = true;
+    const changeset = settleMockRun(stamp.runId, actor, options.attended ? options.message : null);
+    endMockRun(stamp.runId);
+    const event: AgentStreamEvent = { kind: 'Changeset', changeset };
+    emitLocal({ ...event, run, seq: mockJournal.append(run, event) });
+  };
   // The mock drives the UI-action channel through the same fan-out the
   // Tauri listener uses, so browser mode exercises the real subscriber.
   // Tagging happens here for the same reason it happens in agent.rs: the
@@ -350,28 +482,54 @@ function startMockRun(
           replay.push({ kind: 'TurnInterrupted', reason: 'stopped' });
         }
         recordMockCliTranscript(sessionId, replay.splice(0));
+        if (booked !== null) finishMockRun(booked, 'succeeded');
       }
-      emitLocal({ ...event, run });
+      // M58.3: the run's Changeset, once, before Cancelled or Done.
+      if (event.kind === 'Cancelled' || event.kind === 'Done') settle();
+      // M57.6: numbered and held as Rust's reader numbers and journals them.
+      const seq = mockJournal.append(run, event);
+      emitLocal({ ...event, run, seq });
       // Reap at the terminal event, mirroring the reader thread's finish().
-      if (event.kind === 'Done') mockRuns.delete(run);
+      if (event.kind === 'Done') {
+        mockRuns.delete(run);
+        mockJournal.finish(run);
+      }
     },
     // The system prompt rides along (M52.3) so a scripted answer about
     // Knowledge can read the snapshot the real agent would. The write
     // scripts land on the mock disk through the same refusals as Rust's:
     // the append as tool_append's (M53.6), the edit as tool_edit_note's
-    // (M55.5).
+    // (M55.5), and the comment scripts in the page's sidecar as
+    // comment_tools.rs's (M70.3).
     {
       onUiAction: emitUiAction,
-      onAppend: (path, content) => agentAppend(vault, path, content),
-      onEdit: (path, edits) => agentEdit(vault, path, edits),
+      onAppend: (path, content) => agentAppend(vault, path, content, undefined, stamp),
+      onEdit: (path, edits) => agentEdit(vault, path, edits, undefined, stamp),
+      // M57.4: the create script's create_note, through tool_create_note's
+      // refusals.
+      onCreate: (args) => agentCreate(vault, args, stamp),
+      onComment: (args) => agentComment(vault, args, stamp),
+      onReply: (args) => agentReply(vault, args, stamp),
+      onResolve: (args) => agentResolve(vault, args, stamp),
+      // M57.4c: an unattended ask-first page write waits in the mock's
+      // Review queue, as Rust's dispatch queues it.
+      onQueue: (tool, input) =>
+        queueAgentWrite(vault, {
+          actor: options.actor ?? '',
+          runId: booked ?? sessionId,
+          tool,
+          input,
+        }),
       systemPrompt: options.systemPrompt,
       sessionId,
       model: options.model ?? null,
       // M57.1: the mock gate. Only an attended run can ask; a run nobody
       // watches has no card to show, as Rust's has no seat.
       asks: options.attended ? mockAsks : undefined,
-      onDefer: (call) =>
-        confirmMockInteraction(
+      // M57.2: the CLI's own tools decide through the run's plan.
+      approval: mockApproval(options),
+      onDefer: (call) => {
+        const card = confirmMockInteraction(
           registerMockInteraction(
             vault,
             sessionId,
@@ -382,12 +540,175 @@ function startMockRun(
               startMockRun(vault, options, sessionId, [], { toolId: call.toolId, answer });
             },
           ),
-        ),
+        );
+        // A table ask names its family and exact subject, as Rust's card
+        // does; the book holds the same card, so a re-list shows them too.
+        // A page write's card is a write card, titled by the manifest and
+        // naming who asks and where (M57.4).
+        if (card !== null && call.family !== undefined) {
+          Object.assign(card, { family: call.family, subject: call.subject ?? null });
+        }
+        if (card !== null && call.write !== undefined) {
+          Object.assign(card, {
+            kind: 'write',
+            title: call.write.title,
+            target: call.write.target,
+            actor: options.actor ?? null,
+          });
+        }
+        return card;
+      },
       resume,
     },
   );
   mockRuns.set(run, mock);
   return run;
+}
+
+/**
+ * A browser-only test seam (M57.4c): start an unattended run of `actor` in
+ * the mock, as a schedule would, so a spec can watch an ask-first agent's
+ * page write wait in Review. Resolves once the run is done. Never registered
+ * in Tauri, where only the job runner starts unattended runs.
+ */
+async function runUnattended(
+  vault: string,
+  run: { message: string; actor: string; scope?: string[] | null; askFirst?: boolean },
+): Promise<RunStart> {
+  const start = await runAgent(vault, {
+    message: run.message,
+    shell: 'off',
+    connectors: false,
+    attended: false,
+    askFirst: run.askFirst ?? false,
+    actor: run.actor,
+    scope: run.scope ?? null,
+  });
+  if ('deferred' in start) return start;
+  await new Promise<void>((resolve) => {
+    const off = onAgentEvent((event) => {
+      if (event.kind !== 'Done') return;
+      off();
+      resolve();
+    }, start.run);
+  });
+  return start;
+}
+
+if (typeof window !== 'undefined' && !inTauri()) {
+  (window as unknown as { __cerebroRunUnattended: typeof runUnattended }).__cerebroRunUnattended =
+    runUnattended;
+}
+
+/** A thread turn under way (M70.4): the run's durable id (the mock's own in
+ * the browser) and the placeholder bound to it. */
+export interface ThreadTurnStarted {
+  runId: string;
+  placeholder: string;
+}
+
+let mockThreadSeq = 0;
+
+/** The person's text with the leading `@handle` it asked by taken off, so
+ * the mock runs what they asked ("@release-scout wait for me" runs
+ * "wait for me"). */
+function withoutMention(text: string, handle: string): string {
+  const trimmed = text.trim();
+  const mention = `@${handle}`;
+  return trimmed.toLowerCase().startsWith(mention.toLowerCase())
+    ? trimmed.slice(mention.length).trim()
+    : trimmed;
+}
+
+/**
+ * Run one turn of the agent a person's comment names (M70.4): Rust's
+ * `start_thread_turn`, which checks the turn, posts a pending placeholder in
+ * the thread, runs the agent on its own record and posts the answer in the
+ * placeholder's place. The request names only the page, the thread, the
+ * comment and the handle. A refusal rejects, in Rust's words.
+ *
+ * In the browser the mock does the same: `threadTurnRefusal` (Rust's checks,
+ * from thread-turns.json), the placeholder, then the mock agent on the
+ * person's text, whose end settles the placeholder (`settleWords`). A
+ * deleted placeholder drops the answer.
+ */
+export async function startThreadTurn(
+  vault: string,
+  request: ThreadTurnRequest,
+): Promise<ThreadTurnStarted> {
+  if (inTauri()) {
+    const started = await invokeTauri<{ run_id: string; placeholder: string }>(
+      'start_thread_turn',
+      {
+        vault,
+        request: {
+          page: request.page,
+          thread: request.thread,
+          message: request.message,
+          handle: request.handle,
+        },
+      },
+    );
+    return { runId: started.run_id, placeholder: started.placeholder };
+  }
+  const plan = await threadTurnRefusal(vault, request);
+  refuseIfAgentPaused(vault, plan.actor);
+  mockThreadSeq += 1;
+  const runId = `mock-thread-${mockThreadSeq}`;
+  const placeholder = postThreadPlaceholder(request, plan, runId);
+  emitUiAction({ action: 'comments_changed', path: request.page });
+  const binding = {
+    page: request.page,
+    thread: request.thread,
+    placeholder,
+    actor: plan.actor,
+  };
+  // As Rust builds it: the record's limits, no shell, web or connectors,
+  // and nobody seated to answer a card.
+  const options: RunOptions = {
+    message: withoutMention(plan.text, request.handle),
+    shell: 'off',
+    connectors: false,
+    connectorNames: [],
+    approvedStdio: [],
+    attended: false,
+    askFirst: plan.askFirst,
+    actor: plan.actor,
+    scope: plan.scope,
+    readScope: plan.readScope,
+    allowedTools: plan.allowedTools,
+    model: plan.model,
+    effort: plan.effort,
+  };
+  const run = startMockRun(vault, options, crypto.randomUUID(), [
+    { kind: 'UserPrompt', text: options.message },
+  ]);
+  let answer: string | null = null;
+  let failure: string | null = null;
+  let cancelled = false;
+  const off = onAgentEvent((event) => {
+    if (event.kind === 'Result' && event.text.trim() !== '') answer = event.text;
+    else if (event.kind === 'Error') failure = event.notice?.title ?? event.message.slice(0, 300);
+    else if (event.kind === 'Cancelled') cancelled = true;
+    else if (event.kind === 'Done') {
+      off();
+      const end: ThreadTurnEnd = {
+        outcome: cancelled ? 'cancelled' : failure !== null ? 'failed' : 'succeeded',
+        answer,
+        failure,
+      };
+      const { text, state } = settleWords(plan.title, end);
+      try {
+        if (settleThreadPlaceholder(binding, runId, text, state) === 'written') {
+          emitUiAction({ action: 'comments_changed', path: request.page });
+        }
+      } catch {
+        // The page or its sidecar went away mid-turn: Rust logs this and
+        // writes nothing, and so does the mock.
+      }
+    }
+  }, run);
+  return { runId, placeholder };
 }
 
 /**
@@ -402,7 +723,10 @@ export type AnswerResult = { resumed: RunHandle } | { refused: { code: string; m
  * Answer a waiting call (M57.1): the one way an answer reaches the book. In
  * Tauri, `answer_interaction` takes it only while the card waits in this
  * vault, then resumes the run on the same session; the browser's book does
- * the same, and its resume is a mock run.
+ * the same, and its resume is a mock run. An Allow's edited draft (M57.4b)
+ * travels as its own `updatedInput` key, which Rust checks against the
+ * tool's schema and the run's grant before it takes the answer; a refusal
+ * is typed like any other.
  */
 export async function answerInteraction(
   vault: string,
@@ -410,7 +734,17 @@ export async function answerInteraction(
   answer: PersonAnswer,
 ): Promise<AnswerResult> {
   if (!inTauri()) {
-    const taken = answerMockInteraction(vault, id);
+    // M57.2: This conversation only for a card the table asked about, as
+    // Rust's book refuses it otherwise.
+    if (answer.kind === 'allow' && answer.remember === 'conversation') {
+      const card = listMockInteractions(vault).find((pending) => pending.id === id);
+      if (card !== undefined && card.family == null) {
+        return { refused: { code: 'malformed_arguments', message: NOT_REMEMBERED } };
+      }
+    }
+    // M57.3: the book checks the answer fits its card, a question's
+    // answers by the shared rules, as Rust's does.
+    const taken = answerMockInteraction(vault, id, answer);
     if ('refused' in taken) return { refused: taken.refused };
     const before = mockRunSeq;
     try {
@@ -422,16 +756,54 @@ export async function answerInteraction(
     finishMockAnswer(id);
     // The resume took the next run id as it started.
     const run = mockRunSeq > before ? mockRunSeq : before;
-    return { resumed: { run, durableId: null, sessionId: taken.card.session_id } };
+    return {
+      resumed: {
+        run,
+        durableId: null,
+        sessionId: taken.card.session_id,
+        attach: mockAttach(run),
+      },
+    };
   }
   const result = await invokeTauri<
-    { run: number; run_id: string; session_id: string } | { refused: { code: string; message: string } }
-  >('answer_interaction', { vault, id, answer });
+    | { run: number; run_id: string; session_id: string }
+    | { refused: { code: string; message: string } }
+  >('answer_interaction', {
+    vault,
+    id,
+    answer: answer.kind === 'allow' ? { kind: 'allow', remember: answer.remember } : answer,
+    updatedInput: answer.kind === 'allow' ? (answer.updatedInput ?? null) : null,
+  });
   return 'refused' in result
     ? { refused: result.refused }
     : {
-        resumed: { run: result.run, durableId: result.run_id, sessionId: result.session_id },
+        resumed: {
+          run: result.run,
+          durableId: result.run_id,
+          sessionId: result.session_id,
+          attach: result.run_id,
+        },
       };
+}
+
+/** What the book says to This conversation on a call no ceiling asks about
+ * (Rust's `interaction::NOT_REMEMBERED`). */
+export const NOT_REMEMBERED =
+  'This conversation is offered only for a command or file change the shell ceiling asks about.';
+
+/**
+ * The person's own Claude Code settings, counted (M57.2): allow, ask and
+ * deny rules and hook events, never a rule's text. In the browser there is
+ * none to read, so it says so, unless a test seeds one through
+ * `window.__cerebroSeedClaudeSettings`.
+ */
+export async function claudeUserSettings(vault: string | null): Promise<ClaudeUserSettings> {
+  if (!inTauri()) {
+    const seeded = (globalThis as { __cerebroSeedClaudeSettings?: ClaudeUserSettings })
+      .__cerebroSeedClaudeSettings;
+    return seeded ?? { state: 'browser' };
+  }
+  return invokeTauri<ClaudeUserSettings>('claude_user_settings', { vault });
 }
 
 /** Cancel a waiting call (M57.1): Stop or New conversation with its card
@@ -477,6 +849,149 @@ export async function stopAllAgents(): Promise<number[]> {
     return dead;
   }
   return invokeTauri<number[]>('stop_all_agents');
+}
+
+// --- Re-attach (M57.6) -------------------------------------------------------
+
+/**
+ * What a run said after a cursor, as Rust's `journal::EventsSince` answers
+ * it: every event after it (`held`), what is left after the cap dropped some
+ * (`gap`, the journal starting at `first`), or nothing held for that run
+ * under that key (`unknown`). `done` once the run said its last event.
+ */
+export type EventsSince =
+  | { state: 'held'; events: AgentEvent[]; done: boolean }
+  | { state: 'gap'; first: number; events: AgentEvent[]; done: boolean }
+  | { state: 'unknown' };
+
+/** This page load's nonce, in every mock attach key: a key saved by an
+ * earlier load names a run number this load may reuse for another run. */
+const MOCK_PAGE = Math.random().toString(36).slice(2, 10) || 'page';
+
+function mockAttach(run: number): string {
+  return `mock-${MOCK_PAGE}-${run}`;
+}
+
+/** What the mock journal holds a run, and how many finished runs it keeps:
+ * smaller than Rust's caps, the same answers. */
+export const MOCK_JOURNAL_EVENTS = 2_000;
+export const MOCK_JOURNAL_FINISHED = 16;
+
+/**
+ * The browser's journal (M57.6), standing in for Rust's: every mock event is
+ * numbered from 1 per run and held, the oldest dropped past the cap, and
+ * finished runs kept, the oldest dropped past their count. Memory only.
+ * Exported for the adapter's tests, which fill a run past its cap.
+ */
+export const mockJournal = (() => {
+  const runs = new Map<number, { events: AgentEvent[]; first: number; done: boolean }>();
+  const finished: number[] = [];
+  return {
+    open(run: number): void {
+      runs.set(run, { events: [], first: 1, done: false });
+    },
+    /** Number one event of `run` and hold it; the seq it took. */
+    append(run: number, event: AgentStreamEvent): number {
+      const journal = runs.get(run);
+      if (journal === undefined) return 0;
+      const seq = journal.first + journal.events.length;
+      journal.events.push({ ...event, run, seq });
+      while (journal.events.length > MOCK_JOURNAL_EVENTS) {
+        journal.events.shift();
+        journal.first += 1;
+      }
+      return seq;
+    },
+    finish(run: number): void {
+      const journal = runs.get(run);
+      if (journal === undefined) return;
+      journal.done = true;
+      finished.push(run);
+      while (finished.length > MOCK_JOURNAL_FINISHED) {
+        const dropped = finished.shift();
+        if (dropped !== undefined) runs.delete(dropped);
+      }
+    },
+    since(run: number, attach: string, after: number): EventsSince {
+      const journal = runs.get(run);
+      if (journal === undefined || attach !== mockAttach(run)) return { state: 'unknown' };
+      const events = journal.events.filter((e) => e.seq > after);
+      return after + 1 < journal.first
+        ? { state: 'gap', first: journal.first, events, done: journal.done }
+        : { state: 'held', events, done: journal.done };
+    },
+  };
+})();
+
+/** What attaching answers: the journal's state and whether the run had
+ * already ended, with the way to let go; or `unknown`, with nothing held. */
+export type Attached =
+  { state: 'held' | 'gap'; done: boolean; detach: () => void } | { state: 'unknown' };
+
+/**
+ * Attach to a run (M57.6): every event after `after`, each once and in
+ * order, then the live ones. It subscribes first and holds what arrives,
+ * reads the journal from the cursor, delivers that, then what it held, and
+ * drops anything at or under the cursor, so nothing emitted before the
+ * subscription is lost (the spawn race included) and nothing shows twice.
+ * `onState` hears the journal's answer before any of its events, so a
+ * caller knows a gap before the first event after it. `unknown` lets go at
+ * once. A handle with no attach key (an older test double) is followed
+ * live, from now. In Tauri the journal is read by `agent_events_since`,
+ * whose `runId` is the durable run id it checks the run number against.
+ */
+export async function attachRun(
+  handle: Pick<RunHandle, 'run' | 'attach'>,
+  after: number,
+  deliver: (event: AgentEvent) => void,
+  onState?: (state: 'held' | 'gap' | 'unknown', done: boolean) => void,
+): Promise<Attached> {
+  let cursor = after;
+  let held: AgentEvent[] | null = [];
+  const take = (event: AgentEvent) => {
+    if (typeof event.seq === 'number') {
+      if (event.seq <= cursor) return;
+      cursor = event.seq;
+    }
+    deliver(event);
+  };
+  const detach = onAgentEvent((event) => {
+    if (held !== null) held.push(event);
+    else take(event);
+  }, handle.run);
+  if (handle.attach === undefined) {
+    const buffered = held;
+    held = null;
+    onState?.('held', false);
+    for (const event of buffered) take(event);
+    return { state: 'held', done: false, detach };
+  }
+  let answer: EventsSince;
+  try {
+    if (inTauri()) {
+      answer = await invokeTauri<EventsSince>('agent_events_since', {
+        run: handle.run,
+        runId: handle.attach,
+        after,
+      });
+    } else {
+      answer = mockJournal.since(handle.run, handle.attach, after);
+    }
+  } catch {
+    answer = { state: 'unknown' };
+  }
+  if (answer.state === 'unknown') {
+    detach();
+    held = null;
+    onState?.('unknown', false);
+    return { state: 'unknown' };
+  }
+  const buffered = held;
+  held = null;
+  onState?.(answer.state, answer.done);
+  for (const event of answer.events) take(event);
+  for (const event of buffered) take(event);
+  return { state: answer.state, done: answer.done, detach };
 }
 
 // --- Event fan-out ---------------------------------------------------------

@@ -93,6 +93,11 @@ pub struct CommitOutcome {
     /// applied — the ledger is ahead of these files — and the quarantine
     /// lists each one for a person to keep or restore.
     pub kept: Vec<String>,
+    /// The files an APPLIED set wrote (M58.1), each recorded in `vault_writes`
+    /// by the door that committed it (`vault::write::record_projected`). Empty
+    /// for a queue, a rejection and a replay; a kept file is never one, and
+    /// neither is a projection that rewrote identical bytes.
+    pub projected: Vec<crate::vault::write::Projected>,
 }
 
 impl CommitOutcome {
@@ -919,6 +924,7 @@ fn reject_set(
         batch_id: receipt.batch_id,
         replayed: receipt.replayed,
         kept: Vec::new(),
+        projected: Vec::new(),
     })
 }
 
@@ -1061,6 +1067,7 @@ fn queue_set(
         batch_id: receipt.batch_id,
         replayed: receipt.replayed,
         kept: Vec::new(),
+        projected: Vec::new(),
     })
 }
 
@@ -1323,7 +1330,7 @@ fn apply_with_decisions(
     // Only after the marker is durable does the projection follow — and a
     // crash here is repaired from the committed ledger, never from a
     // half-written file.
-    let kept = project_applied(writer, vault, state)?;
+    let (kept, projected) = project_applied(writer, vault, state)?;
     crate::crash::crash_point("commit-set-apply-acked");
     Ok(CommitOutcome {
         commit_set_id: commit_set_id.to_string(),
@@ -1332,6 +1339,7 @@ fn apply_with_decisions(
         batch_id: receipt.batch_id,
         replayed: receipt.replayed,
         kept,
+        projected,
     })
 }
 
@@ -1377,14 +1385,17 @@ fn post_versions(
 /// while every other path is written, and the quarantine lists it — the
 /// ledger ahead of a file it did not write — for a person to decide. Only a
 /// write that FAILED is an error, returned once the others are written.
+/// Returns the kept files, and the files it wrote whose bytes changed
+/// (M58.1), each saying whether it was absent before.
 fn project_applied(
     writer: &LedgerWriter,
     vault: &Path,
     before: &EpistemicState,
-) -> Result<Vec<String>, SubmitError> {
+) -> Result<(Vec<String>, Vec<crate::vault::write::Projected>), SubmitError> {
     let state = state_of(writer, vault)?;
     let manifest = crate::ledger::manifest::load(vault).map_err(internal)?;
     let mut kept: Vec<String> = Vec::new();
+    let mut projected = Vec::new();
     let mut failed: Option<String> = None;
     for (path, belief_id) in &state.projection_paths {
         let projection =
@@ -1427,7 +1438,15 @@ fn project_applied(
         let written = judged
             .and_then(|()| crate::ledger::manifest::write_projection(vault, &rel, &projection));
         match written {
-            Ok(()) => crate::vault::watcher::note_own_write(&vault.join(&rel)),
+            Ok(()) => {
+                crate::vault::watcher::note_own_write(&vault.join(&rel));
+                if !identical {
+                    projected.push(crate::vault::write::Projected {
+                        created: on_disk.is_none(),
+                        path: rel,
+                    });
+                }
+            }
             Err(e) if e.starts_with(crate::ledger::manifest::PROJECTION_DISK_CHANGED) => {
                 crate::ledger::capture::log_refused_capture("policy.project_applied", &rel, &e);
                 kept.push(rel);
@@ -1438,7 +1457,7 @@ fn project_applied(
         }
     }
     match failed {
-        None => Ok(kept),
+        None => Ok((kept, projected)),
         Some(detail) => Err(internal(detail)),
     }
 }
@@ -2087,6 +2106,46 @@ mod tests {
         assert_eq!(
             applied.body["revert_plan"]["steps"][0]["kind"],
             "belief_revised"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_applied_set_names_the_paths_it_projected() {
+        // M58.1: the files an applied set wrote are named, so the door that
+        // committed it can record them; a file kept because it changed on
+        // disk is not one, and a queued set names none.
+        let (vault, mut writer, written) = seeded("commit-projected");
+        let kept = seed_belief(&mut writer, "kept");
+        let state = state(&writer, &vault);
+        for (slug, id) in [("seed", &written), ("kept", &kept)] {
+            let projection = crate::ledger::reduce::project_belief(&state, id).unwrap();
+            crate::ledger::manifest::write_projection(
+                &vault,
+                &format!("knowledge/{slug}.md"),
+                &projection,
+            )
+            .unwrap();
+        }
+        std::fs::write(vault.join("knowledge/kept.md"), "# Mine\n").unwrap();
+        submit(
+            &mut writer,
+            P1,
+            update_op(&written, "x"),
+            &written,
+            Risk::Medium,
+        );
+        submit(&mut writer, P2, update_op(&kept, "y"), &kept, Risk::Medium);
+        let ordered = [P1.to_string(), P2.to_string()];
+        let outcome = commit_proposals(&table(), &mut writer, &vault, RUN, &ordered).unwrap();
+        assert_eq!(outcome.transition, TransitionCode::Apply);
+        assert_eq!(outcome.kept, vec!["knowledge/kept.md".to_string()]);
+        assert_eq!(
+            outcome.projected,
+            vec![crate::vault::write::Projected {
+                path: "knowledge/seed.md".to_string(),
+                created: false,
+            }]
         );
         let _ = std::fs::remove_dir_all(&vault);
     }

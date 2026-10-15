@@ -31,10 +31,16 @@
 //! (M17.1, M49.7): `write_concept`, which refuses a `verified` field and
 //! stamps `generated` from the run's actor, so it is where provenance comes
 //! from, and `recheck_concept`, which moves only `stale_after`; `create_note`,
-//! `update_frontmatter`, `append_to_note` and `edit_note` therefore call
-//! `knowledge::guard_agent_write` and refuse the bundle outright. This module used to say the agent's tools were "NOT
+//! `update_frontmatter`, `append_to_note` and `edit_note` therefore mint
+//! their receipt through `cleared_for_note`, which calls
+//! `knowledge::guard_agent_write` and refuses the bundle outright. This module used to say the agent's tools were "NOT
 //! subject to the knowledge/ guard" and treat that as the design — it was the
 //! hole that let a model stamp the user's own review onto its own output.
+//!
+//! Every write a tool makes carries a receipt (`vault::receipt`, M58.1) that
+//! only this module's three `cleared_for_*` can mint, stamped with the run's
+//! actor and id from its grant, and `human:me` as approver when a person
+//! allowed the write. No door here reaches a person's guard.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
@@ -50,6 +56,8 @@ use tauri::{AppHandle, Emitter};
 
 use crate::policy::tools::{Axis, Kind, Surface, TargetKind, ToolRow};
 use crate::vault;
+use crate::vault::receipt::{Agent, ConceptDoor, RunDoor, WriteReceipt, HUMAN_ACTOR};
+use crate::vault::write::WriteMode;
 
 pub const UI_ACTION_EVENT: &str = "cerebro://ui-action";
 const PROTOCOL_VERSION: &str = "2025-06-18";
@@ -74,7 +82,7 @@ pub const DEFAULT_ACTOR: &str = "claude-code";
 
 /// None and blank both read as the default — a panel run AFTER an agent run
 /// must reset the attribution, never inherit it.
-fn normalize_actor(actor: Option<&str>) -> &str {
+pub(crate) fn normalize_actor(actor: Option<&str>) -> &str {
     actor
         .filter(|a| !a.trim().is_empty())
         .unwrap_or(DEFAULT_ACTOR)
@@ -142,6 +150,52 @@ pub struct RunGrant {
     /// still going in one vault wrote into whichever vault had been opened
     /// since. `None` is a bearer bound to no vault, and it can call no tool.
     pub vault: Option<PathBuf>,
+    /// Who answers this run's confirmable page writes (M57.4): its run kind
+    /// and whether its agent asks first, fixed at mint like everything
+    /// above. Dispatch holds a confirmable write to them (`ask_first_step`).
+    pub asks: WriteAsks,
+}
+
+/// What a run's confirmable page writes answer to (M57.4): the run kind the
+/// tool-approval table reads (attended, unattended or internal), and whether
+/// its agent's record says `ask-first: true`. A seated run decides by the
+/// plan its seat holds; this is what a run with no seat decides by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WriteAsks {
+    pub kind: crate::policy::tool_approval::RunKind,
+    pub ask_first: bool,
+}
+
+impl WriteAsks {
+    /// One of Cerebro's own constructs: no page write is confirmable there.
+    pub const INTERNAL: WriteAsks = WriteAsks {
+        kind: crate::policy::tool_approval::RunKind::Internal,
+        ask_first: false,
+    };
+
+    /// A run nobody watches, of an agent that writes without asking.
+    pub const UNASKED: WriteAsks = WriteAsks {
+        kind: crate::policy::tool_approval::RunKind::Unattended,
+        ask_first: false,
+    };
+
+    /// What `req` answers to: internal for a construct, attended for a run
+    /// a person watches, unattended otherwise, and ask-first as the request
+    /// says once `effective_ask_first` has read the record into it.
+    pub fn of(req: &crate::agent::AgentRequest) -> Self {
+        use crate::policy::tool_approval::RunKind;
+        let kind = if req.internal {
+            RunKind::Internal
+        } else if req.attended == Some(true) {
+            RunKind::Attended
+        } else {
+            RunKind::Unattended
+        };
+        Self {
+            kind,
+            ask_first: req.ask_first == Some(true),
+        }
+    }
 }
 
 /// A run id derived from a string by hash, for test fixtures only (M53.11).
@@ -171,6 +225,7 @@ impl RunGrant {
             tools: None,
             chain: vec![actor.to_string()],
             vault: None,
+            asks: WriteAsks::UNASKED,
         }
     }
 
@@ -202,6 +257,22 @@ fn scope_admits(scope: &Option<Vec<String>>, path: &str) -> bool {
         let folder = folder.trim_matches('/');
         folder.is_empty() || target == folder || target.starts_with(&format!("{folder}/"))
     })
+}
+
+/// `scope_admits` for a path the dispatcher is about to open (M55.5 review):
+/// the scope must admit where it LANDS as well as how it is spelled. The note
+/// writers follow a symlink that stays inside the vault, so a folder link
+/// `notes/public/dir -> ../private` would otherwise let a run scoped to
+/// notes/public read (through edit_note's quoting refusals) and rewrite
+/// notes/private. A path that resolves to no contained landing is left to
+/// the tool's own door, which refuses it in its own words.
+pub(crate) fn scope_admits_landing(vault: &Path, scope: &Option<Vec<String>>, path: &str) -> bool {
+    if scope.is_none() {
+        return true;
+    }
+    scope_admits(scope, path)
+        && crate::vault::write::landing_path(vault, path)
+            .is_none_or(|landing| scope_admits(scope, &landing))
 }
 
 /// token → grant for recent runs, oldest first. See RunGrant.
@@ -293,6 +364,7 @@ fn push_run_token(runs: &mut Vec<(String, RunGrant)>, token: String, grant: RunG
         forget_attempts(&dropped.run_id);
         forget_tool_calls(&dropped.run_id);
         forget_refusals(&dropped.run_id);
+        crate::comment_tools::forget_posts(&dropped.run_id);
         excess -= 1;
     }
 }
@@ -572,6 +644,7 @@ pub(crate) fn test_submit_answer(
             chain: vec![crate::assembly::ask::ACTOR.to_string()],
             // submit_answer reads no vault.
             vault: None,
+            asks: WriteAsks::INTERNAL,
         },
     )
     .map(|_| ())
@@ -720,12 +793,18 @@ impl McpState {
     /// the run's process has exited or failed to start (M53.11), and never
     /// past the window.
     ///
+    /// `asks` is who answers the run's confirmable page writes (M57.4).
+    ///
     /// `run_id` is the durable id the caller books the run under — the
     /// meter's `runs`-table id (M31.2a). It goes into the grant, and the
     /// grant is the ONLY place it is ever resolved from, so a run can still
     /// never name another run's id. `vault` is the vault the run works in,
     /// and the grant is likewise the only place a tool call finds it
     /// (M53.10).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "each is one axis of the grant the bearer carries, set by its spawner"
+    )]
     pub fn run_token(
         &self,
         actor: Option<&str>,
@@ -734,6 +813,7 @@ impl McpState {
         tools: Option<Vec<String>>,
         run_id: String,
         vault: &Path,
+        asks: WriteAsks,
     ) -> Result<String, String> {
         // A root by definition: every caller of this mint is a person, a
         // schedule, or an internal construct. A handed-to run is minted by
@@ -747,6 +827,7 @@ impl McpState {
             read_scope,
             tools,
             vault: Some(vault.to_path_buf()),
+            asks,
         })
     }
 
@@ -755,7 +836,12 @@ impl McpState {
     /// sites cannot accidentally pass a chain they do not have. The vault is
     /// the caller's too (M53.10): a callee works in the vault its caller
     /// works in, taken from the caller's grant like the chain, so the two
-    /// cannot disagree.
+    /// cannot disagree. A callee runs unattended, so nobody can answer its
+    /// page writes, which ask as its own record's `ask_first` says (M57.4).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "each is one axis of the grant the bearer carries, set by its spawner"
+    )]
     pub fn handoff_token(
         &self,
         actor: &str,
@@ -764,6 +850,7 @@ impl McpState {
         tools: Option<Vec<String>>,
         run_id: String,
         caller: &RunGrant,
+        ask_first: bool,
     ) -> Result<String, String> {
         let vault = bound_vault(caller)?;
         let actor = normalize_actor(Some(actor)).to_string();
@@ -777,6 +864,10 @@ impl McpState {
             read_scope,
             tools,
             vault: Some(vault),
+            asks: WriteAsks {
+                kind: crate::policy::tool_approval::RunKind::Unattended,
+                ask_first,
+            },
         })
     }
 
@@ -1238,15 +1329,14 @@ fn handle_rpc(app: &AppHandle, grant: &RunGrant, body: &str) -> Value {
                 .cloned()
                 .unwrap_or_default();
             // M57.1: the run's own hook asks first, ahead of every grant axis
-            // and every count: the gate is no tool the run calls.
+            // and every count: the gate is no tool the run calls. Nor is the
+            // prompt tool (M57.3), which Claude Code itself asks.
             use tauri::Manager;
             let agents = app.try_state::<crate::agent::AgentState>();
-            match answer_gate(
-                name,
-                &args,
-                grant,
-                agents.as_ref().map(|a| a.interactions()),
-            ) {
+            let book = agents.as_ref().map(|a| a.interactions());
+            match answer_gate(name, &args, grant, book)
+                .or_else(|| answer_host(name, &args, grant, book))
+            {
                 Some(answer) => Ok(answer),
                 None => call_tool(app, grant, name, &args),
             }
@@ -1281,19 +1371,576 @@ fn answer_gate(
         return None;
     }
     let call = GateCall::from_args(args);
+    // D7 (M56.10, M57.4): a run's own `recent` notes never ask, even where
+    // its agent asks before every other page write. The gate lets the call
+    // through to dispatch, which judges it again, bytes and all, under the
+    // write's lock; it allows nothing dispatch would not admit.
+    if keeps_its_own_notes(grant, &call, book) {
+        let pass = GateAnswer::Allow {
+            updated_input: None,
+        };
+        return Some(text_result(pass.hook_json().to_string()));
+    }
     let answer = book.map_or(GateAnswer::NoOpinion, |book| {
         book.gate(&grant.run_id, &call)
     });
     Some(text_result(answer.hook_json().to_string()))
 }
 
+/// The prompt tool's answer (M57.3), when `name` is `ask_host`: Claude
+/// Code's `--permission-prompt-tool` on a seated run, asked when a call
+/// reaches its permission prompt. Like the gate, a hook endpoint answered
+/// before `call_tool`, so it is never listed, counted, held to a grant axis,
+/// announced or recorded, and it answers as one text block, never
+/// `error_result`. It allows only a call the bearer's seat holds a person's
+/// answer for (`Interactions::host_prompt`) and denies the rest; with no book
+/// nobody can have answered, so it denies. It can read a person's answer,
+/// never record one.
+fn answer_host(
+    name: &str,
+    args: &Map<String, Value>,
+    grant: &RunGrant,
+    book: Option<&crate::agent::interaction::Interactions>,
+) -> Option<Value> {
+    use crate::agent::interaction::{GateCall, HostPrompt, HOST_TOOL, NOT_PUT};
+    if name != HOST_TOOL {
+        return None;
+    }
+    let answer = book.map_or(HostPrompt::Deny(NOT_PUT.into()), |book| {
+        book.host_prompt(&grant.run_id, &GateCall::from_prompt_args(args))
+    });
+    Some(text_result(answer.prompt_json().to_string()))
+}
+
+/// Is this asked call the run rewriting its own `recent` notes (D7)? Only
+/// for a seated run whose plan would ask for it, on the main conversation,
+/// and only when `own_memory_record` admits it.
+fn keeps_its_own_notes(
+    grant: &RunGrant,
+    call: &crate::agent::interaction::GateCall,
+    book: Option<&crate::agent::interaction::Interactions>,
+) -> bool {
+    let name = crate::policy::tools::bare_name(&call.tool_name);
+    if name != "update_frontmatter" || !call.agent_id.is_empty() {
+        return false;
+    }
+    let asked = book.and_then(|book| book.planned(&grant.run_id, name))
+        == Some(crate::policy::tool_approval::Decision::Ask);
+    let (Some(args), Ok(vault)) = (call.tool_input.as_object(), bound_vault(grant)) else {
+        return false;
+    };
+    asked && matches!(own_memory_record(&vault, grant, name, args), Ok(Some(_)))
+}
+
+/// What a call admitted to its tool body runs with (M57.4b).
+struct Admitted {
+    /// The run's own Agent record, when the call rewrites its notes (M56.10).
+    own: Option<OwnRecord>,
+    /// The input a person approved for an ask-first write, which the tool
+    /// body runs in place of the call's own, and the keys their edit
+    /// changed. None for every call that took no approval.
+    approved: Option<(Map<String, Value>, Vec<String>)>,
+    /// Whether a person approved the write, which its receipt names (M58.1).
+    approval: Approval,
+}
+
+/// Everything a call meets before its tool body (M57.4): the grant's axes
+/// and the corpus (`admit_before_dispatch`), then the ask-first step. Its
+/// own `recent` notes never ask (D7), so a write M56.10's lane admitted
+/// skips the step. An approval whose input differs from the call's (a
+/// person's edit Claude Code did not apply, M57.4b) meets the grant's axes
+/// and the corpus again on the input that will run, and the tool body then
+/// judges it under its own lock, so an edit is re-checked at the write.
+fn admit_call(
+    vault: &Path,
+    grant: &RunGrant,
+    name: &str,
+    args: &Map<String, Value>,
+    book: Option<&crate::agent::interaction::Interactions>,
+) -> Result<Admitted, Value> {
+    let own = admit_before_dispatch(vault, grant, name, args)?;
+    if own.is_some() {
+        return Ok(Admitted {
+            own,
+            approved: None,
+            approval: Approval::None,
+        });
+    }
+    let (approved, approval) = match ask_first_step(vault, grant, name, args, book)? {
+        Some((taken, approval)) => {
+            let input = taken.input.as_object().cloned().unwrap_or_default();
+            if input != *args {
+                admit_before_dispatch(vault, grant, name, &input)?;
+            }
+            (Some((input, taken.edited)), approval)
+        }
+        None => (None, Approval::None),
+    };
+    Ok(Admitted {
+        own,
+        approved,
+        approval,
+    })
+}
+
+/// What the model reads after a write the person edited before allowing it
+/// (M57.4b), whichever input its call carried.
+fn edited_sentence(keys: &[String]) -> String {
+    format!(
+        "The person changed your draft before allowing it ({}); what landed is their version.",
+        keys.join(", ")
+    )
+}
+
+/// An edited draft judged at the answer (M57.4b), under `grant`, the run's
+/// stored request: the grant's write scope, tools and read scope, the
+/// preferences tier, the corpus and the bundle guard, in dispatch's order
+/// and words, then the write itself previewed on the bytes on disk now
+/// (M57.4c: a stale `expect_hash`, a governed type, an edit that quotes
+/// nothing), so a card refuses an edit the bytes would refuse. It records
+/// nothing, unlike dispatch: the person sees the refusal on their card and
+/// can change the draft again. The tool body judges the input once more
+/// under its lock at the write. An edit never widens the grant: whatever
+/// the grant refuses at dispatch it refuses here. Review's Allow of an
+/// edited queued write runs the same check (`decide_pending`).
+pub(crate) fn edit_refusal(
+    vault: &Path,
+    grant: &RunGrant,
+    name: &str,
+    input: &Value,
+) -> Result<(), crate::agent::interaction::Refusal> {
+    use crate::agent::interaction::Refusal as Answer;
+    let unavailable = |message: String| Answer {
+        code: "capability_unavailable",
+        message,
+    };
+    let name = crate::policy::tools::bare_name(name);
+    let args = input.as_object().cloned().unwrap_or_default();
+    let own = match grant_admission(vault, grant, name, &args) {
+        Ok(own) => own,
+        Err(Refusal::Coded(refusal)) => {
+            return Err(Answer {
+                code: refusal.code,
+                message: refusal.message,
+            })
+        }
+        Err(Refusal::Plain(message)) => return Err(unavailable(message)),
+    };
+    if writes_preferences(&grant.actor, name, &args) {
+        return Err(unavailable(PREFERENCES_REFUSAL.to_string()));
+    }
+    if let Some(target) = write_target(name, &args) {
+        crate::knowledge::guard_agent_write(&target).map_err(unavailable)?;
+    }
+    if let Some(refusal) = corpus_refusal(vault, name, &args) {
+        return Err(Answer {
+            code: refusal.code,
+            message: refusal.message,
+        });
+    }
+    // No run books it: the person's card shows the refusal, and nothing is
+    // recorded.
+    let writer = RunWriter {
+        grant,
+        approval: Approval::None,
+        books: false,
+    };
+    if let Some(Err(message)) =
+        note_write(vault, name, &args, writer, own.as_ref(), WriteMode::Preview)
+    {
+        let stale = message.starts_with(&format!("{STALE_CONTENT}:"));
+        return Err(Answer {
+            code: if stale {
+                STALE_CONTENT
+            } else {
+                "capability_unavailable"
+            },
+            message,
+        });
+    }
+    Ok(())
+}
+
+/// M57.4c — every check a confirmable write would make, on the bytes on disk
+/// now, and where it would land: the admission (`admit_before_dispatch`,
+/// which records a refusal as dispatch does, against the run), then the
+/// tool's own handler in Preview, which books a stale `expect_hash` against
+/// the run as the write would. It writes, announces and queues nothing.
+fn preflight_write(
+    vault: &Path,
+    grant: &RunGrant,
+    name: &str,
+    args: &Map<String, Value>,
+) -> Result<vault::write::Landing, Value> {
+    let own = admit_before_dispatch(vault, grant, name, args)?;
+    let writer = RunWriter {
+        grant,
+        approval: Approval::None,
+        books: true,
+    };
+    match note_write(vault, name, args, writer, own.as_ref(), WriteMode::Preview) {
+        Some(Ok(write)) => Ok(write.landing),
+        Some(Err(message)) => Err(error_result(message)),
+        None => Err(error_result(format!(
+            "{name} is no page write that can wait for review."
+        ))),
+    }
+}
+
+/// Every text block of a tool result, joined: what the model would read.
+fn result_text(value: &Value) -> String {
+    value["content"]
+        .as_array()
+        .map(|blocks| {
+            blocks
+                .iter()
+                .filter_map(|block| block["text"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default()
+}
+
+/// M57.4c — an unattended ask-first write waits in Review. It is queued only
+/// once it passes every check it can pass now (`preflight_write`): a doomed
+/// write is refused exactly as the write would be, recorded as it would be.
+/// A draft over the table's `input_bytes`, an agent already at
+/// `open_per_actor` waiting writes, and a vault with no runtime database are
+/// refused with one `capability_unavailable` row under `agent.ask_first`
+/// (with no runtime database there is nowhere to record it, so nothing is).
+/// Otherwise the row is queued with the run's grant, the key-sorted draft and
+/// its canonical hash, and the page's current hash, and the model reads that
+/// it waits: not an error, nothing announced, nothing on disk. The same
+/// write already waiting answers with its id and queues nothing.
+fn queue_step(vault: &Path, grant: &RunGrant, name: &str, args: &Map<String, Value>) -> Value {
+    use crate::runtime::pending_writes::{self, NotQueued};
+    let landing = match preflight_write(vault, grant, name, args) {
+        Ok(landing) => landing,
+        Err(refused) => return refused,
+    };
+    let messages = crate::policy::tool_approval::messages();
+    let limits = crate::policy::tool_approval::queue_limits();
+    let refuse = |detail: &str, text: String| {
+        record_refusal(
+            &grant.run_id,
+            ASK_FIRST_SURFACE,
+            "capability_unavailable",
+            name,
+            &format!("{name}: {detail}"),
+        );
+        error_result(text)
+    };
+    let unavailable = || messages.queue_unavailable.clone();
+    let Some(scope) = crate::runtime::open_vault(vault) else {
+        return refuse("no runtime database to queue it in", unavailable());
+    };
+    let input = Value::Object(args.clone());
+    let grant_json = json!({
+        "actor": grant.actor,
+        "run_id": grant.run_id,
+        "scope": grant.scope,
+        "read_scope": grant.read_scope,
+        "tools": grant.tools,
+        "chain": grant.chain,
+    });
+    let queued = crate::runtime::sink::with_sink(|conn| {
+        pending_writes::queue(
+            conn,
+            &pending_writes::Queue {
+                vault_id: &scope.vault_id,
+                run_id: &grant.run_id,
+                actor: &grant.actor,
+                tool: name,
+                target: &landing.path,
+                target_hash: landing.before.as_deref(),
+                input: &input,
+                grant: &grant_json,
+                limits,
+            },
+        )
+    });
+    match queued {
+        None => refuse("no runtime database to queue it in", unavailable()),
+        Some(Ok(queued)) if queued.fresh => {
+            text_result(messages.queued.replace("{id}", &queued.id))
+        }
+        Some(Ok(queued)) => text_result(messages.queued_already.replace("{id}", &queued.id)),
+        Some(Err(NotQueued::Full(open))) => refuse(
+            "its queue for review is full",
+            messages.queue_full.replace("{n}", &open.to_string()),
+        ),
+        Some(Err(NotQueued::TooLarge)) => refuse(
+            "too large to queue for review",
+            messages
+                .queue_too_large
+                .replace("{max}", &limits.input_bytes.to_string()),
+        ),
+        Some(Err(NotQueued::Db(detail))) => {
+            log::warn!("pending_writes: could not queue {name}: {detail}");
+            refuse("the runtime database refused the queue", unavailable())
+        }
+    }
+}
+
+/// What deciding a queued write says with no runtime database to hold it.
+const DECIDE_UNAVAILABLE: &str =
+    "Cerebro's runtime database is unavailable, so no queued write can be decided.";
+
+/// `f` against the runtime database, or DECIDE_UNAVAILABLE without one.
+fn in_runtime<T>(f: impl FnOnce(&rusqlite::Connection) -> Result<T, String>) -> Result<T, String> {
+    crate::runtime::sink::with_sink(f).unwrap_or_else(|| Err(DECIDE_UNAVAILABLE.into()))
+}
+
+/// Who decides a queued write: the one person (D1), as Review records it.
+pub const PENDING_DECIDED_BY: &str = "human:me";
+
+/// What a rejection without a reason is refused with, in decideProposal's
+/// words.
+pub const REJECTION_NEEDS_A_REASON: &str = "a rejection needs a reason";
+
+/// What a person's decision of a queued write came to (M57.4c). The caller
+/// reads it (CV-03's typed-result exemption): an edit Cerebro refused keeps
+/// the card, and a write another decision got to first is no error.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum PendingDecision {
+    /// It landed, at `path`.
+    Applied { path: String },
+    /// The person allowed it as asked, and Cerebro refused it when applied;
+    /// the agent will hear why.
+    Refused { reason: String },
+    /// The person rejected it.
+    Rejected,
+    /// The person's edit was refused; the write still waits.
+    EditRefused { reason: String },
+    /// Another decision got there first.
+    NoLongerWaiting { state: String },
+}
+
+/// The queuing run's grant, from its stored JSON. A key that is missing or
+/// unreadable narrows to nothing; only an explicit null is unrestricted, as
+/// the run held it. The vault is the one the decision is made in.
+fn stored_grant(vault: &Path, row: &crate::runtime::pending_writes::PendingRow) -> RunGrant {
+    let axis = |key: &str| match row.grant.get(key) {
+        Some(Value::Null) => None,
+        Some(value) => serde_json::from_value::<Vec<String>>(value.clone())
+            .map(Some)
+            .unwrap_or_else(|_| Some(Vec::new())),
+        None => Some(Vec::new()),
+    };
+    RunGrant {
+        actor: row.actor.clone(),
+        run_id: row.run_id.clone(),
+        scope: axis("scope"),
+        read_scope: axis("read_scope"),
+        tools: axis("tools"),
+        chain: axis("chain")
+            .filter(|chain| !chain.is_empty())
+            .unwrap_or_else(|| vec![row.actor.clone()]),
+        vault: Some(vault.to_path_buf()),
+        asks: WriteAsks::UNASKED,
+    }
+}
+
+/// M57.4c — Review's decision of one queued write in `vault`.
+///
+/// Reject needs a reason, and records it. Allow takes the person's edit or
+/// the stored draft, and holds it to the tool's schema (`validate_input`)
+/// and to every guard under the queuing run's stored grant, on the bytes on
+/// disk now: an edit is judged as a card judges one (`edit_refusal`, which
+/// records nothing), so a refused edit answers `edit_refused` and the write
+/// keeps waiting; a refused unedited write is claimed and settled refused,
+/// so the agent hears why. Then the claim (pending to applying; a second
+/// decision answers `no_longer_waiting`), the admission and the tool's own
+/// handler in Commit, under the write's lock, called directly and never
+/// through `call_tool`, so an Allow cannot queue the write again. The row is
+/// settled applied or refused, and a write that landed is announced to the
+/// open pages (`announce`, M53.6). The applied write is the agent's, under
+/// its actor and run, and names `human:me` as its approver (M58.1, M57 Q21);
+/// the row records who decided. A write of another vault is no write of this
+/// one.
+pub fn decide_pending(
+    vault: &Path,
+    pending_id: &str,
+    allow: bool,
+    input: Option<Value>,
+    reason: Option<&str>,
+    announce: impl FnOnce(Value),
+) -> Result<PendingDecision, String> {
+    use crate::runtime::pending_writes::{self, Settle, Taken};
+    let scope = crate::runtime::open_vault(vault).ok_or(DECIDE_UNAVAILABLE)?;
+    let vault_id = scope.vault_id.as_str();
+    if !allow {
+        let said = reason.unwrap_or("").trim();
+        if said.is_empty() {
+            return Err(REJECTION_NEEDS_A_REASON.into());
+        }
+        let found: Option<String> = in_runtime(|conn| {
+            pending_writes::reject(conn, vault_id, pending_id, said, PENDING_DECIDED_BY)
+        })?;
+        return Ok(match found {
+            None => PendingDecision::Rejected,
+            Some(state) => PendingDecision::NoLongerWaiting { state },
+        });
+    }
+    let row = in_runtime(|conn| pending_writes::get(conn, vault_id, pending_id))?
+        .ok_or_else(|| format!("no queued write {pending_id} in this vault"))?;
+    if row.state != "pending" {
+        return Ok(PendingDecision::NoLongerWaiting { state: row.state });
+    }
+    let grant = stored_grant(vault, &row);
+    let name = row.tool.as_str();
+    let edited = input.as_ref().is_some_and(|edit| {
+        crate::agent::interaction::canonical_hash(edit)
+            != crate::agent::interaction::canonical_hash(&row.input)
+    });
+    let draft = match input {
+        Some(edit) if edited => edit,
+        _ => row.input.clone(),
+    };
+    let args = draft.as_object().cloned().unwrap_or_default();
+    let checked = crate::policy::tools::validate_input(name, &draft).and_then(|()| {
+        if edited {
+            edit_refusal(vault, &grant, name, &draft).map_err(|refusal| refusal.message)
+        } else {
+            preflight_write(vault, &grant, name, &args)
+                .map(drop)
+                .map_err(|refused| result_text(&refused))
+        }
+    });
+    let take =
+        || in_runtime(|conn| pending_writes::claim(conn, vault_id, pending_id, PENDING_DECIDED_BY));
+    let settle = |how: Settle| in_runtime(|conn| pending_writes::settle(conn, pending_id, &how));
+    if let Err(reason) = checked {
+        if edited {
+            return Ok(PendingDecision::EditRefused { reason });
+        }
+        if let Taken::NoLongerWaiting(state) = take()? {
+            return Ok(PendingDecision::NoLongerWaiting { state });
+        }
+        settle(Settle::Refused {
+            reason: reason.clone(),
+        })?;
+        return Ok(PendingDecision::Refused { reason });
+    }
+    if let Taken::NoLongerWaiting(state) = take()? {
+        return Ok(PendingDecision::NoLongerWaiting { state });
+    }
+    let writer = RunWriter {
+        grant: &grant,
+        approval: Approval::Person,
+        books: true,
+    };
+    let outcome = match admit_before_dispatch(vault, &grant, name, &args) {
+        Err(refused) => Err(result_text(&refused)),
+        Ok(own) => note_write(vault, name, &args, writer, own.as_ref(), WriteMode::Commit)
+            .unwrap_or_else(|| Err(format!("{name} is no page write that can wait for review."))),
+    };
+    match outcome {
+        Ok(write) => {
+            settle(Settle::Applied {
+                result: write.landing.path.clone(),
+                applied_input: draft.clone(),
+            })?;
+            if let Some(change) = announced_change(vault, name, &args, &Ok(write.reply)) {
+                announce(change);
+            }
+            Ok(PendingDecision::Applied {
+                path: write.landing.path,
+            })
+        }
+        Err(reason) => {
+            settle(Settle::Refused {
+                reason: reason.clone(),
+            })?;
+            Ok(PendingDecision::Refused { reason })
+        }
+    }
+}
+
+/// The surface an ask-first refusal is recorded under (M57.4).
+const ASK_FIRST_SURFACE: &str = "agent.ask_first";
+
+/// M57.4 — dispatch is the boundary for an ask-first page write (CV-29).
+///
+/// A tool the manifest marks confirmable is decided by the plan the run's
+/// seat holds, the one its argv was built from, or, for a run with no seat,
+/// by the table's cell for its grant (an attended run with no seat has no
+/// gate, so nobody can answer it). Allow passes. Ask passes only by taking a
+/// person's Allow recorded for this vault, session, actor and tool, whose
+/// asked or approved input the call carries (`take_write_approval`), so a
+/// user allow rule or a hook that never ran can make the CLI call the tool
+/// sooner and the write is still refused. What the approval gives is the
+/// input the person approved, their edit of the draft included (M57.4b),
+/// and the tool body runs that, not the call's own. Queue (an unattended
+/// run, M57.4c) waits in Review: `queue_step` answers the model, and the
+/// write is not run. Deny refuses. A refusal writes nothing, announces
+/// nothing, and is recorded once per run and tool as
+/// `capability_unavailable`. Every answer that stops the call comes back as
+/// the `Err` value the model reads; a queued write's is no error. A consumed
+/// approval comes back with `Approval::Person`, so the write's receipt names
+/// its approver (M58.1).
+fn ask_first_step(
+    vault: &Path,
+    grant: &RunGrant,
+    name: &str,
+    args: &Map<String, Value>,
+    book: Option<&crate::agent::interaction::Interactions>,
+) -> Result<Option<(crate::agent::interaction::ApprovedWrite, Approval)>, Value> {
+    use crate::policy::tool_approval::{self, Decision, RunKind};
+    if !crate::policy::tools::confirmable(name) {
+        return Ok(None);
+    }
+    let decision = book
+        .and_then(|book| book.planned(&grant.run_id, name))
+        .unwrap_or_else(|| {
+            let kind = match grant.asks.kind {
+                RunKind::Attended => RunKind::Unattended,
+                kind => kind,
+            };
+            tool_approval::confirmable_decision(kind, grant.asks.ask_first)
+        });
+    let messages = tool_approval::messages();
+    let (detail, text) = match decision {
+        Decision::Allow | Decision::Cli => return Ok(None),
+        Decision::Queue => return Err(queue_step(vault, grant, name, args)),
+        Decision::Ask => {
+            let input = Value::Object(args.clone());
+            if let Some(taken) = book.and_then(|book| book.take_write_approval(grant, name, &input))
+            {
+                return Ok(Some((taken, Approval::Person)));
+            }
+            (
+                "no recorded approval",
+                messages.ask_first_unapproved.clone(),
+            )
+        }
+        Decision::Deny | Decision::Refuse if grant.asks.ask_first => (
+            "it asks first, and nobody is watching this run",
+            messages.ask_first_unattended.clone(),
+        ),
+        Decision::Deny | Decision::Refuse => (
+            "no page write is confirmable in this run",
+            messages.denied.clone(),
+        ),
+    };
+    record_refusal(
+        &grant.run_id,
+        ASK_FIRST_SURFACE,
+        "capability_unavailable",
+        name,
+        &format!("{name}: {detail}"),
+    );
+    Err(error_result(text))
+}
+
 /// MCP tool results are content blocks. Errors come back as `isError` content
 /// rather than JSON-RPC errors so the agent can read and recover from them.
-fn text_result(text: String) -> Value {
+pub(crate) fn text_result(text: String) -> Value {
     json!({ "content": [{ "type": "text", "text": text }] })
 }
 
-fn error_result(message: String) -> Value {
+pub(crate) fn error_result(message: String) -> Value {
     json!({ "content": [{ "type": "text", "text": message }], "isError": true })
 }
 
@@ -1725,7 +2372,7 @@ pub(crate) fn listed_tools(grant: &RunGrant, proposals_enabled: bool) -> Vec<Val
 // Tools
 // ---------------------------------------------------------------------------
 
-fn arg_str(args: &Map<String, Value>, key: &str) -> Option<String> {
+pub(crate) fn arg_str(args: &Map<String, Value>, key: &str) -> Option<String> {
     args.get(key).and_then(Value::as_str).map(str::to_string)
 }
 
@@ -1771,11 +2418,11 @@ fn self_anchor(path: &str, about: &Value) -> Option<String> {
 }
 
 /// `recheck_concept` (M49.7, K19) — see `ledger::concepts::recheck_concept`.
+/// The stamp is `by`'s actor, booked under its run.
 fn tool_recheck_concept(
     vault: &Path,
     args: &Map<String, Value>,
-    actor: &str,
-    run: Option<&str>,
+    by: &WriteReceipt<ConceptDoor>,
 ) -> Result<Value, String> {
     let raw = arg_str(args, "path").ok_or("recheck_concept needs a path")?;
     let path = crate::knowledge::canonical_path(&raw).ok_or_else(|| {
@@ -1784,20 +2431,16 @@ fn tool_recheck_concept(
     let stale_after = arg_str(args, "stale_after")
         .ok_or("recheck_concept needs the next stale_after, as YYYY-MM-DD")?;
     crate::knowledge::validate_stale_after(&stale_after, chrono::Utc::now().date_naive())?;
-    Ok(text_result(match crate::ledger::concepts::recheck_concept(
-        vault,
-        &path,
-        &stale_after,
-        actor,
-        run,
-    )? {
-        crate::ledger::concepts::Rechecked::Unchanged => {
-            format!("Nothing changed: {path} is already due for a recheck on {stale_after}.")
-        }
-        crate::ledger::concepts::Rechecked::Stamped => format!(
-            "Recorded: {path} still holds; next recheck {stale_after}. Nothing else changed."
-        ),
-    }))
+    Ok(text_result(
+        match crate::ledger::concepts::recheck_concept(vault, &path, &stale_after, by)? {
+            crate::ledger::concepts::Rechecked::Unchanged => {
+                format!("Nothing changed: {path} is already due for a recheck on {stale_after}.")
+            }
+            crate::ledger::concepts::Rechecked::Stamped => format!(
+                "Recorded: {path} still holds; next recheck {stale_after}. Nothing else changed."
+            ),
+        },
+    ))
 }
 
 /// A call refused before its tool body runs (M54.10), by its grant's write
@@ -2113,6 +2756,8 @@ turns the property into a relation, and the next scan would drop the text. Nothi
 const OWN_RECORD_CHANGED: &str = "The record changed under this write and is no longer this \
 run's agent record, so nothing was written.";
 const ONLY_RECENT: &str = "Only `recent` may change on your own record, so nothing was written.";
+const NOTES_UNPLACED: &str = "Cerebro could not place your notes in this record as it is written \
+without changing anything else, so nothing was written. Tell the person.";
 
 /// The run's own Agent record, found for a write to its notes (M56.10): the
 /// handle the run answers to and the record's path as the scan read it.
@@ -2168,11 +2813,7 @@ fn own_memory_record(
              kept no notes."
         )
     })?;
-    let records: Vec<&vault::entry::Entry> = entries
-        .iter()
-        .filter(|e| e.entry_type.as_deref() == Some("Agent") && e.parse_error.is_none())
-        .filter(|e| agent_handle(e) == handle)
-        .collect();
+    let records = agents_answering(&entries, handle);
     let loose = |p: &str| p.trim_start_matches("./").to_string();
     let Some(record) = records
         .iter()
@@ -2233,12 +2874,102 @@ fn recent_value_refusal(value: &Value) -> Option<String> {
     None
 }
 
+/// Where `recent` sits in a note's bytes (M56.10): the byte span of its
+/// entry in the frontmatter block, which is the `recent:` line at column 0
+/// and every line under it (indented, blank, or a `- ` item at column 0),
+/// less trailing blank lines. With no such key it is the empty span at the
+/// block's end, where a new entry goes. `None` when the bytes hold no
+/// frontmatter block. Every byte outside the span is the person's: their
+/// comments, quoting and indentation, which a reserialized block would lose.
+fn recent_span(content: &str) -> Option<(usize, usize)> {
+    let (block, _) = vault::parse::split_frontmatter(content);
+    let block = block.filter(|b| !b.is_empty())?;
+    let bom = if content.starts_with('\u{feff}') {
+        '\u{feff}'.len_utf8()
+    } else {
+        0
+    };
+    let fence = if content[bom..].starts_with("---\r\n") {
+        5
+    } else {
+        4
+    };
+    let start = bom + fence;
+    if !content.get(start..)?.starts_with(block) {
+        return None;
+    }
+    let breaks = |rest: &str| rest.is_empty() || rest.starts_with([' ', '\t', '\r', '\n']);
+    let opens = |line: &str| line.strip_prefix("recent:").is_some_and(breaks);
+    let continues = |line: &str| {
+        line.trim().is_empty()
+            || line.starts_with([' ', '\t'])
+            || line.strip_prefix('-').is_some_and(breaks)
+    };
+    let mut found: Option<(usize, usize)> = None;
+    let mut at = start;
+    for line in block.split_inclusive('\n') {
+        let end = at + line.len();
+        match found {
+            Some(_) if !continues(line) => break,
+            Some((from, _)) if !line.trim().is_empty() => found = Some((from, end)),
+            None if opens(line) => found = Some((at, end)),
+            _ => {}
+        }
+        at = end;
+    }
+    let block_end = start + block.len();
+    Some(found.unwrap_or((block_end, block_end)))
+}
+
+/// The bytes a notes write lands (M56.10): `current` with only the `recent`
+/// entry's span replaced, by `recent: <value>` as serde_yaml writes it, or
+/// removed for null. A record whose block opens with CRLF keeps CRLF.
+fn notes_bytes(current: &str, value: &Value) -> Result<String, String> {
+    let (from, to) = recent_span(current).ok_or(OWN_RECORD_CHANGED)?;
+    let entry = match value {
+        Value::Null => String::new(),
+        Value::String(text) => {
+            let mut one = serde_yaml::Mapping::new();
+            one.insert(
+                serde_yaml::Value::String(RECENT_KEY.to_string()),
+                serde_yaml::Value::String(text.clone()),
+            );
+            let entry = serde_yaml::to_string(&one).map_err(|_| NOTES_UNPLACED.to_string())?;
+            if current
+                .trim_start_matches('\u{feff}')
+                .starts_with("---\r\n")
+            {
+                entry.replace('\n', "\r\n")
+            } else {
+                entry
+            }
+        }
+        _ => return Err(RECENT_NOT_TEXT.to_string()),
+    };
+    Ok(format!("{}{entry}{}", &current[..from], &current[to..]))
+}
+
+/// Did `after` land `value` as the notes the scanner reads (M56.10)? The
+/// splice is checked by reading it back, so a record written in a shape the
+/// span misreads refuses instead of landing something else.
+fn notes_landed(rel: &str, after: &str, value: &Value) -> bool {
+    let entry = vault::entry::build_entry(rel, after, String::new(), String::new());
+    entry.parse_error.is_none()
+        && !entry.relationships.contains_key(RECENT_KEY)
+        && match value {
+            Value::Null => !entry.properties.contains_key(RECENT_KEY),
+            _ => entry.properties.get(RECENT_KEY) == Some(value),
+        }
+}
+
 /// The byte check for a notes write (M56.10), judged under the write's lock
 /// on the bytes it replaces (M55.1). What the lock holds must still be the
 /// run's own record: a `type: Agent` answering to `handle`, read at the
-/// scanned `rel`. What the write would land must keep that type and handle,
-/// every other key and relation, and the body byte for byte. Only `recent`
-/// may differ.
+/// scanned `rel`. What the write would land must be exactly those bytes with
+/// the `recent` entry spliced to the notes it lands (`notes_bytes`), so every
+/// byte outside the entry's span is the same, and must keep that type and
+/// handle and every other key and relation as the scanner reads them. Only
+/// `recent` may differ.
 fn own_memory_bytes_refusal(
     rel: &str,
     handle: &str,
@@ -2264,9 +2995,16 @@ fn own_memory_bytes_refusal(
         return Some(OWN_RECORD_CHANGED);
     }
     let landed = read(after);
-    let same_body =
-        vault::parse::split_frontmatter(before).1 == vault::parse::split_frontmatter(after).1;
-    if !is_own(&landed) || without_recent(&held) != without_recent(&landed) || !same_body {
+    let notes = landed
+        .properties
+        .get(RECENT_KEY)
+        .cloned()
+        .unwrap_or(Value::Null);
+    let spliced = notes_bytes(before, &notes).ok();
+    if spliced.as_deref() != Some(after)
+        || !is_own(&landed)
+        || without_recent(&held) != without_recent(&landed)
+    {
         return Some(ONLY_RECENT);
     }
     None
@@ -2299,14 +3037,16 @@ enum Refusal {
 }
 
 /// The write axis (M17.13): the scope's refusal of this call's target, or
-/// `None` when the call writes nothing or writes inside its scope.
+/// `None` when the call writes nothing or writes inside its scope. The scope
+/// binds where the target lands as well as how it is spelled (M55.5 review).
 fn write_scope_refusal(
+    vault: &Path,
     grant: &RunGrant,
     name: &str,
     args: &Map<String, Value>,
 ) -> Option<GrantRefusal> {
     let target = write_target(name, args)?;
-    if grant.may_write(&target) {
+    if scope_admits_landing(vault, &grant.scope, &target) {
         return None;
     }
     Some(GrantRefusal {
@@ -2338,7 +3078,7 @@ fn grant_admission(
     // What bounds write_concept is the ledger (every write is a governed
     // transition, M24), the tool allowlist (`tools:` may omit it), and — to
     // REPLACE a concept — read access to it (M49.4, below).
-    let outside = write_scope_refusal(grant, name, args);
+    let outside = write_scope_refusal(vault, grant, name, args);
 
     // M31.1b — reads were the one surface the grant did not bound. A name
     // outside the grant is refused exactly like scope, before any tool body
@@ -2369,14 +3109,17 @@ fn grant_admission(
     // does a note write that carries `expect_hash` (M55.3): the hash says the
     // run read its target, so a run that may not read it cannot use the hash
     // to probe it. edit_note always does (M55.5): its refusals list the
-    // passages they matched, so it is refused before any match. Every reader that ENUMERATES — search_notes, list_inbox, get_vault_context,
-    // and knowledge_about's subject index — filters inside its own body
-    // instead, over the scanned corpus, and says how much was withheld where
-    // a count is what it reports: a silently thinned result reads as "that is
-    // all there is". knowledge_about is checked here as well, because reading
-    // the bundle at all is a separate question from which notes it may name.
+    // passages they matched, so it is refused before any match. Every reader
+    // that ENUMERATES — search_notes, list_notes, list_inbox,
+    // get_vault_context, and knowledge_about's subject index — filters inside
+    // its own body instead, over the scanned corpus, and says how much was
+    // withheld where a count is what it reports: a silently thinned result
+    // reads as "that is all there is". knowledge_about is checked here as
+    // well, because reading the bundle at all is a separate question from
+    // which notes it may name. Like the write axis, it binds where the target
+    // lands, so a symlink inside the scope cannot carry a read out of it.
     if let Some(target) = read_target(name, args).or_else(|| hashed_read_target(name, args)) {
-        if !grant.may_read(&target) {
+        if !scope_admits_landing(vault, &grant.read_scope, &target) {
             return Err(Refusal::Coded(GrantRefusal {
                 code: READ_OUTSIDE_SCOPE,
                 message: format!(
@@ -2581,37 +3324,83 @@ fn call_tool(
     // own code (M54.10). A refused call is still counted above, and it
     // returns before the open pages are told anything (M53.6). `own` is the
     // run's own Agent record when the call rewrites its notes there (M56.10).
-    let own = match admit_before_dispatch(&vault, grant, name, args) {
-        Ok(own) => own,
-        Err(refused) => return Ok(refused),
+    // M57.4: and an ask-first agent's page write, which lands only on a
+    // person's Allow (`ask_first_step`). M57.4b: and runs the input they
+    // approved, their edit included, whatever input the call carried.
+    let Admitted {
+        own,
+        approved,
+        approval,
+    } = {
+        use tauri::Manager;
+        let agents = app.try_state::<crate::agent::AgentState>();
+        match admit_call(
+            &vault,
+            grant,
+            name,
+            args,
+            agents.as_ref().map(|a| a.interactions()),
+        ) {
+            Ok(admitted) => admitted,
+            Err(refused) => return Ok(refused),
+        }
+    };
+    let (args, edited) = match &approved {
+        Some((input, edited)) => (input, edited.as_slice()),
+        None => (args, &[][..]),
     };
 
-    let actor = grant.actor.as_str();
+    // Every write below is stamped with the run, and with its approver when a
+    // person allowed it (M58.1).
+    let writer = RunWriter {
+        grant,
+        approval,
+        books: true,
+    };
     let outcome = match name {
         "get_vault_context" => tool_vault_context(&vault, grant),
         "search_notes" => tool_search(&vault, args, grant),
+        "list_notes" => tool_list_notes(&vault, args, grant),
         "get_note" => tool_get_note(&vault, args),
         "knowledge_about" => tool_knowledge_about(&vault, args, grant),
         "list_inbox" => tool_list_inbox(&vault, grant),
         "hand_to" => tool_hand_to(app, &vault, args, grant),
-        "create_note" => tool_create_note(&vault, args),
-        // The run's id, so a stale `expect_hash` is recorded against it (M55.3).
-        // And the run's own record, when the patch is its notes (M56.10).
-        "update_frontmatter" => {
-            tool_update_frontmatter_in(&vault, args, Some(&grant.run_id), own.as_ref())
+        "create_note" => tool_create_note_in(&vault, args, writer),
+        // The writer books a stale `expect_hash` against the run (M55.3). And
+        // the run's own record, when the patch is its notes (M56.10).
+        "update_frontmatter" => tool_update_frontmatter_in(&vault, args, writer, own.as_ref()),
+        "append_to_note" => tool_append_in(&vault, args, writer),
+        "edit_note" => tool_edit_note_in(&vault, args, writer),
+        // The comment tools (M70.3) write the page's sidecar, never the page,
+        // as the run's actor with its run id.
+        "comment_on_note" | "reply_to_comment" | "resolve_comment" => {
+            let poster = crate::comment_tools::Poster {
+                actor: &grant.actor,
+                run_id: &grant.run_id,
+            };
+            crate::comment_tools::call(&vault, name, args, poster)
         }
-        "append_to_note" => tool_append_in(&vault, args, Some(&grant.run_id)),
-        "edit_note" => tool_edit_note_in(&vault, args, Some(&grant.run_id)),
-        "write_concept" => tool_write_concept_in(&vault, args, actor, Some(&grant.run_id)),
+        "write_concept" => {
+            tool_write_concept_in(&vault, args, &WriteReceipt::run(cleared_for_concept(grant)))
+        }
         // The run's id, as for write_concept (M49.9, K25): the stamp is a
         // proposal now, and the run's counters must include it.
-        "recheck_concept" => tool_recheck_concept(&vault, args, actor, Some(&grant.run_id)),
-        "cache_source" => tool_cache_source(&vault, args, actor),
+        "recheck_concept" => {
+            tool_recheck_concept(&vault, args, &WriteReceipt::run(cleared_for_concept(grant)))
+        }
+        "cache_source" => {
+            tool_cache_source(&vault, args, &WriteReceipt::run(cleared_for_source(grant)))
+        }
         "propose_organize" => tool_propose_organize(app, args),
         "report_window_outcome" => tool_report_window_outcome(args, grant),
         name if name == crate::assembly::prompt::SUBMIT_TOOL => tool_submit_answer(args, grant),
         "open_note" => tool_ui(app, "open_note", args),
-        "navigate" => tool_ui(app, "navigate", args),
+        // Checked against the places its served row lists (M59.1): an
+        // unknown word is refused to the agent, never sent Home.
+        "navigate" => match navigate_refusal(args) {
+            Some(refused) => Err(refused),
+            None => tool_ui(app, "navigate", args),
+        },
         // The proposal surface. Gated twice: the switch decides whether the
         // tools are ever LISTED, and this decides whether a name that was
         // guessed rather than listed can be CALLED. A model that remembered
@@ -2638,11 +3427,21 @@ fn call_tool(
     }
 
     // A failing tool must reach the model as readable content, not as a
-    // transport error it cannot see or recover from.
+    // transport error it cannot see or recover from. A write the person
+    // edited says so (M57.4b), so the model learns what landed.
     Ok(match outcome {
+        Ok(value) if !edited.is_empty() => with_edit_sentence(value, edited),
         Ok(value) => value,
         Err(message) => error_result(message),
     })
+}
+
+/// A tool result with the edit sentence as one more text block (M57.4b).
+fn with_edit_sentence(mut value: Value, edited: &[String]) -> Value {
+    if let Some(content) = value.get_mut("content").and_then(Value::as_array_mut) {
+        content.push(json!({ "type": "text", "text": edited_sentence(edited) }));
+    }
+    value
 }
 
 /// A proposal-boundary answer, as the model sees it.
@@ -2924,13 +3723,16 @@ fn tool_commit_proposals(
     // belonging to another run, and this is what makes that check meaningful:
     // a caller cannot name a run it does not hold the token for.
     let run_id = grant.run_id.clone();
+    let by = WriteReceipt::run(cleared_for_concept(grant));
     crate::ledger::shadow::with_writer(
         vault,
         |writer| match crate::policy::commit::commit_proposals(&table, writer, vault, &run_id, &ids)
         {
             Ok(outcome) => Ok({
-                // Booked on the run's row (M49.9, K25).
+                // Booked on the run's row (M49.9, K25), and the files it
+                // projected recorded under the run (M58.1).
                 outcome.book(&run_id);
+                crate::vault::write::record_projected(vault, &outcome.projected, &by);
                 json!({
                     "commit_set_id": outcome.commit_set_id,
                     "transition": outcome.transition.as_str(),
@@ -2955,9 +3757,10 @@ fn tool_commit_proposals(
     .and_then(typed_result_value)
 }
 
-/// What a tool call changed on disk, as the open pages hear it (M53.6) — or
-/// `None` when it changed nothing: a refusal, an `isError` answer, a read, or
-/// a tool that only moves the UI.
+/// What a tool call changed, as the open pages hear it (M53.6) — or `None`
+/// when it changed nothing they show: a refusal, an `isError` answer, a read,
+/// or a tool that only moves the UI. A comment tool (door `comment`, M70.3)
+/// changed only the page's comments, and says so for that page.
 ///
 /// A write that knows the file it changed names it, under the path the scan
 /// lists it by (`landing_path`), so a page with that file open reloads it
@@ -2969,7 +3772,8 @@ fn tool_commit_proposals(
 /// never "nothing".
 ///
 /// Which tools announce is the manifest's: a tool whose door writes
-/// (`policy::tools::writes_disk`) does, and every other tool is quiet.
+/// (`policy::tools::writes_disk`) announces the vault, a comment door's tool
+/// announces the page's comments, and every other tool is quiet.
 fn announced_change(
     vault: &Path,
     name: &str,
@@ -2998,6 +3802,8 @@ fn announced_change(
                 None => rescan(),
             },
         ),
+        _ if crate::comment_tools::comments_on(name) => arg_str(args, "path")
+            .map(|path| json!({ "action": "comments_changed", "path": listed_path(vault, &path) })),
         _ if crate::policy::tools::writes_disk(name) => Some(rescan()),
         _ => None,
     }
@@ -3097,101 +3903,767 @@ fn is_capture(entry: &vault::entry::Entry) -> bool {
     }
 }
 
-fn tool_search(vault: &Path, args: &Map<String, Value>, grant: &RunGrant) -> Result<Value, String> {
-    let query = arg_str(args, "query").ok_or("search_notes needs a query")?;
-    let type_filter = arg_str(args, "type");
-    let limit = args
-        .get("limit")
-        .and_then(Value::as_u64)
-        .unwrap_or(20)
-        .min(100) as usize;
-
-    // Every body is read either way — the old substring search did the same —
-    // so ranking costs arithmetic over data already in hand and no index
-    // (M17.19). Kept as one materialised corpus because `Doc` borrows it.
-    // M34.4: notes outside the read scope leave the corpus BEFORE ranking —
-    // an out-of-scope note must not even shape the ranking of what remains —
-    // and the count withheld is reported below, because a silently thinned
-    // result reads as "that is all there is".
-    let scanned = vault::scan::scan_vault(vault)?;
-    let total = scanned.len();
-    let readable: Vec<vault::entry::Entry> = scanned
-        .into_iter()
+/// The notes this run may read, and how many the read scope withheld across
+/// the whole vault (M34.4). Notes outside the scope leave BEFORE anything
+/// else reads them: an out-of-scope note must not even shape the ranking of
+/// what remains, and the count is said, because a silently thinned answer
+/// reads as "that is all there is". Read from search's corpus
+/// (`vault/corpus.rs`, M59.4), so an unchanged note is not read again; when
+/// nothing is withheld the corpus's own entries are lent, not copied.
+fn readable_entries<'c>(
+    corpus: &'c vault::corpus::Corpus,
+    grant: &RunGrant,
+) -> (std::borrow::Cow<'c, [vault::entry::Entry]>, usize) {
+    let total = corpus.entries.len();
+    if corpus.entries.iter().all(|e| grant.may_read(&e.path)) {
+        return (std::borrow::Cow::Borrowed(&corpus.entries[..]), 0);
+    }
+    let readable: Vec<vault::entry::Entry> = corpus
+        .entries
+        .iter()
         .filter(|e| grant.may_read(&e.path))
+        .cloned()
         .collect();
     let withheld = total - readable.len();
-    let entries: Vec<vault::entry::Entry> = readable
-        .into_iter()
-        .filter(|e| match &type_filter {
-            Some(wanted) => e.entry_type.as_deref() == Some(wanted.as_str()),
-            None => true,
-        })
-        .collect();
-    let bodies: Vec<String> = entries
-        .iter()
-        .map(|e| vault::write::read_note(vault, &e.path).unwrap_or_default())
-        .collect();
-    let docs: Vec<crate::search::Doc> = entries
-        .iter()
-        .zip(bodies.iter())
-        .map(|(e, body)| crate::search::Doc {
-            path: &e.path,
-            title: &e.title,
-            kind: e.entry_type.as_deref(),
-            body,
-        })
-        .collect();
+    (std::borrow::Cow::Owned(readable), withheld)
+}
 
-    let ranked = crate::search::rank(&query, &docs, limit);
-    // Named in BOTH outcomes: an empty result over a thinned corpus is the
-    // most misleading sentence this tool can emit.
+/// The type a tool was asked to filter by: trimmed, and `None` when blank or
+/// absent.
+fn wanted_type(wanted: Option<&str>) -> Option<&str> {
+    wanted.map(str::trim).filter(|t| !t.is_empty())
+}
+
+/// `entry` has type `wanted`, ignoring ASCII case and the spaces around it.
+fn has_type(entry: &vault::entry::Entry, wanted: &str) -> bool {
+    entry
+        .entry_type
+        .as_deref()
+        .is_some_and(|t| t.trim().eq_ignore_ascii_case(wanted))
+}
+
+/// The entries of type `wanted`, matched ignoring ASCII case and the spaces
+/// around it; a blank or absent type keeps every entry. A type no entry
+/// carries is refused, naming the types these entries do carry, never
+/// "nothing matched": a misspelt type and an empty answer are different
+/// sentences. Only the readable notes are passed in, so a type in use only
+/// outside the read scope is never named.
+fn type_filtered<'a>(
+    entries: &'a [vault::entry::Entry],
+    wanted: Option<&str>,
+) -> Result<Vec<&'a vault::entry::Entry>, String> {
+    let Some(wanted) = wanted_type(wanted) else {
+        return Ok(entries.iter().collect());
+    };
+    let kept: Vec<&vault::entry::Entry> = entries.iter().filter(|e| has_type(e, wanted)).collect();
+    if !kept.is_empty() {
+        return Ok(kept);
+    }
+    let types: BTreeSet<&str> = entries
+        .iter()
+        .filter_map(|e| e.entry_type.as_deref().map(str::trim))
+        .filter(|t| !t.is_empty())
+        .collect();
+    let in_use = if types.is_empty() {
+        "none".to_string()
+    } else {
+        types.into_iter().collect::<Vec<_>>().join(", ")
+    };
+    Err(format!(
+        "No note this run can read has type \"{wanted}\". Types in use: {in_use}."
+    ))
+}
+
+/// A tool's `limit`: absent or null is `default`, a number of 1 or more is
+/// floored, and one above `max` is `max`, with `true` so the answer can say
+/// it was cut. Anything else is refused rather than read as "no results".
+fn arg_limit(
+    args: &Map<String, Value>,
+    default: usize,
+    max: usize,
+) -> Result<(usize, bool), String> {
+    let refused = || format!("limit counts from 1 (default {default}, at most {max})");
+    let Some(value) = args.get("limit").filter(|v| !v.is_null()) else {
+        return Ok((default, false));
+    };
+    let asked = value
+        .as_f64()
+        .filter(|n| *n >= 1.0)
+        .ok_or_else(refused)?
+        .floor();
+    if asked > max as f64 {
+        Ok((max, true))
+    } else {
+        Ok((asked as usize, false))
+    }
+}
+
+/// The labels a hit carries (M59.2): what a reader should know about a note
+/// before quoting it. A concept's standing needs the ledger and the concept
+/// graph, so they are built once, and only when a shown hit is a concept.
+struct HitLabels<'a> {
+    vault: &'a Path,
+    entries: &'a [vault::entry::Entry],
+    today: String,
+    concepts: std::cell::OnceCell<(
+        Option<crate::knowledge::LedgerReview>,
+        crate::knowledge::ConceptGraph,
+    )>,
+}
+
+impl<'a> HitLabels<'a> {
+    /// `entries` are the notes this run may read, so a replacement outside
+    /// the read scope is never named.
+    fn new(vault: &'a Path, entries: &'a [vault::entry::Entry], today: &str) -> Self {
+        HitLabels {
+            vault,
+            entries,
+            today: today.to_string(),
+            concepts: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// In order: a concept's standing, or the bundle's log or index; a
+    /// template; an Inbox capture; a note past its `stale_after`; then what
+    /// could not be read.
+    fn labels(&self, entry: &vault::entry::Entry, unreadable: bool) -> Vec<String> {
+        let mut out = Vec::new();
+        let concept = crate::knowledge::is_concept(entry);
+        if concept {
+            let (ledger, graph) = self.concepts.get_or_init(|| {
+                let ledger = crate::knowledge::ledger_review(self.vault);
+                let index = vault::link::TargetIndex::build(self.entries);
+                let graph =
+                    crate::knowledge::ConceptGraph::build(self.entries, &index, ledger.as_ref());
+                (ledger, graph)
+            });
+            let status =
+                crate::knowledge::concept_status(entry, graph, ledger.as_ref(), &self.today);
+            let mut label = format!("concept, {}", status.trust);
+            if status.lifecycle != "stable" {
+                label.push_str(&format!(", {}", status.lifecycle));
+            }
+            for replacement in &status.superseded_by {
+                label.push_str(&format!(", replaced by {replacement}"));
+            }
+            if status.contested {
+                label.push_str(", contested");
+            }
+            if status.stale {
+                label.push_str(", stale");
+            }
+            out.push(label);
+        } else if crate::knowledge::is_knowledge_path(&entry.path) {
+            match entry.filename.as_str() {
+                "log.md" => out.push("knowledge log".to_string()),
+                "index.md" => out.push("knowledge index".to_string()),
+                _ => {}
+            }
+        }
+        if entry.path.starts_with("templates/") {
+            out.push("template".to_string());
+        }
+        if is_capture(entry) {
+            out.push("Inbox capture".to_string());
+        }
+        let stale_after = crate::knowledge::stale_after_of(entry.properties.get("stale_after"));
+        if !concept && crate::knowledge::is_stale(stale_after.as_deref(), &self.today) {
+            out.push("stale".to_string());
+        }
+        if unparsed(entry) {
+            out.push("unparsed frontmatter".to_string());
+        }
+        if unreadable {
+            out.push("unreadable".to_string());
+        }
+        out
+    }
+}
+
+/// A note whose frontmatter did not parse: the scan kept its title and text,
+/// and nothing of its frontmatter, its type included.
+fn unparsed(entry: &vault::entry::Entry) -> bool {
+    entry
+        .parse_error
+        .as_deref()
+        .is_some_and(|e| !e.starts_with("unreadable"))
+}
+
+/// A note the scan could not read: it is listed by its path, with no text.
+fn unreadable(entry: &vault::entry::Entry) -> bool {
+    entry
+        .parse_error
+        .as_deref()
+        .is_some_and(|e| e.starts_with("unreadable"))
+}
+
+/// One hit's first line: `- path — title [Type] · label · label`.
+fn hit_line(entry: &vault::entry::Entry, labels: &[String]) -> String {
+    let mut line = format!("- {} — {}", entry.path, entry.title);
+    if let Some(kind) = entry.entry_type.as_deref() {
+        line.push_str(&format!(" [{kind}]"));
+    }
+    for label in labels {
+        line.push_str(&format!(" · {label}"));
+    }
+    line
+}
+
+/// `one` when `n` is 1, else `many`.
+fn plural<'s>(n: usize, one: &'s str, many: &'s str) -> &'s str {
+    if n == 1 {
+        one
+    } else {
+        many
+    }
+}
+
+/// `search_notes` (M17.19, M59.2): keyword search over the notes this run
+/// may read, ranked by `search::rank_scoped` over titles, types, frontmatter
+/// and bodies, or, with `in` (M59.5), over the titles alone or everything
+/// but them. The answer says what it found and what it missed: how many
+/// matched past the limit, which caps applied, and which notes it could not
+/// fully search. The notes come from search's corpus (`vault/corpus.rs`,
+/// M59.4): one read per changed file, the one ⌘K's page-text search ranks
+/// too, and never an index.
+fn tool_search(vault: &Path, args: &Map<String, Value>, grant: &RunGrant) -> Result<Value, String> {
+    search_notes_in(vault::corpus::shared(), vault, args, grant)
+}
+
+/// `tool_search` over `cache`: the tool passes the shared cache, a test its
+/// own.
+fn search_notes_in(
+    cache: &vault::corpus::CorpusCache,
+    vault: &Path,
+    args: &Map<String, Value>,
+    grant: &RunGrant,
+) -> Result<Value, String> {
+    let query = arg_str(args, "query")
+        .filter(|q| !q.trim().is_empty())
+        .ok_or("search_notes needs a query")?;
+    let (limit, limit_cut) = arg_limit(args, 20, 100)?;
+    let scope = match args.get("in").filter(|v| !v.is_null()) {
+        None => crate::search::Scope::All,
+        Some(word) => word
+            .as_str()
+            .and_then(crate::search::Scope::parse)
+            .ok_or("in must be name, content or all")?,
+    };
+    let wanted = arg_str(args, "type");
+    let typed = wanted.as_deref().is_some_and(|t| !t.trim().is_empty());
+
+    let corpus = cache.snapshot(vault)?;
+    let (readable, withheld) = readable_entries(&corpus, grant);
+    let entries = type_filtered(&readable, wanted.as_deref())?;
+    // Counted, never dropped: a note the search could not fully read is
+    // still a note, and an answer that loses it reads as complete.
+    let unparsed_count = readable.iter().filter(|e| unparsed(e)).count();
+    let unreadable_count = readable.iter().filter(|e| unreadable(e)).count();
+    // The read scope and the type, applied as the corpus is read, so a note
+    // outside either never reaches the ranker.
+    let only = wanted_type(wanted.as_deref());
+    let kept = crate::search::docs_of(&corpus, |e| {
+        grant.may_read(&e.path) && only.is_none_or(|t| has_type(e, t))
+    });
+    let docs = kept.docs();
+    let parsed = crate::search::parse_query(&query);
+    // A title-only search ranks no body text. The corpus read every body
+    // once all the same, and keeps it for the next search that needs it.
+    let ranked = crate::search::rank_scoped(&parsed, &docs, limit, scope);
+    let fields = match scope {
+        crate::search::Scope::Name => " (titles only)",
+        crate::search::Scope::Content => " (titles not searched)",
+        crate::search::Scope::All => "",
+    };
+
+    let of_type = match (typed, entries.first()) {
+        (true, Some(first)) => format!(" of type {}", first.entry_type.as_deref().unwrap_or("")),
+        _ => String::new(),
+    };
+    // Named in EVERY outcome: an empty result over a thinned corpus is the
+    // most misleading sentence this tool can emit. M34.4's exact words.
     let scope_note = if withheld == 0 {
         String::new()
     } else {
         format!(" ({withheld} notes outside this run's read scope were not searched)")
     };
+    // A long note was searched in part (M59.4): a word past its first
+    // 100 KB was not, so a miss there is not a miss in the note. A
+    // title-only search reads no body, so no cap touched it.
+    let capped = if scope == crate::search::Scope::Name {
+        0
+    } else {
+        kept.capped
+    };
+    let capped_note = match capped {
+        0 => String::new(),
+        c => format!(
+            " ({c} {} longer than 100 KB {} searched in {} first 100 KB)",
+            plural(c, "note", "notes"),
+            plural(c, "was", "were"),
+            plural(c, "its", "their"),
+        ),
+    };
+
+    let mut footers: Vec<String> = Vec::new();
+    let more = ranked.total.saturating_sub(ranked.hits.len());
+    if more > 0 {
+        footers.push(format!(
+            "{more} more not shown; raise limit (at most 100) or narrow the query."
+        ));
+    }
+    if limit_cut {
+        footers.push("The limit is at most 100.".to_string());
+    }
+    if parsed.dropped > 0 {
+        footers.push(format!(
+            "Only the first {} of {} distinct words were searched.",
+            crate::search::MAX_TERMS,
+            parsed.distinct
+        ));
+    }
+    if parsed.cut > 0 {
+        footers.push(format!(
+            "{} {} longer than {chars} characters {} cut to {chars}.",
+            parsed.cut,
+            plural(parsed.cut, "word", "words"),
+            plural(parsed.cut, "was", "were"),
+            chars = crate::search::MAX_TERM_CHARS,
+        ));
+    }
+    if unparsed_count > 0 {
+        let p = unparsed_count;
+        footers.push(if typed {
+            format!(
+                "{p} {} frontmatter that could not be parsed, so {} type is unknown and {} not searched.",
+                plural(p, "note has", "notes have"),
+                plural(p, "its", "their"),
+                plural(p, "it was", "they were"),
+            )
+        } else {
+            format!(
+                "{p} {} frontmatter that could not be parsed, so only {} title and text were searched.",
+                plural(p, "note has", "notes have"),
+                plural(p, "its", "their"),
+            )
+        });
+    }
+    if unreadable_count > 0 {
+        let u = unreadable_count;
+        footers.push(format!(
+            "{u} {} could not be read, so {} text was not searched.",
+            plural(u, "note", "notes"),
+            plural(u, "its", "their"),
+        ));
+    }
+    let footer = if footers.is_empty() {
+        String::new()
+    } else {
+        format!("\n\n{}", footers.join("\n"))
+    };
+
     if ranked.hits.is_empty() {
         return Ok(text_result(format!(
-            "No notes matched \"{query}\".{scope_note}"
+            "No notes{of_type} matched \"{query}\"{fields}.{scope_note}{capped_note}{footer}"
         )));
     }
 
-    let lines: Vec<String> = ranked
-        .hits
-        .iter()
-        .map(|hit| {
-            let entry = &entries[hit.index];
-            let excerpt = if hit.excerpt.is_empty() {
-                entry.snippet.clone()
+    let (n, total) = (ranked.hits.len(), ranked.total);
+    // Said out loud: an agent handed loose matches as if they were tight
+    // ones will report them to the user as the answer.
+    let header = if ranked.widened {
+        format!(
+            "No note{of_type} contains every word of \"{query}\"{fields}. {n} of {total} closest {}, best first{scope_note}{capped_note}:",
+            plural(total, "match", "matches")
+        )
+    } else {
+        format!(
+            "{n} of {total} {}{of_type} {} \"{query}\"{fields}, best first{scope_note}{capped_note}:",
+            plural(total, "note", "notes"),
+            plural(total, "matches", "match")
+        )
+    };
+
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let labeller = HitLabels::new(vault, &readable, &today);
+    let mut lines: Vec<String> = Vec::new();
+    for hit in &ranked.hits {
+        let entry = kept.entries[hit.index];
+        lines.push(hit_line(entry, &labeller.labels(entry, unreadable(entry))));
+        match &hit.excerpt {
+            Some(excerpt) => lines.push(match &excerpt.at {
+                crate::search::ExcerptAt::Line(n) => format!("  L{n}: {}", excerpt.text),
+                crate::search::ExcerptAt::Field(key) => format!("  {key}: {}", excerpt.text),
+            }),
+            None if !entry.snippet.trim().is_empty() => {
+                lines.push(format!("  {}", entry.snippet.trim()))
+            }
+            None => {}
+        }
+        if ranked.widened {
+            lines.push(format!("  matched: {}", hit.matched.join(", ")));
+        }
+    }
+    Ok(text_result(format!(
+        "{header}\n{}{footer}",
+        lines.join("\n")
+    )))
+}
+
+// --- list_notes: browse without a search term (M59.5) ----------------------
+
+/// How list_notes orders what it lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BrowseSort {
+    /// When the file last changed, newest first.
+    Modified,
+    /// When the file first appeared on this disk, newest first.
+    Created,
+    /// The title, ignoring case, A to Z.
+    Title,
+    /// The path, A to Z.
+    Path,
+}
+
+impl BrowseSort {
+    /// The words the answer's header orders by.
+    fn order(self) -> &'static str {
+        match self {
+            BrowseSort::Modified => "newest modified first",
+            BrowseSort::Created => "newest created first",
+            BrowseSort::Title => "by title",
+            BrowseSort::Path => "by path",
+        }
+    }
+
+    /// The time a line shows: created only under sort created.
+    fn shown_time(self) -> &'static str {
+        if self == BrowseSort::Created {
+            "created"
+        } else {
+            "modified"
+        }
+    }
+}
+
+/// What list_notes keeps and how it orders it. The type is applied before,
+/// by `type_filtered`, so its refusal names the readable types.
+struct BrowseFilter<'a> {
+    /// A vault-relative folder, its subfolders included; `None` is the vault.
+    folder: Option<&'a str>,
+    /// Only notes whose file changed at or after this instant.
+    since: Option<chrono::DateTime<chrono::Utc>>,
+    sort: BrowseSort,
+}
+
+/// What `browse` found: the notes shown, how many matched in all, and the
+/// notes it could not place by time, counted rather than guessed.
+struct Browsed<'a> {
+    shown: Vec<&'a vault::entry::Entry>,
+    total: usize,
+    /// Matched notes with no recorded time to sort by, listed last.
+    unrecorded: usize,
+    /// Notes `since` could not include because no modified time was recorded.
+    since_unrecorded: usize,
+}
+
+/// A note's recorded time, or `None` when it is not an RFC 3339 time.
+fn recorded_time(at: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    chrono::DateTime::parse_from_rfc3339(at)
+        .ok()
+        .map(|t| t.with_timezone(&chrono::Utc))
+}
+
+/// `path` is `folder` or inside it, matched at a separator as `scope_admits`
+/// matches, so `records/risks` never takes in `records/risks-archive`.
+fn in_folder(path: &str, folder: &str) -> bool {
+    path == folder
+        || path
+            .strip_prefix(folder)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// list_notes' listing, pure: the entries `filter` keeps, in its order, the
+/// first `limit` shown. A time that does not parse is unrecorded: never
+/// read as new, it sorts last and is counted, and `since` counts the notes
+/// it could not include. Every tie breaks on the path. No body is read.
+fn browse<'a>(
+    entries: &[&'a vault::entry::Entry],
+    filter: &BrowseFilter,
+    limit: usize,
+) -> Browsed<'a> {
+    let mut since_unrecorded = 0;
+    let mut kept: Vec<&'a vault::entry::Entry> = Vec::new();
+    for &entry in entries {
+        if filter.folder.is_some_and(|f| !in_folder(&entry.path, f)) {
+            continue;
+        }
+        if let Some(since) = filter.since {
+            match recorded_time(&entry.modified_at) {
+                Some(at) if at >= since => {}
+                Some(_) => continue,
+                None => {
+                    since_unrecorded += 1;
+                    continue;
+                }
+            }
+        }
+        kept.push(entry);
+    }
+    let time = |e: &vault::entry::Entry| match filter.sort {
+        BrowseSort::Created => recorded_time(&e.created_at),
+        _ => recorded_time(&e.modified_at),
+    };
+    let unrecorded = match filter.sort {
+        BrowseSort::Modified | BrowseSort::Created => {
+            kept.iter().filter(|e| time(e).is_none()).count()
+        }
+        BrowseSort::Title | BrowseSort::Path => 0,
+    };
+    match filter.sort {
+        BrowseSort::Modified | BrowseSort::Created => kept.sort_by(|a, b| {
+            // Newest first, and a note with no time after every note with one.
+            match (time(a), time(b)) {
+                (Some(x), Some(y)) => y.cmp(&x),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
+            .then_with(|| a.path.cmp(&b.path))
+        }),
+        BrowseSort::Title => kept.sort_by(|a, b| {
+            a.title
+                .to_lowercase()
+                .cmp(&b.title.to_lowercase())
+                .then_with(|| a.path.cmp(&b.path))
+        }),
+        BrowseSort::Path => kept.sort_by(|a, b| a.path.cmp(&b.path)),
+    }
+    let total = kept.len();
+    kept.truncate(limit);
+    Browsed {
+        shown: kept,
+        total,
+        unrecorded,
+        since_unrecorded,
+    }
+}
+
+/// A string argument: `Ok(None)` when absent, null or blank, `Err(())` when
+/// it is not a string at all.
+fn arg_text<'a>(args: &'a Map<String, Value>, key: &str) -> Result<Option<&'a str>, ()> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(text)) => Ok(Some(text.trim()).filter(|t| !t.is_empty())),
+        Some(_) => Err(()),
+    }
+}
+
+const FOLDER_REFUSAL: &str = "folder must be a folder inside the vault, such as records/risks";
+const SINCE_REFUSAL: &str = "modified_since must be a date such as 2026-10-01 or an RFC 3339 \
+                             time such as 2026-10-01T09:00:00Z";
+const SORT_REFUSAL: &str = "sort must be modified, created, title or path";
+
+/// list_notes' `folder`: trimmed of a leading `./` or `/` and a trailing
+/// `/`, `None` for the whole vault. A `..` segment would climb out, and is
+/// refused.
+fn arg_folder(args: &Map<String, Value>) -> Result<Option<String>, String> {
+    let Some(raw) = arg_text(args, "folder").map_err(|()| FOLDER_REFUSAL)? else {
+        return Ok(None);
+    };
+    let folder = raw
+        .trim_start_matches("./")
+        .trim_start_matches('/')
+        .trim_end_matches('/');
+    if folder.split('/').any(|segment| segment == "..") {
+        return Err(FOLDER_REFUSAL.to_string());
+    }
+    Ok(Some(folder.to_string()).filter(|f| !f.is_empty()))
+}
+
+/// list_notes' `modified_since`: exactly `YYYY-MM-DD` is that day at
+/// 00:00:00 UTC, anything else must be an RFC 3339 time, read in UTC.
+fn arg_since(args: &Map<String, Value>) -> Result<Option<chrono::DateTime<chrono::Utc>>, String> {
+    let Some(raw) = arg_text(args, "modified_since").map_err(|()| SINCE_REFUSAL)? else {
+        return Ok(None);
+    };
+    let bytes = raw.as_bytes();
+    let dated = bytes.len() == 10
+        && bytes.iter().enumerate().all(|(i, b)| {
+            if i == 4 || i == 7 {
+                *b == b'-'
             } else {
-                hit.excerpt.clone()
-            };
+                b.is_ascii_digit()
+            }
+        });
+    if dated {
+        return chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d")
+            .ok()
+            .and_then(|day| day.and_hms_opt(0, 0, 0))
+            .map(|midnight| Some(midnight.and_utc()))
+            .ok_or_else(|| SINCE_REFUSAL.to_string());
+    }
+    recorded_time(raw)
+        .map(Some)
+        .ok_or_else(|| SINCE_REFUSAL.to_string())
+}
+
+/// list_notes' `sort`: modified when absent.
+fn arg_sort(args: &Map<String, Value>) -> Result<BrowseSort, String> {
+    match arg_text(args, "sort").map_err(|()| SORT_REFUSAL)? {
+        None | Some("modified") => Ok(BrowseSort::Modified),
+        Some("created") => Ok(BrowseSort::Created),
+        Some("title") => Ok(BrowseSort::Title),
+        Some("path") => Ok(BrowseSort::Path),
+        Some(_) => Err(SORT_REFUSAL.to_string()),
+    }
+}
+
+/// `list_notes` (M59.5): browse the notes this run may read by type, folder
+/// and file time, with no search term. The notes come from search's corpus
+/// (`vault/corpus.rs`), so an unchanged note is not read again, and the
+/// listing itself reads no body.
+fn tool_list_notes(
+    vault: &Path,
+    args: &Map<String, Value>,
+    grant: &RunGrant,
+) -> Result<Value, String> {
+    list_notes_in(vault::corpus::shared(), vault, args, grant)
+}
+
+/// `tool_list_notes` over `cache`: the tool passes the shared cache, a test
+/// its own.
+fn list_notes_in(
+    cache: &vault::corpus::CorpusCache,
+    vault: &Path,
+    args: &Map<String, Value>,
+    grant: &RunGrant,
+) -> Result<Value, String> {
+    let folder = arg_folder(args)?;
+    let since = arg_since(args)?;
+    let sort = arg_sort(args)?;
+    let (limit, limit_cut) = arg_limit(args, 50, 200)?;
+    let wanted = arg_str(args, "type");
+    let typed = wanted_type(wanted.as_deref()).is_some();
+
+    let corpus = cache.snapshot(vault)?;
+    // The withheld count is the whole vault's, never the folder's: counting
+    // what a folder filter hides would measure an unreadable folder, and a
+    // shape is a read (M34.4).
+    let (readable, withheld) = readable_entries(&corpus, grant);
+    let entries = type_filtered(&readable, wanted.as_deref())?;
+    let filter = BrowseFilter {
+        folder: folder.as_deref(),
+        since,
+        sort,
+    };
+    let browsed = browse(&entries, &filter, limit);
+
+    let of_type = match (typed, entries.first()) {
+        (true, Some(first)) => format!(" of type {}", first.entry_type.as_deref().unwrap_or("")),
+        _ => String::new(),
+    };
+    let in_folder_words = folder
+        .as_deref()
+        .map(|f| format!(" in {f}/"))
+        .unwrap_or_default();
+    let since_words = since
+        .map(|at| {
             format!(
-                "- {} — {}{}\n  {}",
-                entry.path,
-                entry.title,
-                entry
-                    .entry_type
-                    .as_deref()
-                    .map(|t| format!(" [{t}]"))
-                    .unwrap_or_default(),
-                excerpt
+                " modified since {}",
+                at.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
+            )
+        })
+        .unwrap_or_default();
+    // Named in every outcome, in M34.4's plural whatever the count.
+    let scope_note = if withheld == 0 {
+        String::new()
+    } else {
+        format!(" ({withheld} notes outside this run's read scope were not listed)")
+    };
+
+    let mut footers: Vec<String> = Vec::new();
+    let more = browsed.total.saturating_sub(browsed.shown.len());
+    if more > 0 {
+        footers.push(format!(
+            "{more} more not listed; narrow the filter or raise limit (at most 200)."
+        ));
+    }
+    if limit_cut {
+        footers.push("The limit is at most 200.".to_string());
+    }
+    if browsed.unrecorded > 0 {
+        let k = browsed.unrecorded;
+        footers.push(format!(
+            "{k} {} no recorded {} time and {} listed last.",
+            plural(k, "note has", "notes have"),
+            sort.shown_time(),
+            plural(k, "is", "are"),
+        ));
+    }
+    if browsed.since_unrecorded > 0 {
+        let k = browsed.since_unrecorded;
+        footers.push(format!(
+            "{k} {} no recorded modified time, so modified_since could not include {}.",
+            plural(k, "note has", "notes have"),
+            plural(k, "it", "them"),
+        ));
+    }
+    if typed {
+        // Their type is unknown, so the type filter could not keep them: a
+        // note the folder and time would have listed is counted, not lost.
+        let unparsed_notes: Vec<&vault::entry::Entry> =
+            readable.iter().filter(|e| unparsed(e)).collect();
+        let p = browse(&unparsed_notes, &filter, 0).total;
+        if p > 0 {
+            footers.push(format!(
+                "{p} {} frontmatter that could not be parsed, so {} type is unknown and {} not listed.",
+                plural(p, "note has", "notes have"),
+                plural(p, "its", "their"),
+                plural(p, "it was", "they were"),
+            ));
+        }
+    }
+    let footer = if footers.is_empty() {
+        String::new()
+    } else {
+        format!("\n\n{}", footers.join("\n"))
+    };
+
+    if browsed.shown.is_empty() {
+        return Ok(text_result(format!(
+            "No notes{of_type}{in_folder_words}{since_words}.{scope_note}{footer}"
+        )));
+    }
+
+    let (n, total) = (browsed.shown.len(), browsed.total);
+    let header = format!(
+        "{n} of {total} {}{of_type}{in_folder_words}{since_words}, {}{scope_note}:",
+        plural(total, "note", "notes"),
+        sort.order(),
+    );
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let labeller = HitLabels::new(vault, &readable, &today);
+    let lines: Vec<String> = browsed
+        .shown
+        .iter()
+        .map(|entry| {
+            let at = match sort {
+                BrowseSort::Created => &entry.created_at,
+                _ => &entry.modified_at,
+            };
+            let time = recorded_time(at)
+                .map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+                .unwrap_or_else(|| "not recorded".to_string());
+            format!(
+                "{} · {} {time}",
+                hit_line(entry, &labeller.labels(entry, unreadable(entry))),
+                sort.shown_time(),
             )
         })
         .collect();
-
     Ok(text_result(format!(
-        "{} match(es) for \"{}\"{}{}:\n{}",
-        lines.len(),
-        query,
-        // Said out loud: an agent handed loose matches as if they were tight
-        // ones will report them to the user as the answer.
-        if ranked.widened {
-            " (no note contained every term — closest matches, best first)"
-        } else {
-            " (best first)"
-        },
-        scope_note,
+        "{header}\n{}{footer}",
         lines.join("\n")
     )))
 }
@@ -3267,6 +4739,12 @@ fn tool_get_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, Strin
             "Frontmatter: {}\n",
             serde_json::to_string_pretty(&entry.properties).unwrap_or_default()
         ));
+    }
+    // The page's open comment threads (M70.3), before the separator, so the
+    // body stays last and byte for byte what edit_note matches.
+    if let Some(threads) = crate::comment_tools::thread_listing(vault, &path, &body) {
+        header.push_str(&threads);
+        header.push('\n');
     }
     Ok(text_result(format!("{header}\n---\n{body}")))
 }
@@ -3464,11 +4942,12 @@ fn handoff_refusal(grant: &RunGrant, callee_actor: &str) -> Option<String> {
 
 /// The name an agent answers to, from its record — a declared `slug:` or its
 /// slugified title. A deliberate TWIN of engine/agents.ts `agentHandle`
-/// (M33b.6): the renderer resolves @mentions with the TS half, this tool
-/// resolves `hand_to` with this one, and the two must agree or an agent is
-/// addressable in chat and not from a chain. Kept to the slug grammar's
+/// (M33b.6): the renderer reads an @mention with the TS half, while `hand_to`
+/// and `start_thread_turn` (a person's @mention in a comment thread, M70.4)
+/// resolve with this one, and the two must agree or an agent is addressable
+/// in chat and not from a chain or a thread. Kept to the slug grammar's
 /// intersection (lowercase ASCII, dashes) so both sides derive the same name.
-fn agent_handle(entry: &vault::entry::Entry) -> String {
+pub(crate) fn agent_handle(entry: &vault::entry::Entry) -> String {
     if let Some(slug) = entry.properties.get("slug").and_then(Value::as_str) {
         let declared = slug.trim();
         if !declared.is_empty() {
@@ -3486,16 +4965,57 @@ fn agent_handle(entry: &vault::entry::Entry) -> String {
     out.trim_matches('-').to_string()
 }
 
-/// Resolve who `hand_to` names. Pure over the scan for the same reason
-/// `handoff_refusal` is pure over the grant.
-fn resolve_agent<'a>(
+/// Does any Agent record answering to `handle` say `ask-first:` is on
+/// (M57.4)? Every record, not the first: two records answering to one
+/// handle, either of which asks first, read on.
+fn records_ask_first(entries: &[vault::entry::Entry], handle: &str) -> bool {
+    agents_answering(entries, handle)
+        .into_iter()
+        .any(|e| crate::policy::tool_approval::ask_first_of(&e.properties, &e.relationships).on)
+}
+
+/// The handle scan (M56.10): every parsed `type: Agent` record answering to
+/// `handle`, in scan order. `hand_to` takes the first; a run's notes lane and
+/// a thread turn (M70.4) refuse two as ambiguous.
+pub(crate) fn agents_answering<'a>(
     entries: &'a [vault::entry::Entry],
     handle: &str,
-) -> Option<&'a vault::entry::Entry> {
+) -> Vec<&'a vault::entry::Entry> {
     entries
         .iter()
         .filter(|e| e.entry_type.as_deref() == Some("Agent") && e.parse_error.is_none())
-        .find(|e| agent_handle(e) == handle)
+        .filter(|e| agent_handle(e) == handle)
+        .collect()
+}
+
+/// Does this run's agent ask before its page writes (M57.4)? The request
+/// says so (the renderer read the record), or Rust reads the record of a
+/// `process:` actor here by the handle scan `hand_to` uses, so a renderer
+/// that leaves `ask_first` out can never drop it: the wire only tightens.
+/// A vault that cannot be scanned reads on, failing closed.
+pub(crate) fn effective_ask_first(vault: &Path, actor: Option<&str>, asked: Option<bool>) -> bool {
+    if asked == Some(true) {
+        return true;
+    }
+    let Some(handle) = actor
+        .and_then(|actor| actor.strip_prefix("process:"))
+        .filter(|handle| !handle.is_empty())
+    else {
+        return false;
+    };
+    match vault::scan::scan_vault(vault) {
+        Ok(entries) => records_ask_first(&entries, handle),
+        Err(_) => true,
+    }
+}
+
+/// Resolve who `hand_to` names. Pure over the scan for the same reason
+/// `handoff_refusal` is pure over the grant.
+pub(crate) fn resolve_agent<'a>(
+    entries: &'a [vault::entry::Entry],
+    handle: &str,
+) -> Option<&'a vault::entry::Entry> {
+    agents_answering(entries, handle).into_iter().next()
 }
 
 /// One frontmatter list, as the folder/tool grammar both axes share: a
@@ -3503,7 +5023,7 @@ fn resolve_agent<'a>(
 /// and empty is Some([]) — the TS parse's exact reading (engine/agents.ts).
 /// One string a record's frontmatter names (M56.5), trimmed. Blank, absent
 /// or not a string is unset.
-fn frontmatter_str(entry: &vault::entry::Entry, key: &str) -> Option<String> {
+pub(crate) fn frontmatter_str(entry: &vault::entry::Entry, key: &str) -> Option<String> {
     entry
         .properties
         .get(key)
@@ -3513,7 +5033,7 @@ fn frontmatter_str(entry: &vault::entry::Entry, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn frontmatter_list(entry: &vault::entry::Entry, key: &str) -> Option<Vec<String>> {
+pub(crate) fn frontmatter_list(entry: &vault::entry::Entry, key: &str) -> Option<Vec<String>> {
     let raw = entry.properties.get(key)?;
     let items: Vec<String> = match raw {
         Value::String(s) => vec![s.clone()],
@@ -3575,11 +5095,16 @@ fn tool_hand_to(
     let body = vault::write::read_note(vault, &record.path)
         .map(|text| strip_frontmatter(&text))
         .unwrap_or_default();
-    let request = match handoff_request(record, &body, &callee_actor, message) {
+    let mut request = match handoff_request(record, &body, &callee_actor, message) {
         Ok(request) => request,
         // Nothing is started: no bearer, no row, no child.
         Err(refusal) => return Ok(error_result(refusal)),
     };
+    // M57.4: every record answering to the callee's handle, as a run of it
+    // reads them: one that asks first makes the callee ask.
+    if records_ask_first(&entries, &agent_handle(record)) {
+        request.ask_first = Some(true);
+    }
     let run_id = crate::start_handoff_run(app, vault, request, grant)?;
     Ok(text_result(format!(
         "Started {} (run {run_id}) with what you handed it. It works under its own scope and \
@@ -3622,10 +5147,17 @@ fn handoff_request(
         // need the per-machine approvals, and both live in the renderer. A
         // missing field must never widen access — a handed-to run that needs
         // either is a chain the person starts themselves.
-        shell: Some(false),
+        shell: Some(crate::agent::ShellCeiling::Off),
         connectors: Some(false),
         connector_names: Some(vec![]),
         attended: Some(false),
+        // M57.4: the callee asks as ITS record says, never as the caller's
+        // does; nobody watches a handed-to run, so an ask-first callee's page
+        // writes are refused at dispatch and recorded.
+        ask_first: Some(
+            crate::policy::tool_approval::ask_first_of(&record.properties, &record.relationships)
+                .on,
+        ),
         mcp_url: None,
         mcp_token: None,
         actor: Some(callee_actor.to_string()),
@@ -3649,7 +5181,7 @@ fn handoff_request(
 
 /// The body without its frontmatter block — the record's standing
 /// instructions, which ride the handed-to run's system prompt.
-fn strip_frontmatter(text: &str) -> String {
+pub(crate) fn strip_frontmatter(text: &str) -> String {
     let trimmed = text.trim_start();
     if let Some(rest) = trimmed.strip_prefix("---") {
         if let Some(end) = rest.find("\n---") {
@@ -3703,8 +5235,9 @@ fn governed_write_refusal(frontmatter: &Map<String, Value>) -> Option<&'static s
 ///
 /// The one byte check (M55.1). An agent's patch, append and edit run it
 /// twice under the write's path lock (`vault::write::patch_note_checked`,
-/// `append_note_checked`, `edit_note`; a run's patch of its own notes runs
-/// `own_memory_bytes_refusal` instead, M56.10): on the bytes the lock holds — editing a Type doc
+/// `append_note_checked`, `edit_note`; a run's write of its own notes,
+/// `write_own_notes`, runs `own_memory_bytes_refusal` instead, M56.10): on
+/// the bytes the lock holds — editing a Type doc
 /// or an Agent record — and on the bytes the write would land, because
 /// neither mint below ever says `type: Agent` in its own argument:
 /// - The patch side: nulling out the last surviving key empties the mapping,
@@ -3753,7 +5286,167 @@ fn governed_compose_refusal(
     governed_bytes_refusal(&content)
 }
 
+/// Whether a person allowed a run's write (M57 Q21): `Person` only for a
+/// write whose approval was consumed (`ask_first_step`) or that Review
+/// allowed (`decide_pending`). Its receipt then names `human:me` as
+/// approver, and keeps the agent as the actor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Approval {
+    None,
+    Person,
+}
+
+/// Proof that a run's MCP door cleared a write (M58.1): the stamp a run's
+/// receipt is minted from (`WriteReceipt::run`). Its fields are private, so
+/// only this module builds one, and only its three `cleared_for_*` do.
+pub(crate) struct RunCleared<D: RunDoor> {
+    actor: String,
+    run_id: String,
+    approved_by: Option<&'static str>,
+    door: std::marker::PhantomData<D>,
+}
+
+impl<D: RunDoor> RunCleared<D> {
+    /// The actor, run and approver the receipt stamps.
+    pub(crate) fn into_stamp(self) -> (String, String, Option<&'static str>) {
+        (self.actor, self.run_id, self.approved_by)
+    }
+}
+
+/// Who approved a write, as its receipt names them.
+fn approver(approval: Approval) -> Option<&'static str> {
+    match approval {
+        Approval::None => None,
+        _ => Some(HUMAN_ACTOR),
+    }
+}
+
+/// A run's page write cleared (M58.1): `knowledge::guard_agent_write` on
+/// `target`, at the point each note door has always asked it, so refusal
+/// order and words are unchanged, then the run's stamp from `grant`.
+///
+/// The guard is why every note door comes through here (M17.1): through
+/// `update_frontmatter` an agent could patch `verified` onto a concept, the
+/// self-certification `write_concept` refuses; through `create_note` it
+/// could author one pre-stamped, with whatever provenance it typed (the
+/// folder is what decides where a create lands, so the folder is the
+/// target); through `append_to_note` it could grow a concept body with no
+/// `sources`, no updated `generated` and no dedup check; and `edit_note`
+/// could rewrite one.
+pub(crate) fn cleared_for_note(
+    grant: &RunGrant,
+    target: &str,
+    approval: Approval,
+) -> Result<RunCleared<Agent>, String> {
+    crate::knowledge::guard_agent_write(target)?;
+    Ok(RunCleared {
+        actor: grant.actor.clone(),
+        run_id: grant.run_id.clone(),
+        approved_by: approver(approval),
+        door: std::marker::PhantomData,
+    })
+}
+
+/// A run's `cache_source` cleared (M58.1): `write_source` holds the write
+/// to `sources/`, so the stamp is all this adds.
+pub(crate) fn cleared_for_source(grant: &RunGrant) -> RunCleared<Agent> {
+    RunCleared {
+        actor: grant.actor.clone(),
+        run_id: grant.run_id.clone(),
+        approved_by: None,
+        door: std::marker::PhantomData,
+    }
+}
+
+/// A run's concept write cleared (M58.1): `write_concept`,
+/// `recheck_concept` and `commit_proposals`, whose own checks hold the
+/// bundle, booked under the run.
+pub(crate) fn cleared_for_concept(grant: &RunGrant) -> RunCleared<ConceptDoor> {
+    RunCleared {
+        actor: grant.actor.clone(),
+        run_id: grant.run_id.clone(),
+        approved_by: None,
+        door: std::marker::PhantomData,
+    }
+}
+
+/// Who a run's note write is made by (M58.1): its grant, whether a person
+/// approved it, and whether a stale expectation is booked against the run
+/// (M55.3), which a person's card check never does.
+#[derive(Clone, Copy)]
+struct RunWriter<'a> {
+    grant: &'a RunGrant,
+    approval: Approval,
+    books: bool,
+}
+
+impl RunWriter<'_> {
+    /// The run a stale expectation is booked against, if any.
+    fn run(&self) -> Option<&str> {
+        self.books.then_some(self.grant.run_id.as_str())
+    }
+
+    /// The receipt for a note write to `target`, through `cleared_for_note`.
+    fn cleared(&self, target: &str) -> Result<WriteReceipt<Agent>, String> {
+        Ok(WriteReceipt::run(cleared_for_note(
+            self.grant,
+            target,
+            self.approval,
+        )?))
+    }
+}
+
+/// A test's writer: the grant, nobody approving, nothing booked.
+#[cfg(test)]
+fn test_writer(grant: &RunGrant) -> RunWriter<'_> {
+    RunWriter {
+        grant,
+        approval: Approval::None,
+        books: false,
+    }
+}
+
+/// A test's writer as the server makes one: the grant, nobody approving,
+/// a stale expectation booked against its run.
+#[cfg(test)]
+fn booked(grant: &RunGrant) -> RunWriter<'_> {
+    RunWriter {
+        books: true,
+        ..test_writer(grant)
+    }
+}
+
+/// What a confirmable note writer did, or in a preview would do (M57.4c):
+/// the reply the model reads, and where the write lands.
+struct NoteWrite {
+    reply: Value,
+    landing: vault::write::Landing,
+}
+
+/// The run-less form tests call; the server always books a run.
+#[cfg(test)]
 fn tool_create_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
+    let grant = RunGrant::unrestricted(DEFAULT_ACTOR);
+    tool_create_note_in(vault, args, test_writer(&grant))
+}
+
+/// `create_note`, made by `writer`'s run (M58.1).
+fn tool_create_note_in(
+    vault: &Path,
+    args: &Map<String, Value>,
+    writer: RunWriter<'_>,
+) -> Result<Value, String> {
+    create_note_write(vault, args, writer, WriteMode::Commit).map(|write| write.reply)
+}
+
+/// `create_note` in `mode` (M57.4c): a preview judges everything the create
+/// would and names the file it would write.
+fn create_note_write(
+    vault: &Path,
+    args: &Map<String, Value>,
+    writer: RunWriter<'_>,
+    mode: WriteMode,
+) -> Result<NoteWrite, String> {
     let folder = arg_str(args, "folder").unwrap_or_default();
     let slug = arg_str(args, "slug").ok_or("create_note needs a slug")?;
     let body = arg_str(args, "body").unwrap_or_default();
@@ -3765,30 +5458,44 @@ fn tool_create_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, St
     if let Some(refusal) = governed_compose_refusal(&frontmatter, &slug, &body) {
         return Err(refusal.into());
     }
-    // The folder is what decides where this lands, so it is what gets checked
-    // (M17.1). A concept authored here would arrive with whatever provenance
-    // the model chose to type, including a `verified` stamp it may not make.
-    crate::knowledge::guard_agent_write(&folder)?;
-    let path = vault::write::create_note(vault, &folder, &slug, &frontmatter, &body)?;
-    Ok(text_result(format!("Created {path}")))
+    let by = writer.cleared(&folder)?;
+    let landing =
+        vault::write::create_note_in(vault, &folder, &slug, &frontmatter, &body, mode, &by)?;
+    Ok(NoteWrite {
+        reply: text_result(format!("Created {}", landing.path)),
+        landing,
+    })
 }
 
 /// The run-less form tests call; the server always books a run. It opens no
 /// notes lane, so every Agent record is governed here.
 #[cfg(test)]
 fn tool_update_frontmatter(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
-    tool_update_frontmatter_in(vault, args, None, None)
+    let grant = RunGrant::unrestricted(DEFAULT_ACTOR);
+    tool_update_frontmatter_in(vault, args, test_writer(&grant), None)
 }
 
-/// `update_frontmatter`, with a stale `expect_hash` recorded against the
-/// calling run when there is one (M55.3). `own` is the run's own Agent record
-/// when the admission found the call rewriting its notes there (M56.10).
+/// `update_frontmatter`, made by `writer`'s run, with a stale `expect_hash`
+/// recorded against it when it books one (M55.3). `own` is the run's own
+/// Agent record when the admission found the call rewriting its notes there
+/// (M56.10).
 fn tool_update_frontmatter_in(
     vault: &Path,
     args: &Map<String, Value>,
-    run: Option<&str>,
+    writer: RunWriter<'_>,
     own: Option<&OwnRecord>,
 ) -> Result<Value, String> {
+    update_frontmatter_write(vault, args, writer, own, WriteMode::Commit).map(|write| write.reply)
+}
+
+/// `update_frontmatter` in `mode` (M57.4c).
+fn update_frontmatter_write(
+    vault: &Path,
+    args: &Map<String, Value>,
+    writer: RunWriter<'_>,
+    own: Option<&OwnRecord>,
+    mode: WriteMode,
+) -> Result<NoteWrite, String> {
     let path = arg_str(args, "path").ok_or("update_frontmatter needs a path")?;
     let patch = args
         .get("patch")
@@ -3797,11 +5504,9 @@ fn tool_update_frontmatter_in(
         .ok_or("update_frontmatter needs a patch object")?;
     let expect = parse_expect_hash(args)?;
     if let Some(own) = own {
-        return write_own_notes(vault, &path, &patch, expect.as_deref(), run, own);
+        return write_own_notes(vault, &path, &patch, expect.as_deref(), writer, own, mode);
     }
-    // The self-certification hole (M17.1): this tool could patch `verified`
-    // onto any concept, which is exactly what write_concept refuses to do.
-    crate::knowledge::guard_agent_write(&path)?;
+    let by = writer.cleared(&path)?;
     // Both directions are governed: editing a Type doc or an Agent record,
     // and retyping an ordinary note INTO one. The second is what makes a
     // guard on creation alone insufficient — an agent minted in two steps is
@@ -3811,89 +5516,134 @@ fn tool_update_frontmatter_in(
         return Err(refusal.into());
     }
     // A stale expectation is judged under the same lock, before the check.
-    vault::write::patch_note_checked(
+    let landing = vault::write::patch_note_in(
         vault,
         &path,
         &patch,
         expect.as_deref(),
+        mode,
         governed_bytes_check,
+        &by,
     )
-    .map_err(|e| note_write_refusal(run, "update_frontmatter", e))?;
-    Ok(text_result(format!("Updated frontmatter on {path}")))
+    .map_err(|e| note_write_refusal(writer.run(), "update_frontmatter", e))?;
+    Ok(NoteWrite {
+        reply: text_result(format!("Updated frontmatter on {path}")),
+        landing,
+    })
 }
 
 /// The notes lane of `update_frontmatter` (D7, M56.10): a run rewriting
 /// `recent` on its own Agent record. The value is judged first, then the
 /// bundle guard, then the bytes under the write's lock, held to the run's own
 /// record with only `recent` changed, in place of the governed check that
-/// refuses every other write to an Agent record. The reply is the ordinary
-/// one, so nothing downstream reads a notes write as anything new.
+/// refuses every other write to an Agent record. It writes through
+/// `rewrite_note` with `notes_bytes`, not `patch_note_checked`, because a
+/// patch reserializes the whole block and the person's comments and spelling
+/// would not survive it. The reply is the ordinary one, so nothing
+/// downstream reads a notes write as anything new. Its receipt names the
+/// run and nobody approving (D7): the lane never asks, and the call's axes
+/// already admitted it, so the receipt re-checks no scope.
 fn write_own_notes(
     vault: &Path,
     path: &str,
     patch: &Map<String, Value>,
     expect: Option<&str>,
-    run: Option<&str>,
+    writer: RunWriter<'_>,
     own: &OwnRecord,
-) -> Result<Value, String> {
+    mode: WriteMode,
+) -> Result<NoteWrite, String> {
     if let Some(refusal) = recent_value_refusal(patch.get(RECENT_KEY).unwrap_or(&Value::Null)) {
         return Err(refusal);
     }
-    crate::knowledge::guard_agent_write(path)?;
-    vault::write::patch_note_checked(vault, path, patch, expect, |before, after| {
-        match own_memory_bytes_refusal(&own.path, &own.handle, before, after) {
-            Some(refusal) => Err(refusal.into()),
-            None => Ok(()),
-        }
+    let by = WriteReceipt::run(cleared_for_note(writer.grant, path, Approval::None)?);
+    let value = patch.get(RECENT_KEY).unwrap_or(&Value::Null);
+    // An Agent record is a markdown note; `.md` is the one extension the
+    // patch path takes for one too.
+    let landing = vault::write::rewrite_note_in(
+        vault,
+        path,
+        &["md"],
+        expect,
+        mode,
+        |before| {
+            let after = notes_bytes(before, value)?;
+            if let Some(refusal) = own_memory_bytes_refusal(&own.path, &own.handle, before, &after)
+            {
+                return Err(refusal.into());
+            }
+            if !notes_landed(&own.path, &after, value) {
+                return Err(NOTES_UNPLACED.into());
+            }
+            Ok(after)
+        },
+        &by,
+    )
+    .map_err(|e| note_write_refusal(writer.run(), "update_frontmatter", e))?;
+    Ok(NoteWrite {
+        reply: text_result(format!("Updated frontmatter on {path}")),
+        landing,
     })
-    .map_err(|e| note_write_refusal(run, "update_frontmatter", e))?;
-    Ok(text_result(format!("Updated frontmatter on {path}")))
 }
 
 /// The run-less form tests call; the server always books a run.
 #[cfg(test)]
 fn tool_append(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
-    tool_append_in(vault, args, None)
+    let grant = RunGrant::unrestricted(DEFAULT_ACTOR);
+    tool_append_in(vault, args, test_writer(&grant))
 }
 
-/// `append_to_note`, with a stale `expect_hash` recorded against the calling
-/// run when there is one (M55.3).
+/// `append_to_note`, made by `writer`'s run, with a stale `expect_hash`
+/// recorded against it when it books one (M55.3).
 fn tool_append_in(
     vault: &Path,
     args: &Map<String, Value>,
-    run: Option<&str>,
+    writer: RunWriter<'_>,
 ) -> Result<Value, String> {
+    append_write(vault, args, writer, WriteMode::Commit).map(|write| write.reply)
+}
+
+/// `append_to_note` in `mode` (M57.4c).
+fn append_write(
+    vault: &Path,
+    args: &Map<String, Value>,
+    writer: RunWriter<'_>,
+    mode: WriteMode,
+) -> Result<NoteWrite, String> {
     let path = arg_str(args, "path").ok_or("append_to_note needs a path")?;
     let content = arg_str(args, "content").ok_or("append_to_note needs content")?;
     let expect = parse_expect_hash(args)?;
-    // Least severe of the three, still a bypass (M17.1): a concept body grown
-    // here carries no `sources`, no updated `generated`, and no dedup check.
-    crate::knowledge::guard_agent_write(&path)?;
+    let by = writer.cleared(&path)?;
     // The mechanism refuses anything that is not a markdown note —
     // `.git/config`, a ledger segment, a `.canvas`, a `.mmd` — before reading
     // a byte of it (PLATFORM-API-1); the grant cannot, since an unscoped
     // run's grant admits every path. Both directions are judged on the bytes
     // the lock holds and the bytes the append would land.
-    vault::write::append_note_checked(
+    let landing = vault::write::append_note_in(
         vault,
         &path,
         &content,
         expect.as_deref(),
+        mode,
         governed_bytes_check,
+        &by,
     )
-    .map_err(|e| note_write_refusal(run, "append_to_note", e))?;
-    Ok(text_result(format!("Appended to {path}")))
+    .map_err(|e| note_write_refusal(writer.run(), "append_to_note", e))?;
+    Ok(NoteWrite {
+        reply: text_result(format!("Appended to {path}")),
+        landing,
+    })
 }
 
 /// The run-less form tests call; the server always books a run.
 #[cfg(test)]
 fn tool_edit_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
-    tool_edit_note_in(vault, args, None)
+    let grant = RunGrant::unrestricted(DEFAULT_ACTOR);
+    tool_edit_note_in(vault, args, test_writer(&grant))
 }
 
 /// `edit_note` (M55.5): replace quoted passages of a note's body in place,
-/// all or none, with a stale `expect_hash` recorded against the calling run
-/// when there is one (M55.3).
+/// all or none, made by `writer`'s run, with a stale `expect_hash` recorded
+/// against it when it books one (M55.3).
 ///
 /// The grant has already held the note to both scopes (`read_write`), so a
 /// refusal that quotes the note back speaks only to a run that may read it.
@@ -3904,25 +5654,66 @@ fn tool_edit_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, Stri
 fn tool_edit_note_in(
     vault: &Path,
     args: &Map<String, Value>,
-    run: Option<&str>,
+    writer: RunWriter<'_>,
 ) -> Result<Value, String> {
+    edit_note_write(vault, args, writer, WriteMode::Commit).map(|write| write.reply)
+}
+
+/// `edit_note` in `mode` (M57.4c): a preview plans and checks the edits on
+/// the bytes on disk now.
+fn edit_note_write(
+    vault: &Path,
+    args: &Map<String, Value>,
+    writer: RunWriter<'_>,
+    mode: WriteMode,
+) -> Result<NoteWrite, String> {
     let path = arg_str(args, "path").ok_or("edit_note needs a path")?;
     let edits = quote_edits(args)?;
     let expect = parse_expect_hash(args)?;
-    crate::knowledge::guard_agent_write(&path)?;
-    let edited = vault::write::edit_note(
+    let by = writer.cleared(&path)?;
+    let edited = vault::write::edit_note_in(
         vault,
         &path,
         &edits,
         expect.as_deref(),
+        mode,
         governed_bytes_check,
+        &by,
     )
-    .map_err(|e| note_write_refusal(run, "edit_note", e))?;
-    Ok(text_result(edit_report(
-        &listed_path(vault, &path),
-        edits.len(),
-        &edited,
-    )))
+    .map_err(|e| note_write_refusal(writer.run(), "edit_note", e))?;
+    Ok(NoteWrite {
+        reply: text_result(edit_report(
+            &listed_path(vault, &path),
+            edits.len(),
+            &edited,
+        )),
+        landing: vault::write::Landing {
+            path: path.clone(),
+            before: Some(edited.before.clone()),
+            after: edited.content_hash.clone(),
+        },
+    })
+}
+
+/// One of the four confirmable note writers by name, in `mode` (M57.4c), or
+/// None for any other tool. `own` is the run's own record when the call
+/// rewrites its notes (M56.10); `writer` stamps the write and books a stale
+/// expectation.
+fn note_write(
+    vault: &Path,
+    name: &str,
+    args: &Map<String, Value>,
+    writer: RunWriter<'_>,
+    own: Option<&OwnRecord>,
+    mode: WriteMode,
+) -> Option<Result<NoteWrite, String>> {
+    Some(match name {
+        "create_note" => create_note_write(vault, args, writer, mode),
+        "update_frontmatter" => update_frontmatter_write(vault, args, writer, own, mode),
+        "append_to_note" => append_write(vault, args, writer, mode),
+        "edit_note" => edit_note_write(vault, args, writer, mode),
+        _ => return None,
+    })
 }
 
 /// `edits` as the resolver takes them. The resolver judges every limit and
@@ -3987,16 +5778,17 @@ fn tool_write_concept(
     args: &Map<String, Value>,
     actor: &str,
 ) -> Result<Value, String> {
-    tool_write_concept_in(vault, args, actor, None)
+    tool_write_concept_in(vault, args, &WriteReceipt::for_test(actor, None))
 }
 
-/// `write_concept`, booked under the calling run when there is one (M49.9).
+/// `write_concept`, stamped `generated` by `by`'s actor and booked under its
+/// run when it has one (M49.9).
 fn tool_write_concept_in(
     vault: &Path,
     args: &Map<String, Value>,
-    actor: &str,
-    run: Option<&str>,
+    by: &WriteReceipt<ConceptDoor>,
 ) -> Result<Value, String> {
+    let actor = by.actor();
     let raw = arg_str(args, "path").ok_or("write_concept needs a path")?;
     // One spelling per concept (M49.4): `./knowledge/x.md` and
     // `Knowledge/x.md` are the same file, and must be the same Belief.
@@ -4098,17 +5890,14 @@ fn tool_write_concept_in(
         )
     };
 
-    match run {
-        Some(run) => vault::write::write_concept_in_run(vault, &path, &frontmatter, &body, run)?,
-        None => vault::write::write_concept(vault, &path, &frontmatter, &body)?,
-    }
+    vault::write::write_concept(vault, &path, &frontmatter, &body, by)?;
 
     // The log is appended by us, on every write, rather than left to the agent
     // to remember — see knowledge::insert_log_entry. A failure here must not
     // lose the concept that was already written, so it degrades to a note in
     // the tool result instead of an error.
     let title = arg_str(args, "title").unwrap_or_else(|| path.clone());
-    let logged = crate::vault::write::append_knowledge_log(vault, &path, &title, existed);
+    let logged = crate::vault::write::append_knowledge_log(vault, &path, &title, existed, by);
     let note = match logged {
         Ok(()) => String::new(),
         Err(e) => format!(" (could not update the knowledge log: {e})"),
@@ -4279,8 +6068,9 @@ fn holds_source(entry: &vault::entry::Entry, kind: &str, canonical: &str) -> boo
 fn tool_cache_source(
     vault: &Path,
     args: &Map<String, Value>,
-    actor: &str,
+    by: &WriteReceipt<Agent>,
 ) -> Result<Value, String> {
+    let actor = by.actor();
     let id = arg_str(args, "id").ok_or("cache_source needs an id")?;
     let kind = arg_str(args, "kind").unwrap_or_else(|| "web".into());
     if kind != "issue" && kind != "web" {
@@ -4316,7 +6106,7 @@ fn tool_cache_source(
     frontmatter.insert("generated".into(), json!({ "by": actor, "at": now_iso() }));
 
     let doc = format!("# {title}\n\n{}\n", body.trim());
-    crate::vault::write::write_source(vault, &path, &frontmatter, &doc)?;
+    crate::vault::write::write_source(vault, &path, &frontmatter, &doc, by)?;
     Ok(text_result(format!(
         "Cached {id} at {path}. Cite that path in `sources` rather than refetching."
     )))
@@ -4478,6 +6268,37 @@ fn tool_propose_organize(app: &AppHandle, args: &Map<String, Value>) -> Result<V
     )))
 }
 
+/// Why navigate cannot go where it was asked, or `None` (M59.1).
+///
+/// The places are the served row's `to` enum, which `destinations.test.ts`
+/// holds to the webview's table, so Rust keeps no second list: a missing row
+/// lists nothing and refuses every call. Argument validation, like
+/// `search_notes needs a query`; a database the vault lacks is the webview's
+/// to say, since only it holds the schema.
+fn navigate_refusal(args: &Map<String, Value>) -> Option<String> {
+    let places: Vec<&str> = crate::policy::tools::row("navigate")
+        .and_then(|row| row.input_schema.pointer("/properties/to/enum"))
+        .and_then(Value::as_array)
+        .map(|list| list.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    let listed = places.join(", ");
+    let Some(to) = args.get("to").and_then(Value::as_str) else {
+        return Some(format!("navigate needs `to`: one of {listed}."));
+    };
+    if !places.contains(&to) {
+        return Some(format!(
+            "navigate cannot go to \"{to}\": `to` is one of {listed}."
+        ));
+    }
+    let named = arg_str(args, "database").is_some_and(|d| !d.trim().is_empty());
+    if to == "view" && !named {
+        return Some(
+            "navigate to a view needs `database`: the name of the database to open.".into(),
+        );
+    }
+    None
+}
+
 fn tool_ui(app: &AppHandle, action: &str, args: &Map<String, Value>) -> Result<Value, String> {
     let mut payload = args.clone();
     payload.insert("action".into(), json!(action));
@@ -4507,7 +6328,7 @@ mod tests {
             json!({ "kind": kind, "id": id, "title": "Copy", "body": body }),
         )
         .unwrap();
-        tool_cache_source(vault, &args, DEFAULT_ACTOR)
+        tool_cache_source(vault, &args, &WriteReceipt::for_test(DEFAULT_ACTOR, None))
     }
 
     fn answer_text(answer: &Value) -> &str {
@@ -4674,9 +6495,30 @@ mod tests {
         let dir = std::env::temp_dir().join("cerebro-src-guard");
         let _ = std::fs::create_dir_all(&dir);
         let fm = serde_json::Map::new();
-        assert!(crate::vault::write::write_source(&dir, "knowledge/x.md", &fm, "b").is_err());
-        assert!(crate::vault::write::write_source(&dir, "docs/x.md", &fm, "b").is_err());
-        assert!(crate::vault::write::write_source(&dir, "sources/web/x.md", &fm, "b").is_ok());
+        assert!(crate::vault::write::write_source(
+            &dir,
+            "knowledge/x.md",
+            &fm,
+            "b",
+            &WriteReceipt::for_test(DEFAULT_ACTOR, None)
+        )
+        .is_err());
+        assert!(crate::vault::write::write_source(
+            &dir,
+            "docs/x.md",
+            &fm,
+            "b",
+            &WriteReceipt::for_test(DEFAULT_ACTOR, None)
+        )
+        .is_err());
+        assert!(crate::vault::write::write_source(
+            &dir,
+            "sources/web/x.md",
+            &fm,
+            "b",
+            &WriteReceipt::for_test(DEFAULT_ACTOR, None)
+        )
+        .is_ok());
     }
 
     #[test]
@@ -4897,6 +6739,69 @@ mod tests {
     }
 
     #[test]
+    fn navigate_serves_view_among_its_places() {
+        let row = crate::policy::tools::row("navigate").expect("navigate is served");
+        let places = row
+            .input_schema
+            .pointer("/properties/to/enum")
+            .and_then(Value::as_array)
+            .expect("navigate's `to` is an enum");
+        assert!(!places.is_empty());
+        assert!(places.contains(&json!("view")), "{places:?}");
+    }
+
+    #[test]
+    fn navigate_goes_only_where_the_served_schema_says() {
+        let call = |args: Value| {
+            navigate_refusal(&serde_json::from_value::<Map<String, Value>>(args).unwrap())
+        };
+        let row = crate::policy::tools::row("navigate").expect("navigate is served");
+        let places: Vec<String> = row.input_schema["properties"]["to"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p.as_str().unwrap().to_string())
+            .collect();
+        let listed = places.join(", ");
+        for place in places.iter().filter(|p| *p != "view") {
+            assert_eq!(call(json!({ "to": place })), None, "{place}");
+        }
+        assert_eq!(call(json!({ "to": "view", "database": "Decision" })), None);
+        assert_eq!(
+            call(json!({ "to": "view", "database": "Decision", "view": "Board" })),
+            None
+        );
+
+        // The kinds the webview says inside are not words the agent says.
+        for word in ["pulse", "list"] {
+            assert_eq!(
+                call(json!({ "to": word })),
+                Some(format!(
+                    "navigate cannot go to \"{word}\": `to` is one of {listed}."
+                )),
+            );
+        }
+        assert_eq!(
+            call(json!({})),
+            Some(format!("navigate needs `to`: one of {listed}."))
+        );
+        // The retired `id` names no database.
+        for args in [
+            json!({ "to": "view" }),
+            json!({ "to": "view", "database": "  " }),
+            json!({ "to": "view", "id": "roadmap" }),
+        ] {
+            assert_eq!(
+                call(args),
+                Some(
+                    "navigate to a view needs `database`: the name of the database to open."
+                        .to_string()
+                ),
+            );
+        }
+    }
+
+    #[test]
     fn the_manifest_spells_the_names_the_code_does() {
         // The manifest restates a few names the code also spells (the
         // lanes.v1 posture); each pair is pinned here.
@@ -4954,6 +6859,12 @@ mod tests {
                 case["writes_disk"].as_bool().expect("writes_disk"),
                 "{case}"
             );
+            // M57.4: every case states whether an ask-first run asks first.
+            assert_eq!(
+                crate::policy::tools::confirmable(tool),
+                case["confirmable"].as_bool().expect("confirmable"),
+                "{case}"
+            );
             assert_eq!(
                 write_target(tool, &args).as_deref(),
                 case["write_target"].as_str(),
@@ -5003,7 +6914,12 @@ mod tests {
         cache.insert("id".into(), json!("https://wiki.test/x/page"));
         cache.insert("title".into(), json!("Page"));
         cache.insert("body".into(), json!("fetched content"));
-        tool_cache_source(&dir, &cache, "process:release-scout").unwrap();
+        tool_cache_source(
+            &dir,
+            &cache,
+            &WriteReceipt::for_test("process:release-scout", None),
+        )
+        .unwrap();
         let cached =
             std::fs::read_to_string(dir.join(new_copy("web", "https://wiki.test/x/page"))).unwrap();
         assert!(cached.contains("process:release-scout"));
@@ -5585,6 +7501,7 @@ mod tests {
             scope: Some(folders.iter().map(|f| f.to_string()).collect()),
             tools: None,
             vault: None,
+            asks: WriteAsks::UNASKED,
         }
     }
 
@@ -5598,6 +7515,7 @@ mod tests {
             read_scope: Some(folders.iter().map(|f| f.to_string()).collect()),
             tools: None,
             vault: None,
+            asks: WriteAsks::UNASKED,
         }
     }
 
@@ -5651,6 +7569,1326 @@ mod tests {
             text.contains("outside this run's read scope are not listed"),
             "hidden/b.md is an untyped capture this run may not see: {text}"
         );
+    }
+
+    // --- search_notes reports what it found and missed (M59.2) ----------
+
+    /// search_notes as `grant` asks it, answering the text the model reads.
+    fn search_as(vault: &Path, args: Value, grant: &RunGrant) -> Result<String, String> {
+        let args: Map<String, Value> = serde_json::from_value(args).unwrap();
+        tool_search(vault, &args, grant)
+            .map(|answer| answer["content"][0]["text"].as_str().unwrap().to_string())
+    }
+
+    fn search_all(vault: &Path, args: Value) -> String {
+        search_as(vault, args, &RunGrant::unrestricted("a")).expect("an answer")
+    }
+
+    /// The first line naming `path`, as `- path — …`.
+    fn hit_for<'a>(text: &'a str, path: &str) -> &'a str {
+        let head = format!("- {path} \u{2014} ");
+        text.lines()
+            .find(|line| line.starts_with(&head))
+            .unwrap_or_else(|| panic!("{path} is not a hit in:\n{text}"))
+    }
+
+    // --- search_notes reads search's corpus (M59.4) ----------------------
+
+    /// The paths of a search_notes answer, in the order it lists them.
+    fn listed(text: &str) -> Vec<String> {
+        text.lines()
+            .filter_map(|line| line.strip_prefix("- "))
+            .filter_map(|line| line.split(" \u{2014} ").next())
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Long enough ago that no read of the file is racily clean.
+    fn settle(vault: &Path, rel: &str) {
+        let file = std::fs::File::options()
+            .write(true)
+            .open(vault.join(rel))
+            .unwrap();
+        file.set_modified(std::time::SystemTime::now() - Duration::from_secs(3600))
+            .unwrap();
+    }
+
+    #[test]
+    fn search_notes_and_search_vault_rank_alike() {
+        let vault = temp_vault("search-rank-alike");
+        write(
+            &vault,
+            "a/pricing.md",
+            "---\ntype: Decision\n---\n\n# Pricing\n\nTiers.\n",
+        );
+        write(
+            &vault,
+            "b/notes.md",
+            "# Notes\n\nPricing tiers came up, pricing again.\n",
+        );
+        write(
+            &vault,
+            "c/old.md",
+            "# Old\n\nA passing mention of pricing.\n",
+        );
+        write(
+            &vault,
+            "d/meta.md",
+            "---\ndescription: pricing rules\n---\n\n# Rules\n",
+        );
+        write(&vault, "e/none.md", "# None\n\nNothing here.\n");
+        for query in ["pricing", "pricing tiers", "tiers rules"] {
+            let text = search_all(&vault, json!({ "query": query, "limit": 50 }));
+            let found = crate::search::vault_search_in(
+                &vault::corpus::CorpusCache::new(1),
+                &vault,
+                query,
+                50,
+            )
+            .unwrap();
+            let paths: Vec<String> = found.hits.iter().map(|h| h.path.clone()).collect();
+            assert_eq!(listed(&text), paths, "{query}: {text}");
+            assert!(!paths.is_empty(), "{query}");
+        }
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn search_notes_reads_each_note_once_and_reuses_the_corpus() {
+        let vault = temp_vault("search-reads-once");
+        for name in ["a", "b", "c"] {
+            let rel = format!("notes/{name}.md");
+            write(&vault, &rel, &format!("# {name}\n\nthe findable word\n"));
+            settle(&vault, &rel);
+        }
+        let cache = vault::corpus::CorpusCache::new(1);
+        let args: Map<String, Value> =
+            serde_json::from_value(json!({ "query": "findable" })).unwrap();
+        let grant = RunGrant::unrestricted("a");
+        let first = search_notes_in(&cache, &vault, &args, &grant).unwrap();
+        assert!(
+            answer_text(&first).starts_with("3 of 3 notes match"),
+            "{first}"
+        );
+        assert_eq!(
+            cache.reads(),
+            3,
+            "one read per note, not a scan and a read_note"
+        );
+        search_notes_in(&cache, &vault, &args, &grant).unwrap();
+        assert_eq!(cache.reads(), 3, "the second search reads nothing");
+        write(&vault, "notes/b.md", "# b\n\nthe findable word, changed\n");
+        settle(&vault, "notes/b.md");
+        search_notes_in(&cache, &vault, &args, &grant).unwrap();
+        assert_eq!(cache.reads(), 4, "only the changed note");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn search_notes_says_when_a_long_note_was_searched_in_part() {
+        let vault = temp_vault("search-long-note");
+        let filler = "filler words here\n".repeat(vault::corpus::SEARCH_BODY_CAP / 10);
+        write(
+            &vault,
+            "notes/long.md",
+            &format!("# Long\n\nEarly draining.\n{filler}Late zeppelin.\n"),
+        );
+        write(&vault, "notes/short.md", "# Short\n\nAlso draining.\n");
+        let text = search_all(&vault, json!({ "query": "draining" }));
+        assert!(
+            text.starts_with(
+                "2 of 2 notes match \"draining\", best first \
+                 (1 note longer than 100 KB was searched in its first 100 KB):"
+            ),
+            "{text}"
+        );
+        let missed = search_all(&vault, json!({ "query": "zeppelin" }));
+        assert_eq!(
+            missed,
+            "No notes matched \"zeppelin\". \
+             (1 note longer than 100 KB was searched in its first 100 KB)"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn search_finds_a_skill_by_its_description_and_counts_the_rest() {
+        let vault = temp_vault("search-skill-description");
+        write(
+            &vault,
+            "records/skills/create-an-agent.md",
+            "---\ntype: Skill\nslug: create-an-agent\ndescription: Interview the user about a \
+             job worth delegating, then draft an Agent record.\n---\n\n# Create an agent\n\n\
+             Build the user a new agent.\n",
+        );
+        let text = search_all(&vault, json!({ "query": "interview" }));
+        assert!(
+            text.starts_with("1 of 1 note matches \"interview\", best first:"),
+            "{text}"
+        );
+        assert!(hit_for(&text, "records/skills/create-an-agent.md").contains("[Skill]"));
+        assert!(
+            text.contains("\n  description: Interview the user about a job worth delegating"),
+            "{text}"
+        );
+
+        for name in ["a", "b", "c", "d"] {
+            write(
+                &vault,
+                &format!("notes/{name}.md"),
+                "# Zebra\n\nzebra notes\n",
+            );
+        }
+        let text = search_all(&vault, json!({ "query": "zebra", "limit": 1 }));
+        assert!(text.starts_with("1 of 4 notes match \"zebra\""), "{text}");
+        assert!(
+            text.contains("3 more not shown; raise limit (at most 100) or narrow the query."),
+            "{text}"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_quoted_phrase_ranks_first() {
+        let vault = temp_vault("search-quoted");
+        write(
+            &vault,
+            "notes/a.md",
+            "# Notes\n\nThe release checklist lives here, among many other words about \
+             meetings, budgets, hiring plans, vendors and the office move.\n",
+        );
+        write(
+            &vault,
+            "notes/b.md",
+            "# Release\n\nfor the release: a checklist; again a checklist, release again\n",
+        );
+        let loose = search_all(&vault, json!({ "query": "release checklist" }));
+        let quoted = search_all(&vault, json!({ "query": "\"release checklist\"" }));
+        let first = |text: &str| text.lines().nth(1).unwrap_or("").to_string();
+        assert!(first(&loose).starts_with("- notes/b.md"), "{loose}");
+        assert!(first(&quoted).starts_with("- notes/a.md"), "{quoted}");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_relationship_target_is_found() {
+        let vault = temp_vault("search-relationship");
+        write(
+            &vault,
+            "records/risks/vendor-delay.md",
+            "---\ntype: Risk\nowner: \"[[maya-chen]]\"\n---\n\n# Vendor delay\n\nThe vendor slipped.\n",
+        );
+        let text = search_all(&vault, json!({ "query": "maya" }));
+        hit_for(&text, "records/risks/vendor-delay.md");
+        assert!(text.contains("\n  owner: maya-chen"), "{text}");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_agents_memory_is_not_searched() {
+        let vault = temp_vault("search-agent-memory");
+        write(
+            &vault,
+            "records/agents/scout.md",
+            "---\ntype: Agent\nslug: scout\nrecent: zanzibar trip\nmemory:\n  - zanzibar \
+             again\npreferences: zanzibar\n---\n\n# Scout\n\nWatch releases.\n",
+        );
+        let text = search_all(&vault, json!({ "query": "zanzibar" }));
+        assert_eq!(text, "No notes matched \"zanzibar\".");
+        // The rest of the record is a note like any other.
+        let text = search_all(&vault, json!({ "query": "scout" }));
+        hit_for(&text, "records/agents/scout.md");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_unknown_type_is_refused_with_only_readable_types() {
+        let vault = temp_vault("search-unknown-type");
+        write(
+            &vault,
+            "visible/a.md",
+            "---\ntype: Note\n---\n\n# Alpha\n\nfindable\n",
+        );
+        write(
+            &vault,
+            "visible/b.md",
+            "---\ntype: Decision\n---\n\n# Beta\n\nfindable\n",
+        );
+        write(
+            &vault,
+            "hidden/s.md",
+            "---\ntype: Secret\n---\n\n# Plans\n\nfindable\n",
+        );
+        let grant = read_scoped(&["visible"]);
+        for asked in ["Risk", "Secret"] {
+            let refused = search_as(
+                &vault,
+                json!({ "query": "findable", "type": asked }),
+                &grant,
+            )
+            .expect_err("an unknown type is refused");
+            assert_eq!(
+                refused,
+                format!(
+                    "No note this run can read has type \"{asked}\". Types in use: Decision, Note."
+                )
+            );
+        }
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_type_matches_ignoring_case() {
+        let vault = temp_vault("search-type-case");
+        write(
+            &vault,
+            "a.md",
+            "---\ntype: Note\n---\n\n# Alpha\n\nfindable\n",
+        );
+        write(
+            &vault,
+            "b.md",
+            "---\ntype: Decision\n---\n\n# Beta\n\nfindable\n",
+        );
+        let text = search_all(&vault, json!({ "query": "findable", "type": " note " }));
+        assert!(
+            text.starts_with("1 of 1 note of type Note matches \"findable\""),
+            "{text}"
+        );
+        hit_for(&text, "a.md");
+        assert!(!text.contains("- b.md"));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    /// Two concepts, `new` declaring it replaces `old`.
+    fn replaced_concepts(vault: &Path, new_at: &str) {
+        write(
+            vault,
+            "knowledge/risks/old.md",
+            "---\ntype: Risk\ntitle: Thermal margin\ndescription: The pelican case.\n---\n\nBody.\n",
+        );
+        write(
+            vault,
+            new_at,
+            "---\ntype: Risk\ntitle: Thermal margin rev B\nsupersedes:\n  - \"[[old]]\"\n---\n\nBody.\n",
+        );
+    }
+
+    #[test]
+    fn a_superseded_concept_names_its_replacement() {
+        let vault = temp_vault("search-superseded");
+        replaced_concepts(&vault, "knowledge/risks/new.md");
+        let text = search_all(&vault, json!({ "query": "pelican" }));
+        assert!(
+            hit_for(&text, "knowledge/risks/old.md")
+                .ends_with("[Risk] · concept, unverified, replaced by knowledge/risks/new.md"),
+            "{text}"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_replacement_outside_the_read_scope_is_not_named() {
+        let vault = temp_vault("search-superseded-hidden");
+        replaced_concepts(&vault, "knowledge/drafts/new.md");
+        let grant = read_scoped(&["knowledge/risks"]);
+        let text = search_as(&vault, json!({ "query": "pelican" }), &grant).unwrap();
+        assert!(
+            hit_for(&text, "knowledge/risks/old.md").ends_with("[Risk] · concept, unverified"),
+            "{text}"
+        );
+        assert!(!text.contains("drafts"), "{text}");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn templates_captures_and_the_knowledge_log_are_labelled() {
+        let vault = temp_vault("search-labels");
+        write(
+            &vault,
+            "templates/meeting.md",
+            "---\ntype: Meeting\n---\n\n# Meeting\n\nquokka\n",
+        );
+        write(&vault, "knowledge/log.md", "# Log\n\n- quokka\n");
+        write(&vault, "knowledge/index.md", "# Index\n\n- quokka\n");
+        write(&vault, "inbox/idea.md", "# Idea\n\nquokka\n");
+        write(
+            &vault,
+            "records/r.md",
+            "---\ntype: Note\n---\n\n# R\n\nquokka\n",
+        );
+        let text = search_all(&vault, json!({ "query": "quokka" }));
+        assert!(text.starts_with("5 of 5 notes match"), "{text}");
+        assert!(hit_for(&text, "templates/meeting.md").ends_with("[Meeting] · template"));
+        assert!(hit_for(&text, "knowledge/log.md").ends_with("Log · knowledge log"));
+        assert!(hit_for(&text, "knowledge/index.md").ends_with("Index · knowledge index"));
+        assert!(hit_for(&text, "inbox/idea.md").ends_with("Idea · Inbox capture"));
+        assert!(hit_for(&text, "records/r.md").ends_with("[Note]"));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_note_past_its_stale_after_is_labelled_stale() {
+        let vault = temp_vault("search-stale");
+        write(
+            &vault,
+            "records/r.md",
+            "---\ntype: Risk\nstale_after: 2000-01-01\n---\n\n# R\n\nquokka\n",
+        );
+        let text = search_all(&vault, json!({ "query": "quokka" }));
+        assert!(
+            hit_for(&text, "records/r.md").ends_with("[Risk] · stale"),
+            "{text}"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn the_word_caps_are_stated() {
+        let vault = temp_vault("search-caps");
+        let long = "q".repeat(120);
+        write(&vault, "a.md", &format!("# A\n\nw0 and {long}\n"));
+        let words: Vec<String> = (0..51).map(|i| format!("w{i}")).collect();
+        let text = search_all(&vault, json!({ "query": words.join(" ") }));
+        assert!(
+            text.ends_with("\n\nOnly the first 50 of 51 distinct words were searched."),
+            "{text}"
+        );
+        let text = search_all(&vault, json!({ "query": long }));
+        hit_for(&text, "a.md");
+        assert!(
+            text.ends_with("\n\n1 word longer than 80 characters was cut to 80."),
+            "{text}"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_limit_over_100_is_cut_and_said() {
+        let vault = temp_vault("search-limit-cut");
+        write(&vault, "a.md", "# A\n\nquokka\n");
+        let text = search_all(&vault, json!({ "query": "quokka", "limit": 101 }));
+        assert!(text.ends_with("\n\nThe limit is at most 100."), "{text}");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_limit_below_one_is_refused() {
+        let vault = temp_vault("search-limit-refused");
+        write(&vault, "a.md", "# A\n\nquokka\n");
+        for limit in [json!(0), json!(-1), json!(0.5), json!("5"), json!(true)] {
+            let refused = search_as(
+                &vault,
+                json!({ "query": "quokka", "limit": limit }),
+                &RunGrant::unrestricted("a"),
+            )
+            .expect_err("refused");
+            assert_eq!(
+                refused, "limit counts from 1 (default 20, at most 100)",
+                "{limit}"
+            );
+        }
+        let refused = search_as(
+            &vault,
+            json!({ "query": "  " }),
+            &RunGrant::unrestricted("a"),
+        )
+        .expect_err("a blank query");
+        assert_eq!(refused, "search_notes needs a query");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_fractional_limit_is_floored() {
+        let vault = temp_vault("search-limit-floor");
+        for name in ["a", "b", "c", "d", "e"] {
+            write(&vault, &format!("{name}.md"), "# Q\n\nquokka\n");
+        }
+        let text = search_all(&vault, json!({ "query": "quokka", "limit": 2.5 }));
+        assert!(text.starts_with("2 of 5 notes match"), "{text}");
+        assert!(text.contains("3 more not shown"), "{text}");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn unparsed_frontmatter_is_counted_and_labelled() {
+        let vault = temp_vault("search-unparsed");
+        write(
+            &vault,
+            "broken.md",
+            "---\ntype: [unclosed\n---\n\n# Broken\n\nquokka\n",
+        );
+        write(
+            &vault,
+            "fine.md",
+            "---\ntype: Note\n---\n\n# Fine\n\nquokka\n",
+        );
+        let text = search_all(&vault, json!({ "query": "quokka" }));
+        // Its type was never read, so it is untyped, and untyped is a capture.
+        assert!(
+            hit_for(&text, "broken.md").ends_with("Broken · Inbox capture · unparsed frontmatter"),
+            "{text}"
+        );
+        assert!(
+            text.ends_with(
+                "\n\n1 note has frontmatter that could not be parsed, so only its title and \
+                 text were searched."
+            ),
+            "{text}"
+        );
+        let typed = search_all(&vault, json!({ "query": "quokka", "type": "Note" }));
+        assert!(!typed.contains("broken.md"), "{typed}");
+        assert!(
+            typed.ends_with(
+                "\n\n1 note has frontmatter that could not be parsed, so its type is unknown \
+                 and it was not searched."
+            ),
+            "{typed}"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_unreadable_note_is_counted_not_dropped() {
+        let vault = temp_vault("search-unreadable");
+        std::fs::write(
+            vault.join("quokka-notes.md"),
+            b"# Quokka notes\n\n\xff\xfe quokka\n",
+        )
+        .unwrap();
+        let text = search_all(&vault, json!({ "query": "quokka" }));
+        assert!(
+            hit_for(&text, "quokka-notes.md")
+                .ends_with("Quokka notes · Inbox capture · unreadable"),
+            "{text}"
+        );
+        assert!(
+            text.ends_with("\n\n1 note could not be read, so its text was not searched."),
+            "{text}"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    const PELICAN_NOTE: &str = "---\ntype: Risk\nstatus: open\n---\n\n# Vendor delay\n\nFirst \
+                                paragraph.\n\nThe pelican shipment slipped.\n";
+
+    /// The `L{n}` search_notes gives the pelican line.
+    fn pelican_line(vault: &Path) -> usize {
+        let text = search_all(vault, json!({ "query": "pelican" }));
+        let line = text
+            .lines()
+            .find_map(|l| l.strip_prefix("  L"))
+            .unwrap_or_else(|| panic!("no line in:\n{text}"));
+        let (n, excerpt) = line.split_once(": ").unwrap();
+        assert_eq!(excerpt, "The pelican shipment slipped.");
+        n.parse().unwrap()
+    }
+
+    #[test]
+    fn a_hit_names_the_body_line_get_note_prints() {
+        let vault = temp_vault("search-line-get-note");
+        write(&vault, "records/r.md", PELICAN_NOTE);
+        let n = pelican_line(&vault);
+        let note = tool_get_note(&vault, &args_of(json!({ "path": "records/r.md" }))).unwrap();
+        let printed = note["content"][0]["text"].as_str().unwrap();
+        let (_, body) = printed.split_once("\n---\n").unwrap();
+        assert_eq!(
+            body.lines().nth(n - 1),
+            Some("The pelican shipment slipped.")
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_excerpt_line_is_the_line_edit_note_lists() {
+        let vault = temp_vault("search-line-edit-note");
+        write(&vault, "records/r.md", PELICAN_NOTE);
+        let n = pelican_line(&vault);
+        let edited = tool_edit_note(
+            &vault,
+            &args_of(json!({
+                "path": "records/r.md",
+                "edits": [{ "old": "pelican", "new": "heron" }]
+            })),
+        )
+        .unwrap();
+        let report = edited["content"][0]["text"].as_str().unwrap();
+        assert!(
+            report.contains(&format!("1. now at line {n}\n")),
+            "{report}"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn search_answers_an_unattended_run_alike() {
+        let vault = temp_vault("search-unattended");
+        write(&vault, "records/r.md", PELICAN_NOTE);
+        let attended = RunGrant {
+            asks: WriteAsks {
+                kind: crate::policy::tool_approval::RunKind::Attended,
+                ask_first: true,
+            },
+            ..RunGrant::unrestricted("agent:scout")
+        };
+        let unattended = RunGrant {
+            asks: WriteAsks {
+                kind: crate::policy::tool_approval::RunKind::Unattended,
+                ask_first: false,
+            },
+            ..RunGrant::unrestricted("agent:scout")
+        };
+        let args = json!({ "query": "pelican" });
+        assert_eq!(
+            search_as(&vault, args.clone(), &attended).unwrap(),
+            search_as(&vault, args, &unattended).unwrap()
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    fn served_search_description() -> String {
+        tool_catalog(true)
+            .into_iter()
+            .find(|tool| tool["name"] == "search_notes")
+            .expect("search_notes is served")["description"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    #[test]
+    fn search_notes_says_it_is_keyword_search() {
+        let description = served_search_description();
+        assert!(description.chars().count() <= 2048);
+        assert!(description.contains("not semantic"), "{description}");
+    }
+
+    #[test]
+    fn the_search_description_names_no_other_tool() {
+        let description = served_search_description();
+        for tool in tool_catalog(true) {
+            let name = tool["name"].as_str().unwrap();
+            if name != "search_notes" {
+                assert!(!description.contains(name), "it names {name}");
+            }
+        }
+    }
+
+    // --- search_notes `in` (M59.5) ---------------------------------------
+
+    /// Four notes: "pelican" in a title, a body, a frontmatter value and a
+    /// type, each alone.
+    fn pelican_vault(label: &str) -> PathBuf {
+        let vault = temp_vault(label);
+        write(
+            &vault,
+            "notes/title.md",
+            "---\ntype: Note\n---\n\n# Pelican case\n\nNothing about birds.\n",
+        );
+        write(
+            &vault,
+            "notes/body.md",
+            "---\ntype: Note\n---\n\n# Weekly notes\n\nThe pelican came up.\n",
+        );
+        write(
+            &vault,
+            "notes/meta.md",
+            "---\ntype: Note\nspecies: pelican\n---\n\n# Vendor list\n\nNothing here.\n",
+        );
+        write(
+            &vault,
+            "notes/typed.md",
+            "---\ntype: Pelican\n---\n\n# Field log\n\nSeen at dawn.\n",
+        );
+        for rel in ["title", "body", "meta", "typed"] {
+            settle(&vault, &format!("notes/{rel}.md"));
+        }
+        vault
+    }
+
+    #[test]
+    fn in_name_matches_titles_only() {
+        let vault = pelican_vault("search-in-name");
+        let cache = vault::corpus::CorpusCache::new(1);
+        let args: Map<String, Value> =
+            serde_json::from_value(json!({ "query": "pelican", "in": "name" })).unwrap();
+        let grant = RunGrant::unrestricted("a");
+        let text =
+            answer_text(&search_notes_in(&cache, &vault, &args, &grant).unwrap()).to_string();
+        assert_eq!(
+            text,
+            "1 of 1 note matches \"pelican\" (titles only), best first:\n\
+             - notes/title.md \u{2014} Pelican case [Note]\n  Nothing about birds."
+        );
+        // It ranks no body text, and reads nothing the corpus did not: one
+        // read per note, kept for the next search, whatever its scope.
+        assert_eq!(cache.reads(), 4);
+        let body_only = serde_json::from_value(json!({ "query": "dawn", "in": "name" })).unwrap();
+        let missed = search_notes_in(&cache, &vault, &body_only, &grant).unwrap();
+        assert_eq!(
+            answer_text(&missed),
+            "No notes matched \"dawn\" (titles only)."
+        );
+        assert_eq!(cache.reads(), 4, "a title-only search reads nothing new");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn in_content_skips_titles() {
+        let vault = pelican_vault("search-in-content");
+        let text = search_all(&vault, json!({ "query": "pelican", "in": "content" }));
+        assert!(
+            text.starts_with("3 of 3 notes match \"pelican\" (titles not searched), best first:"),
+            "{text}"
+        );
+        let mut found = listed(&text);
+        found.sort();
+        assert_eq!(found, ["notes/body.md", "notes/meta.md", "notes/typed.md"]);
+        assert!(!text.contains("notes/title.md"), "{text}");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn in_all_answers_exactly_as_no_in() {
+        let vault = pelican_vault("search-in-all");
+        for query in [
+            "pelican",
+            "pelican case",
+            "\"pelican case\"",
+            "dawn notes",
+            "zeppelin",
+        ] {
+            assert_eq!(
+                search_all(&vault, json!({ "query": query, "in": "all" })),
+                search_all(&vault, json!({ "query": query })),
+                "{query}"
+            );
+            assert_eq!(
+                search_all(&vault, json!({ "query": query, "in": null })),
+                search_all(&vault, json!({ "query": query })),
+                "{query}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_unknown_in_is_refused() {
+        let vault = pelican_vault("search-in-unknown");
+        let grant = RunGrant::unrestricted("a");
+        for word in [
+            json!("title"),
+            json!("Name"),
+            json!(""),
+            json!(1),
+            json!(["name"]),
+        ] {
+            assert_eq!(
+                search_as(&vault, json!({ "query": "pelican", "in": word }), &grant),
+                Err("in must be name, content or all".to_string()),
+                "{word}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // --- list_notes browses (M59.5) --------------------------------------
+
+    /// An entry at `path` titled `title`, changed at `modified` and first
+    /// seen at `created`.
+    fn browse_entry(path: &str, title: &str, modified: &str, created: &str) -> vault::entry::Entry {
+        let mut entry = vault::entry::Entry::empty_for_test(path);
+        entry.title = title.to_string();
+        entry.modified_at = modified.to_string();
+        entry.created_at = created.to_string();
+        entry
+    }
+
+    /// The paths `browse` shows, and its counts: total, unrecorded and
+    /// since_unrecorded.
+    fn browse_paths(
+        entries: &[vault::entry::Entry],
+        filter: &BrowseFilter,
+        limit: usize,
+    ) -> (Vec<String>, (usize, usize, usize)) {
+        let refs: Vec<&vault::entry::Entry> = entries.iter().collect();
+        let browsed = browse(&refs, filter, limit);
+        let paths = browsed.shown.iter().map(|e| e.path.clone()).collect();
+        let counts = (browsed.total, browsed.unrecorded, browsed.since_unrecorded);
+        (paths, counts)
+    }
+
+    fn sorted_by(sort: BrowseSort) -> BrowseFilter<'static> {
+        BrowseFilter {
+            folder: None,
+            since: None,
+            sort,
+        }
+    }
+
+    #[test]
+    fn browse_orders_recorded_times_newest_first_and_unrecorded_last() {
+        let entries = [
+            browse_entry("a.md", "A", "2026-10-01T09:00:00Z", "2026-09-03T00:00:00Z"),
+            browse_entry("b.md", "B", "not a time", "2026-09-01T00:00:00Z"),
+            browse_entry("c.md", "C", "2026-10-03T09:00:00Z", ""),
+            browse_entry(
+                "d.md",
+                "D",
+                "2026-10-02T09:00:00+02:00",
+                "2026-09-02T00:00:00Z",
+            ),
+        ];
+        // d.md's 09:00 at +02:00 is 07:00 UTC, still a day after a.md.
+        let (paths, counts) = browse_paths(&entries, &sorted_by(BrowseSort::Modified), 10);
+        assert_eq!(paths, ["c.md", "d.md", "a.md", "b.md"]);
+        assert_eq!(counts, (4, 1, 0));
+        let (paths, counts) = browse_paths(&entries, &sorted_by(BrowseSort::Created), 10);
+        assert_eq!(paths, ["a.md", "d.md", "b.md", "c.md"]);
+        assert_eq!(counts, (4, 1, 0));
+        // The limit shows the first, and the counts still cover them all.
+        let (paths, counts) = browse_paths(&entries, &sorted_by(BrowseSort::Modified), 1);
+        assert_eq!(paths, ["c.md"]);
+        assert_eq!(counts, (4, 1, 0));
+        // A title or path order needs no time, so it counts none.
+        let (_, counts) = browse_paths(&entries, &sorted_by(BrowseSort::Path), 10);
+        assert_eq!(counts, (4, 0, 0));
+    }
+
+    #[test]
+    fn browse_since_counts_the_unrecorded_it_cannot_include() {
+        let entries = [
+            browse_entry(
+                "old.md",
+                "Old",
+                "2026-09-30T23:59:59Z",
+                "2026-09-01T00:00:00Z",
+            ),
+            browse_entry(
+                "edge.md",
+                "Edge",
+                "2026-10-01T00:00:00Z",
+                "2026-09-01T00:00:00Z",
+            ),
+            browse_entry(
+                "new.md",
+                "New",
+                "2026-10-05T00:00:00Z",
+                "2026-09-01T00:00:00Z",
+            ),
+            browse_entry("lost.md", "Lost", "", "2026-09-01T00:00:00Z"),
+        ];
+        let filter = BrowseFilter {
+            folder: None,
+            since: Some(recorded_time("2026-10-01T00:00:00Z").unwrap()),
+            sort: BrowseSort::Modified,
+        };
+        let (paths, counts) = browse_paths(&entries, &filter, 10);
+        assert_eq!(paths, ["new.md", "edge.md"]);
+        // Two kept, none of them unrecorded, and one it could not include.
+        assert_eq!(counts, (2, 0, 1));
+    }
+
+    #[test]
+    fn browse_folder_holds_subfolders_and_not_siblings() {
+        let entries = [
+            browse_entry("records/risks/a.md", "A", "2026-10-01T00:00:00Z", ""),
+            browse_entry("records/risks/old/b.md", "B", "2026-10-02T00:00:00Z", ""),
+            browse_entry(
+                "records/risks-archive/c.md",
+                "C",
+                "2026-10-03T00:00:00Z",
+                "",
+            ),
+            browse_entry("records/risks.md", "D", "2026-10-04T00:00:00Z", ""),
+        ];
+        let filter = BrowseFilter {
+            folder: Some("records/risks"),
+            since: None,
+            sort: BrowseSort::Path,
+        };
+        let (paths, counts) = browse_paths(&entries, &filter, 10);
+        assert_eq!(paths, ["records/risks/a.md", "records/risks/old/b.md"]);
+        assert_eq!(counts.0, 2);
+    }
+
+    #[test]
+    fn browse_breaks_ties_on_path() {
+        let at = "2026-10-01T00:00:00Z";
+        let entries = [
+            browse_entry("c.md", "Same", at, at),
+            browse_entry("a.md", "Same", at, at),
+            browse_entry("b.md", "same", at, at),
+            browse_entry("z.md", "Same", "", ""),
+            browse_entry("y.md", "Same", "", ""),
+        ];
+        // The same time, the unrecorded alike, and one title in two cases.
+        for sort in [BrowseSort::Modified, BrowseSort::Created, BrowseSort::Title] {
+            let (paths, _) = browse_paths(&entries, &sorted_by(sort), 10);
+            assert_eq!(paths, ["a.md", "b.md", "c.md", "y.md", "z.md"], "{sort:?}");
+        }
+    }
+
+    #[test]
+    fn browse_title_sort_ignores_case() {
+        let at = "2026-10-01T00:00:00Z";
+        let entries = [
+            browse_entry("1.md", "beta", at, at),
+            browse_entry("2.md", "Alpha", at, at),
+            browse_entry("3.md", "ALPHA two", at, at),
+            browse_entry("4.md", "Gamma", at, at),
+        ];
+        let (paths, _) = browse_paths(&entries, &sorted_by(BrowseSort::Title), 10);
+        assert_eq!(paths, ["2.md", "3.md", "1.md", "4.md"]);
+    }
+
+    /// list_notes as `grant` asks it, over a cache of its own, answering the
+    /// text the model reads.
+    fn list_as(vault: &Path, args: Value, grant: &RunGrant) -> Result<String, String> {
+        let args: Map<String, Value> = serde_json::from_value(args).unwrap();
+        list_notes_in(&vault::corpus::CorpusCache::new(1), vault, &args, grant)
+            .map(|answer| answer_text(&answer).to_string())
+    }
+
+    fn list_all(vault: &Path, args: Value) -> String {
+        list_as(vault, args, &RunGrant::unrestricted("a")).expect("an answer")
+    }
+
+    /// A note of `kind` at `rel`, its file last changed at `at`.
+    fn note_at(vault: &Path, rel: &str, kind: &str, title: &str, at: &str) {
+        write(
+            vault,
+            rel,
+            &format!("---\ntype: {kind}\n---\n\n# {title}\n\nBody.\n"),
+        );
+        let when: std::time::SystemTime = chrono::DateTime::parse_from_rfc3339(at).unwrap().into();
+        std::fs::File::options()
+            .write(true)
+            .open(vault.join(rel))
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(when))
+            .unwrap();
+    }
+
+    #[test]
+    fn list_notes_lists_newest_first_and_says_how_many_more() {
+        let vault = temp_vault("list-newest");
+        note_at(
+            &vault,
+            "notes/a.md",
+            "Note",
+            "Alpha",
+            "2026-10-01T09:00:00Z",
+        );
+        note_at(
+            &vault,
+            "notes/b.md",
+            "Note",
+            "Bravo",
+            "2026-10-03T09:00:00Z",
+        );
+        note_at(
+            &vault,
+            "notes/c.md",
+            "Note",
+            "Charlie",
+            "2026-10-02T09:00:00Z",
+        );
+        assert_eq!(
+            list_all(&vault, json!({ "limit": 2 })),
+            "2 of 3 notes, newest modified first:\n\
+             - notes/b.md \u{2014} Bravo [Note] · modified 2026-10-03T09:00:00Z\n\
+             - notes/c.md \u{2014} Charlie [Note] · modified 2026-10-02T09:00:00Z\n\
+             \n\
+             1 more not listed; narrow the filter or raise limit (at most 200)."
+        );
+        // One shown, singular all through.
+        let one = list_all(&vault, json!({ "limit": 1, "sort": "title" }));
+        assert!(
+            one.starts_with("1 of 3 notes, by title:\n- notes/a.md"),
+            "{one}"
+        );
+        assert!(
+            one.ends_with("\n\n2 more not listed; narrow the filter or raise limit (at most 200)."),
+            "{one}"
+        );
+        let path = list_all(&vault, json!({ "sort": "path", "folder": "notes/a.md" }));
+        assert_eq!(
+            path,
+            "1 of 1 note in notes/a.md/, by path:\n\
+             - notes/a.md \u{2014} Alpha [Note] · modified 2026-10-01T09:00:00Z"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn list_notes_filters_by_type_folder_and_modified_since() {
+        let vault = temp_vault("list-filters");
+        note_at(
+            &vault,
+            "records/risks/r1.md",
+            "Risk",
+            "Vendor delay",
+            "2026-10-05T00:00:00Z",
+        );
+        note_at(
+            &vault,
+            "records/risks/old/r2.md",
+            "Risk",
+            "Thermal",
+            "2026-09-20T00:00:00Z",
+        );
+        note_at(
+            &vault,
+            "records/risks-archive/r3.md",
+            "Risk",
+            "Archived",
+            "2026-10-06T00:00:00Z",
+        );
+        note_at(
+            &vault,
+            "records/risks/d.md",
+            "Decision",
+            "Go",
+            "2026-10-07T00:00:00Z",
+        );
+        let typed = list_all(
+            &vault,
+            json!({ "type": " risk ", "folder": " ./records/risks/ " }),
+        );
+        assert_eq!(
+            typed,
+            "2 of 2 notes of type Risk in records/risks/, newest modified first:\n\
+             - records/risks/r1.md \u{2014} Vendor delay [Risk] · modified 2026-10-05T00:00:00Z\n\
+             - records/risks/old/r2.md \u{2014} Thermal [Risk] · modified 2026-09-20T00:00:00Z"
+        );
+        let since = list_all(
+            &vault,
+            json!({ "type": "Risk", "folder": "records/risks", "modified_since": "2026-10-01" }),
+        );
+        assert_eq!(
+            since,
+            "1 of 1 note of type Risk in records/risks/ modified since 2026-10-01T00:00:00Z, newest modified first:\n\
+             - records/risks/r1.md \u{2014} Vendor delay [Risk] · modified 2026-10-05T00:00:00Z"
+        );
+        // Blank filters are no filters.
+        let all = list_all(
+            &vault,
+            json!({ "type": "", "folder": "/", "modified_since": " " }),
+        );
+        assert!(
+            all.starts_with("4 of 4 notes, newest modified first:"),
+            "{all}"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_date_reads_as_midnight_utc_and_is_restated() {
+        let vault = temp_vault("list-midnight");
+        note_at(&vault, "n/edge.md", "Note", "Edge", "2026-10-01T00:00:00Z");
+        note_at(
+            &vault,
+            "n/before.md",
+            "Note",
+            "Before",
+            "2026-09-30T23:59:59Z",
+        );
+        let dated = list_all(&vault, json!({ "modified_since": "2026-10-01" }));
+        assert!(
+            dated.starts_with("1 of 1 note modified since 2026-10-01T00:00:00Z, newest modified first:\n- n/edge.md"),
+            "{dated}"
+        );
+        // An RFC 3339 time with an offset is read, and restated, in UTC.
+        let offset = list_all(
+            &vault,
+            json!({ "modified_since": "2026-10-01T01:59:59+02:00" }),
+        );
+        assert!(
+            offset.starts_with(
+                "2 of 2 notes modified since 2026-09-30T23:59:59Z, newest modified first:"
+            ),
+            "{offset}"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_empty_listing_names_its_filter() {
+        let vault = temp_vault("list-empty");
+        note_at(
+            &vault,
+            "records/risks/r1.md",
+            "Risk",
+            "Vendor delay",
+            "2026-10-05T00:00:00Z",
+        );
+        assert_eq!(
+            list_all(
+                &vault,
+                json!({ "type": "risk", "folder": "records/x", "modified_since": "2026-11-01" })
+            ),
+            "No notes of type Risk in records/x/ modified since 2026-11-01T00:00:00Z."
+        );
+        assert_eq!(
+            list_all(&vault, json!({ "folder": "elsewhere" })),
+            "No notes in elsewhere/."
+        );
+        let empty = temp_vault("list-empty-vault");
+        assert_eq!(list_all(&empty, json!({})), "No notes.");
+        let _ = std::fs::remove_dir_all(&vault);
+        let _ = std::fs::remove_dir_all(&empty);
+    }
+
+    #[test]
+    fn the_withheld_count_is_vault_wide() {
+        // A folder filter never measures an unreadable folder: the count is
+        // the whole vault's, the same whichever folder was asked for.
+        let vault = temp_vault("list-withheld");
+        note_at(
+            &vault,
+            "visible/a.md",
+            "Note",
+            "Alpha",
+            "2026-10-01T00:00:00Z",
+        );
+        note_at(
+            &vault,
+            "hidden/b.md",
+            "Note",
+            "Beta",
+            "2026-10-01T00:00:00Z",
+        );
+        note_at(
+            &vault,
+            "secret/c.md",
+            "Note",
+            "Gamma",
+            "2026-10-01T00:00:00Z",
+        );
+        let grant = read_scoped(&["visible"]);
+        assert_eq!(
+            list_as(&vault, json!({ "folder": "hidden" }), &grant).unwrap(),
+            "No notes in hidden/. (2 notes outside this run's read scope were not listed)"
+        );
+        assert_eq!(
+            list_as(&vault, json!({}), &grant).unwrap(),
+            "1 of 1 note, newest modified first (2 notes outside this run's read scope were not listed):\n\
+             - visible/a.md \u{2014} Alpha [Note] · modified 2026-10-01T00:00:00Z"
+        );
+        let one_hidden = read_scoped(&["visible", "hidden"]);
+        assert!(
+            list_as(&vault, json!({ "folder": "hidden" }), &one_hidden)
+                .unwrap()
+                .contains("(1 notes outside this run's read scope were not listed)"),
+            "M34.4's plural, whatever the count"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn list_notes_refuses_an_unknown_type_with_only_readable_types() {
+        let vault = temp_vault("list-unknown-type");
+        note_at(
+            &vault,
+            "visible/a.md",
+            "Note",
+            "Alpha",
+            "2026-10-01T00:00:00Z",
+        );
+        note_at(
+            &vault,
+            "hidden/b.md",
+            "Secret",
+            "Beta",
+            "2026-10-01T00:00:00Z",
+        );
+        let grant = read_scoped(&["visible"]);
+        assert_eq!(
+            list_as(&vault, json!({ "type": "Secret" }), &grant),
+            Err("No note this run can read has type \"Secret\". Types in use: Note.".to_string())
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_malformed_modified_since_is_refused() {
+        let vault = temp_vault("list-bad-since");
+        note_at(&vault, "n/a.md", "Note", "Alpha", "2026-10-01T00:00:00Z");
+        for since in [
+            json!("yesterday"),
+            json!("2026-1-01"),
+            json!("2026-13-01"),
+            json!("2026-02-30"),
+            json!("2026-10-01 09:00"),
+            json!(20261001),
+        ] {
+            assert_eq!(
+                list_as(
+                    &vault,
+                    json!({ "modified_since": since }),
+                    &RunGrant::unrestricted("a")
+                ),
+                Err(SINCE_REFUSAL.to_string()),
+                "{since}"
+            );
+        }
+        assert_eq!(
+            SINCE_REFUSAL,
+            "modified_since must be a date such as 2026-10-01 or an RFC 3339 time such as \
+             2026-10-01T09:00:00Z"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_unknown_sort_is_refused() {
+        let vault = temp_vault("list-bad-sort");
+        for sort in [json!("newest"), json!("Modified"), json!(3)] {
+            assert_eq!(
+                list_as(
+                    &vault,
+                    json!({ "sort": sort }),
+                    &RunGrant::unrestricted("a")
+                ),
+                Err("sort must be modified, created, title or path".to_string()),
+                "{sort}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_folder_climbing_out_is_refused() {
+        let vault = temp_vault("list-climb");
+        for folder in [
+            json!("../outside"),
+            json!("records/../.."),
+            json!("a/.."),
+            json!(7),
+        ] {
+            assert_eq!(
+                list_as(
+                    &vault,
+                    json!({ "folder": folder }),
+                    &RunGrant::unrestricted("a")
+                ),
+                Err("folder must be a folder inside the vault, such as records/risks".to_string()),
+                "{folder}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn the_limit_is_capped_at_200_and_said() {
+        let vault = temp_vault("list-limit");
+        note_at(&vault, "n/a.md", "Note", "Alpha", "2026-10-01T00:00:00Z");
+        let text = list_all(&vault, json!({ "limit": 201 }));
+        assert!(text.ends_with("\n\nThe limit is at most 200."), "{text}");
+        assert_eq!(
+            list_as(&vault, json!({ "limit": 0 }), &RunGrant::unrestricted("a")),
+            Err("limit counts from 1 (default 50, at most 200)".to_string())
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn list_notes_labels_a_superseded_concept_and_a_template() {
+        let vault = temp_vault("list-labels");
+        replaced_concepts(&vault, "knowledge/risks/new.md");
+        write(
+            &vault,
+            "templates/meeting.md",
+            "---\ntype: Meeting\n---\n\n# Meeting\n",
+        );
+        let text = list_all(&vault, json!({ "sort": "path" }));
+        let line = |path: &str| {
+            text.lines()
+                .find(|l| l.starts_with(&format!("- {path} \u{2014} ")))
+                .unwrap_or_else(|| panic!("{path} in:\n{text}"))
+                .to_string()
+        };
+        assert!(
+            line("knowledge/risks/old.md").contains(
+                "[Risk] · concept, unverified, replaced by knowledge/risks/new.md · modified "
+            ),
+            "{text}"
+        );
+        assert!(
+            line("templates/meeting.md").contains("[Meeting] · template · modified "),
+            "{text}"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn list_notes_counts_unparsed_frontmatter_under_a_type_filter() {
+        let vault = temp_vault("list-unparsed");
+        note_at(&vault, "n/a.md", "Risk", "Alpha", "2026-10-01T00:00:00Z");
+        write(
+            &vault,
+            "n/broken.md",
+            "---\ntype: [unclosed\n---\n\n# Broken\n",
+        );
+        let text = list_all(&vault, json!({ "type": "Risk" }));
+        assert!(
+            text.ends_with(
+                "\n\n1 note has frontmatter that could not be parsed, so its type is unknown \
+                 and it was not listed."
+            ),
+            "{text}"
+        );
+        // Outside the folder asked for, it is no part of the answer.
+        let elsewhere = list_all(&vault, json!({ "type": "Risk", "folder": "m" }));
+        assert_eq!(elsewhere, "No notes of type Risk in m/.");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn list_notes_is_served_read_only() {
+        let catalog = tool_catalog(true);
+        let at = |name: &str| {
+            catalog
+                .iter()
+                .position(|tool| tool["name"] == name)
+                .unwrap_or_else(|| panic!("{name} is served"))
+        };
+        assert_eq!(at("list_notes"), at("search_notes") + 1);
+        let row = &catalog[at("list_notes")];
+        assert_eq!(row["annotations"]["title"], "List notes");
+        assert_eq!(row["annotations"]["readOnlyHint"], true);
+        assert_eq!(row["annotations"]["destructiveHint"], false);
+        assert_eq!(row["annotations"]["idempotentHint"], true);
+        assert_eq!(row["inputSchema"]["required"], json!([]));
+        assert!(
+            row["_meta"]["anthropic/alwaysLoad"].is_null(),
+            "loaded by name (Q8)"
+        );
+        let search = &catalog[at("search_notes")];
+        assert_eq!(
+            search["inputSchema"]["properties"]["in"]["enum"],
+            json!(["name", "content", "all"])
+        );
+    }
+
+    #[test]
+    fn the_listing_description_names_no_other_tool() {
+        let catalog = tool_catalog(true);
+        let description = catalog
+            .iter()
+            .find(|tool| tool["name"] == "list_notes")
+            .expect("list_notes is served")["description"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(description.chars().count() <= 2048);
+        for tool in &catalog {
+            let name = tool["name"].as_str().unwrap();
+            if name != "list_notes" {
+                assert!(!description.contains(name), "it names {name}");
+            }
+        }
     }
 
     #[test]
@@ -6000,7 +9238,7 @@ mod tests {
         let text = |value: &Value| value["content"][0]["text"].as_str().unwrap().to_string();
         let own = admit_before_dispatch(vault, grant, "update_frontmatter", &args)
             .map_err(|refused| text(&refused))?;
-        tool_update_frontmatter_in(vault, &args, Some(&grant.run_id), own.as_ref())
+        tool_update_frontmatter_in(vault, &args, booked(grant), own.as_ref())
             .map(|value| text(&value))
     }
 
@@ -6039,6 +9277,111 @@ mod tests {
         }
         assert_eq!(after.relationships, before.relationships);
         assert_eq!(body_of(&vault, SCOUT_PATH), body, "the body bytes stay");
+        // Every other byte stays: the indented `scope:` list a reserialized
+        // block would flatten is still indented.
+        assert_eq!(
+            std::fs::read_to_string(vault.join(SCOUT_PATH)).unwrap(),
+            SCOUT_RECORD.replace(
+                "recent: old notes\n",
+                "recent: |-\n  R-1 is slipping.\n  No owner on the deploy risk yet.\n"
+            )
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    /// A record the way a person writes one: comments, quoting the canonical
+    /// form drops, an indented list, and block-scalar notes mid-block.
+    const HAND_WRITTEN_SCOUT: &str = "---\n# Release scout: the person owns this record.\n\
+         type: Agent\nslug: release-scout\nschedule: \"0 9 * * 1\"   # Mondays\nscope:\n  - \
+         records/risks\nrecent: |\n  old notes\n    indented old line\n\n  more old notes\n\n\
+         # What it prefers.\npreferences: 'be terse'\n---\n\n# Release scout\n\nWatch.\n";
+
+    #[test]
+    fn a_notes_write_keeps_every_byte_outside_its_notes() {
+        let vault = memory_vault("mcp-notes-bytes");
+        crate::vault::testutil::write(&vault, SCOUT_PATH, HAND_WRITTEN_SCOUT);
+        let grant = run_of(&vault, "process:release-scout", Some(&["records/risks"]));
+        let read = || std::fs::read_to_string(vault.join(SCOUT_PATH)).unwrap();
+        let old_entry = "recent: |\n  old notes\n    indented old line\n\n  more old notes\n";
+
+        assert!(patch_as(
+            &vault,
+            &grant,
+            SCOUT_PATH,
+            json!({ "recent": "R-1 slips." })
+        )
+        .is_ok());
+        assert_eq!(
+            read(),
+            HAND_WRITTEN_SCOUT.replace(old_entry, "recent: R-1 slips.\n"),
+            "comments, quoting, indentation and blank lines stay"
+        );
+
+        // Null removes the entry and nothing else.
+        assert!(patch_as(&vault, &grant, SCOUT_PATH, json!({ "recent": null })).is_ok());
+        let cleared = HAND_WRITTEN_SCOUT.replace(old_entry, "");
+        assert_eq!(read(), cleared);
+        assert!(patch_as(&vault, &grant, SCOUT_PATH, json!({ "recent": null })).is_ok());
+        assert_eq!(read(), cleared, "clearing absent notes changes nothing");
+
+        // Notes on a record without them go at the end of the block.
+        assert!(patch_as(&vault, &grant, SCOUT_PATH, json!({ "recent": "a\nb" })).is_ok());
+        assert_eq!(
+            read(),
+            cleared.replace(
+                "preferences: 'be terse'\n---",
+                "preferences: 'be terse'\nrecent: |-\n  a\n  b\n---"
+            )
+        );
+        assert_eq!(
+            scanned(&vault, SCOUT_PATH).properties["recent"],
+            json!("a\nb")
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn the_demo_scout_gets_its_notes_back_byte_for_byte() {
+        // demo-vault's release-scout is the record the finding named: an
+        // indented `scope:` list, no `recent` yet. Writing notes and clearing
+        // them again leaves the file as it shipped.
+        let demo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../demo-vault");
+        let shipped = std::fs::read_to_string(demo.join(SCOUT_PATH)).unwrap();
+        assert!(shipped.contains("scope:\n  - records/risks\n"));
+        let vault = memory_vault("mcp-notes-demo");
+        crate::vault::testutil::write(&vault, SCOUT_PATH, &shipped);
+        let grant = run_of(&vault, "process:release-scout", Some(&["records/risks"]));
+        let read = || std::fs::read_to_string(vault.join(SCOUT_PATH)).unwrap();
+
+        assert!(patch_as(&vault, &grant, SCOUT_PATH, json!({ "recent": "R-1." })).is_ok());
+        assert_eq!(
+            read(),
+            shipped.replacen(
+                "records/risks\n---\n",
+                "records/risks\nrecent: R-1.\n---\n",
+                1
+            )
+        );
+        assert!(patch_as(&vault, &grant, SCOUT_PATH, json!({ "recent": null })).is_ok());
+        assert_eq!(read(), shipped);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_crlf_record_keeps_its_line_endings() {
+        let vault = memory_vault("mcp-notes-crlf");
+        let crlf = SCOUT_RECORD.replace('\n', "\r\n");
+        crate::vault::testutil::write(&vault, SCOUT_PATH, &crlf);
+        let grant = run_of(&vault, "process:release-scout", Some(&["records/risks"]));
+        assert!(patch_as(&vault, &grant, SCOUT_PATH, json!({ "recent": "a\nb" })).is_ok());
+        assert_eq!(
+            std::fs::read_to_string(vault.join(SCOUT_PATH)).unwrap(),
+            crlf.replace("recent: old notes\r\n", "recent: |-\r\n  a\r\n  b\r\n")
+        );
+        assert_eq!(
+            scanned(&vault, SCOUT_PATH).properties["recent"],
+            json!("a\nb")
+        );
         let _ = std::fs::remove_dir_all(&vault);
     }
 
@@ -6259,6 +9602,973 @@ mod tests {
         let _ = std::fs::remove_dir_all(&vault);
     }
 
+    // --- Ask-first page writes (M57.4) ----------------------------------
+
+    use crate::agent::interaction::{
+        GateAnswer, GateCall, Interactions, PersonAnswer, Seat, WireAnswer,
+    };
+    use crate::policy::tool_approval::RunKind;
+
+    const SCOUT_ACTOR: &str = "process:release-scout";
+
+    fn create_args() -> Map<String, Value> {
+        args_of(json!({
+            "folder": "records/risks", "slug": "vendor-delay", "body": "# Vendor delay\n"
+        }))
+    }
+
+    /// A run of release-scout in `vault` that answers to `kind`, asking
+    /// first or not.
+    fn scout_run(vault: &Path, kind: RunKind, ask_first: bool) -> RunGrant {
+        RunGrant {
+            asks: WriteAsks { kind, ask_first },
+            ..run_of(vault, SCOUT_ACTOR, Some(&["records/risks"]))
+        }
+    }
+
+    /// Seat `grant`'s run in Claude Code session `session`, planned from a
+    /// panel request of release-scout's that asks first or not.
+    fn seat_for(book: &Interactions, vault: &Path, grant: &RunGrant, session: &str) {
+        let req: crate::agent::AgentRequest = serde_json::from_value(json!({
+            "message": "", "attended": true, "actor": SCOUT_ACTOR,
+            "ask_first": grant.asks.ask_first, "scope": ["records/risks"]
+        }))
+        .unwrap();
+        book.open_seat(
+            Seat::new(
+                &grant.run_id,
+                session,
+                &crate::agent::vault_key(vault),
+                &req,
+            ),
+            None,
+        );
+    }
+
+    /// One create_note call the way call_tool makes it, short of the app:
+    /// the admission with the book, then the handler.
+    fn create_as(
+        vault: &Path,
+        grant: &RunGrant,
+        book: Option<&Interactions>,
+    ) -> Result<String, String> {
+        create_with(vault, grant, book, &create_args())
+    }
+
+    /// `create_as` with the input the CLI sends, and the approved input
+    /// substituted and the edit named as call_tool does (M57.4b): every
+    /// text block, joined.
+    fn create_with(
+        vault: &Path,
+        grant: &RunGrant,
+        book: Option<&Interactions>,
+        sent: &Map<String, Value>,
+    ) -> Result<String, String> {
+        let text = |value: &Value| {
+            value["content"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|block| block["text"].as_str().unwrap())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let admitted = admit_call(vault, grant, "create_note", sent, book)
+            .map_err(|refused| text(&refused))?;
+        let (args, edited) = match &admitted.approved {
+            Some((input, edited)) => (input, edited.as_slice()),
+            None => (sent, &[][..]),
+        };
+        let writer = RunWriter {
+            grant,
+            approval: admitted.approval,
+            books: true,
+        };
+        let value = tool_create_note_in(vault, args, writer)?;
+        Ok(text(&if edited.is_empty() {
+            value
+        } else {
+            with_edit_sentence(value, edited)
+        }))
+    }
+
+    /// release-scout asks to create the note in session `s-1`, its stream
+    /// confirms the card, the person answers, and a run resumes it: the
+    /// resumed run's grant. The answer command's own steps, minus the spawn.
+    fn answered(book: &Interactions, vault: &Path, answer: WireAnswer) -> RunGrant {
+        let asking = scout_run(vault, RunKind::Attended, true);
+        seat_for(book, vault, &asking, "s-1");
+        let call = GateCall {
+            session_id: "s-1".into(),
+            tool_use_id: "toolu_1".into(),
+            tool_name: "mcp__cerebro__create_note".into(),
+            tool_input: Value::Object(create_args()),
+            agent_id: String::new(),
+        };
+        assert_eq!(book.gate(&asking.run_id, &call), GateAnswer::Defer);
+        let card = book.confirm("s-1", "toolu_1").expect("a write card");
+        book.close_seat(&asking.run_id);
+        let resume = book
+            .begin_answer(
+                &crate::agent::vault_key(vault),
+                &card.id,
+                PersonAnswer::from_ipc(answer),
+            )
+            .unwrap();
+        if let Some(approval) = resume.approval.clone() {
+            book.record_write_approval(approval);
+        }
+        let resumed = scout_run(vault, RunKind::Attended, true);
+        seat_for(book, vault, &resumed, "s-1");
+        book.finish_answer(&card.id, &resumed.run_id);
+        resumed
+    }
+
+    fn allow_once() -> WireAnswer {
+        serde_json::from_value(json!({ "kind": "allow", "remember": "once" })).unwrap()
+    }
+
+    const PLANNED: &str = "records/risks/vendor-delay.md";
+
+    #[test]
+    fn an_ask_first_write_never_lands_without_a_persons_allow() {
+        // A user allow rule, or a hook that never ran, lets the CLI make the
+        // call with no card ever shown: dispatch still refuses it.
+        let _sink = ArmedSink::new("mcp-ask-first-sink");
+        let vault = memory_vault("mcp-ask-first-unapproved");
+        let book = Interactions::with_asks(Vec::new());
+        let grant = scout_run(&vault, RunKind::Attended, true);
+        seat_for(&book, &vault, &grant, "s-1");
+        let before = vault_bytes(&vault);
+        let unapproved = "This write needs the person's Allow first, and Cerebro has none for \
+                          it, so nothing was written. Call the tool again to ask them.";
+        for _ in 0..2 {
+            assert_eq!(
+                create_as(&vault, &grant, Some(&book)),
+                Err(unapproved.into())
+            );
+        }
+        assert_eq!(vault_bytes(&vault), before, "bytes unchanged");
+        assert_eq!(
+            rows_for_run(&grant.run_id),
+            vec![(
+                "capability_unavailable".to_string(),
+                ASK_FIRST_SURFACE.to_string(),
+                "create_note: no recorded approval".to_string(),
+            )],
+            "recorded once, against the run"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_allow_lets_that_write_through_once() {
+        let vault = memory_vault("mcp-ask-first-allowed");
+        let book = Interactions::with_asks(Vec::new());
+        let resumed = answered(&book, &vault, allow_once());
+        assert!(create_as(&vault, &resumed, Some(&book)).is_ok());
+        assert!(vault.join(PLANNED).exists());
+        // The same write again needs another Allow.
+        let again = create_as(&vault, &resumed, Some(&book)).unwrap_err();
+        assert!(again.contains("needs the person's Allow"), "{again}");
+        assert!(!vault.join("records/risks/vendor-delay-2.md").exists());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_deny_mints_no_approval() {
+        let vault = memory_vault("mcp-ask-first-denied");
+        let book = Interactions::with_asks(Vec::new());
+        let deny = serde_json::from_value(json!({ "kind": "deny", "message": "not yet" })).unwrap();
+        let resumed = answered(&book, &vault, deny);
+        assert!(create_as(&vault, &resumed, Some(&book)).is_err());
+        assert!(!vault.join(PLANNED).exists());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_approval_is_bound_to_its_vault_session_and_actor() {
+        let vault = memory_vault("mcp-ask-first-bound");
+        let book = Interactions::with_asks(Vec::new());
+        answered(&book, &vault, allow_once());
+        // Another session of the same agent in the same vault.
+        let other_session = scout_run(&vault, RunKind::Attended, true);
+        seat_for(&book, &vault, &other_session, "s-2");
+        assert!(create_as(&vault, &other_session, Some(&book)).is_err());
+        // Another actor seated on the same session.
+        let other_actor = RunGrant {
+            actor: "process:librarian".into(),
+            ..scout_run(&vault, RunKind::Attended, true)
+        };
+        seat_for(&book, &vault, &other_actor, "s-1");
+        assert!(create_as(&vault, &other_actor, Some(&book)).is_err());
+        // Another vault, same session and actor.
+        let elsewhere = memory_vault("mcp-ask-first-bound-elsewhere");
+        let moved = scout_run(&elsewhere, RunKind::Attended, true);
+        seat_for(&book, &elsewhere, &moved, "s-1");
+        assert!(create_as(&elsewhere, &moved, Some(&book)).is_err());
+        assert!(!vault.join(PLANNED).exists() && !elsewhere.join(PLANNED).exists());
+        let _ = std::fs::remove_dir_all(&vault);
+        let _ = std::fs::remove_dir_all(&elsewhere);
+    }
+
+    // --- Unattended ask-first writes wait in Review (M57.4c) ---------------
+
+    /// One call of an unattended ask-first run the way call_tool admits it:
+    /// the value the model reads, which the admission answers instead of
+    /// running the tool.
+    fn queued_call(vault: &Path, grant: &RunGrant, name: &str, args: Value) -> Value {
+        match admit_call(vault, grant, name, &args_of(args), None) {
+            Err(answer) => answer,
+            Ok(_) => panic!("an unattended ask-first write never reaches its tool"),
+        }
+    }
+
+    /// The writes waiting in `vault`, oldest first.
+    fn waiting_in(vault: &Path) -> Vec<crate::runtime::pending_writes::PendingRow> {
+        let vault_id = crate::runtime::scope::derive_vault_id(vault);
+        crate::runtime::sink::with_sink(|conn| {
+            crate::runtime::pending_writes::list_open(conn, &vault_id, "1970-01-01T00:00:00.000Z")
+        })
+        .expect("the sink is armed")
+        .unwrap()
+    }
+
+    fn is_error(value: &Value) -> bool {
+        value["isError"] == json!(true)
+    }
+
+    fn queued_id(value: &Value) -> String {
+        let text = result_text(value);
+        let id = text
+            .strip_prefix("Queued for the person's review as ")
+            .and_then(|rest| rest.split(';').next())
+            .unwrap_or_else(|| panic!("not queued: {text}"));
+        id.to_string()
+    }
+
+    #[test]
+    fn an_unattended_ask_first_write_waits_in_review_and_nowhere_on_disk() {
+        let _sink = ArmedSink::new("mcp-queue-sink");
+        let vault = memory_vault("mcp-queue");
+        let grant = scout_run(&vault, RunKind::Unattended, true);
+        let before = vault_bytes(&vault);
+        let answer = queued_call(&vault, &grant, "create_note", Value::Object(create_args()));
+        assert!(!is_error(&answer), "a queued write is no error");
+        let id = queued_id(&answer);
+        assert_eq!(
+            result_text(&answer),
+            format!(
+                "Queued for the person's review as {id}; nothing is written until they allow \
+                 it. Your next run will be told whether it was applied or rejected, so do not \
+                 queue it again."
+            )
+        );
+        assert_eq!(vault_bytes(&vault), before, "nothing on disk");
+        let rows = waiting_in(&vault);
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert_eq!(
+            (
+                row.pending_id.as_str(),
+                row.tool.as_str(),
+                row.actor.as_str()
+            ),
+            (id.as_str(), "create_note", SCOUT_ACTOR)
+        );
+        assert_eq!(
+            (row.target.as_str(), row.target_hash.as_deref()),
+            (PLANNED, None)
+        );
+        assert_eq!(row.input, Value::Object(create_args()));
+        assert_eq!(row.run_id, grant.run_id);
+        assert_eq!(row.grant["scope"], json!(["records/risks"]));
+        assert!(
+            rows_for_run(&grant.run_id).is_empty(),
+            "nothing was refused"
+        );
+        // An attended run with no seat has no gate: nobody can answer it, so
+        // its write waits in Review too.
+        let unseated = scout_run(&vault, RunKind::Attended, true);
+        let other = args_of(json!({
+            "folder": "records/risks", "slug": "supplier", "body": "# Supplier\n"
+        }));
+        let answer = queued_call(&vault, &unseated, "create_note", Value::Object(other));
+        assert!(!is_error(&answer));
+        assert_eq!(waiting_in(&vault).len(), 2);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M70.4: a thread turn is a run nobody can answer a card in, so its
+    // ask-first agent's page write waits in Review, as an unattended run's
+    // does, and lands nowhere on disk.
+    #[test]
+    fn a_thread_turns_ask_first_write_waits_in_review() {
+        let _sink = ArmedSink::new("mcp-thread-turn-queue-sink");
+        let vault = memory_vault("mcp-thread-turn-queue");
+        let asks = SCOUT_RECORD.replace("tools: safe\n", "tools: safe\nask-first: true\n");
+        crate::vault::testutil::write(&vault, SCOUT_PATH, &asks);
+        let sidecar = json!({ "format": 1, "threads": [{ "comments": [{
+            "id": "0000000000000001", "author": "human:owner",
+            "created": "2026-10-14T09:00:00Z", "body": "@release-scout file a risk"
+        }] }] });
+        crate::vault::testutil::write(
+            &vault,
+            &crate::vault::comments::sidecar_rel("notes/n.md"),
+            &crate::vault::comments::serialize_comments(
+                &crate::vault::comments::file_from_value(&sidecar).unwrap(),
+            ),
+        );
+        let entries = vault::scan::scan_vault(&vault).unwrap();
+        let plan = crate::agent::thread_turn::plan(
+            &vault,
+            &entries,
+            &crate::agent::thread_turn::ThreadTurnRequest {
+                page: "notes/n.md".into(),
+                thread: "0000000000000001".into(),
+                message: "0000000000000001".into(),
+                handle: "release-scout".into(),
+            },
+        )
+        .unwrap();
+        let asks = WriteAsks::of(&plan.request);
+        assert_eq!(
+            asks,
+            WriteAsks {
+                kind: RunKind::Unattended,
+                ask_first: true
+            }
+        );
+        let grant = RunGrant {
+            asks,
+            ..run_of(&vault, SCOUT_ACTOR, Some(&["records/risks"]))
+        };
+        let before = vault_bytes(&vault);
+        let answer = queued_call(&vault, &grant, "create_note", Value::Object(create_args()));
+        assert!(!is_error(&answer), "{}", result_text(&answer));
+        queued_id(&answer);
+        assert_eq!(vault_bytes(&vault), before, "nothing on disk");
+        assert_eq!(waiting_in(&vault).len(), 1);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn the_same_write_queued_twice_waits_once() {
+        let _sink = ArmedSink::new("mcp-queue-twice-sink");
+        let vault = memory_vault("mcp-queue-twice");
+        let first = scout_run(&vault, RunKind::Unattended, true);
+        let id = queued_id(&queued_call(
+            &vault,
+            &first,
+            "create_note",
+            Value::Object(create_args()),
+        ));
+        // Another run of the same agent, the same draft.
+        let second = scout_run(&vault, RunKind::Unattended, true);
+        let again = queued_call(&vault, &second, "create_note", Value::Object(create_args()));
+        assert!(!is_error(&again));
+        assert_eq!(
+            result_text(&again),
+            format!("This exact write already waits for review as {id}; nothing new was queued.")
+        );
+        assert_eq!(waiting_in(&vault).len(), 1);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_write_that_would_be_refused_is_refused_not_queued() {
+        let _sink = ArmedSink::new("mcp-queue-doomed-sink");
+        let vault = memory_vault("mcp-queue-doomed");
+        crate::vault::testutil::write(
+            &vault,
+            "records/risks/twice.md",
+            "---\ntype: Risk\n---\n\nsame\n\nsame\n",
+        );
+        let grant = scout_run(&vault, RunKind::Unattended, true);
+        for (name, args, says) in [
+            (
+                "create_note",
+                json!({ "folder": "notes", "slug": "x", "body": "# X\n" }),
+                "cannot write to notes",
+            ),
+            (
+                "append_to_note",
+                json!({
+                    "path": "records/risks/r-1.md", "content": "More.",
+                    "expect_hash": "0".repeat(64)
+                }),
+                "stale_content",
+            ),
+            (
+                "edit_note",
+                json!({ "path": "records/risks/twice.md", "edits": [{ "old": "same", "new": "x" }] }),
+                "same",
+            ),
+        ] {
+            let answer = queued_call(&vault, &grant, name, args);
+            assert!(is_error(&answer), "{name}: {}", result_text(&answer));
+            assert!(
+                result_text(&answer).contains(says),
+                "{name}: {}",
+                result_text(&answer)
+            );
+        }
+        // The bundle, for a run whose scope would let it reach there.
+        let unscoped = RunGrant {
+            asks: WriteAsks {
+                kind: RunKind::Unattended,
+                ask_first: true,
+            },
+            ..run_of(&vault, SCOUT_ACTOR, None)
+        };
+        let bundle = json!({ "folder": "knowledge/risks", "slug": "x", "body": "# X\n" });
+        let answer = queued_call(&vault, &unscoped, "create_note", bundle);
+        assert!(is_error(&answer), "{}", result_text(&answer));
+        assert!(waiting_in(&vault).is_empty(), "nothing doomed was queued");
+        // Refused and recorded as the write would be: the scope, and the stale hash.
+        let codes: Vec<String> = rows_for_run(&grant.run_id)
+            .into_iter()
+            .map(|(code, _, _)| code)
+            .collect();
+        assert!(
+            codes.contains(&WRITE_OUTSIDE_SCOPE.to_string()),
+            "{codes:?}"
+        );
+        assert!(codes.contains(&STALE_CONTENT.to_string()), "{codes:?}");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn queueing_without_a_runtime_db_writes_nothing_and_says_so() {
+        let _lock = crate::runtime::sink::test_lock();
+        crate::runtime::sink::disarm();
+        let vault = memory_vault("mcp-queue-no-db");
+        let grant = scout_run(&vault, RunKind::Unattended, true);
+        let before = vault_bytes(&vault);
+        let answer = queued_call(&vault, &grant, "create_note", Value::Object(create_args()));
+        assert!(is_error(&answer));
+        assert_eq!(
+            result_text(&answer),
+            "Cerebro could not queue this write for review (its runtime database is \
+             unavailable), so nothing was written."
+        );
+        assert_eq!(vault_bytes(&vault), before);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn applying_runs_every_guard_under_the_queued_grant() {
+        let _sink = ArmedSink::new("mcp-apply-guards-sink");
+        let vault = memory_vault("mcp-apply-guards");
+        let grant = scout_run(&vault, RunKind::Unattended, true);
+        let id = queued_id(&queued_call(
+            &vault,
+            &grant,
+            "create_note",
+            Value::Object(create_args()),
+        ));
+        // An edit that moves the write out of the queuing run's scope.
+        let outside = json!({ "folder": "notes", "slug": "vendor-delay", "body": "# V\n" });
+        let decided = decide_pending(&vault, &id, true, Some(outside), None, |_| {}).unwrap();
+        assert!(
+            matches!(&decided, PendingDecision::EditRefused { reason } if reason.contains("cannot write to notes")),
+            "{decided:?}"
+        );
+        assert_eq!(
+            waiting_in(&vault).len(),
+            1,
+            "a refused edit keeps the write waiting"
+        );
+        // An edit the bytes would refuse is refused too: a stale hash.
+        let patch = queued_id(&queued_call(
+            &vault,
+            &grant,
+            "update_frontmatter",
+            json!({ "path": "records/risks/r-1.md", "patch": { "status": "open" } }),
+        ));
+        let stale = json!({
+            "path": "records/risks/r-1.md", "patch": { "status": "open" },
+            "expect_hash": "0".repeat(64)
+        });
+        let decided = decide_pending(&vault, &patch, true, Some(stale), None, |_| {}).unwrap();
+        assert!(
+            matches!(&decided, PendingDecision::EditRefused { reason } if reason.starts_with("stale_content")),
+            "{decided:?}"
+        );
+        // The page is retyped to an Agent record since: the unedited write is
+        // refused when applied, and settled so the agent hears it.
+        crate::vault::testutil::write(&vault, "records/risks/r-1.md", "---\ntype: Agent\n---\n");
+        let before = vault_bytes(&vault);
+        let decided = decide_pending(&vault, &patch, true, None, None, |_| {}).unwrap();
+        assert_eq!(
+            decided,
+            PendingDecision::Refused {
+                reason: AGENT_DOC_REFUSAL.to_string()
+            }
+        );
+        assert_eq!(vault_bytes(&vault), before, "nothing was written");
+        let vault_id = crate::runtime::scope::derive_vault_id(&vault);
+        let told = crate::runtime::sink::with_sink(|conn| {
+            crate::runtime::pending_writes::take_outcomes(
+                conn,
+                &vault_id,
+                SCOUT_ACTOR,
+                "1970-01-01T00:00:00.000Z",
+            )
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(told.rows.len(), 1);
+        assert_eq!(told.rows[0].state, "refused");
+        assert_eq!(told.still_pending, 1);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_applied_write_lands_once() {
+        let _sink = ArmedSink::new("mcp-apply-once-sink");
+        let vault = memory_vault("mcp-apply-once");
+        let grant = scout_run(&vault, RunKind::Unattended, true);
+        let id = queued_id(&queued_call(
+            &vault,
+            &grant,
+            "create_note",
+            Value::Object(create_args()),
+        ));
+        assert_eq!(
+            decide_pending(&vault, &id, false, None, Some("  "), |_| {}),
+            Err(REJECTION_NEEDS_A_REASON.to_string()),
+            "a rejection needs a reason"
+        );
+        let mut announced = Vec::new();
+        let decided = decide_pending(&vault, &id, true, None, None, |change| {
+            announced.push(change)
+        });
+        assert_eq!(
+            decided,
+            Ok(PendingDecision::Applied {
+                path: PLANNED.to_string()
+            })
+        );
+        assert_eq!(
+            std::fs::read_to_string(vault.join(PLANNED)).unwrap(),
+            "# Vendor delay\n"
+        );
+        assert_eq!(announced, vec![json!({ "action": "vault_changed" })]);
+        assert_eq!(
+            decide_pending(&vault, &id, true, None, None, |_| {}),
+            Ok(PendingDecision::NoLongerWaiting {
+                state: "applied".into()
+            })
+        );
+        assert_eq!(
+            decide_pending(&vault, &id, false, None, Some("too late"), |_| {}),
+            Ok(PendingDecision::NoLongerWaiting {
+                state: "applied".into()
+            })
+        );
+        assert!(
+            !vault.join("records/risks/vendor-delay-2.md").exists(),
+            "once"
+        );
+        // A write of another vault is no write of this one.
+        let elsewhere = memory_vault("mcp-apply-once-elsewhere");
+        assert!(decide_pending(&elsewhere, &id, true, None, None, |_| {}).is_err());
+        let _ = std::fs::remove_dir_all(&vault);
+        let _ = std::fs::remove_dir_all(&elsewhere);
+    }
+
+    #[test]
+    fn apply_never_requeues() {
+        let _sink = ArmedSink::new("mcp-apply-requeue-sink");
+        let vault = memory_vault("mcp-apply-requeue");
+        let grant = scout_run(&vault, RunKind::Unattended, true);
+        let edited = args_of(json!({
+            "folder": "records/risks", "slug": "vendor-delay", "body": "# Vendor delay risk\n"
+        }));
+        let id = queued_id(&queued_call(
+            &vault,
+            &grant,
+            "create_note",
+            Value::Object(create_args()),
+        ));
+        let decided =
+            decide_pending(&vault, &id, true, Some(Value::Object(edited)), None, |_| {}).unwrap();
+        assert_eq!(
+            decided,
+            PendingDecision::Applied {
+                path: PLANNED.to_string()
+            }
+        );
+        assert_eq!(
+            std::fs::read_to_string(vault.join(PLANNED)).unwrap(),
+            "# Vendor delay risk\n",
+            "the person's edit landed"
+        );
+        assert!(
+            waiting_in(&vault).is_empty(),
+            "the Allow queued nothing again"
+        );
+        // The apply door calls the handler directly, never the dispatch that
+        // queues.
+        let source = include_str!("mcp.rs");
+        let body = &source[source.find("pub fn decide_pending(").unwrap()..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        for door in [
+            "call_tool(",
+            "ask_first_step(",
+            "queue_step(",
+            "admit_call(",
+        ] {
+            assert!(!body.contains(door), "decide_pending reaches {door}");
+        }
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_ask_first_agent_keeps_its_recent_notes_without_asking() {
+        // D7: its own `recent` never asks, at the gate or at dispatch.
+        let vault = memory_vault("mcp-ask-first-recent");
+        let book = Interactions::with_asks(Vec::new());
+        let grant = scout_run(&vault, RunKind::Attended, true);
+        seat_for(&book, &vault, &grant, "s-1");
+        let args = args_of(json!({ "path": SCOUT_PATH, "patch": { "recent": "n" } }));
+        let admitted = admit_call(&vault, &grant, "update_frontmatter", &args, Some(&book))
+            .expect("admitted without an approval");
+        assert!(admitted.own.is_some(), "through M56.10's lane");
+        let call = GateCall {
+            session_id: "s-1".into(),
+            tool_use_id: "toolu_9".into(),
+            tool_name: "mcp__cerebro__update_frontmatter".into(),
+            tool_input: Value::Object(args.clone()),
+            agent_id: String::new(),
+        };
+        assert!(keeps_its_own_notes(&grant, &call, Some(&book)));
+        // Any other page write by the same run still asks.
+        let other = GateCall {
+            tool_input: json!({ "path": "records/risks/r-1.md", "patch": { "recent": "n" } }),
+            ..call.clone()
+        };
+        assert!(!keeps_its_own_notes(&grant, &other, Some(&book)));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn writes_without_ask_first_are_unchanged() {
+        let _sink = ArmedSink::new("mcp-ask-first-off-sink");
+        let vault = memory_vault("mcp-ask-first-off");
+        let book = Interactions::with_asks(Vec::new());
+        let attended = scout_run(&vault, RunKind::Attended, false);
+        seat_for(&book, &vault, &attended, "s-1");
+        assert!(create_as(&vault, &attended, Some(&book)).is_ok());
+        let unattended = scout_run(&vault, RunKind::Unattended, false);
+        assert!(create_as(&vault, &unattended, None).is_ok());
+        assert!(vault.join("records/risks/vendor-delay-2.md").exists());
+        assert!(rows_for_run(&attended.run_id).is_empty());
+        assert!(rows_for_run(&unattended.run_id).is_empty());
+        // And a tool that is no page writer never meets the step.
+        let asking = scout_run(&vault, RunKind::Unattended, true);
+        assert!(matches!(
+            ask_first_step(&vault, &asking, "get_note", &Map::new(), None),
+            Ok(None)
+        ));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn hand_to_carries_the_callees_ask_first() {
+        let request = |extra: &str| {
+            handoff_request(&agent_record(extra), "", "process:helper", "go".into())
+                .unwrap()
+                .ask_first
+        };
+        assert_eq!(request("ask-first: true\n"), Some(true));
+        assert_eq!(request("ask-first: false\n"), Some(false));
+        assert_eq!(request(""), Some(false));
+        assert_eq!(
+            request("ask-first: maybe\n"),
+            Some(true),
+            "an odd value fails closed"
+        );
+        // Two records answering to one handle: either asking reads on.
+        let quiet = agent_record("slug: helper\n");
+        let asking = vault::entry::build_entry(
+            "records/agents/helper-2.md",
+            "---\ntype: Agent\ntitle: Helper\nslug: helper\nask-first: true\n---\n",
+            String::new(),
+            String::new(),
+        );
+        assert!(!records_ask_first(std::slice::from_ref(&quiet), "helper"));
+        assert!(records_ask_first(&[quiet, asking], "helper"));
+    }
+
+    #[test]
+    fn a_renderer_cannot_drop_ask_first() {
+        let vault = memory_vault("mcp-ask-first-record");
+        let asks = SCOUT_RECORD.replace("tools: safe\n", "tools: safe\nask-first: true\n");
+        crate::vault::testutil::write(&vault, SCOUT_PATH, &asks);
+        for sent in [None, Some(false), Some(true)] {
+            assert!(
+                effective_ask_first(&vault, Some(SCOUT_ACTOR), sent),
+                "{sent:?}"
+            );
+        }
+        // A record that does not ask leaves it to the request, which only
+        // tightens.
+        assert!(!effective_ask_first(
+            &vault,
+            Some("process:librarian"),
+            None
+        ));
+        assert!(effective_ask_first(
+            &vault,
+            Some("process:librarian"),
+            Some(true)
+        ));
+        // The plain panel, and a handle no record answers to.
+        assert!(!effective_ask_first(&vault, None, None));
+        assert!(!effective_ask_first(
+            &vault,
+            Some("process:nobody"),
+            Some(false)
+        ));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // --- The person edits the draft (M57.4b) --------------------------------
+
+    fn edited_create() -> Map<String, Value> {
+        args_of(json!({
+            "folder": "records/risks", "slug": "vendor-delay", "body": "# Vendor delay risk\n"
+        }))
+    }
+
+    /// release-scout asks to create the note in session `s-1`, and the
+    /// person allows it with `edit`, judged as the answer command judges it
+    /// (`edit_refusal`, under the grant the resume runs with) unless
+    /// `unchecked`: the resumed run's grant, or the answer's refusal.
+    fn answered_with(
+        book: &Interactions,
+        vault: &Path,
+        edit: Value,
+        unchecked: bool,
+    ) -> Result<RunGrant, crate::agent::interaction::Refusal> {
+        let asking = scout_run(vault, RunKind::Attended, true);
+        seat_for(book, vault, &asking, "s-1");
+        let call = GateCall {
+            session_id: "s-1".into(),
+            tool_use_id: "toolu_1".into(),
+            tool_name: "mcp__cerebro__create_note".into(),
+            tool_input: Value::Object(create_args()),
+            agent_id: String::new(),
+        };
+        assert_eq!(book.gate(&asking.run_id, &call), GateAnswer::Defer);
+        let card = book.confirm("s-1", "toolu_1").expect("a write card");
+        book.close_seat(&asking.run_id);
+        let resume = book.begin_answer_edited(
+            &crate::agent::vault_key(vault),
+            &card.id,
+            PersonAnswer::from_ipc(allow_once()),
+            Some(edit),
+            |_, tool, input| {
+                if unchecked {
+                    return Ok(());
+                }
+                edit_refusal(vault, &asking, tool, input)
+            },
+        )?;
+        book.record_write_approval(resume.approval.clone().expect("an approval"));
+        let resumed = scout_run(vault, RunKind::Attended, true);
+        seat_for(book, vault, &resumed, "s-1");
+        book.finish_answer(&card.id, &resumed.run_id);
+        // The resumed call's gate hands Claude Code the person's version.
+        assert!(matches!(
+            book.gate(&resumed.run_id, &call),
+            GateAnswer::Allow {
+                updated_input: Some(_)
+            }
+        ));
+        Ok(resumed)
+    }
+
+    const EDITED: &str = "The person changed your draft before allowing it (body); what landed \
+                          is their version.";
+
+    #[test]
+    fn an_edited_draft_lands_as_edited() {
+        // A CLI that applies updatedInput sends the person's version.
+        let vault = memory_vault("mcp-edit-applied");
+        let book = Interactions::with_asks(Vec::new());
+        let resumed = answered_with(&book, &vault, Value::Object(edited_create()), false).unwrap();
+        let said = create_with(&vault, &resumed, Some(&book), &edited_create()).unwrap();
+        assert_eq!(said, format!("Created {PLANNED}\n{EDITED}"));
+        let landed = std::fs::read_to_string(vault.join(PLANNED)).unwrap();
+        assert!(landed.contains("# Vendor delay risk"), "{landed}");
+        // Once: the same call again needs another Allow.
+        assert!(create_with(&vault, &resumed, Some(&book), &edited_create()).is_err());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_cli_that_ignores_updated_input_still_lands_the_edit() {
+        // The resumed call carries the model's own draft: dispatch matches the
+        // asked hash and runs the person's version, and says so.
+        let vault = memory_vault("mcp-edit-ignored");
+        let book = Interactions::with_asks(Vec::new());
+        let resumed = answered_with(&book, &vault, Value::Object(edited_create()), false).unwrap();
+        let said = create_with(&vault, &resumed, Some(&book), &create_args()).unwrap();
+        assert!(said.ends_with(EDITED), "{said}");
+        let landed = std::fs::read_to_string(vault.join(PLANNED)).unwrap();
+        assert!(landed.contains("# Vendor delay risk"), "{landed}");
+        assert!(!landed.contains("# Vendor delay\n"), "{landed}");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_edit_outside_the_write_scope_is_refused_at_answer_and_at_the_write() {
+        let _sink = ArmedSink::new("mcp-edit-scope-sink");
+        let vault = memory_vault("mcp-edit-scope");
+        let book = Interactions::with_asks(Vec::new());
+        let mut moved = edited_create();
+        moved.insert("folder".into(), json!("notes"));
+        // At the answer: refused, the card waits, and nothing is recorded.
+        let refused =
+            answered_with(&book, &vault, Value::Object(moved.clone()), false).unwrap_err();
+        assert_eq!(refused.code, WRITE_OUTSIDE_SCOPE);
+        assert_eq!(
+            refused.message,
+            "This run is scoped to records/risks and cannot write to notes."
+        );
+        assert_eq!(book.pending(&crate::agent::vault_key(&vault)).len(), 1);
+        // At the write: an approval that somehow holds it is judged again on
+        // the input that would run, whichever input the call carries.
+        let book = Interactions::with_asks(Vec::new());
+        let resumed = answered_with(&book, &vault, Value::Object(moved), true).unwrap();
+        let before = vault_bytes(&vault);
+        let at_write = create_with(&vault, &resumed, Some(&book), &create_args()).unwrap_err();
+        assert!(at_write.contains("cannot write to notes"), "{at_write}");
+        assert_eq!(vault_bytes(&vault), before);
+        assert_eq!(
+            rows_for_run(&resumed.run_id)
+                .iter()
+                .map(|(code, _, _)| code.as_str())
+                .collect::<Vec<_>>(),
+            [WRITE_OUTSIDE_SCOPE]
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_edit_into_knowledge_or_a_type_doc_is_refused() {
+        let vault = memory_vault("mcp-edit-governed");
+        let unscoped = |grant: RunGrant| RunGrant {
+            scope: None,
+            ..grant
+        };
+        // knowledge/ at the answer, in the bundle guard's words.
+        let mut bundle = edited_create();
+        bundle.insert("folder".into(), json!("knowledge/metrics"));
+        let grant = unscoped(scout_run(&vault, RunKind::Attended, true));
+        let refused =
+            edit_refusal(&vault, &grant, "create_note", &Value::Object(bundle)).unwrap_err();
+        assert_eq!(refused.code, "capability_unavailable");
+        assert!(
+            refused.message.contains("write_concept"),
+            "{}",
+            refused.message
+        );
+        // A Type doc is refused at the answer now that the answer previews
+        // the write (M57.4c), and again at the write.
+        let mut typed = edited_create();
+        typed.insert("frontmatter".into(), json!({ "type": "Type" }));
+        let typed = Value::Object(typed);
+        assert_eq!(
+            edit_refusal(&vault, &grant, "create_note", &typed),
+            Err(crate::agent::interaction::Refusal {
+                code: "capability_unavailable",
+                message: TYPE_DOC_REFUSAL.to_string(),
+            })
+        );
+        // Past the answer (a card that skipped its check), the write still
+        // refuses it under its lock.
+        let book = Interactions::with_asks(Vec::new());
+        let resumed = answered_with(&book, &vault, typed, true).unwrap();
+        let before = vault_bytes(&vault);
+        assert!(create_with(&vault, &resumed, Some(&book), &create_args()).is_err());
+        assert_eq!(vault_bytes(&vault), before);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_edit_never_widens_the_tool_grant() {
+        let vault = memory_vault("mcp-edit-tools");
+        let narrowed = RunGrant {
+            tools: Some(vec!["get_note".into()]),
+            ..scout_run(&vault, RunKind::Attended, true)
+        };
+        let refused = edit_refusal(
+            &vault,
+            &narrowed,
+            "mcp__cerebro__create_note",
+            &Value::Object(edited_create()),
+        )
+        .unwrap_err();
+        assert_eq!(refused.code, TOOL_OUTSIDE_GRANT);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn only_the_answer_command_mints_an_approval() {
+        fn walk(dir: &Path, out: &mut Vec<(String, String)>) {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    let text = std::fs::read_to_string(&path).unwrap();
+                    let body = text
+                        .split("#[cfg(test)]\nmod tests")
+                        .next()
+                        .unwrap()
+                        .to_string();
+                    let name = path
+                        .strip_prefix(Path::new(env!("CARGO_MANIFEST_DIR")).join("src"))
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\\', "/");
+                    out.push((name, body));
+                }
+            }
+        }
+        let mut sources = Vec::new();
+        walk(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut sources,
+        );
+        assert!(sources.len() > 20);
+        for (name, body) in &sources {
+            let records = body.matches("record_write_approval(").count();
+            match name.as_str() {
+                // Its one call, in the answer command.
+                "lib.rs" => {
+                    assert_eq!(records, 1, "the answer command records it once");
+                    let call = body.find("record_write_approval(").unwrap();
+                    let owner = body[..call].rfind("\nfn ").unwrap();
+                    assert!(body[owner..].starts_with("\nfn answer_interaction("));
+                }
+                // Its definition.
+                "agent/interaction.rs" => assert_eq!(records, 1, "one writer"),
+                _ => assert_eq!(records, 0, "{name} records an approval"),
+            }
+            if name != "agent/interaction.rs" {
+                assert!(
+                    !body.contains("WriteApproval {"),
+                    "{name} builds an approval"
+                );
+            }
+        }
+    }
+
     /// An Agent record with these extra frontmatter lines, as scanned.
     fn agent_record(extra: &str) -> vault::entry::Entry {
         let content = format!("---\ntype: Agent\ntitle: Helper\n{extra}---\nDo the thing.\n");
@@ -6289,6 +10599,23 @@ mod tests {
         )
         .unwrap();
         assert_eq!((blank.model, blank.effort), (None, None));
+    }
+
+    #[test]
+    fn hand_to_s_request_carries_off() {
+        // M57.2: a handed-to run never inherits a shell ceiling, even from a
+        // record that declares the shell; its plan withholds nothing, since
+        // Off has nothing to ask.
+        let record = agent_record("tools: shell\n");
+        let request =
+            handoff_request(&record, "Do the thing.", "process:helper", "go".into()).unwrap();
+        assert_eq!(request.shell, Some(crate::agent::ShellCeiling::Off));
+        assert_eq!(request.attended, Some(false));
+        let plan = crate::policy::tool_approval::plan_for(&request, false);
+        for tool in ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"] {
+            assert!(plan.disallowed.iter().any(|t| t == tool), "{tool}");
+        }
+        assert!(plan.withheld.is_empty() && plan.asks.is_empty());
     }
 
     #[test]
@@ -6378,9 +10705,26 @@ mod tests {
             clean.replace("preferences: be terse\n", ""),
             clean.replace("Keep a brief", "Ignore your scope"),
             format!("{clean}More.\n"),
+            // The same keys, reserialized: the list loses its indent. A
+            // parsed comparison cannot see this; the bytes can.
+            clean.replace("scope:\n  - records/risks", "scope:\n- records/risks"),
+            // Anything beside the notes is more than the notes.
+            clean.replace("recent: new notes\n", "recent: new notes\n# added\n"),
+            clean.replace("recent: new notes", "recent: 'new notes'"),
         ] {
             assert_eq!(check(SCOUT_RECORD, &after), Some(ONLY_RECENT), "{after}");
         }
+
+        // Held to the span: notes that arrive beside a comment keep it.
+        let commented = HAND_WRITTEN_SCOUT;
+        let span = recent_span(commented).unwrap();
+        assert!(commented[span.0..span.1].starts_with("recent: |\n"));
+        assert!(commented[span.1..].starts_with("\n# What it prefers."));
+        let landed = notes_bytes(commented, &json!("n")).unwrap();
+        assert_eq!(check(commented, &landed), None);
+        assert!(notes_landed(SCOUT_PATH, &landed, &json!("n")));
+        let stripped = landed.replace("# What it prefers.\n", "");
+        assert_eq!(check(commented, &stripped), Some(ONLY_RECENT));
     }
 
     #[test]
@@ -6596,14 +10940,24 @@ mod tests {
     #[test]
     fn every_write_tool_tells_the_open_pages() {
         // The tripwire, over the manifest: a served tool announces a change
-        // when it succeeds exactly when its door writes, so a new write tool
-        // cannot ship with writes an open page never hears about and then
-        // saves over.
+        // to the vault when it succeeds exactly when its door writes, and a
+        // comment door's tool announces the comments of the page it named
+        // (M70.3), so a new write tool cannot ship with writes an open page
+        // never hears about and then saves over.
         let vault = announcing_vault("tripwire");
         let args = json!({ "path": "notes/a.md", "folder": "notes", "slug": "b" });
-        let (mut loud, mut quiet) = (0, 0);
+        let (mut loud, mut commented, mut quiet) = (0, 0, 0);
         for name in every_served_name() {
             let change = announced(&vault, &name, args.clone());
+            if crate::comment_tools::comments_on(&name) {
+                assert_eq!(
+                    change,
+                    Some(json!({ "action": "comments_changed", "path": "notes/a.md" })),
+                    "{name}"
+                );
+                commented += 1;
+                continue;
+            }
             let writes = crate::policy::tools::writes_disk(&name);
             assert_eq!(
                 change.is_some(),
@@ -6618,8 +10972,56 @@ mod tests {
             }
         }
         assert!(
-            loud > 0 && quiet > 0,
-            "{loud} announce and {quiet} stay quiet"
+            loud > 0 && quiet > 0 && commented == 3,
+            "{loud} announce the vault, {commented} the comments, and {quiet} stay quiet"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn comment_tools_announce_the_page_whose_comments_changed() {
+        let vault = announcing_vault("comments");
+        for name in [
+            "comment_on_note",
+            "reply_to_comment",
+            "mcp__cerebro__resolve_comment",
+        ] {
+            assert_eq!(
+                announced(
+                    &vault,
+                    name,
+                    json!({ "path": "./notes/a.md", "thread": "x" })
+                ),
+                Some(json!({ "action": "comments_changed", "path": "notes/a.md" })),
+                "{name}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_refused_comment_announces_nothing() {
+        let vault = announcing_vault("comments-refused");
+        let args = args_of(json!({ "path": "notes/a.md", "text": "x" }));
+        assert_eq!(
+            announced_change(
+                &vault,
+                "comment_on_note",
+                &args,
+                &Err("no note at x".into())
+            ),
+            None
+        );
+        assert_eq!(
+            announced_change(
+                &vault,
+                "resolve_comment",
+                &args,
+                &Ok(error_result(
+                    "Thread x is already resolved. Nothing changed.".into()
+                ))
+            ),
+            None
         );
         let _ = std::fs::remove_dir_all(&vault);
     }
@@ -6645,6 +11047,7 @@ mod tests {
                 Some(vec![COMMIT_TOOL.into()]),
                 crate::ledger::new_run_id(),
                 Path::new("/vaults/a"),
+                WriteAsks::UNASKED,
             )
             .expect("minting needs state, not a socket");
         let grant = resolve_in(&state, &token, Instant::now())
@@ -6678,6 +11081,7 @@ mod tests {
                 None,
                 durable.clone(),
                 Path::new("/vaults/a"),
+                WriteAsks::UNASKED,
             )
             .expect("minting needs state, not a socket");
         let grant = resolve_in(&state, &token, Instant::now())
@@ -6714,6 +11118,7 @@ mod tests {
                 None,
                 crate::ledger::new_run_id(),
                 Path::new(vault),
+                WriteAsks::UNASKED,
             )
             .unwrap()
     }
@@ -6752,6 +11157,7 @@ mod tests {
                 None,
                 crate::ledger::new_run_id(),
                 Path::new("/vaults/a"),
+                WriteAsks::UNASKED,
             )
             .unwrap();
         let caller = resolve_in(&state, &caller_token, Instant::now()).unwrap();
@@ -6763,6 +11169,7 @@ mod tests {
                 None,
                 crate::ledger::new_run_id(),
                 Path::new("/vaults/b"),
+                WriteAsks::UNASKED,
             )
             .unwrap();
         let callee_token = state
@@ -6773,6 +11180,7 @@ mod tests {
                 None,
                 crate::ledger::new_run_id(),
                 &caller,
+                false,
             )
             .unwrap();
         let callee = resolve_in(&state, &callee_token, Instant::now()).unwrap();
@@ -6789,6 +11197,7 @@ mod tests {
                 None,
                 crate::ledger::new_run_id(),
                 &RunGrant::unrestricted("process:lead"),
+                false,
             )
             .unwrap_err();
         assert!(refusal.contains("bound to no vault"), "{refusal}");
@@ -7135,6 +11544,63 @@ mod tests {
             tool_create_note(&vault, &args_of(hook)).unwrap_err(),
             "not a note: .git/hooks/pre-commit.md — dot-folders and dotfiles hold no notes"
         );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M60.8: a page in the vault's Trash is outside every Cerebro agent
+    // tool: no read finds it, and every writer refuses its path as a
+    // dot-folder, in the corpus's words.
+    #[test]
+    fn the_trash_is_invisible_to_agent_tools() {
+        let _sink = ArmedSink::new("mcp-trash-sink");
+        let vault = crate::vault::testutil::temp_vault("mcp-trash");
+        let trashed = ".trash/20261014T093000Z-a1b2/notes/gone.md";
+        crate::vault::testutil::write(&vault, trashed, "# Gone\n\nZanzibarquill.\n");
+        crate::vault::testutil::write(&vault, "notes/kept.md", "# Kept\n\nStill here.\n");
+        let grant = bound(&vault);
+        let cache = vault::corpus::CorpusCache::new(1);
+
+        let get = args_of(json!({ "path": trashed }));
+        assert_eq!(
+            tool_get_note(&vault, &get).unwrap_err(),
+            format!("no note at {trashed}")
+        );
+        let search = args_of(json!({ "query": "Zanzibarquill" }));
+        let found = search_notes_in(&cache, &vault, &search, &grant).unwrap();
+        assert!(
+            answer_text(&found).starts_with("No notes matched"),
+            "{}",
+            answer_text(&found)
+        );
+        let listed = list_notes_in(&cache, &vault, &args_of(json!({})), &grant).unwrap();
+        assert!(answer_text(&listed).contains("notes/kept.md"));
+        assert!(
+            !answer_text(&listed).contains(".trash"),
+            "{}",
+            answer_text(&listed)
+        );
+
+        let words =
+            format!("not a note: {trashed} \u{2014} dot-folders and dotfiles hold no notes");
+        let before = vault_bytes(&vault);
+        for (tool, args) in [
+            (
+                "append_to_note",
+                json!({ "path": trashed, "content": "More." }),
+            ),
+            (
+                "update_frontmatter",
+                json!({ "path": trashed, "patch": { "status": "done" } }),
+            ),
+            (
+                "edit_note",
+                json!({ "path": trashed, "edits": [{ "old": "Gone", "new": "Back" }] }),
+            ),
+        ] {
+            let answer = refuse_before_dispatch(&vault, &grant, tool, &args_of(args));
+            assert_eq!(refused_text(answer), words, "{tool}");
+        }
+        assert_eq!(vault_bytes(&vault), before, "every byte where it was");
         let _ = std::fs::remove_dir_all(&vault);
     }
 
@@ -7598,6 +12064,7 @@ mod tests {
                         None,
                         crate::ledger::new_run_id(),
                         &vault,
+                        WriteAsks::UNASKED,
                     )
                     .expect("a minted bearer")
             })
@@ -8075,6 +12542,7 @@ mod tests {
             read_scope: None,
             tools: None,
             vault: None,
+            asks: WriteAsks::INTERNAL,
         }
     }
 
@@ -8226,6 +12694,7 @@ mod tests {
                 tools,
                 crate::ledger::new_run_id(),
                 Path::new("/vaults/a"),
+                WriteAsks::UNASKED,
             )
             .expect("minting needs state, not a socket");
         resolve_in(&state, &token, Instant::now()).expect("a minted token resolves to its grant")
@@ -8379,6 +12848,7 @@ mod tests {
         let args = crate::agent::build_args(
             &request,
             Path::new("/tmp/mcp.json"),
+            &crate::policy::tool_approval::plan_for(&request, false),
             None,
             true,
             &crate::agent::RunConnectors::default(),
@@ -8943,7 +13413,9 @@ mod tests {
             "body": "b"
         }))
         .unwrap();
-        assert!(tool_cache_source(&dir, &source, DEFAULT_ACTOR).is_err());
+        assert!(
+            tool_cache_source(&dir, &source, &WriteReceipt::for_test(DEFAULT_ACTOR, None)).is_err()
+        );
 
         assert_eq!(snapshot(), before, "every byte where it was, nothing new");
 
@@ -9058,7 +13530,9 @@ mod tests {
             let recheck: Map<String, Value> =
                 serde_json::from_value(json!({ "path": path, "stale_after": "2099-01-01" }))
                     .unwrap();
-            let err = tool_recheck_concept(&dir, &recheck, DEFAULT_ACTOR, None).unwrap_err();
+            let err =
+                tool_recheck_concept(&dir, &recheck, &WriteReceipt::for_test(DEFAULT_ACTOR, None))
+                    .unwrap_err();
             assert!(err.contains("not a concept path"), "{path}: {err}");
         }
         crate::ledger::shadow::deactivate();
@@ -9538,7 +14012,7 @@ mod tests {
     }
 
     /// A run-taking note-write handler, as the server calls it.
-    type HashedWriter = fn(&Path, &Map<String, Value>, Option<&str>) -> Result<Value, String>;
+    type HashedWriter = fn(&Path, &Map<String, Value>, RunWriter<'_>) -> Result<Value, String>;
 
     /// The three agent note writers that take `expect_hash`, each with the
     /// run-taking handler the server calls and its own arguments.
@@ -9555,7 +14029,7 @@ mod tests {
             (
                 "update_frontmatter",
                 // An ordinary note opens no notes lane (M56.10).
-                |vault, args, run| tool_update_frontmatter_in(vault, args, run, None),
+                |vault, args, writer| tool_update_frontmatter_in(vault, args, writer, None),
                 json!({ "path": "notes/a.md", "patch": { "status": "done" } }),
             ),
             (
@@ -9585,7 +14059,7 @@ mod tests {
             args.insert("expect_hash".into(), json!(hash));
 
             assert_eq!(refuse_before_dispatch(&vault, &grant, tool, &args), None);
-            let outcome = handler(&vault, &args, Some(&grant.run_id));
+            let outcome = handler(&vault, &args, booked(&grant));
             let text = outcome.clone().expect_err("a stale hash is refused");
             assert_eq!(
                 text,
@@ -9606,10 +14080,7 @@ mod tests {
             let one = vec![(STALE_CONTENT.to_string(), tool.to_string(), text.clone())];
             assert_eq!(rows_for_run(&grant.run_id), one, "{tool}");
             // Repeated, it is refused again and recorded once.
-            assert_eq!(
-                handler(&vault, &args, Some(&grant.run_id)).unwrap_err(),
-                text
-            );
+            assert_eq!(handler(&vault, &args, booked(&grant)).unwrap_err(), text);
             assert_eq!(rows_for_run(&grant.run_id), one, "{tool}");
             // The refusal reaches the model as isError, so nothing is announced.
             assert_eq!(announced_change(&vault, tool, &args, &outcome), None);
@@ -9631,7 +14102,11 @@ mod tests {
                 };
                 let mut args = args_of(args.clone());
                 args.insert("expect_hash".into(), json!(hash));
-                let outcome = handler(&vault, &args, None);
+                let outcome = handler(
+                    &vault,
+                    &args,
+                    test_writer(&RunGrant::unrestricted(DEFAULT_ACTOR)),
+                );
                 assert!(outcome.is_ok(), "{tool} (upper: {upper}): {outcome:?}");
                 let landed = std::fs::read_to_string(vault.join("notes/a.md")).unwrap();
                 assert_ne!(landed, HASHED_NOTE, "{tool}: the write landed");
@@ -9645,7 +14120,12 @@ mod tests {
             let vault = crate::vault::testutil::temp_vault("mcp-expect-none");
             crate::vault::testutil::write(&vault, "notes/a.md", HASHED_NOTE);
             assert!(
-                handler(&vault, &args_of(args.clone()), None).is_ok(),
+                handler(
+                    &vault,
+                    &args_of(args.clone()),
+                    test_writer(&RunGrant::unrestricted(DEFAULT_ACTOR)),
+                )
+                .is_ok(),
                 "{tool}"
             );
             let _ = std::fs::remove_dir_all(&vault);
@@ -9670,7 +14150,12 @@ mod tests {
                 let mut args = args_of(args.clone());
                 args.insert("expect_hash".into(), bad.clone());
                 assert_eq!(
-                    handler(&vault, &args, None).unwrap_err(),
+                    handler(
+                        &vault,
+                        &args,
+                        test_writer(&RunGrant::unrestricted(DEFAULT_ACTOR))
+                    )
+                    .unwrap_err(),
                     "expect_hash must be the 64-character hash from get_note's Hash line",
                     "{tool}: {bad}"
                 );
@@ -9739,7 +14224,7 @@ mod tests {
                 None,
                 "{tool}"
             );
-            handler(&vault, &plain, Some(&grant.run_id)).unwrap();
+            handler(&vault, &plain, booked(&grant)).unwrap();
             assert_ne!(
                 std::fs::read_to_string(vault.join("notes/a.md")).unwrap(),
                 HASHED_NOTE,
@@ -10031,6 +14516,60 @@ mod tests {
         let _ = std::fs::remove_dir_all(&vault);
     }
 
+    /// Both scopes bind where a path LANDS (M55.5 review). A folder link
+    /// inside the scope that points out of it is spelled in scope, but its
+    /// note lives outside; an out-of-range edit there would otherwise quote
+    /// that note back, passage by passage, and a matching one would rewrite it.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_cannot_carry_edit_note_out_of_its_scopes() {
+        let vault = temp_vault("mcp-edit-symlink-scope");
+        let original = "# Secret\n\nThe code is 1234.\n";
+        write(&vault, "notes/private/secret.md", original);
+        write(&vault, "notes/public/open.md", "# Open\n");
+        std::os::unix::fs::symlink("../private", vault.join("notes/public/dir")).unwrap();
+        let args = args_of(json!({
+            "path": "notes/public/dir/secret.md",
+            "edits": [{ "old": "e", "new": "x", "occurrence": 9999 }],
+        }));
+        let public = || Some(vec!["notes/public".to_string()]);
+        for (grant, refusal) in [
+            (
+                RunGrant {
+                    scope: public(),
+                    read_scope: public(),
+                    ..bound(&vault)
+                },
+                "This run is scoped to notes/public and cannot write to \
+                 notes/public/dir/secret.md.",
+            ),
+            (
+                RunGrant {
+                    read_scope: public(),
+                    ..bound(&vault)
+                },
+                "This run may read only notes/public and cannot read \
+                 notes/public/dir/secret.md.",
+            ),
+        ] {
+            let text = refused_text(refuse_before_dispatch(&vault, &grant, "edit_note", &args));
+            assert_eq!(text, refusal);
+            assert!(!text.contains("1234"), "the refusal quotes nothing: {text}");
+        }
+        // A link that stays inside the scope is still admitted.
+        let inside = RunGrant {
+            scope: Some(vec!["notes".into()]),
+            read_scope: Some(vec!["notes".into()]),
+            ..bound(&vault)
+        };
+        assert!(refuse_before_dispatch(&vault, &inside, "edit_note", &args).is_none());
+        assert_eq!(
+            std::fs::read_to_string(vault.join("notes/private/secret.md")).unwrap(),
+            original
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
     #[test]
     fn edit_note_refuses_the_bundle() {
         let vault = temp_vault("mcp-edit-bundle");
@@ -10133,7 +14672,13 @@ mod tests {
         let vault = temp_vault("mcp-edit-body");
         let original = "\u{feff}---\r\ntitle: Plan\r\n---  \r\n\r\n# Plan\r\nLast line";
         write(&vault, "notes/plan.md", original);
+        // With a thread listed in the header too (M70.3).
+        comment_as_owner(&vault, "notes/plan.md", "Last line", "Keep it?");
         let read = tool_get_note(&vault, &args_of(json!({ "path": "notes/plan.md" }))).unwrap();
+        assert!(
+            answer_text(&read).contains("Comments: 1 open thread(s)."),
+            "{read}"
+        );
         let printed = answer_text(&read)
             .split_once("\n---\n")
             .expect("get_note's separator")
@@ -10157,6 +14702,270 @@ mod tests {
             std::fs::read_to_string(vault.join("notes/plan.md")).unwrap(),
             original.replace("# Plan\r", "# Plans\r")
         );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // --- The comment tools (M70.3) -------------------------------------------
+
+    /// A person's thread on `page`, about `quote` (or the whole page when
+    /// it is empty), as the Comments tab starts one.
+    fn comment_as_owner(vault: &Path, page: &str, quote: &str, body: &str) -> String {
+        let anchor = (!quote.is_empty()).then(|| vault::comments::AnchorInput {
+            quote: quote.to_string(),
+            occurrence: 1,
+            before: String::new(),
+            after: String::new(),
+        });
+        let file = vault::comments::write_comment(
+            vault,
+            page,
+            &vault::comments::CommentOp::Start {
+                anchor,
+                body: body.to_string(),
+            },
+            vault::comments::OWNER,
+            None,
+        )
+        .unwrap();
+        file.threads.last().unwrap().id().to_string()
+    }
+
+    fn comment_poster(grant: &RunGrant) -> crate::comment_tools::Poster<'_> {
+        crate::comment_tools::Poster {
+            actor: &grant.actor,
+            run_id: &grant.run_id,
+        }
+    }
+
+    #[test]
+    fn get_note_lists_open_threads_between_the_header_and_the_body() {
+        let vault = temp_vault("mcp-get-note-threads");
+        let bytes = "---\nstatus: draft\n---\n\n# Plan\n\nWe ship on Thursdays.\n";
+        write(&vault, "notes/plan.md", bytes);
+        let plain = answer_text(
+            &tool_get_note(&vault, &args_of(json!({ "path": "notes/plan.md" }))).unwrap(),
+        )
+        .to_string();
+        assert!(
+            !plain.contains("Comments:"),
+            "no threads, no block: {plain}"
+        );
+        let id = comment_as_owner(&vault, "notes/plan.md", "Thursdays", "Firm?");
+        let read = tool_get_note(&vault, &args_of(json!({ "path": "notes/plan.md" }))).unwrap();
+        let (header, body) = answer_text(&read).split_once("\n---\n").unwrap();
+        assert_eq!(
+            body,
+            vault::write::read_note(&vault, "notes/plan.md").unwrap()
+        );
+        let (before, threads) = header.split_once("Comments: ").expect("the block");
+        assert!(
+            before.contains("\nHash: ") && before.contains("Frontmatter: "),
+            "{header}"
+        );
+        assert!(
+            threads.starts_with("1 open thread(s). The quoted text below"),
+            "{threads}"
+        );
+        assert!(
+            threads.contains(&format!("- Thread {id}, on line 4: ")),
+            "{threads}"
+        );
+        assert!(
+            threads.contains("\n  - human:owner at ") && threads.ends_with(": \"Firm?\"\n"),
+            "{threads}"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_comment_holding_the_separator_never_moves_the_body() {
+        let vault = temp_vault("mcp-get-note-separator");
+        write(&vault, "notes/plan.md", "# Plan\n\nBody line.\n");
+        comment_as_owner(&vault, "notes/plan.md", "", "Above\n---\nBelow\n\n---\n");
+        let read = tool_get_note(&vault, &args_of(json!({ "path": "notes/plan.md" }))).unwrap();
+        let text = answer_text(&read);
+        assert_eq!(text.matches("\n---\n").count(), 1, "{text}");
+        let (_, body) = text.split_once("\n---\n").unwrap();
+        assert_eq!(body, "# Plan\n\nBody line.\n");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_comment_outside_the_read_scope_is_refused_before_any_match() {
+        let _sink = ArmedSink::new("mcp-comment-read-scope");
+        let vault = temp_vault("mcp-comment-read-scope");
+        write(&vault, "visible/a.md", "# A\n");
+        write(
+            &vault,
+            "hidden/b.md",
+            "# B\n\nA secret plan, then a secret plan.\n",
+        );
+        let grant = RunGrant {
+            read_scope: Some(vec!["visible".into()]),
+            ..bound(&vault)
+        };
+        let message = "This run may read only visible and cannot read hidden/b.md.";
+        for (name, call) in [
+            (
+                "comment_on_note",
+                json!({ "path": "hidden/b.md", "quote": "secret plan", "text": "x" }),
+            ),
+            (
+                "reply_to_comment",
+                json!({ "path": "hidden/b.md", "thread": "0000000000000001", "text": "x" }),
+            ),
+            (
+                "resolve_comment",
+                json!({ "path": "hidden/b.md", "thread": "0000000000000001" }),
+            ),
+        ] {
+            let answer = refuse_before_dispatch(&vault, &grant, name, &args_of(call));
+            let text = refused_text(answer);
+            assert_eq!(text, message, "{name}");
+            assert!(!text.contains("secret"), "nothing of the page is quoted");
+        }
+        let rows = rows_for_run(&grant.run_id);
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    READ_OUTSIDE_SCOPE.to_string(),
+                    "comment_on_note".to_string(),
+                    message.to_string()
+                ),
+                (
+                    READ_OUTSIDE_SCOPE.to_string(),
+                    "reply_to_comment".to_string(),
+                    message.to_string()
+                ),
+                (
+                    READ_OUTSIDE_SCOPE.to_string(),
+                    "resolve_comment".to_string(),
+                    message.to_string()
+                )
+            ]
+        );
+        assert!(!vault.join(".comments").exists());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_comment_needs_no_write_scope() {
+        // A run that may write only records/risks reads a decision page and
+        // comments on it: a comment changes no page, so the write scope never
+        // hears of it and records nothing (Q7).
+        let _sink = ArmedSink::new("mcp-comment-write-scope");
+        let vault = temp_vault("mcp-comment-write-scope");
+        let page = "records/decisions/dec-manual.md";
+        let bytes = "---\ntype: Decision\n---\n\n# Manual\n\nDetect the conflict, then ask.\n";
+        write(&vault, page, bytes);
+        let grant = RunGrant {
+            scope: Some(vec!["records/risks".into()]),
+            ..bound(&vault)
+        };
+        let args =
+            args_of(json!({ "path": page, "quote": "Detect the conflict", "text": "Who asks?" }));
+        assert_eq!(
+            refuse_before_dispatch(&vault, &grant, "comment_on_note", &args),
+            None
+        );
+        let answer =
+            crate::comment_tools::call(&vault, "comment_on_note", &args, comment_poster(&grant))
+                .unwrap();
+        assert!(answer_text(&answer).starts_with(&format!("Commented on {page} as thread ")));
+        assert!(
+            rows_for_run(&grant.run_id).is_empty(),
+            "no write_outside_scope row"
+        );
+        assert_eq!(std::fs::read_to_string(vault.join(page)).unwrap(), bytes);
+        crate::comment_tools::forget_posts(&grant.run_id);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_grant_without_the_comment_tools_cannot_call_them() {
+        let vault = temp_vault("mcp-comment-grant");
+        write(&vault, "notes/a.md", "# A\n\nText.\n");
+        let grant = RunGrant {
+            tools: Some(vec!["get_note".into()]),
+            ..bound(&vault)
+        };
+        for name in ["comment_on_note", "reply_to_comment", "resolve_comment"] {
+            let refusal = ungranted_tool_refusal(&grant, name).expect("not granted");
+            assert!(refusal.contains(name), "{refusal}");
+            let refused = refuse_before_dispatch(
+                &vault,
+                &grant,
+                name,
+                &args_of(json!({ "path": "notes/a.md", "thread": "x", "text": "x" })),
+            );
+            assert!(refused.is_some(), "{name}");
+        }
+        let granted = RunGrant {
+            tools: Some(vec!["comment_on_note".into()]),
+            ..bound(&vault)
+        };
+        assert!(ungranted_tool_refusal(&granted, "comment_on_note").is_none());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn the_comment_tools_never_change_a_note() {
+        let vault = temp_vault("mcp-comment-never-writes");
+        write(
+            &vault,
+            "notes/a.md",
+            "---\nstatus: draft\n---\n\n# A\n\nShip on Thursday.\n",
+        );
+        write(&vault, "notes/b.md", "# B\n");
+        let notes = |vault: &Path| {
+            vault_bytes(vault)
+                .into_iter()
+                .filter(|(path, _)| !path.starts_with(vault.join(".comments")))
+                .collect::<BTreeMap<_, _>>()
+        };
+        let before = notes(&vault);
+        let grant = bound(&vault);
+        let call = |name: &str, value: Value| {
+            crate::comment_tools::call(&vault, name, &args_of(value), comment_poster(&grant))
+        };
+        let posted = call(
+            "comment_on_note",
+            json!({ "path": "notes/a.md", "quote": "Thursday", "text": "Sure?" }),
+        )
+        .unwrap();
+        let id = answer_text(&posted)
+            .split("thread ")
+            .nth(1)
+            .and_then(|rest| rest.split(',').next())
+            .unwrap()
+            .to_string();
+        call(
+            "comment_on_note",
+            json!({ "path": "notes/b.md", "text": "Page." }),
+        )
+        .unwrap();
+        call(
+            "reply_to_comment",
+            json!({ "path": "notes/a.md", "thread": id, "text": "Yes." }),
+        )
+        .unwrap();
+        call(
+            "resolve_comment",
+            json!({ "path": "notes/a.md", "thread": id, "text": "Done." }),
+        )
+        .unwrap();
+        // Refusals too.
+        let _ = call(
+            "resolve_comment",
+            json!({ "path": "notes/a.md", "thread": id }),
+        );
+        let _ = call(
+            "comment_on_note",
+            json!({ "path": "notes/a.md", "quote": "status", "text": "x" }),
+        );
+        assert_eq!(notes(&vault), before);
+        crate::comment_tools::forget_posts(&grant.run_id);
         let _ = std::fs::remove_dir_all(&vault);
     }
 
@@ -10318,5 +15127,438 @@ mod tests {
         assert!(crate::policy::tools::row(gate).is_none());
         let manifest = include_str!("../../shared/policy/tools.v1.json");
         assert!(!manifest.contains(gate));
+    }
+
+    // --- The prompt tool (M57.3) ---------------------------------------------
+
+    fn host_args(id: &str, tool: &str, input: Value) -> Map<String, Value> {
+        json!({ "tool_name": tool, "tool_use_id": id, "input": input })
+            .as_object()
+            .unwrap()
+            .clone()
+    }
+
+    /// The prompt tool's answer as Claude Code reads it: one text block
+    /// holding `{behavior, …}`, never an error.
+    fn prompt_of(answer: &Value) -> Value {
+        hook_of(answer)
+    }
+
+    fn attended_seat_request() -> crate::agent::AgentRequest {
+        serde_json::from_value(json!({ "message": "m", "system_prompt": null,
+            "session_id": null, "attended": true }))
+        .unwrap()
+    }
+
+    #[test]
+    fn the_prompt_tool_is_never_listed_or_named() {
+        let host = crate::agent::interaction::HOST_TOOL;
+        let grants = [
+            bearer(None, None, None),
+            bearer(Some("process:scout"), Some(owned(&["projects"])), None),
+            bearer(None, None, Some(owned(&["get_note", host]))),
+            bearer(None, Some(vec![]), Some(vec![])),
+        ];
+        for grant in &grants {
+            for proposals in [false, true] {
+                assert!(
+                    !listed_names(grant, proposals)
+                        .iter()
+                        .any(|name| name == host),
+                    "proposals={proposals}"
+                );
+            }
+        }
+        for proposals in [false, true] {
+            assert!(!names_of(&tool_catalog(proposals))
+                .iter()
+                .any(|name| name == host));
+        }
+        assert!(crate::policy::tools::row(host).is_none());
+        let manifest = include_str!("../../shared/policy/tools.v1.json");
+        assert!(!manifest.contains(host));
+    }
+
+    #[test]
+    fn the_prompt_tool_answers_before_the_grant_axes_and_records_nothing() {
+        use crate::agent::interaction::{GATE_TOOL, HOST_TOOL};
+        // Narrowed to nothing on every axis and bound to no vault: call_tool
+        // would refuse it at the first line, and the prompt tool still
+        // answers, as JSON Claude Code reads, never as an error.
+        let mut grant = bearer(Some("process:scout"), Some(vec![]), Some(vec![]));
+        grant.read_scope = Some(vec![]);
+        grant.vault = None;
+        let book = seated_book(&grant);
+        for _ in 0..3 {
+            let answer = answer_host(
+                HOST_TOOL,
+                &host_args("t1", "mcp__cerebro__append_to_note", json!({})),
+                &grant,
+                Some(&book),
+            )
+            .expect("the prompt tool answers");
+            assert_eq!(prompt_of(&answer)["behavior"], "deny");
+        }
+        assert!(
+            take_tool_calls(&grant.run_id)
+                .unwrap_or_default()
+                .is_empty(),
+            "a prompt-tool question is no tool call of the run's"
+        );
+        // Each endpoint answers only its own name; the rest is call_tool's.
+        assert!(answer_host("get_note", &Map::new(), &grant, Some(&book)).is_none());
+        assert!(answer_host(GATE_TOOL, &Map::new(), &grant, Some(&book)).is_none());
+        assert!(answer_gate(HOST_TOOL, &Map::new(), &grant, Some(&book)).is_none());
+        // Malformed arguments are still answered, and refused.
+        let broken = json!({ "tool_name": 7, "input": "x" })
+            .as_object()
+            .unwrap()
+            .clone();
+        let answer = answer_host(HOST_TOOL, &broken, &grant, Some(&book)).unwrap();
+        assert_eq!(prompt_of(&answer)["behavior"], "deny");
+    }
+
+    #[test]
+    fn the_prompt_tool_allows_only_a_persons_answer() {
+        use crate::agent::interaction::{
+            Interactions, PersonAnswer, Remember, Seat, WireAnswer, HOST_TOOL, NOT_PUT,
+        };
+        let asked = "mcp__cerebro__append_to_note";
+        let input = json!({ "path": "notes/inbox.md", "content": "- one" });
+        let grant = bearer(None, None, None);
+        let book = seated_book(&grant);
+        let ask = |grant: &RunGrant, book: Option<&Interactions>, id: &str, tool: &str| {
+            prompt_of(
+                &answer_host(HOST_TOOL, &host_args(id, tool, input.clone()), grant, book).unwrap(),
+            )
+        };
+        let not_put = json!({ "behavior": "deny", "message": NOT_PUT });
+        // An ask no person answered, before and while it waits.
+        assert_eq!(ask(&grant, Some(&book), "t1", asked), not_put);
+        assert_eq!(
+            hook_of(
+                &answer_gate(
+                    crate::agent::interaction::GATE_TOOL,
+                    &gate_args("s-1", "t1", asked),
+                    &grant,
+                    Some(&book),
+                )
+                .unwrap()
+            )["hookSpecificOutput"]["permissionDecision"],
+            "defer"
+        );
+        assert_eq!(ask(&grant, Some(&book), "t1", asked), not_put);
+        // A call the table would pass is unlisted; with no book, or on a
+        // bearer with no seat, nobody answered.
+        assert_eq!(
+            ask(&grant, Some(&book), "t2", "Read"),
+            json!({ "behavior": "deny",
+                    "message": crate::policy::tool_approval::messages().unlisted })
+        );
+        assert_eq!(ask(&grant, None, "t1", asked), not_put);
+        let stranger = bearer(None, None, None);
+        assert_eq!(ask(&stranger, Some(&book), "t1", asked)["behavior"], "deny");
+
+        // The person allows t1 in the app, and its resume runs on a new
+        // bearer seated in the same session: the prompt tool allows it with
+        // the call's own input.
+        let card = book.confirm("s-1", "t1").expect("a card");
+        book.close_seat(&grant.run_id);
+        book.begin_answer(
+            Path::new("/vaults/a"),
+            &card.id,
+            PersonAnswer::from_ipc(WireAnswer::Allow {
+                remember: Remember::Once,
+            }),
+        )
+        .expect("the answer is taken");
+        let resume = bearer(None, None, None);
+        book.open_seat(
+            Seat::new(
+                &resume.run_id,
+                "s-1",
+                Path::new("/vaults/a"),
+                &attended_seat_request(),
+            ),
+            None,
+        );
+        book.finish_answer(&card.id, &resume.run_id);
+        assert_eq!(
+            ask(&resume, Some(&book), "t1", asked),
+            json!({ "behavior": "allow", "updatedInput": input })
+        );
+        // Another call of the same seat, or the same id under another tool,
+        // is still nobody's answer.
+        assert_eq!(ask(&resume, Some(&book), "t9", asked), not_put);
+        assert_eq!(
+            ask(&resume, Some(&book), "t1", "mcp__cerebro__create_note"),
+            not_put
+        );
+        // The asking bearer, its seat closed, gets nothing from it.
+        assert_eq!(ask(&grant, Some(&book), "t1", asked)["behavior"], "deny");
+    }
+
+    // --- Every write carries its receipt (M58.1) ---------------------------
+
+    /// One recorded write: kind, path, actor, run, approver.
+    type Stamped = (
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    );
+
+    /// `vault`'s rows in `vault_writes`, oldest first.
+    fn stamped(vault: &Path) -> Vec<Stamped> {
+        let vault_id = crate::runtime::scope::derive_vault_id(vault);
+        crate::runtime::sink::with_sink(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT kind, path, actor, run_id, approved_by FROM vault_writes \
+                     WHERE vault_id = ?1 ORDER BY rowid",
+                )
+                .unwrap();
+            stmt.query_map([&vault_id], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+        })
+        .unwrap()
+    }
+
+    fn row(kind: &str, path: &str, grant: &RunGrant, approver: Option<&str>) -> Stamped {
+        (
+            kind.to_string(),
+            path.to_string(),
+            Some(grant.actor.clone()),
+            Some(grant.run_id.clone()),
+            approver.map(str::to_string),
+        )
+    }
+
+    #[test]
+    fn a_scheduled_agents_append_records_its_actor_and_run() {
+        let _sink = ArmedSink::new("mcp-append-stamp-sink");
+        let vault = memory_vault("mcp-append-stamp");
+        let grant = scout_run(&vault, RunKind::Unattended, false);
+        let args = args_of(json!({ "path": "records/risks/r-1.md", "content": "Slipping." }));
+        assert_eq!(
+            refuse_before_dispatch(&vault, &grant, "append_to_note", &args),
+            None
+        );
+        tool_append_in(&vault, &args, booked(&grant)).unwrap();
+        assert_eq!(
+            stamped(&vault),
+            vec![row("vault.write", "records/risks/r-1.md", &grant, None)]
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_agent_append_records_the_landing_path() {
+        let _sink = ArmedSink::new("mcp-append-landing-sink");
+        let vault = memory_vault("mcp-append-landing");
+        let grant = scout_run(&vault, RunKind::Unattended, false);
+        let mut spellings = vec!["./records/risks/r-1.md"];
+        // On a disk that folds case, the folder as the disk stores it.
+        if vault.join("RECORDS/risks/r-1.md").exists() {
+            spellings.push("RECORDS/risks/r-1.md");
+        }
+        for spelling in &spellings {
+            let args = args_of(json!({ "path": spelling, "content": "More." }));
+            tool_append_in(&vault, &args, booked(&grant)).unwrap();
+        }
+        // Spelled once, as the scan lists it: one burst, one row.
+        assert_eq!(
+            stamped(&vault),
+            vec![row("vault.write", "records/risks/r-1.md", &grant, None)]
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_allowed_ask_first_write_names_its_approver() {
+        let _sink = ArmedSink::new("mcp-ask-first-approver-sink");
+        let vault = memory_vault("mcp-ask-first-approver");
+        let book = Interactions::with_asks(Vec::new());
+        let resumed = answered(&book, &vault, allow_once());
+        create_as(&vault, &resumed, Some(&book)).unwrap();
+        assert_eq!(
+            stamped(&vault),
+            vec![row(
+                "vault.create",
+                PLANNED,
+                &resumed,
+                Some(crate::vault::receipt::HUMAN_ACTOR)
+            )]
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_applied_queued_write_keeps_the_agents_actor() {
+        let _sink = ArmedSink::new("mcp-applied-actor-sink");
+        let vault = memory_vault("mcp-applied-actor");
+        let grant = scout_run(&vault, RunKind::Unattended, true);
+        let id = queued_id(&queued_call(
+            &vault,
+            &grant,
+            "create_note",
+            Value::Object(create_args()),
+        ));
+        assert!(stamped(&vault).is_empty(), "a queued write records nothing");
+        decide_pending(&vault, &id, true, None, None, |_| {}).unwrap();
+        assert_eq!(
+            stamped(&vault),
+            vec![row(
+                "vault.create",
+                PLANNED,
+                &grant,
+                Some(crate::vault::receipt::HUMAN_ACTOR)
+            )],
+            "the agent's write, under its run, that you allowed"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn the_memory_lane_records_the_agents_own_run() {
+        let _sink = ArmedSink::new("mcp-own-notes-stamp-sink");
+        let vault = memory_vault("mcp-own-notes-stamp");
+        let grant = run_of(&vault, SCOUT_ACTOR, Some(&["records/risks"]));
+        patch_as(
+            &vault,
+            &grant,
+            SCOUT_PATH,
+            json!({ "recent": "R-1 is slipping." }),
+        )
+        .unwrap();
+        assert_eq!(
+            stamped(&vault),
+            vec![row("vault.write", SCOUT_PATH, &grant, None)]
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn commit_proposals_records_what_it_projected() {
+        use crate::policy::commit::tests_support::{seed_belief, submit, update_op, P1, RUN};
+        let _sink = ArmedSink::new("mcp-commit-projected-sink");
+        let vault = crate::vault::testutil::temp_vault("mcp-commit-projected");
+        let _shadow = crate::ledger::shadow::testing::activated(&vault);
+        let grant = RunGrant {
+            run_id: RUN.to_string(),
+            vault: Some(vault.clone()),
+            ..RunGrant::unrestricted(SCOUT_ACTOR)
+        };
+        crate::ledger::shadow::with_writer(&vault, |writer| {
+            let belief = seed_belief(writer, "seed");
+            let state = crate::ledger::concepts::current_state(writer, &vault).unwrap();
+            let projection = crate::ledger::reduce::project_belief(&state, &belief).unwrap();
+            crate::ledger::manifest::write_projection(&vault, "knowledge/seed.md", &projection)
+                .unwrap();
+            submit(
+                writer,
+                P1,
+                update_op(&belief, "x"),
+                &belief,
+                crate::policy::table::Risk::Medium,
+            );
+        })
+        .unwrap();
+        let answer =
+            tool_commit_proposals(&vault, &args_of(json!({ "proposal_ids": [P1] })), &grant)
+                .unwrap();
+        assert!(result_text(&answer).contains("\"apply\""), "{answer}");
+        assert_eq!(
+            stamped(&vault),
+            vec![row("vault.write", "knowledge/seed.md", &grant, None)]
+        );
+        crate::ledger::shadow::deactivate();
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn write_concept_records_the_concept_and_the_log() {
+        let _sink = ArmedSink::new("mcp-concept-stamp-sink");
+        let vault = crate::vault::testutil::temp_vault("mcp-concept-stamp");
+        let _shadow = crate::ledger::shadow::testing::activated(&vault);
+        let grant = bound(&vault);
+        let args = args_of(json!({
+            "path": "knowledge/systems/scouted.md",
+            "title": "Scouted",
+            "description": "What the release scout found.",
+            "body": "What the scout learned."
+        }));
+        tool_write_concept_in(
+            &vault,
+            &args,
+            &WriteReceipt::run(cleared_for_concept(&grant)),
+        )
+        .unwrap();
+        assert_eq!(
+            stamped(&vault),
+            vec![
+                row("vault.create", "knowledge/systems/scouted.md", &grant, None),
+                row("vault.create", "knowledge/log.md", &grant, None),
+            ]
+        );
+        crate::ledger::shadow::deactivate();
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M58.1 (CV-33): each agent door of src-tauri/fixtures/write-doors.json
+    // refuses as the table says, or records its one row under the run's
+    // stamp. The mock replays the same rows.
+    #[test]
+    fn agent_write_doors_replay_the_shared_cases() {
+        let table: Value =
+            serde_json::from_str(include_str!("../fixtures/write-doors.json")).unwrap();
+        let _sink = ArmedSink::new("mcp-write-doors-sink");
+        for case in table["agent"].as_array().unwrap() {
+            let vault = crate::vault::testutil::temp_vault("mcp-write-doors");
+            for (rel, bytes) in case["seed"].as_object().into_iter().flatten() {
+                crate::vault::testutil::write(&vault, rel, bytes.as_str().unwrap());
+            }
+            let grant = RunGrant {
+                run_id: case["stamp"]["run_id"].as_str().unwrap().to_string(),
+                vault: Some(vault.clone()),
+                ..RunGrant::unrestricted(case["stamp"]["actor"].as_str().unwrap())
+            };
+            let door = case["door"].as_str().unwrap();
+            let args = case["args"].as_object().cloned().unwrap();
+            let outcome = note_write(&vault, door, &args, booked(&grant), None, WriteMode::Commit)
+                .expect("a note door");
+            match case["refused"].as_str() {
+                Some(fragment) => {
+                    let err = outcome
+                        .err()
+                        .unwrap_or_else(|| panic!("{case} must refuse"));
+                    assert!(err.contains(fragment), "{case}: {err}");
+                    assert!(
+                        stamped(&vault).is_empty(),
+                        "{case}: a refusal records nothing"
+                    );
+                }
+                None => {
+                    outcome.unwrap_or_else(|e| panic!("{case} must land: {e}"));
+                    let records = &case["records"];
+                    assert_eq!(
+                        stamped(&vault),
+                        vec![row(
+                            records["kind"].as_str().unwrap(),
+                            records["path"].as_str().unwrap(),
+                            &grant,
+                            None
+                        )],
+                        "{case}"
+                    );
+                }
+            }
+            let _ = std::fs::remove_dir_all(&vault);
+        }
     }
 }

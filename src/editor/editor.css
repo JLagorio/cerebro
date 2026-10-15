@@ -518,6 +518,135 @@
 }
 
 /*
+ * Find in a page (M59.6). Decorations, like the comment highlights above:
+ * findHighlights.ts draws them and they never reach the document. A link hit
+ * is a node decoration on the chip's wrapper, so the chip itself is reached
+ * through a descendant selector, whatever wraps it (trap 1).
+ */
+.cerebro-editor .cb-find-hit {
+  background: var(--warn-50);
+  border-radius: 2px;
+}
+
+.cerebro-editor .cb-find-current {
+  background: var(--warn-300);
+  outline: 1px solid var(--warn-500);
+}
+
+.cerebro-editor .cb-find-hit [data-chip] {
+  outline: 2px solid var(--warn-300);
+  outline-offset: 1px;
+}
+
+.cerebro-editor .cb-find-current [data-chip] {
+  outline-color: var(--warn-500);
+}
+
+/* The bar rides a sticky row of no height at the top of the page's scroller,
+   so it neither pushes the page down nor scrolls away. Below the editor's
+   popovers (z-40), above its blocks. */
+.cerebro-editor .cb-find-row {
+  position: sticky;
+  top: 8px;
+  z-index: 30;
+  height: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 16px;
+}
+
+.cerebro-editor .cb-find-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: max-content;
+  padding: 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-md);
+  font-family: var(--font-ui);
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+}
+
+.cerebro-editor .cb-find-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cerebro-editor .cb-find-input {
+  width: 200px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--n-300);
+  border-radius: var(--r-sm);
+  background: var(--n-0);
+  color: var(--text-primary);
+  font: inherit;
+  outline: none;
+}
+
+.cerebro-editor .cb-find-input::placeholder {
+  color: var(--text-disabled);
+}
+
+.cerebro-editor .cb-find-input:focus {
+  border-color: var(--border-focus);
+  box-shadow: var(--ring);
+}
+
+.cerebro-editor .cb-find-count {
+  min-width: 72px;
+  padding: 0 4px;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.cerebro-editor .cb-find-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--n-600);
+  cursor: pointer;
+}
+
+.cerebro-editor .cb-find-icon:hover:not([disabled]) {
+  background: var(--n-100);
+  color: var(--n-800);
+}
+
+.cerebro-editor .cb-find-icon:focus-visible {
+  border-color: var(--border-focus);
+  box-shadow: var(--ring);
+}
+
+.cerebro-editor .cb-find-icon[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.cerebro-editor .cb-find-icon-on {
+  background: var(--surface-selected);
+  color: var(--cortex-600);
+}
+
+.cerebro-editor .cb-find-status {
+  padding: 0 4px;
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+}
+
+/*
  * A section link's landing (M55.8): SectionFlash draws this box over the
  * heading from document.body, so it is not scoped under .cerebro-editor, and
  * it is never written onto the editor's own DOM (ProseMirror wipes what it

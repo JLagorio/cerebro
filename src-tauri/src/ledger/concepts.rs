@@ -58,6 +58,8 @@ use super::schema::{
 };
 use super::writer::LedgerWriter;
 use super::{ledger_dir, read_ledger, shadow};
+use crate::vault::receipt::{ConceptDoor, WriteReceipt};
+use crate::vault::write::Projected;
 
 /// The explicit basis a fresh agent-written concept declares.
 pub const AGENT_BASIS_REASON: &str = "agent write without captured observations";
@@ -102,50 +104,75 @@ fn agent_concept_path(rel: &str) -> Result<(), String> {
     }
 }
 
-/// `write_concept` for the run that asked for it (M49.9, K25): its
-/// proposals and commit set carry that run's id, and the run's row books
-/// what was submitted, applied and rejected.
-pub fn write_concept_in_run(
+/// Record what a concept writer changed on disk under `by` (M58.1, Q1): the
+/// files its commit projected, then any of `before`'s paths whose bytes
+/// changed and that the commit did not name (a no-op's refreshed projection,
+/// a log append, a verify). Nothing for a write that changed no byte.
+fn record_written(
     vault: &Path,
-    rel: &str,
-    frontmatter: &serde_json::Map<String, serde_json::Value>,
-    body: &str,
-    run: &str,
-) -> Result<(), String> {
-    agent_concept_path(rel)?;
-    shadow::with_writer(vault, |writer| {
-        write_concept_in_run_with(writer, vault, rel, frontmatter, body, Some(run))
-    })
-    .unwrap_or_else(|| Err(writer_unavailable(vault)))
+    before: &[(String, Option<String>)],
+    projected: &[Projected],
+    by: &WriteReceipt<ConceptDoor>,
+) {
+    crate::vault::write::record_projected(vault, projected, by);
+    let rest: Vec<(String, Option<String>)> = before
+        .iter()
+        .filter(|(rel, _)| !projected.iter().any(|file| &file.path == rel))
+        .cloned()
+        .collect();
+    crate::vault::write::record_changed(vault, &rest, by);
 }
 
 /// Ledger-first `write_concept`: a committed Belief transition whose file
 /// is the projection. Refuses with `ledger_writer_unavailable` when no
 /// writer is active for the vault.
+///
+/// Booked under the receipt's run when it has one (M49.9, K25): its
+/// proposals and commit set carry that run's id, and the run's row books
+/// what was submitted, applied and rejected. Every file it projected is
+/// recorded under the receipt (M58.1).
 pub fn write_concept(
     vault: &Path,
     rel: &str,
     frontmatter: &serde_json::Map<String, serde_json::Value>,
     body: &str,
+    by: &WriteReceipt<ConceptDoor>,
 ) -> Result<(), String> {
     agent_concept_path(rel)?;
+    let before = crate::vault::write::snapshot(vault, &[rel]);
+    let mut projected = Vec::new();
     shadow::with_writer(vault, |writer| {
-        write_concept_with(writer, vault, rel, frontmatter, body)
+        write_concept_into(
+            writer,
+            vault,
+            rel,
+            frontmatter,
+            body,
+            by.run_id(),
+            &mut projected,
+        )
     })
-    .unwrap_or_else(|| Err(writer_unavailable(vault)))
+    .unwrap_or_else(|| Err(writer_unavailable(vault)))?;
+    record_written(vault, &before, &projected, by);
+    Ok(())
 }
 
-/// Ledger-first knowledge-log append. Refuses without an active writer.
+/// Ledger-first knowledge-log append, recorded under `by`. Refuses without
+/// an active writer.
 pub fn append_log(
     vault: &Path,
     concept_rel: &str,
     title: &str,
     existed: bool,
+    by: &WriteReceipt<ConceptDoor>,
 ) -> Result<(), String> {
+    let before = crate::vault::write::snapshot(vault, &[crate::knowledge::LOG_PATH]);
     shadow::with_writer(vault, |writer| {
         append_log_with(writer, vault, concept_rel, title, existed)
     })
-    .unwrap_or_else(|| Err(writer_unavailable(vault)))
+    .unwrap_or_else(|| Err(writer_unavailable(vault)))?;
+    record_written(vault, &before, &[], by);
+    Ok(())
 }
 
 /// Ledger-first `verify_concept` (M23.4): the human stamp lands in fields
@@ -163,14 +190,18 @@ pub fn verify_concept(
     rel: &str,
     patch: &serde_json::Map<String, serde_json::Value>,
     viewed_body_hash: &str,
+    by: &WriteReceipt<ConceptDoor>,
 ) -> Result<(), String> {
     if !rel.starts_with("knowledge/") {
         return Err(outside_bundle(rel));
     }
+    let before = crate::vault::write::snapshot(vault, &[rel]);
     shadow::with_writer(vault, |writer| {
         verify_with(writer, vault, rel, patch, viewed_body_hash)
     })
-    .unwrap_or_else(|| Err(writer_unavailable(vault)))
+    .unwrap_or_else(|| Err(writer_unavailable(vault)))?;
+    record_written(vault, &before, &[], by);
+    Ok(())
 }
 
 /// What a recheck did (M49.7).
@@ -195,21 +226,33 @@ pub enum Rechecked {
 /// table decides it — it auto-applies on an ordinary concept and queues
 /// where an escalator (a hub's `lineage_fan_in`) says a person should see
 /// it; a hand-coded check here was policy written twice. It is not a claim,
-/// so it writes no log line.
+/// so it writes no log line. The stamp is the receipt's actor, booked under
+/// its run, and the file it projected is recorded under it (M58.1).
 pub fn recheck_concept(
     vault: &Path,
     rel: &str,
     stale_after: &str,
-    actor: &str,
-    run: Option<&str>,
+    by: &WriteReceipt<ConceptDoor>,
 ) -> Result<Rechecked, String> {
     agent_concept_path(rel)?;
-    shadow::with_writer(vault, |writer| {
-        recheck_with(writer, vault, rel, stale_after, actor, run)
+    let mut projected = Vec::new();
+    let rechecked = shadow::with_writer(vault, |writer| {
+        recheck_into(
+            writer,
+            vault,
+            rel,
+            stale_after,
+            by.actor(),
+            by.run_id(),
+            &mut projected,
+        )
     })
-    .unwrap_or_else(|| Err(writer_unavailable(vault)))
+    .unwrap_or_else(|| Err(writer_unavailable(vault)))?;
+    record_written(vault, &[], &projected, by);
+    Ok(rechecked)
 }
 
+#[cfg(test)]
 fn recheck_with(
     writer: &mut LedgerWriter,
     vault: &Path,
@@ -217,6 +260,19 @@ fn recheck_with(
     stale_after: &str,
     actor: &str,
     run: Option<&str>,
+) -> Result<Rechecked, String> {
+    recheck_into(writer, vault, rel, stale_after, actor, run, &mut Vec::new())
+}
+
+/// `recheck_with`, collecting the files its commit projected.
+fn recheck_into(
+    writer: &mut LedgerWriter,
+    vault: &Path,
+    rel: &str,
+    stale_after: &str,
+    actor: &str,
+    run: Option<&str>,
+    projected: &mut Vec<Projected>,
 ) -> Result<Rechecked, String> {
     let krel = rel
         .strip_prefix("knowledge/")
@@ -294,6 +350,7 @@ fn recheck_with(
         vec![(stamp, targets)],
         run,
         door,
+        projected,
     )?;
     Ok(Rechecked::Stamped)
 }
@@ -521,6 +578,7 @@ fn alias_list(value: Option<&serde_json::Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+#[cfg(test)]
 fn write_concept_with(
     writer: &mut LedgerWriter,
     vault: &Path,
@@ -532,6 +590,7 @@ fn write_concept_with(
 }
 
 /// `write_concept_with`, booked under the run that made the write (M49.9).
+#[cfg(test)]
 fn write_concept_in_run_with(
     writer: &mut LedgerWriter,
     vault: &Path,
@@ -539,6 +598,20 @@ fn write_concept_in_run_with(
     frontmatter: &serde_json::Map<String, serde_json::Value>,
     body: &str,
     run: Option<&str>,
+) -> Result<(), String> {
+    write_concept_into(writer, vault, rel, frontmatter, body, run, &mut Vec::new())
+}
+
+/// The concept write, booked under `run` when there is one, collecting the
+/// files its commit projected.
+fn write_concept_into(
+    writer: &mut LedgerWriter,
+    vault: &Path,
+    rel: &str,
+    frontmatter: &serde_json::Map<String, serde_json::Value>,
+    body: &str,
+    run: Option<&str>,
+    projected: &mut Vec<Projected>,
 ) -> Result<(), String> {
     let krel = rel
         .strip_prefix("knowledge/")
@@ -580,7 +653,9 @@ fn write_concept_in_run_with(
         tool: "write_concept",
         reason: format!("write_concept {rel} (actor {})", actor.id),
     };
-    route(writer, vault, &state, krel, &actor, ops, run, door)?;
+    route(
+        writer, vault, &state, krel, &actor, ops, run, door, projected,
+    )?;
 
     let state = current_state(writer, vault)?;
     let belief_id = state
@@ -606,7 +681,7 @@ struct Door<'a> {
 }
 
 /// Submit the enriched ops as one atomic commit set and interpret its
-/// outcome.
+/// outcome. The files an applied set projected join `projected`.
 ///
 /// A concept write is all-or-nothing by nature: the Belief, its relation
 /// edits, and its new aliases describe one edit a person made in one file.
@@ -625,6 +700,7 @@ fn route(
     ops: Vec<(schema::ProposalOp, Vec<schema::ProposalTarget>)>,
     run: Option<&str>,
     door: Door<'_>,
+    projected: &mut Vec<Projected>,
 ) -> Result<(), String> {
     let table = crate::policy::table::PolicyTable::load()?;
     // `write_concept` → `cerebro-write-concept`: the spelling every id below
@@ -736,6 +812,7 @@ fn route(
     if run.is_some() {
         outcome.book(&run_id);
     }
+    projected.extend(outcome.projected.iter().cloned());
     match outcome.transition {
         crate::policy::commit::TransitionCode::Apply => Ok(()),
         crate::policy::commit::TransitionCode::InitialQueue => Err(queued_detail(&outcome)),

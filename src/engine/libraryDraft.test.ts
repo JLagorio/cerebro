@@ -161,6 +161,26 @@ describe('agentPatch by key (M55.12)', () => {
     '# Release scout\n\nWatch the risks.\n',
   );
 
+  it('patches ask-first alone: on writes true, off removes it (M57.4)', () => {
+    expect(d.askFirst).toBe(false);
+    expect(agentPatch({ ...d, askFirst: true }, ['askFirst'])).toEqual({ 'ask-first': true });
+    expect(agentPatch({ ...d, askFirst: false }, ['askFirst'])).toEqual({ 'ask-first': null });
+    // No other row carries it along.
+    expect('ask-first' in agentPatch({ ...d, askFirst: true }, ['shell', 'scope'])).toBe(false);
+  });
+
+  it('drafts an odd ask-first value as neither, and writes it on (M57.4)', () => {
+    const odd = (value: unknown) =>
+      agentDraft(
+        makeEntry({ path: 'a.md', type: 'Agent', properties: { 'ask-first': value } as never }),
+        '',
+      ).askFirst;
+    expect(odd(true)).toBe(true);
+    expect(odd(false)).toBe(false);
+    expect(odd('yes')).toBeNull();
+    expect(agentPatch({ ...d, askFirst: null }, ['askFirst'])).toEqual({ 'ask-first': true });
+  });
+
   it('writes exactly the asked keys', () => {
     expect(agentPatch(d, ['scope'])).toEqual({ scope: ['records/risks'] });
     expect(agentPatch(d, ['readScope'])).toEqual({ 'read-scope': ['records'] });

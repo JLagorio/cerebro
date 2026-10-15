@@ -11,14 +11,17 @@ import { describe, expect, it } from 'vitest';
 
 import { sha256Hex } from '../sha256';
 import { POLICY } from './table';
+import TOOL_CASES from '../../../src-tauri/fixtures/tool-cases.json';
 import {
   bareToolName,
+  isConfirmable,
   parseToolsManifest,
   TOOLS,
   TOOLS_DIGEST_PATH,
   TOOLS_FORMAT,
   TOOLS_PATH,
   toolFacts,
+  toolSchema,
   type CliTool,
   type ToolRow,
   type ToolsManifest,
@@ -45,6 +48,20 @@ describe('the shared manifest is one artifact', () => {
     expect(TOOLS.format).toBe(TOOLS_FORMAT);
     expect(TOOLS.tools.length).toBeGreaterThan(0);
     expect(TOOLS.cli_tools.length).toBeGreaterThan(0);
+  });
+
+  it('folds exactly the read rows, list_notes included (M56.8, M59.5)', () => {
+    const folded = TOOLS.tools.filter((row) => row.fold !== null).map((row) => row.name);
+    const reads = TOOLS.tools.filter((row) => row.kind === 'read_only').map((row) => row.name);
+    expect(folded).toEqual(reads);
+    expect(folded).toEqual([
+      'get_vault_context',
+      'search_notes',
+      'list_notes',
+      'get_note',
+      'knowledge_about',
+      'list_inbox',
+    ]);
   });
 });
 
@@ -369,6 +386,54 @@ describe('the load refuses what tools.rs refuses, in the same words', () => {
     ]);
   });
 
+  it('keeps confirmable on the note writers (M57.4)', () => {
+    expectNames([
+      [
+        'confirmable on a reader',
+        (v) => (tool(v, 'get_note').confirmable = true),
+        ['tool get_note', '`confirmable`', 'door none, which writes nothing'],
+      ],
+      [
+        'confirmable on a concept writer',
+        (v) => (tool(v, 'write_concept').confirmable = true),
+        ['tool write_concept', '`confirmable`', 'write or read_write axis, not none'],
+      ],
+      [
+        'confirmable on the generated block',
+        (v) => (v.generated.confirmable = true),
+        ['generated', '`confirmable`', 'policy.v3'],
+      ],
+      [
+        'a row without the column',
+        (v) => drop(tool(v, 'create_note'), 'confirmable'),
+        ['tool create_note', '`confirmable`', 'is missing'],
+      ],
+    ]);
+  });
+
+  it('holds door comment to reads of one note drawn as steps (M70.3)', () => {
+    const words = (name: string) =>
+      `${TOOLS_PATH}: tool ${name}: \`door\` comment takes only axis read, a note target, kind additive and renderer step`;
+    const cases: [string, (raw: ToolsManifest) => void][] = [
+      ['comment_on_note', (v) => (tool(v, 'comment_on_note').axis = 'read_write')],
+      [
+        'reply_to_comment',
+        (v) => (tool(v, 'reply_to_comment').target = { arg: null, kind: 'bundle' }),
+      ],
+      ['resolve_comment', (v) => (tool(v, 'resolve_comment').renderer = 'change')],
+      ['comment_on_note', (v) => (tool(v, 'comment_on_note').kind = 'destructive')],
+      ['get_note', (v) => (tool(v, 'get_note').door = 'comment')],
+    ];
+    for (const [name, mutate] of cases) expect(refused(mutate)).toBe(words(name));
+    expectNames([
+      [
+        'confirmable on a comment row',
+        (v) => (tool(v, 'comment_on_note').confirmable = true),
+        ['tool comment_on_note', '`confirmable`', 'door comment'],
+      ],
+    ]);
+  });
+
   it('names the CLI row and the field', () => {
     expectNames([
       [
@@ -377,19 +442,14 @@ describe('the load refuses what tools.rs refuses, in the same words', () => {
         ['cli tool task', '`name`', '[A-Z][A-Za-z]*'],
       ],
       [
-        'shell grant nothing withdraws',
-        (v) => (cli(v, 'Read').denied_when_read_scoped = false),
-        ['cli tool Read', '`with_shell`'],
+        'a row with no family',
+        (v) => (cli(v, 'Read').family = null),
+        ['cli tool Read', '`family`', 'tool-approval family'],
       ],
       [
-        'denied twice',
-        (v) => (cli(v, 'Bash').denied_when_read_scoped = true),
-        ['cli tool Bash', '`denied_when_read_scoped`'],
-      ],
-      [
-        'a writer shell-less runs keep',
-        (v) => (cli(v, 'WebFetch').writes = true),
-        ['cli tool WebFetch', '`denied_without_shell`'],
+        'a subject that is no input field',
+        (v) => (cli(v, 'Bash').subject = 'Command'),
+        ['cli tool Bash', '`subject`', 'null or an input field'],
       ],
       [
         'change card on a reader',
@@ -398,6 +458,27 @@ describe('the load refuses what tools.rs refuses, in the same words', () => {
       ],
       ['icon shape', (v) => (cli(v, 'Grep').icon = 'search_icon'), ['cli tool Grep', '`icon`']],
     ]);
+  });
+
+  it('gives every CLI row a family and a subject (M57.2)', () => {
+    expect(TOOLS.cli_tools.map((t) => [t.name, t.family, t.subject])).toEqual([
+      ['Write', 'file_write', 'file_path'],
+      ['Edit', 'file_write', 'file_path'],
+      ['MultiEdit', 'file_write', 'file_path'],
+      ['NotebookEdit', 'file_write', 'notebook_path'],
+      ['Bash', 'shell', 'command'],
+      ['Read', 'file_read', 'file_path'],
+      ['Glob', 'file_read', 'pattern'],
+      ['Grep', 'file_read', 'pattern'],
+      ['WebFetch', 'web', 'url'],
+      ['WebSearch', 'web', 'query'],
+      ['Task', 'delegate', 'description'],
+      ['AskUserQuestion', 'question', null],
+      ['ExitPlanMode', 'plan', null],
+    ]);
+    for (const name of ['AskUserQuestion', 'ExitPlanMode']) {
+      expect(toolFacts(name)).toMatchObject({ writes: false, renderer: 'step' });
+    }
   });
 
   it('keeps fold phrases on read rows alone (M56.8)', () => {
@@ -627,6 +708,46 @@ describe('toolFacts', () => {
     expect(toolFacts('write_concept')?.renderer).toBe('concept');
     expect(toolFacts('recheck_concept')?.renderer).toBe('concept');
   });
+
+  it('names exactly the four note writers confirmable, with their titles (M57.4)', () => {
+    expect(TOOLS.tools.filter((row) => row.confirmable).map((row) => row.name)).toEqual([
+      'create_note',
+      'update_frontmatter',
+      'append_to_note',
+      'edit_note',
+    ]);
+    expect(TOOLS.generated.confirmable).toBe(false);
+    expect(toolFacts('mcp__cerebro__create_note')).toMatchObject({
+      confirmable: true,
+      title: 'Create a note',
+    });
+    expect(toolFacts('get_note')).toMatchObject({ confirmable: false, title: 'Read a note' });
+    expect(toolFacts('Write')).toMatchObject({ confirmable: false, title: null });
+    for (const name of ['create_note', ' Create_Note ', 'MCP__CEREBRO__EDIT_NOTE']) {
+      expect(isConfirmable(name), name).toBe(true);
+    }
+    for (const name of ['get_note', 'write_concept', 'Write', 'mcp__other__create_note', '']) {
+      expect(isConfirmable(name), name).toBe(false);
+    }
+  });
+
+  it('gives each confirmable row’s schema, in either spelling (M57.4b)', () => {
+    for (const row of TOOLS.tools.filter((r) => r.confirmable)) {
+      expect(toolSchema(row.name)).toBe(row.input_schema);
+      expect(toolSchema(`mcp__cerebro__${row.name}`)).toBe(row.input_schema);
+      expect(JSON.stringify(row.input_schema)).not.toContain('{{');
+    }
+    expect(toolSchema('Write')).toBeNull();
+    expect(toolSchema('propose_update_belief')).toBeNull();
+    expect(toolSchema('mcp__other__create_note')).toBeNull();
+  });
+
+  it.each(TOOL_CASES.cases.map((c) => [c.tool, c.confirmable] as const))(
+    'replays tool-cases.json: %s is confirmable: %s',
+    (name, confirmable) => {
+      expect(isConfirmable(name)).toBe(confirmable);
+    },
+  );
 
   it('carries a row’s target and its door’s writes flag', () => {
     expect(toolFacts('create_note')).toMatchObject({

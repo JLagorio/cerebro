@@ -83,7 +83,7 @@ export interface Layout {
   settings: Record<SettingsName, string>;
 }
 
-export type SettingsName = 'hook' | 'allow' | 'allow-hook';
+export type SettingsName = 'hook' | 'allow' | 'allow-hook' | 'gate' | 'gate-near';
 
 export function layout(root: string): Layout {
   const probe = join(root, 'probe');
@@ -99,6 +99,8 @@ export function layout(root: string): Layout {
       hook: join(probe, 'settings-hook.json'),
       allow: join(probe, 'settings-allow.json'),
       'allow-hook': join(probe, 'settings-allow-hook.json'),
+      gate: join(probe, 'settings-gate.json'),
+      'gate-near': join(probe, 'settings-gate-near.json'),
     },
   };
 }
@@ -175,6 +177,9 @@ export interface Turn {
   decisions?: (at: Layout) => JsonObject;
   /** hook-decisions.json for the PreToolUse hook, written before the turn. */
   hookDecisions?: JsonObject;
+  /** gate-decisions.json for the probe's `gate` tool (M57.1), written before
+   * the turn. */
+  gateDecisions?: JsonObject;
   /** Stop the child's group at the first stdout line that matches. */
   stopOn?: Matcher;
 }
@@ -206,6 +211,50 @@ const ASK =
 const WRITE =
   'Use the Write tool to create notes/gamma.md containing the word hello, then reply done.';
 const RULE = "Call slow_echo once with text 'rule' and seconds 0, then reply done.";
+
+/**
+ * M57.1's gate: an `mcp_tool` PreToolUse hook that calls the probe's
+ * unlisted `gate` tool with the call, as Cerebro's run settings call
+ * `ask_gate`. The gated tool is never in --allowedTools, so a hook that does
+ * not answer leaves the call to argv, which refuses it.
+ */
+const gated = (
+  decision: JsonObject | null,
+): Pick<Turn, 'mode' | 'allowed' | 'settings' | 'gateDecisions'> => ({
+  mode: 'acceptEdits',
+  allowed: ['Read'],
+  settings: 'gate',
+  gateDecisions: decision === null ? {} : { [SLOW]: decision },
+});
+const GATE_DEFER = gated({ permissionDecision: 'defer' });
+
+/** The gate's hook entry: one exact-list matcher, the call handed over by
+ * the CLI's own interpolation. */
+export function gateHook(matcher: string): JsonObject {
+  const field = (name: string) => `\${${name}}`;
+  return {
+    PreToolUse: [
+      {
+        matcher,
+        hooks: [
+          {
+            type: 'mcp_tool',
+            server: 'probe',
+            tool: 'gate',
+            input: {
+              session_id: field('session_id'),
+              tool_use_id: field('tool_use_id'),
+              tool_name: field('tool_name'),
+              tool_input: field('tool_input'),
+              agent_id: field('agent_id'),
+            },
+            timeout: 10,
+          },
+        ],
+      },
+    ],
+  };
+}
 
 function user(text: string): JsonObject {
   return {
@@ -313,9 +362,71 @@ export const SCENARIOS = {
       },
       {
         ...acceptEdits,
-        ...hookSays('allow', 'The person allowed both.'),
+        ...hookSays('allow', 'The person allowed it.'),
         prompt: 'Continue.',
         session: { resume: 'c' },
+      },
+    ],
+  },
+  // M57.1: the ask seam's own transport, through an mcp_tool hook. Recorded
+  // only once the owner's login exists; its fixture lands with that record
+  // commit (RECORD_OWED).
+  'defer-gate': {
+    facts: ['F21', 'F22', 'F23', 'F24', 'F25', 'F26', 'F27'],
+    turns: [
+      // 0: the gate defers (F21, F27).
+      {
+        ...GATE_DEFER,
+        prompt: "Call slow_echo once with text 'alpha' and seconds 0, then reply done.",
+        session: { mint: 'a' },
+      },
+      // 1: an empty-prompt resume; the gate allows with an updated input (F22).
+      {
+        ...gated({ permissionDecision: 'allow', updatedInput: { text: 'gamma', seconds: 0 } }),
+        prompt: '',
+        session: { resume: 'a' },
+      },
+      // 2, 3: deferred, then denied with a reason on the empty-prompt resume (F22).
+      {
+        ...GATE_DEFER,
+        prompt: "Call slow_echo once with text 'beta' and seconds 0, then reply done.",
+        session: { mint: 'b' },
+      },
+      {
+        ...gated({ permissionDecision: 'deny', permissionDecisionReason: 'Not today.' }),
+        prompt: '',
+        session: { resume: 'b' },
+      },
+      // 4: the gate fails as a tool, and argv decides (F23).
+      {
+        ...gated({ isError: true }),
+        prompt: "Call slow_echo once with text 'delta' and seconds 0, then reply done.",
+        session: { mint: 'd' },
+      },
+      // 5: two calls in one message (F24).
+      {
+        ...GATE_DEFER,
+        prompt:
+          "Call slow_echo twice in one message, once with text 'one' and once with text 'two', seconds 0 each, then reply done.",
+        session: { mint: 'e' },
+      },
+      // 6, 7: deferred, then resumed with new text while the gate denies (F25).
+      {
+        ...GATE_DEFER,
+        prompt: "Call slow_echo once with text 'zeta' and seconds 0, then reply done.",
+        session: { mint: 'f' },
+      },
+      {
+        ...gated({ permissionDecision: 'deny', permissionDecisionReason: 'Never answered.' }),
+        prompt: 'Reply with the one word: next.',
+        session: { resume: 'f' },
+      },
+      // 8: a matcher that only nearly names the tool never runs the hook (F26).
+      {
+        ...GATE_DEFER,
+        settings: 'gate-near',
+        prompt: "Call slow_echo once with text 'eta' and seconds 0, then reply done.",
+        session: { mint: 'g' },
       },
     ],
   },
@@ -408,6 +519,13 @@ export const SCENARIOS = {
 } satisfies Record<string, Scenario>;
 
 export type ScenarioName = keyof typeof SCENARIOS;
+
+/**
+ * Scenarios whose fixture is owed a live run and has none yet (M57.1): no
+ * derived fixture stands in for them, so their fact cases skip, titled "live
+ * run owed", until the record commit adds `spike/<name>.json`.
+ */
+export const RECORD_OWED: readonly ScenarioName[] = ['defer-gate'];
 export const SCENARIO_NAMES = Object.keys(SCENARIOS) as ScenarioName[];
 
 /**
@@ -563,8 +681,13 @@ export function setup(at: Layout, node: string = process.execPath): void {
   writeJson(at.settings.hook, { hooks: hook });
   writeJson(at.settings.allow, { permissions: allow });
   writeJson(at.settings['allow-hook'], { permissions: allow, hooks: hook });
+  // M57.1: the gate, on exactly the gated tool; and one whose matcher only
+  // nearly names it, which an exact list never matches.
+  writeJson(at.settings.gate, { hooks: gateHook(SLOW) });
+  writeJson(at.settings['gate-near'], { hooks: gateHook(`Bash|${SLOW.slice(0, -1)}`) });
   writeJson(join(at.probe, 'decisions.json'), {});
   writeJson(join(at.probe, 'hook-decisions.json'), {});
+  writeJson(join(at.probe, 'gate-decisions.json'), {});
 }
 
 /**
@@ -914,6 +1037,7 @@ export async function runScenario(name: RunName, at: Layout, options: RunOptions
     const id = sessions.get(key) as string;
     writeJson(join(at.probe, 'decisions.json'), turn?.decisions?.(at) ?? {});
     writeJson(join(at.probe, 'hook-decisions.json'), turn?.hookDecisions ?? {});
+    writeJson(join(at.probe, 'gate-decisions.json'), turn?.gateDecisions ?? {});
     const logStart = existsSync(log) ? statSync(log).size : 0;
     const argv = turn ? turnArgv(turn, at, id) : streamArgv(at, id);
     options.log(`${name} step ${index}: claude ${argv.slice(0, 2).join(' ')} …`);

@@ -14,20 +14,27 @@ import { VAULT_TODAY } from '../src/lib/vaultToday';
  * `src/lib/vaultToday.ts`, which the state lab's clock pins too (M64.1). */
 export { VAULT_TODAY };
 
-export async function boot(page: Page): Promise<void> {
+/** What a spec may change about the boot (M57.2). */
+export interface BootOptions {
+  /** Let the background job runner fire (M8.6): off unless a spec is about
+   * a scheduled run. */
+  autoLearn?: boolean;
+}
+
+export async function boot(page: Page, { autoLearn = false }: BootOptions = {}): Promise<void> {
   // `setFixedTime` and not `install`: this freezes what the clock READS
   // without faking timers, so the app's intervals, debounces and Playwright's
   // own waiting all still run on real time.
   await page.clock.setFixedTime(new Date(VAULT_TODAY));
   // The background distiller (M8.6) is off for tests that are not about it:
   // a reader that fires four seconds in would rescan the vault mid-assertion.
-  await page.addInitScript(() => {
-    window.localStorage.setItem('cerebro.autoLearn', 'false');
+  await page.addInitScript((learn) => {
+    window.localStorage.setItem('cerebro.autoLearn', String(learn));
     // Pin the theme (M16.39). These specs assert on rendered UI, and an unset
     // themeMode resolves 'system' — so a dark display would flip every colour
     // out from under them. The app has two palettes now; the specs assume one.
     window.localStorage.setItem('cerebro.themeMode', 'light');
-  });
+  }, autoLearn);
   await page.goto('/');
   // With no persisted vault the first-launch chooser renders "Open demo
   // vault"; if the mock IPC restored a last vault it boots straight to the
@@ -124,6 +131,17 @@ export async function openStateLab(page: Page, section: string, state: string): 
   });
 }
 
+/** One commit the history seam stages (M58.4), as `SeedCommit` spells it. */
+export interface E2eSeedCommit {
+  hash: string;
+  message: string;
+  author?: string;
+  date: number;
+  files: { path: string; status: string; previousPath?: string }[];
+  snapshots: Record<string, string | null>;
+  run?: { runId: string; actor: string } | null;
+}
+
 /** One lab preset as `window.__cerebroLabPresets` lists it (M64.1). */
 export interface E2eLabPreset {
   section: string;
@@ -137,6 +155,9 @@ declare global {
     __cerebroMockFs: Map<string, string>;
     /** The M64.1 fault seam: the next read of this command fails once. */
     __cerebroFailNext: (command: string) => void;
+    /** The M59.4 page-text seam: ⌘K's searchVault rejects with this message
+     * until it is called again with null. */
+    __cerebroFailSearchVault: (message: string | null) => void;
     /** Every state-lab preset, set by the lab page in dev (M64.1). */
     __cerebroLabPresets: E2eLabPreset[];
     /** The M27.5 chip seam. The browser has no ledger, so a spec that wants
@@ -154,6 +175,10 @@ declare global {
     /** The M24.9 review seam. The browser has no ledger, so a spec stages the
      * cards `policy/review.rs` would have returned. */
     __cerebroSeedReview: (fixture: unknown) => void;
+    /** The M58.4 history seam (src/lib/mockGit.ts `seedGitHistory`): stage
+     * commits, newest first, each with the bytes its files held and, for a
+     * run's commit, the run runtime.db's record names. */
+    __cerebroSeedGitHistory: (commits: E2eSeedCommit[]) => void;
     /** The M55.6 write gate. While it holds a promise, the mock agent's write
      * steps wait for it, so a spec can type into the open page between the
      * ask and the write. */
@@ -163,6 +188,18 @@ declare global {
     __cerebroMockQuit: (deadlineMs?: number) => void;
     /** What the webview answered each quit: `finished` or `cancelled`. */
     __cerebroMockQuitLog: string[];
+    /** The M57.2 withheld-tool rows a mock run booked, as Rust's meter
+     * writes them under `agent.ask`. */
+    __cerebroMockRefusals?: { run: string; code: string; surface: string; detail: string }[];
+    /** The M57.2 disclosure seam: what Settings reads as the person's own
+     * Claude Code settings. Unset, the browser answers `browser`. */
+    __cerebroSeedClaudeSettings?: unknown;
+    /** The M57.4c unattended seam: start a run of `actor` nobody watches, as
+     * a schedule would, so its ask-first page writes wait in Review. */
+    __cerebroRunUnattended: (
+      vault: string,
+      run: { message: string; actor: string; scope?: string[] | null; askFirst?: boolean },
+    ) => Promise<unknown>;
     /** The M70.1 comment probe, on the last mounted editor in browser mode
      * (`CommentProbe` in src/editor/commentHighlights.ts): the selection as
      * an anchor, threads to draw, and how each one resolved. */

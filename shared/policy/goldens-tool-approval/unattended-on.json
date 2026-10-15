@@ -1,0 +1,48 @@
+{
+  "why": "A scheduled run under On (an agent that declares the shell): pre-approved as attended, and the refused tools denied in argv.",
+  "input": {
+    "kind": "unattended",
+    "shell": "on",
+    "ask_first": false,
+    "read_scoped": false,
+    "narrowing": null
+  },
+  "expected": {
+    "permission_mode": "acceptEdits",
+    "allowed": [
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "NotebookEdit",
+      "Bash",
+      "Read",
+      "Glob",
+      "Grep"
+    ],
+    "disallowed": [
+      "AskUserQuestion",
+      "ExitPlanMode"
+    ],
+    "matcher": [],
+    "withheld": [],
+    "decisions": {
+      "Write": "allow",
+      "Edit": "allow",
+      "MultiEdit": "allow",
+      "NotebookEdit": "allow",
+      "Bash": "allow",
+      "Read": "allow",
+      "Glob": "allow",
+      "Grep": "allow",
+      "WebFetch": "cli",
+      "WebSearch": "cli",
+      "Task": "cli",
+      "AskUserQuestion": "deny",
+      "ExitPlanMode": "deny",
+      "mcp__cerebro__create_note": "allow",
+      "mcp__cerebro__update_frontmatter": "allow",
+      "mcp__cerebro__append_to_note": "allow",
+      "mcp__cerebro__edit_note": "allow"
+    }
+  }
+}

@@ -9,8 +9,8 @@
  * once it passes, so every step here is bounded by a share of the deadline
  * the request names, and no constant here twins Rust's.
  *
- * A save that fails keeps the app open with a toast. A second quit within
- * `QUIT_ANYWAY_MS` closes anyway.
+ * A save that fails, before or during the leave, keeps the app open with a
+ * toast. A second quit within `QUIT_ANYWAY_MS` closes anyway.
  *
  * Dock Quit, logout, restart and shutdown never ask, so none of this runs
  * for them. See quit.rs.
@@ -180,6 +180,10 @@ export async function prepareQuit(
     if (deps.pageWriteFailures() > before && !quitAnyway) return await stay();
     await within(deps.beginLeaving(leaveMs), leaveMs);
     await within(deps.settlePageWrites(settleMs), settleMs);
+    // Some saves happen only on leave (a held save, an open choice, a
+    // diagram). The page has unmounted by now, so staying can only report a
+    // failure here, not keep its text; endLeaving brings the shell back.
+    if (deps.pageWriteFailures() > before && !quitAnyway) return await stay();
   } catch {
     // An unexpected throw is a save that may not have landed.
     if (!quitAnyway) {

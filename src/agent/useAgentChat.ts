@@ -1,22 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   answerInteraction,
+  attachRun,
   cancelInteraction,
   listInteractions,
-  onAgentEvent,
+  readCliTranscript,
   runAgent,
   startedOrThrow,
   stopAgent,
+  type RunHandle,
 } from './agentIpc';
 import { newRunId } from './runs';
-import { applyEvent, endLiveTurn } from './transcript';
-import type { AgentEvent, ChatMessage, PendingInteraction, PersonAnswer, PrLink } from './types';
+import { applyEvent, endLiveTurn, replaceLastTurn, replayTranscript } from './transcript';
+import type {
+  AgentEvent,
+  ChatMessage,
+  LiveTurn,
+  PendingInteraction,
+  PersonAnswer,
+  PrLink,
+} from './types';
 import { flushOpenPages } from '@/editor/openPages';
 import { listAgents, narrowTools, readAddress } from '@/engine/agents';
 import type { Place } from '@/engine/place';
-import { grantedTools, type PromptGrant } from '@/engine/toolGrant';
-import { isWriteTool } from '@/engine/tools';
+import { grantedTools, holdsShell, type PromptGrant } from '@/engine/toolGrant';
 import { readNote } from '@/lib/ipc';
+import { effectiveCeiling, type ShellCeiling } from '@/lib/policy/toolApproval';
 import { addressedAgentPrompt, panelAgentPrompt, standingInstructionsBlock } from '@/lib/prompts';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -81,6 +90,13 @@ function newIdPrefix(): string {
 }
 
 /**
+ * How long a stopped turn waits for its run's Done (M57.5) before it ends
+ * anyway, with one toast. Rust's stop is TERM, a 2 s grace, then KILL, so a
+ * Done this late is lost, not slow.
+ */
+export const STOP_CONFIRM_MS = 10_000;
+
+/**
  * A call the turn waits on (M57.1): Rust's card, the bubble it belongs to (the
  * resume goes on there), whether an answer is on its way, and, once an answer
  * came too late, Rust's words for that.
@@ -90,6 +106,9 @@ export interface WaitingCard {
   messageId: string;
   answering: boolean;
   stale: string | null;
+  /** Rust's refusal of a write card's edited draft (M57.4b): the card still
+   * waits, with the person's edits, to be answered again. */
+  refused?: string | null;
 }
 
 export interface AgentChat {
@@ -123,12 +142,36 @@ export interface AgentChat {
      * thing being invoked, not to the thread it was invoked in. Intersected
      * with the addressed agent's own narrowing, if the turn named one. */
     allowedTools?: string[] | null,
+    /** The context this turn was queued in (M57.5, Up next), frozen then; it
+     * replaces `getTurn()`. The Settings ceilings and the panel's binding
+     * are still read now, so a ceiling lowered since binds the turn. */
+    turn?: TurnContext,
   ): void;
+  /** Stop this conversation's turn (M57.5). With a run, Rust stops it and the
+   * turn stays, `stopping`, until its Cancelled and Done arrive, so the next
+   * turn never shares a session with a child still in its grace. Before the
+   * child exists, or with a card waiting (which has no child), it ends at
+   * once. Either way the reply reads cancelled. */
   stop(): void;
+  /** A stop is on its way and the run's Done has not come (M57.5). */
+  stopping: boolean;
+  /** Is a turn in flight, stopping or waiting on a card (M57.5)? Stable, and
+   * read off refs, so it is true in the same tick a send starts. */
+  busy(): boolean;
+  /** Start a new conversation in this hook (M57.6): a running turn is
+   * detached, never stopped, and a waiting card keeps waiting. */
   reset(): void;
+  /** The turn still running in this conversation, if any (M57.6): what the
+   * thread saves so reopening it, or reloading, re-attaches. Set when the
+   * child exists, moved to the resume when a card's answer resumes it, and
+   * null once the turn has ended. */
+  live: LiveTurn | null;
   /** M9.5: the CLI session behind this transcript, so a conversation can be
-   * resumed after a reload rather than starting over. Minted before the first
-   * event (M56.3), and the session file a lost thread is rebuilt from. */
+   * resumed after a reload rather than starting over, and the session file a
+   * lost thread is rebuilt from (M56.3). A session Rust minted for this turn
+   * shows here only once the run's stream names it: Claude Code writes the
+   * file after its init, so a turn stopped before that leaves no file, and
+   * the thread keeps the session it had (none, for a new one). */
   sessionId: string | null;
   /** The model Claude Code last reported answering (M56.3), or null. */
   model: string | null;
@@ -138,12 +181,32 @@ export interface AgentChat {
   turnEndedAt: string | null;
   /** Restore a persisted conversation into the hook, with what its
    * transcript says about it when it was read back (M56.3); without facts,
-   * the model and the links clear. */
+   * the model and the links clear. The turn this conversation was running
+   * is detached first, never stopped (M57.6). Given the restored thread's
+   * `live` turn, it re-attaches to it, from its reply's `seq`. */
   restore(
     messages: ChatMessage[],
     sessionId: string | null,
     facts?: { model: string | null; prLinks: PrLink[] },
+    live?: LiveTurn | null,
   ): void;
+}
+
+/** The one-line label a turn's run is listed under: its question, the user
+ * message just before `assistantId` in `messages`. */
+function questionBefore(messages: ChatMessage[], assistantId: string): string {
+  const at = messages.findIndex((m) => m.id === assistantId);
+  const question = messages
+    .slice(0, at === -1 ? messages.length : at)
+    .reverse()
+    .find((m) => m.role === 'user');
+  return question?.text ?? 'Assistant turn';
+}
+
+/** `message` with its cursor at `event`'s seq, when the event carries one (a
+ * test double's may not, and then the cursor stays where it was). */
+function stamped(message: ChatMessage, event: AgentEvent): ChatMessage {
+  return typeof event.seq === 'number' ? { ...message, seq: event.seq } : message;
 }
 
 /**
@@ -162,16 +225,22 @@ export interface AgentChat {
  * run id, so a turn subscribes to ITS run and is structurally incapable of
  * seeing another's — including the terminal `Done` that used to freeze a
  * brand-new bubble the moment a question was asked.
+ *
+ * M57.6: a turn outlives the hook. Closing the panel, switching threads and
+ * New conversation detach from the run and leave it running; the thread
+ * saves `live`, and opening it again re-attaches through the run's journal
+ * (`attachRun`), from the cursor its reply carries, so each event lands once.
+ * What a finished turn does to the vault (end its run record, rescan)
+ * belongs to ChatTurnsHost, which is mounted for the app's life, so a turn
+ * that ends while detached is settled exactly once. Its commit is Rust's,
+ * made before the run's Done (M58.3).
  */
 export function useAgentChat(
   /** This turn's context — see TurnContext for why it is a getter. */
   getTurn: () => TurnContext,
-  { shell, connectors }: { shell: boolean; connectors: boolean },
-  /** Fires after a turn that wrote files, with a one-line summary (M9.5). */
-  onWroteFiles?: (summary: string) => void,
+  { shell, connectors }: { shell: ShellCeiling; connectors: boolean },
 ): AgentChat {
   const vaultPath = useVaultStore((s) => s.vaultPath);
-  const rescan = useVaultStore((s) => s.rescan);
   const toast = useUiStore((s) => s.toast);
   // M17.7: a turn REGISTERS itself rather than raising a shared flag. The
   // background runner still yields to an attended run as a courtesy — don't
@@ -181,6 +250,9 @@ export function useAgentChat(
   const attachChild = useUiStore((s) => s.attachChild);
   const endRun = useUiStore((s) => s.endRun);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // The latest messages, for a stop that names the reply it waits on.
+  const messagesRef = useRef<ChatMessage[]>(messages);
+  messagesRef.current = messages;
   const [streaming, setStreaming] = useState(false);
   const idPrefix = useRef<string>('');
   if (idPrefix.current === '') idPrefix.current = newIdPrefix();
@@ -191,35 +263,56 @@ export function useAgentChat(
   }, []);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const sessionRef = useRef<string | null>(null);
+  // A session Rust minted for the in-flight turn that the stream has not
+  // named yet, with the one it replaced. Until Init or Result names it no
+  // session file exists, so a turn that ends first puts the old one back.
+  const provisional = useRef<{ previous: string | null } | null>(null);
   const [reportedModel, setReportedModel] = useState<string | null>(null);
   const [prLinks, setPrLinks] = useState<PrLink[]>([]);
   const [turnEndedAt, setTurnEndedAt] = useState<string | null>(null);
-  // The prompt that started the in-flight turn, so a write checkpoint can say
-  // what the agent was asked to do rather than just that it wrote.
-  const lastPrompt = useRef<string>('');
-  const onWrote = useRef(onWroteFiles);
-  onWrote.current = onWroteFiles;
   // This turn's run and its subscription. Both are per-turn: the run id is
   // what stopAgent needs, and the unsubscribe is what guarantees a finished
-  // turn stops listening.
+  // or detached turn stops listening.
   const runRef = useRef<number | null>(null);
   // This turn's entry in the run registry, which exists from the moment Send
-  // is pressed — before the child does.
+  // is pressed — before the child does — and whether a host can settle it:
+  // once its child is attached with a key, ChatTurnsHost ends it at Done
+  // (M57.6), and this hook ends it only when no child ever came.
   const taskRef = useRef<string | null>(null);
+  const taskSettledByHost = useRef(false);
+  // Where the turn was asked, for a run record registered again on a resume.
+  const turnPlace = useRef<{ place: Place | null; conversationId: string | null }>({
+    place: null,
+    conversationId: null,
+  });
   const unsubscribe = useRef<(() => void) | null>(null);
+  // Bumped by every attach and every detach, so an attach answered after the
+  // turn moved on lets go of what it holds, and its events change nothing.
+  const attachToken = useRef(0);
+  // M57.6: the journal dropped events of this turn's run while nobody was
+  // attached, so only Cancelled, Error and Done change the reply, and Done
+  // rebuilds it from the session file.
+  const gapRef = useRef(false);
+  const [live, setLiveState] = useState<LiveTurn | null>(null);
+  const liveRef = useRef<LiveTurn | null>(null);
+  const setLive = useCallback((next: LiveTurn | null) => {
+    liveRef.current = next;
+    setLiveState(next);
+  }, []);
   // One turn at a time PER CONVERSATION (PR #5 review). Not a global lock any
   // more — other conversations and the background runner have their own runs.
   const turnInFlight = useRef(false);
-  // Cancellation for send()'s async leg (PR #5 review). stop/reset/restore
-  // end the TURN synchronously, but the send that started it may still be
+  // Cancellation for send()'s async leg (PR #5 review). Reset, restore and
+  // unmounting detach the turn synchronously (M57.6), and a stop before the
+  // child exists ends it (M57.5), but the send that started it may still be
   // parked on the open pages' saves, a skill expansion or an addressed
-  // agent's record — and on resume it would spawn a child for a turn the user
-  // already cancelled. Bumping the epoch makes that pending work quit at its
+  // agent's record — and on resume it would spawn a child for a turn nobody
+  // is attached to. Bumping the epoch makes that pending work quit at its
   // next checkpoint instead.
   const sendEpoch = useRef(0);
-  // The agent writes straight to disk; a turn that touched files must end
-  // with a rescan or the UI keeps showing the pre-agent vault.
-  const touchedFiles = useRef(false);
+  // M57.5: the reply whose send is inside runAgent, so a Stop in that window
+  // waits for the child it is about to have.
+  const spawning = useRef<string | null>(null);
   // M57.1: the card this conversation shows, mirrored in a ref so the event
   // handler reads it in the same dispatch that set it, and the calls this
   // turn's run deferred that have not come back.
@@ -230,65 +323,176 @@ export function useAgentChat(
     setInteraction(next);
   }, []);
   const deferredIds = useRef<Set<string>>(new Set());
+  // M57.5: the reply a stop is waiting on (its bubble's id), mirrored in a
+  // ref for `busy()`, and the timer that gives up on a lost Done.
+  const [stopping, setStopping] = useState(false);
+  const stoppingRef = useRef<string | null>(null);
+  const stopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearStopping = useCallback(() => {
+    if (stopTimer.current !== null) clearTimeout(stopTimer.current);
+    stopTimer.current = null;
+    stoppingRef.current = null;
+    setStopping(false);
+  }, []);
 
   const patchMessage = useCallback((id: string, update: (m: ChatMessage) => ChatMessage) => {
     setMessages((prev) => prev.map((m) => (m.id === id ? update(m) : m)));
   }, []);
 
-  /** Drop this turn's subscription and clear its run. Idempotent. */
+  /** Let go of this turn's run: drop its subscription and clear it, leaving
+   * the run itself alone. Idempotent. */
   const releaseRun = useCallback(() => {
+    attachToken.current += 1;
     unsubscribe.current?.();
     unsubscribe.current = null;
     runRef.current = null;
   }, []);
 
+  /** Give the turn's task its child, and the key the host settles it by. */
+  const attachTask = useCallback(
+    (taskId: string, handle: Pick<RunHandle, 'run' | 'attach'>) => {
+      attachChild(taskId, handle.run, handle.attach);
+      taskSettledByHost.current = handle.attach !== undefined;
+    },
+    [attachChild],
+  );
+
+  /** The turn's task, in the registry again if the host already ended it
+   * (a run that stopped on a card, M57.1), holding `handle`'s child. */
+  const ensureTask = useCallback(
+    (handle: Pick<RunHandle, 'run' | 'attach'>, assistantId: string) => {
+      const held = taskRef.current;
+      if (held !== null && useUiStore.getState().runs.some((r) => r.id === held)) {
+        attachTask(held, handle);
+        return;
+      }
+      const taskId = newRunId();
+      taskRef.current = taskId;
+      startRun({
+        id: taskId,
+        owner: 'chat',
+        label: questionBefore(messagesRef.current, assistantId),
+        place: turnPlace.current.place,
+        path: null,
+        conversationId: turnPlace.current.conversationId,
+        run: handle.run,
+        ...(handle.attach === undefined ? {} : { attach: handle.attach }),
+        startedAt: Date.now(),
+      });
+      taskSettledByHost.current = handle.attach !== undefined;
+    },
+    [attachTask, startRun],
+  );
+
+  /** Let go of the turn's task. One a host settles stays in the registry
+   * for it; one no host can settle (no child ever came) ends here. */
+  const releaseTask = useCallback(() => {
+    if (taskRef.current !== null && !taskSettledByHost.current) endRun(taskRef.current);
+    taskRef.current = null;
+    taskSettledByHost.current = false;
+  }, [endRun]);
+
   const endTurn = useCallback(() => {
     releaseRun();
-    turnInFlight.current = false;
-    setStreaming(false);
-    if (taskRef.current !== null) {
-      endRun(taskRef.current);
-      taskRef.current = null;
+    clearStopping();
+    // A minted session the run never named has no file to resume: the next
+    // send mints its own rather than `--resume` a session Claude Code never
+    // wrote, which answers "No conversation found".
+    if (provisional.current !== null) {
+      sessionRef.current = provisional.current.previous;
+      provisional.current = null;
     }
-  }, [endRun, releaseRun]);
+    turnInFlight.current = false;
+    gapRef.current = false;
+    setLive(null);
+    setStreaming(false);
+    releaseTask();
+  }, [clearStopping, releaseRun, releaseTask, setLive]);
 
-  /** Kill THIS conversation's run, if it has one. Fire-and-forget: callers
-   * end the turn synchronously, and a run that already finished answers
-   * false rather than erroring. */
-  const killRun = useCallback(() => {
-    const run = runRef.current;
-    if (run === null) return;
-    void stopAgent(run).catch(() => undefined);
-  }, []);
+  /** Detach the turn (M57.6): unsubscribe and leave its run, its registry
+   * record and its card alone. Reset, restore and unmounting do this; a
+   * send still parked before its spawn is cancelled by the epoch the caller
+   * bumps, and its task, which no child will settle, ends here. */
+  const detachTurn = useCallback(() => {
+    releaseRun();
+    clearStopping();
+    turnInFlight.current = false;
+    gapRef.current = false;
+    setStreaming(false);
+    releaseTask();
+  }, [clearStopping, releaseRun, releaseTask]);
 
-  /**
-   * One event of this turn's run. What the message shows is the reducer's
-   * (`transcript.ts`, the same one a restored thread replays through); this
-   * keeps only the side effects: the session, touched files, the model, the
-   * links, and ending the turn.
-   */
-  /** The turn is over: it frees its run and its task, notes when it ended,
-   * and a turn that wrote rescans and checkpoints. */
+  /** The turn is over: it frees its run, notes when it ended, and is no
+   * longer live. What it did to the vault is ChatTurnsHost's to settle. */
   const finishTurn = useCallback(() => {
     deferredIds.current.clear();
     endTurn();
     setTurnEndedAt(new Date().toISOString());
-    if (touchedFiles.current) {
-      touchedFiles.current = false;
-      void rescan();
-      // M9.5/M9.4: a turn that wrote files gets its own checkpoint, so
-      // the assistant's work is revertible on its own rather than
-      // tangled into the user's next one.
-      onWrote.current?.(lastPrompt.current);
-    }
-  }, [endTurn, rescan]);
+  }, [endTurn]);
 
+  /**
+   * Put a reply back as the session file says its turn went (M57.6): after a
+   * gap, at Done, or when the journal no longer knows the run. A file that
+   * cannot be read keeps the cached reply, marked interrupted, so a cut
+   * reply never reads as final.
+   */
+  const rebuildFromFile = useCallback(
+    (assistantId: string) => {
+      const session = sessionRef.current;
+      const epoch = sendEpoch.current;
+      const interrupted = () =>
+        patchMessage(assistantId, (m) => {
+          const { gap: _gap, ...rest } = m;
+          return { ...rest, streaming: false, interrupted: true };
+        });
+      if (session === null || vaultPath === null) {
+        interrupted();
+        return;
+      }
+      void readCliTranscript(vaultPath, session, null).then((read) => {
+        if (sendEpoch.current !== epoch) return;
+        if (read.state !== 'read') {
+          interrupted();
+          return;
+        }
+        const replayed = replayTranscript(read.events, session);
+        setMessages((prev) => replaceLastTurn(prev, assistantId, replayed.messages));
+      });
+    },
+    [patchMessage, vaultPath],
+  );
+
+  /** The turn ended at its run's Done: after a gap, its reply rebuilds from
+   * the session file first. */
+  const settleTurn = useCallback(
+    (assistantId: string) => {
+      if (gapRef.current) rebuildFromFile(assistantId);
+      finishTurn();
+    },
+    [finishTurn, rebuildFromFile],
+  );
+
+  /**
+   * One event of this turn's run. What the message shows is the reducer's
+   * (`transcript.ts`, the same one a restored thread replays through); this
+   * keeps only the side effects: the session, the model, the links, the
+   * card a held call raises (M57.1), the reply's cursor (M57.6), and ending
+   * the turn, which a run's Done does unless the turn is waiting on that
+   * card. After a gap only Cancelled, Error, Changeset and Done change the
+   * reply: the session file a gap rebuilds from never holds the first three
+   * (M58.3 for the Changeset).
+   */
   const handleEvent = useCallback(
     (assistantId: string, event: AgentEvent) => {
+      const touch = () => {
+        if (typeof event.seq === 'number') patchMessage(assistantId, (m) => stamped(m, event));
+      };
       switch (event.kind) {
         case 'Init':
+          provisional.current = null;
           sessionRef.current = event.session_id;
           setSessionId(event.session_id);
+          touch();
           return;
         case 'Interaction':
           // M57.1: this run's own gate holds a call for the person.
@@ -298,15 +502,13 @@ export function useAgentChat(
             answering: false,
             stale: null,
           });
+          touch();
           return;
         case 'ToolDeferred':
           deferredIds.current.add(event.tool_id);
           break;
         case 'ToolDone':
           deferredIds.current.delete(event.tool_id);
-          break;
-        case 'ToolStart':
-          if (isWriteTool(event.tool_name)) touchedFiles.current = true;
           break;
         case 'ModelChanged':
           setReportedModel(event.model);
@@ -317,25 +519,33 @@ export function useAgentChat(
               ? prev
               : [...prev, { number: event.number, url: event.url, repository: event.repository }],
           );
+          touch();
           return;
         case 'Result':
           if (event.session_id) {
+            provisional.current = null;
             sessionRef.current = event.session_id;
             setSessionId(event.session_id);
           }
           break;
+        case 'Cancelled':
+          // M57.5: Rust says the run was stopped on purpose, whoever stopped
+          // it (this panel, the run list, a vault switch); the reducer marks
+          // the reply, and Done ends the turn as usual.
+          break;
         case 'Done': {
-          patchMessage(assistantId, endLiveTurn);
+          patchMessage(assistantId, (m) => stamped(endLiveTurn(m), event));
           // M57.1: a run that stopped on a call for the person has ended,
           // and its turn has not: it stays in flight, waiting, with no run,
-          // until an answer resumes it or Stop cancels it.
+          // until an answer resumes it or Stop cancels it. It stays live
+          // (M57.6), so a thread switch or a close keeps the card waiting.
           const waitingOn = interactionRef.current;
           if (waitingOn !== null && waitingOn.stale === null) {
             releaseRun();
             return;
           }
           if (deferredIds.current.size === 0) {
-            finishTurn();
+            settleTurn(assistantId);
             return;
           }
           // A deferral with no card: the book may hold one this event raced,
@@ -354,7 +564,7 @@ export function useAgentChat(
               ...m,
               tools: m.tools.map((t) => (held.includes(t.id) ? { ...t, paused: true } : t)),
             }));
-            finishTurn();
+            settleTurn(assistantId);
           };
           if (vaultPath === null) {
             settle(undefined);
@@ -368,26 +578,98 @@ export function useAgentChat(
           return;
         }
       }
-      patchMessage(assistantId, (m) => applyEvent(m, event, 'live'));
+      if (
+        gapRef.current &&
+        event.kind !== 'Cancelled' &&
+        event.kind !== 'Error' &&
+        event.kind !== 'Changeset'
+      ) {
+        touch();
+        return;
+      }
+      patchMessage(assistantId, (m) => stamped(applyEvent(m, event, 'live'), event));
     },
-    [finishTurn, patchMessage, releaseRun, showInteraction, vaultPath],
+    [patchMessage, releaseRun, settleTurn, showInteraction, vaultPath],
+  );
+
+  /**
+   * Follow a run (M57.6): every event after `after`, each once and in order,
+   * through `attachRun`, which reads the run's journal from the cursor, so
+   * nothing it said before this subscription is lost. `onState` hears the
+   * journal's answer before any event; `unknown` means it holds nothing for
+   * the run, and `onUnknown` decides what the turn does without it.
+   */
+  const follow = useCallback(
+    (
+      handle: Pick<RunHandle, 'run' | 'attach'>,
+      after: number,
+      assistantId: string,
+      hooks: {
+        onState?: (done: boolean) => void;
+        onUnknown?: () => void;
+        /** The journal said the run had ended and nothing after the cursor
+         * ended the turn: the cursor already covered the run's Done. */
+        onEndedBefore?: () => void;
+      } = {},
+    ) => {
+      attachToken.current += 1;
+      const token = attachToken.current;
+      unsubscribe.current = null;
+      void attachRun(
+        handle,
+        after,
+        (event) => {
+          if (attachToken.current === token) handleEvent(assistantId, event);
+        },
+        (state, done) => {
+          if (attachToken.current !== token || state === 'unknown') return;
+          if (state === 'gap') {
+            gapRef.current = true;
+            patchMessage(assistantId, (m) => ({ ...m, gap: true }));
+          }
+          hooks.onState?.(done);
+        },
+      )
+        .then((attached) => {
+          if (attached.state === 'unknown') {
+            if (attachToken.current === token) hooks.onUnknown?.();
+            return;
+          }
+          if (attachToken.current !== token) {
+            attached.detach();
+            return;
+          }
+          unsubscribe.current = attached.detach;
+          if (attached.done) hooks.onEndedBefore?.();
+        })
+        .catch(() => undefined);
+    },
+    [handleEvent, patchMessage],
   );
 
   const send = useCallback(
-    (text: string, message?: string | (() => Promise<string>), allowedTools?: string[] | null) => {
+    (
+      text: string,
+      message?: string | (() => Promise<string>),
+      allowedTools?: string[] | null,
+      frozen?: TurnContext,
+    ) => {
       const trimmed = text.trim();
       if (trimmed === '' || vaultPath === null) return;
-      // Callers gate on `streaming`; this closes the same-tick window where
-      // that render state is still stale. Dropped, not queued — the caller
-      // that hit it kept its draft, so nothing is lost.
-      if (turnInFlight.current) return;
+      // Mid-turn text goes to Up next (M57.5), which sends only when this
+      // conversation is idle; this guard only stops a same-tick double
+      // dispatch, while the render state callers read is still stale.
+      if (turnInFlight.current || stoppingRef.current !== null) return;
       turnInFlight.current = true;
       // A card an answer came too late for goes with the next turn (M57.1).
       showInteraction(null);
       deferredIds.current.clear();
+      gapRef.current = false;
       // Frozen here, before anything can await: this turn's context is the
-      // context the question was asked in.
-      const turn = getTurn();
+      // context the question was asked in. A queued turn's was frozen when it
+      // was queued (M57.5); only the panel's binding (M56.6) is read now.
+      const current = getTurn();
+      const turn = frozen === undefined ? current : { ...frozen, boundAgent: current.boundAgent };
       // M33b.6 — who this turn is addressed to, read from the text the person
       // actually composed. Off the store synchronously rather than through a
       // subscription: the recipient belongs to THIS message, and a chat hook
@@ -408,7 +690,6 @@ export function useAgentChat(
           : null;
       const recipient = addressedTo ?? bound;
       const assistantId = nextId();
-      lastPrompt.current = trimmed;
       // A labelled ask's prompt rides on its bubble (ChatMessage.prompt), so a
       // retry can send it again. A skill's expansion is a function read inside
       // the turn, and is not kept.
@@ -445,6 +726,8 @@ export function useAgentChat(
       // waits.
       const taskId = newRunId();
       taskRef.current = taskId;
+      taskSettledByHost.current = false;
+      turnPlace.current = { place: turn.place, conversationId: turn.conversationId };
       startRun({
         id: taskId,
         owner: 'chat',
@@ -458,9 +741,10 @@ export function useAgentChat(
 
       const epoch = sendEpoch.current;
       void (async () => {
-        // stop/reset/restore bumped the epoch while this send was parked on
-        // an await: the turn is over, so quit without spawning a child. The
-        // bubble was appended synchronously, so un-spin it here.
+        // stop/reset/restore/unmount bumped the epoch while this send was
+        // parked on an await: the turn is over or detached, so quit without
+        // spawning a child. The bubble was appended synchronously, so un-spin
+        // it here.
         const cancelled = () => {
           if (sendEpoch.current === epoch) return false;
           patchMessage(assistantId, (m) => ({ ...m, streaming: false }));
@@ -501,12 +785,23 @@ export function useAgentChat(
           // Two narrowings can meet on one turn — a skill's `allowed-tools:`
           // and the recipient's — so they intersect. Never union. What
           // the turn then holds is what its prompts may name (M54.7): the
-          // narrowing, the shell this turn is granted, which a read limit
-          // withdraws in Rust (M53.5), and a person watching.
+          // narrowing, the shell its ceiling plans for it (M57.2), which a
+          // read limit withdraws (M53.5), and a person watching.
           const allowed = narrowTools(allowedTools ?? null, recipient?.allowedTools ?? null);
+          // M57.2 — the ceiling this turn may hold: the Settings ceiling, and
+          // for an addressed or bound agent only when its record declares
+          // `tools: shell`. A record can only SUBTRACT: none grants itself
+          // what Settings denies, and addressing one is never the way around
+          // that, exactly as on a schedule (useJobRunner).
+          const ceiling = effectiveCeiling(shell, recipient === null ? null : recipient.shell);
           const grant: PromptGrant = {
             tools: grantedTools(allowed),
-            shell: shell && (recipient?.shell ?? true) && recipient?.readScope == null,
+            shell: holdsShell({
+              shell: ceiling,
+              attended: true,
+              readScoped: recipient?.readScope != null,
+              narrowing: allowed,
+            }),
             attended: true,
           };
           // An addressed recipient's block LEADS the message, like
@@ -530,7 +825,8 @@ export function useAgentChat(
           if (cancelled()) return;
           // Attended, no lane: never gated, so a deferral here would be a
           // contract break — startedOrThrow turns it into a visible error.
-          const { run, sessionId: started } = startedOrThrow(
+          spawning.current = assistantId;
+          const handle = startedOrThrow(
             await runAgent(vaultPath, {
               message: outgoing,
               systemPrompt: turn.systemPrompt(grant) + closing,
@@ -540,13 +836,9 @@ export function useAgentChat(
               model: turn.model ?? recipient?.model ?? null,
               effort: turn.effort ?? recipient?.effort ?? null,
               // M33b.6 — the recipient's grant (addressed, or bound in
-              // Settings since M56.6), and it can only ever
-              // SUBTRACT. `shell` here is the Settings ceiling; a record that
-              // declares `tools: shell` in a vault whose owner never switched
-              // shell on still gets false, exactly as it does on a schedule
-              // (useJobRunner). No record grants itself what Settings denies,
-              // and addressing one must never become the way around that.
-              shell: shell && (recipient?.shell ?? true),
+              // Settings since M56.6), and it can only ever SUBTRACT: the
+              // ceiling worked out above.
+              shell: ceiling,
               connectors,
               connectorNames: recipient?.connectors ?? null,
               // A person typed this turn and is watching it stream — the one
@@ -556,6 +848,12 @@ export function useAgentChat(
               // below (PR #5 security review, M54.9), and to reach connectors
               // a record does not name.
               attended: true,
+              // M57.4: the addressed or bound agent's `ask-first:`; false for
+              // the plain panel, which no record answers for. Its page
+              // writes then wait for the person's Allow in a card. A card's
+              // answer resumes the run Rust froze, so the actor, the scopes,
+              // the tools and this never re-derive from the resume.
+              askFirst: recipient?.askFirst ?? false,
               approvedStdio: useUiStore.getState().stdioApprovals[vaultPath] ?? [],
               // The narrowing the grant above was read from, so the prompt and
               // the CLI's tools are the same set.
@@ -575,43 +873,65 @@ export function useAgentChat(
               actor: recipient?.actor ?? null,
             }),
           );
-          // Cancelled during the spawn itself: the child exists now, so it has
-          // to be killed by id rather than abandoned.
-          if (cancelled()) {
+          const { run, sessionId: started, attach } = handle;
+          spawning.current = null;
+          const goLive = () => {
+            runRef.current = run;
+            attachTask(taskId, handle);
+            if (attach !== undefined) setLive({ run, attach, assistantId });
+            follow(handle, 0, assistantId);
+          };
+          // Stopped during the spawn itself (M57.5): the child exists now, so
+          // the turn takes it, stops it, and stays stopping until its Done.
+          if (stoppingRef.current === assistantId) {
+            goLive();
             void stopAgent(run).catch(() => undefined);
-            endTurn();
             return;
           }
-          // The subscription is scoped to THIS run, so no event from any other
-          // conversation, background job or killed child can reach this turn.
-          // The mock and the Rust reader both emit asynchronously, so the id
-          // is always in hand before the first event.
-          // M56.3: the session is known before the first event — minted or
-          // resumed in Rust — so the thread stores it now, and a reload
-          // mid-turn still knows which file to rebuild from.
-          if (started !== undefined && started !== null) {
-            sessionRef.current = started;
-            setSessionId(started);
+          // Reset, restored or unmounted during the spawn: the send was
+          // still parked, so it is cancelled as it always was — the child is
+          // killed by id, never abandoned, and the turn is not ended again
+          // (a newer one may hold it now).
+          if (cancelled()) {
+            void stopAgent(run).catch(() => undefined);
+            return;
           }
-          runRef.current = run;
-          attachChild(taskId, run);
-          unsubscribe.current = onAgentEvent((event) => handleEvent(assistantId, event), run);
+          // M56.3: the session is known before the first event, minted or
+          // resumed in Rust. A resumed one is the thread's already. A minted
+          // one is held back from the thread until the stream names it (the
+          // Init case above stores it): before Claude Code's init there is no
+          // session file, so a thread that stored it then and was stopped,
+          // closed or switched away from would `--resume` nothing.
+          if (started !== undefined && started !== null && started !== sessionRef.current) {
+            provisional.current = { previous: sessionRef.current };
+            sessionRef.current = started;
+          }
+          // The subscription is scoped to THIS run, so no event from any other
+          // conversation, background job or killed child can reach this turn;
+          // and it reads the run's journal from the start (M57.6), so an
+          // event the run sent before this line still lands, once.
+          goLive();
         } catch (err) {
+          spawning.current = null;
           const failure = err instanceof Error ? err.message : String(err);
           patchMessage(assistantId, (m) => ({ ...m, error: failure, streaming: false }));
+          // A send a stop, reset or restore already ended keeps its error on
+          // the bubble and leaves the turn (perhaps a newer one) alone.
+          if (sendEpoch.current !== epoch && stoppingRef.current !== assistantId) return;
           endTurn();
           toast(failure);
         }
       })();
     },
     [
-      attachChild,
+      attachTask,
       connectors,
       endTurn,
+      follow,
       getTurn,
-      handleEvent,
       nextId,
       patchMessage,
+      setLive,
       shell,
       showInteraction,
       startRun,
@@ -622,11 +942,16 @@ export function useAgentChat(
 
   /**
    * Answer the waiting card (M57.1). Rust resumes the run on the same
-   * session, and its events land in the card's bubble, under the same task.
-   * A late answer is refused `no_longer_waiting`: handled here, without a
-   * toast, because the card says it in Rust's words and the turn it waited
-   * for is over (CV-03 written reason: a typed outcome, not a failure). Any
-   * other failure is toasted and the card stays, to be answered again.
+   * session, and its events land in the card's bubble, under the same task,
+   * registered again if the host ended it when the first run stopped; the
+   * turn's `live` moves to the resume (M57.6), with a fresh cursor, since a
+   * new run counts its events from 1. A late answer is refused
+   * `no_longer_waiting`: handled here, without a toast, because the card
+   * says it in Rust's words and the turn it waited for is over (CV-03
+   * written reason: a typed outcome, not a failure). A write card's edited
+   * draft Rust refused (M57.4b) keeps the card waiting, with the refusal on
+   * it. Any other failure is toasted and the card stays, to be answered
+   * again.
    */
   const answer = useCallback(
     (given: PersonAnswer) => {
@@ -634,30 +959,45 @@ export function useAgentChat(
       if (current === null || current.answering || current.stale !== null || vaultPath === null) {
         return;
       }
-      showInteraction({ ...current, answering: true });
+      showInteraction({ ...current, answering: true, refused: null });
       const epoch = sendEpoch.current;
       void (async () => {
         try {
           const result = await answerInteraction(vaultPath, current.card.id, given);
           if (sendEpoch.current !== epoch) return;
+          // M57.4b: Rust refused a write card's edited draft and the card
+          // still waits, so it stays, saying why (CV-03 written reason: a
+          // typed outcome the card shows, not a failure to toast).
+          if (
+            'refused' in result &&
+            current.card.kind === 'write' &&
+            result.refused.code !== 'no_longer_waiting'
+          ) {
+            showInteraction({ ...current, answering: false, refused: result.refused.message });
+            return;
+          }
           if ('refused' in result) {
             showInteraction({ ...current, answering: false, stale: result.refused.message });
             finishTurn();
             return;
           }
           showInteraction(null);
-          const { run, sessionId: resumed } = result.resumed;
+          const handle = result.resumed;
+          const resumed = handle.sessionId;
           if (resumed !== undefined && resumed !== null) {
             sessionRef.current = resumed;
             setSessionId(resumed);
           }
-          patchMessage(current.messageId, (m) => ({ ...m, streaming: true }));
-          runRef.current = run;
-          if (taskRef.current !== null) attachChild(taskRef.current, run);
-          unsubscribe.current = onAgentEvent(
-            (event) => handleEvent(current.messageId, event),
-            run,
-          );
+          patchMessage(current.messageId, (m) => {
+            const { seq: _cursor, ...rest } = m;
+            return { ...rest, streaming: true };
+          });
+          runRef.current = handle.run;
+          ensureTask(handle, current.messageId);
+          if (handle.attach !== undefined) {
+            setLive({ run: handle.run, attach: handle.attach, assistantId: current.messageId });
+          }
+          follow(handle, 0, current.messageId);
         } catch (err) {
           if (sendEpoch.current !== epoch) return;
           showInteraction({ ...current, answering: false });
@@ -665,11 +1005,12 @@ export function useAgentChat(
         }
       })();
     },
-    [attachChild, finishTurn, handleEvent, patchMessage, showInteraction, toast, vaultPath],
+    [ensureTask, finishTurn, follow, patchMessage, setLive, showInteraction, toast, vaultPath],
   );
 
-  /** Refuse the waiting card's call as stopped (M57.1): Stop and New
-   * conversation do; a thread switch and closing the panel leave it waiting. */
+  /** Refuse the waiting card's call as stopped (M57.1): Stop does; a thread
+   * switch, New conversation and closing the panel leave it waiting
+   * (M57.6). */
   const cancelWaiting = useCallback(() => {
     const current = interactionRef.current;
     if (current === null) return;
@@ -683,102 +1024,160 @@ export function useAgentChat(
   }, [patchMessage, showInteraction]);
 
   /**
-   * Unmounting mid-turn ends the turn (M15). A turn waiting on a card has no
-   * run to stop, and its card stays in Rust's book (M57.1): reopening the
-   * panel lists it again.
+   * Unmounting mid-turn detaches it (M57.6): closing the assistant leaves
+   * the run running, its registry record standing and its card waiting, and
+   * the thread saves `live` (useConversations), so reopening re-attaches.
+   * ChatTurnsHost settles the run's Done whether or not the panel is open.
+   * A send still parked before its spawn is cancelled by the epoch, as it
+   * always was: no child exists to detach from, and its task ends here.
+   * Written against refs only, because this runs while React is unmounting
+   * the tree that owns it.
    *
-   * The panel is rendered conditionally, so closing the assistant while an
-   * answer streams tears this hook down. Nothing here used to run on the way
-   * out: the child kept going, and `agentBusy` stayed true for the rest of the
-   * session — which made the background distiller's own guard bail forever.
-   *
-   * M17.2 removed the case that made this fire by accident: `open_note` no
-   * longer closes the panel, so an unmount now means the user actually closed
-   * the assistant. Written against the store directly rather than the bound
-   * action, because this runs while React is unmounting the tree that owns it.
+   * The detach waits a tick, and a mount in that tick takes it back:
+   * StrictMode unmounts and remounts every effect once on mount, and the
+   * thread's restore (useConversations) has already re-attached by then and
+   * does not run again. Detaching for that pretend unmount would leave a
+   * re-attached turn deaf, and a card it looks up never shown.
    */
+  const unmountTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
+    if (unmountTimer.current !== null) {
+      clearTimeout(unmountTimer.current);
+      unmountTimer.current = null;
+    }
     return () => {
-      // Reaches a send still parked on the open pages' saves, a skill
-      // expansion or an addressed agent's record, which killRun cannot: it
-      // has no child to kill yet.
-      sendEpoch.current += 1;
-      if (!turnInFlight.current) return;
-      killRun();
-      releaseRun();
-      turnInFlight.current = false;
-      if (taskRef.current !== null) {
-        useUiStore.getState().endRun(taskRef.current);
+      unmountTimer.current = setTimeout(() => {
+        unmountTimer.current = null;
+        // Reaches a send still parked on the open pages' saves, a skill
+        // expansion or an addressed agent's record: it quits without a child.
+        sendEpoch.current += 1;
+        if (stopTimer.current !== null) clearTimeout(stopTimer.current);
+        stoppingRef.current = null;
+        attachToken.current += 1;
+        unsubscribe.current?.();
+        unsubscribe.current = null;
+        if (!turnInFlight.current) return;
+        turnInFlight.current = false;
+        if (taskRef.current !== null && !taskSettledByHost.current) {
+          useUiStore.getState().endRun(taskRef.current);
+        }
         taskRef.current = null;
-      }
+      }, 0);
     };
-  }, [killRun, releaseRun]);
+  }, []);
 
   const stop = useCallback(() => {
+    if (!turnInFlight.current || stoppingRef.current !== null) return;
+    // A waiting card has no child (its run already sent Done): its call is
+    // refused, and its reply reads cancelled.
+    const waitingOn = interactionRef.current;
+    if (waitingOn !== null && waitingOn.stale === null) {
+      patchMessage(waitingOn.messageId, (m) => ({ ...m, cancelled: true }));
+    }
     cancelWaiting();
-    killRun();
     // The epoch bump is what reaches a send still parked on a skill expansion
-    // — killRun can only kill a child that already exists.
+    // or a record read: it quits at its next checkpoint without a child.
     sendEpoch.current += 1;
-    // Un-spin whatever is still streaming, and say it was stopped. Not just
-    // the run's bubble: a send parked before its child exists has a spinning
-    // message and no run at all.
+    const run = runRef.current;
+    const reply = spawning.current;
+    if (run !== null || reply !== null) {
+      // M57.5: the child is stopped, and the turn stays until its run's
+      // Cancelled and Done, so nothing starts on this session while it is
+      // still in its grace. A send inside runAgent takes its child first.
+      const replyId =
+        reply ??
+        [...messagesRef.current].reverse().find((m) => m.streaming === true)?.id ??
+        'stopping';
+      stoppingRef.current = replyId;
+      setStopping(true);
+      if (run !== null) void stopAgent(run).catch(() => undefined);
+      stopTimer.current = setTimeout(() => {
+        if (stoppingRef.current !== replyId) return;
+        // CV-03: a stop is a human action, so a lost Done is a toast and
+        // the turn ends anyway, never a throw. No host will see that Done
+        // either, so its record ends here.
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.streaming === true
+              ? { ...m, streaming: false, interrupted: true, cancelled: true }
+              : m,
+          ),
+        );
+        if (taskRef.current !== null) endRun(taskRef.current);
+        endTurn();
+        toast('The stopped turn never said it ended, so Cerebro stopped waiting for it.');
+      }, STOP_CONFIRM_MS);
+      return;
+    }
+    // No child yet, or a card: the turn ends now, cancelled. A card's run
+    // already said Done, so its record ends here too.
     setMessages((prev) =>
-      prev.map((m) => (m.streaming === true ? { ...m, streaming: false, interrupted: true } : m)),
+      prev.map((m) =>
+        m.streaming === true ? { ...m, streaming: false, interrupted: true, cancelled: true } : m,
+      ),
     );
+    if (taskRef.current !== null) endRun(taskRef.current);
     endTurn();
-  }, [cancelWaiting, endTurn, killRun]);
+  }, [cancelWaiting, endRun, endTurn, patchMessage, toast]);
+
+  const busy = useCallback(() => {
+    const card = interactionRef.current;
+    return (
+      turnInFlight.current || stoppingRef.current !== null || (card !== null && card.stale === null)
+    );
+  }, []);
 
   const reset = useCallback(() => {
-    cancelWaiting();
-    killRun();
+    detachTurn();
     sendEpoch.current += 1;
+    showInteraction(null);
+    deferredIds.current.clear();
+    provisional.current = null;
     sessionRef.current = null;
     setSessionId(null);
     setReportedModel(null);
     setPrLinks([]);
     setTurnEndedAt(null);
-    endTurn();
+    setLive(null);
     setMessages([]);
-  }, [cancelWaiting, endTurn, killRun]);
+  }, [detachTurn, setLive, showInteraction]);
 
-  /** Load a stored conversation. Ends this conversation's turn first: the
-   * events still in flight belong to the transcript being replaced. A card
-   * the thread left is not cancelled (M57.1): it stays in Rust's book, and
-   * the restored thread's own card, if it has one, is listed back. */
-  const restore = useCallback(
+  /**
+   * Bring back the card a restored thread's call waits on (M57.1), from
+   * Rust's book: the thread waits again, held in flight, its row marked
+   * held. `preferred` is the reply it belongs to, when the caller knows it.
+   * `otherwise` runs when the book holds no card for the session.
+   */
+  const waitOnCard = useCallback(
     (
       restored: ChatMessage[],
-      restoredSession: string | null,
-      facts?: { model: string | null; prLinks: PrLink[] },
+      session: string,
+      preferred: string | null,
+      otherwise: () => void = () => undefined,
     ) => {
-      killRun();
-      sendEpoch.current += 1;
-      showInteraction(null);
-      deferredIds.current.clear();
-      endTurn();
-      sessionRef.current = restoredSession;
-      setSessionId(restoredSession);
-      setReportedModel(facts?.model ?? null);
-      setPrLinks(facts?.prLinks ?? []);
-      setTurnEndedAt(null);
-      setMessages(restored);
-      if (restoredSession === null || vaultPath === null) return;
+      if (vaultPath === null) {
+        otherwise();
+        return;
+      }
       const epoch = sendEpoch.current;
       void listInteractions(vaultPath)
         .then((cards) => {
           if (sendEpoch.current !== epoch) return;
-          const card = cards.find((c) => c.session_id === restoredSession);
-          if (card === undefined) return;
+          const card = cards.find((c) => c.session_id === session);
           const assistants = restored.filter((m) => m.role === 'assistant');
           const bubble =
-            assistants.find((m) => m.tools.some((t) => t.id === card.tool_id)) ??
-            assistants[assistants.length - 1];
-          if (bubble === undefined) return;
-          // The thread waits again: held in flight, its row marked held.
+            card === undefined
+              ? undefined
+              : (assistants.find((m) => m.id === preferred) ??
+                assistants.find((m) => m.tools.some((t) => t.id === card.tool_id)) ??
+                assistants[assistants.length - 1]);
+          if (card === undefined || bubble === undefined) {
+            otherwise();
+            return;
+          }
           patchMessage(bubble.id, (m) =>
             applyEvent(
-              m,
+              { ...m, streaming: false },
               { kind: 'ToolDeferred', tool_id: card.tool_id, tool_name: card.tool_name },
               'live',
             ),
@@ -787,9 +1186,102 @@ export function useAgentChat(
           turnInFlight.current = true;
           setStreaming(true);
         })
-        .catch(() => undefined);
+        .catch(() => otherwise());
     },
-    [endTurn, killRun, patchMessage, showInteraction, vaultPath],
+    [patchMessage, showInteraction, vaultPath],
+  );
+
+  /** Re-attach to the turn a restored thread left running (M57.6), from its
+   * reply's cursor. A live run with no record in the registry, as after a
+   * reload, is registered again, so ChatTurnsHost settles it. A run the
+   * journal no longer knows rebuilds its reply from the session file. */
+  const reattach = useCallback(
+    (turn: LiveTurn, cursor: number) => {
+      runRef.current = turn.run;
+      turnPlace.current = { place: null, conversationId: getTurn().conversationId };
+      const handle = { run: turn.run, attach: turn.attach };
+      follow(handle, cursor, turn.assistantId, {
+        onState: (done) => {
+          const held = useUiStore
+            .getState()
+            .runs.find((r) => r.owner === 'chat' && r.run === turn.run && r.attach === turn.attach);
+          if (held !== undefined) {
+            taskRef.current = held.id;
+            taskSettledByHost.current = true;
+          } else if (!done) {
+            taskRef.current = null;
+            ensureTask(handle, turn.assistantId);
+          }
+        },
+        onUnknown: () => {
+          rebuildFromFile(turn.assistantId);
+          finishTurn();
+        },
+        // The run's Done came before the thread was left, and the turn was
+        // still live: it stopped on a card (M57.1), which waits in the book
+        // unless something closed it since.
+        onEndedBefore: () => {
+          releaseRun();
+          const session = sessionRef.current;
+          const ended = () => {
+            patchMessage(turn.assistantId, endLiveTurn);
+            finishTurn();
+          };
+          if (session === null) ended();
+          else waitOnCard(messagesRef.current, session, turn.assistantId, ended);
+        },
+      });
+    },
+    [
+      ensureTask,
+      finishTurn,
+      follow,
+      getTurn,
+      patchMessage,
+      rebuildFromFile,
+      releaseRun,
+      waitOnCard,
+    ],
+  );
+
+  const restore = useCallback(
+    (
+      restored: ChatMessage[],
+      restoredSession: string | null,
+      facts?: { model: string | null; prLinks: PrLink[] },
+      liveTurn?: LiveTurn | null,
+    ) => {
+      detachTurn();
+      sendEpoch.current += 1;
+      showInteraction(null);
+      deferredIds.current.clear();
+      provisional.current = null;
+      sessionRef.current = restoredSession;
+      setSessionId(restoredSession);
+      setReportedModel(facts?.model ?? null);
+      setPrLinks(facts?.prLinks ?? []);
+      setTurnEndedAt(null);
+      const turn =
+        liveTurn != null && restored.some((m) => m.id === liveTurn.assistantId) ? liveTurn : null;
+      setLive(turn);
+      if (turn !== null) {
+        // The turn is in flight again, its reply streaming, until its run's
+        // events say otherwise.
+        const marked = restored.map((m) =>
+          m.id === turn.assistantId ? { ...m, streaming: true } : m,
+        );
+        messagesRef.current = marked;
+        setMessages(marked);
+        turnInFlight.current = true;
+        setStreaming(true);
+        const reply = marked.find((m) => m.id === turn.assistantId);
+        reattach(turn, reply?.seq ?? 0);
+        return;
+      }
+      setMessages(restored);
+      if (restoredSession !== null) waitOnCard(restored, restoredSession, null);
+    },
+    [detachTurn, reattach, setLive, showInteraction, waitOnCard],
   );
 
   return {
@@ -800,7 +1292,10 @@ export function useAgentChat(
     answer,
     send,
     stop,
+    stopping,
+    busy,
     reset,
+    live,
     sessionId,
     model: reportedModel,
     prLinks,

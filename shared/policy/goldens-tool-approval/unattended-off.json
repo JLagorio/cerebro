@@ -1,0 +1,44 @@
+{
+  "why": "A scheduled run with Shell access Off: as attended, except that nothing meets a gate, so a question is denied and the refused tools ride --disallowedTools.",
+  "input": {
+    "kind": "unattended",
+    "shell": "off",
+    "ask_first": false,
+    "read_scoped": false,
+    "narrowing": null
+  },
+  "expected": {
+    "permission_mode": "acceptEdits",
+    "allowed": [],
+    "disallowed": [
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "NotebookEdit",
+      "Bash",
+      "AskUserQuestion",
+      "ExitPlanMode"
+    ],
+    "matcher": [],
+    "withheld": [],
+    "decisions": {
+      "Write": "deny",
+      "Edit": "deny",
+      "MultiEdit": "deny",
+      "NotebookEdit": "deny",
+      "Bash": "deny",
+      "Read": "cli",
+      "Glob": "cli",
+      "Grep": "cli",
+      "WebFetch": "cli",
+      "WebSearch": "cli",
+      "Task": "cli",
+      "AskUserQuestion": "deny",
+      "ExitPlanMode": "deny",
+      "mcp__cerebro__create_note": "allow",
+      "mcp__cerebro__update_frontmatter": "allow",
+      "mcp__cerebro__append_to_note": "allow",
+      "mcp__cerebro__edit_note": "allow"
+    }
+  }
+}

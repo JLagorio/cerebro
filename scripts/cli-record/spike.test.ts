@@ -23,6 +23,7 @@ import {
   pick,
   pickRun,
   readRaw,
+  RECORD_OWED,
   recordRoot,
   reduceToFixture,
   refuseRoot,
@@ -230,6 +231,9 @@ describe('argv', () => {
 
   it("is each spike fixture's argv, turn for turn", () => {
     for (const name of SCENARIO_NAMES) {
+      const path = join(REPO, `src-tauri/fixtures/cli-stream/spike/${name}.json`);
+      // A scenario owed its first live run has no fixture yet (M57.1).
+      if (RECORD_OWED.includes(name) && !existsSync(path)) continue;
       const fixture = JSON.parse(
         readFileSync(join(REPO, `src-tauri/fixtures/cli-stream/spike/${name}.json`), 'utf8'),
       ) as { steps: { argv: string[] }[] };
@@ -245,6 +249,46 @@ describe('argv', () => {
         expect(step.argv, `${name} step ${index}`).toEqual(expected);
       }
     }
+  });
+});
+
+describe('the defer-gate scenario (M57.1)', () => {
+  const turns = SCENARIOS['defer-gate'].turns as Turn[];
+  const argvOf = (index: number) => turnArgv(turns[index], PLACEHOLDER, 'S');
+
+  it('rides the gate in --settings and never pre-approves the gated tool', () => {
+    for (const [index, turn] of turns.entries()) {
+      const argv = argvOf(index);
+      expect(flag(argv, '--setting-sources'), `${index}`).toBe('user');
+      expect(flag(argv, '--settings'), `${index}`).toMatch(/settings-gate(-near)?\.json$/);
+      expect(flag(argv, '--allowedTools')?.split(','), `${index}`).not.toContain(
+        'mcp__probe__slow_echo',
+      );
+      expect(turn.mode, `${index}`).toBe('acceptEdits');
+    }
+    expect(flag(argvOf(8), '--settings')).toBe('/RECORD/probe/settings-gate-near.json');
+  });
+
+  it('resumes an answer with an empty prompt, and new text with its own', () => {
+    for (const index of [1, 3]) {
+      expect(argvOf(index).slice(0, 2), `${index}`).toEqual(['-p', '']);
+      expect(flag(argvOf(index), '--resume'), `${index}`).toBe('S');
+    }
+    expect(argvOf(7)[1]).toBe('Reply with the one word: next.');
+    expect(flag(argvOf(7), '--resume')).toBe('S');
+  });
+
+  it('answers F21 to F27 and is owed its live run', () => {
+    expect(SCENARIOS['defer-gate'].facts).toEqual([
+      'F21',
+      'F22',
+      'F23',
+      'F24',
+      'F25',
+      'F26',
+      'F27',
+    ]);
+    expect(RECORD_OWED).toEqual(['defer-gate']);
   });
 });
 
@@ -442,6 +486,29 @@ describe('a recording against a stand-in claude', () => {
       'permissions',
       'hooks',
     ]);
+    // M57.1: the gate's mcp_tool hook, on exactly the gated tool, and the
+    // near-miss matcher an exact list never matches.
+    const gate = JSON.parse(readFileSync(at.settings.gate, 'utf8'));
+    expect(gate.hooks.PreToolUse).toHaveLength(1);
+    expect(gate.hooks.PreToolUse[0].matcher).toBe('mcp__probe__slow_echo');
+    expect(gate.hooks.PreToolUse[0].hooks).toEqual([
+      {
+        type: 'mcp_tool',
+        server: 'probe',
+        tool: 'gate',
+        input: {
+          session_id: '${session_id}',
+          tool_use_id: '${tool_use_id}',
+          tool_name: '${tool_name}',
+          tool_input: '${tool_input}',
+          agent_id: '${agent_id}',
+        },
+        timeout: 10,
+      },
+    ]);
+    const near = JSON.parse(readFileSync(at.settings['gate-near'], 'utf8'));
+    expect(near.hooks.PreToolUse[0].matcher).toBe('Bash|mcp__probe__slow_ech');
+    expect(JSON.parse(readFileSync(join(at.probe, 'gate-decisions.json'), 'utf8'))).toEqual({});
   });
 
   it('records each turn: minted first, resumed after, the session file copied', async () => {

@@ -7,7 +7,8 @@
  *
  * - **Flush.** Every open page registers how to land its pending save. A turn
  *   flushes them all before its child starts, so the agent reads, and appends
- *   to, what is on screen rather than what was on disk half a second ago.
+ *   to, what is on screen rather than what was on disk half a second ago. A
+ *   page that cannot land its save yet says so (`heldOpenPages`).
  * - **External writes.** The agent's MCP writes go through the app's own
  *   `write_file`, which registers each write as the app's, so the watcher
  *   drops the echo. The tools announce what they changed instead, and a page
@@ -25,6 +26,37 @@ export function registerFlush(flush: Flush): () => void {
   return () => {
     flushes.delete(flush);
   };
+}
+
+type Holding = () => string | null;
+
+const holders = new Set<Holding>();
+
+/**
+ * Register how a page says it is holding a save: its path while a save, a
+ * merge or a choice waits there, null otherwise. The returned function
+ * unregisters it.
+ */
+export function registerHold(holding: Holding): () => void {
+  holders.add(holding);
+  return () => {
+    holders.delete(holding);
+  };
+}
+
+/**
+ * The open pages a flush could not land (M55.13): each still holds a save
+ * while it waits on an outside write, a reconcile or the person's choice. A
+ * caller about to move one of these files refuses instead, because the save
+ * would land at the old path once it releases.
+ */
+export function heldOpenPages(): string[] {
+  const paths = new Set<string>();
+  for (const holding of holders) {
+    const path = holding();
+    if (path !== null) paths.add(path);
+  }
+  return [...paths];
 }
 
 /** `fn()`, with a synchronous throw turned into a rejection. */
@@ -108,5 +140,6 @@ export async function announceExternalWrites(
 /** Test isolation: forget every page and its flush. */
 export function __resetOpenPages(): void {
   flushes.clear();
+  holders.clear();
   watchers.clear();
 }

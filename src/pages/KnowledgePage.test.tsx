@@ -4,13 +4,17 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Entry } from '@/engine/types';
 import { ReviewPager } from '@/knowledge/ReviewQueue';
 import type { ReviewCard } from '@/lib/ipc';
-import { __seedReview } from '@/lib/mockIpc';
+import { failNext, resetFaults } from '@/lib/mockFaults';
+import { __seedReview, queueAgentWrite, resetMockFs } from '@/lib/mockIpc';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { KnowledgePage } from './KnowledgePage';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  resetFaults();
+});
 
 // The mock's queue holds the demo's cards; these tests stage their own, and
 // none unless they say so.
@@ -675,5 +679,43 @@ describe('KnowledgePage as a table (M52.5)', () => {
     expect(row('Signed').querySelector('[data-testid="concept-proposal"]')).not.toBeNull();
     // Start review walks the concepts; the cards are decided under Review.
     expect(screen.getByTestId('knowledge-start-count').textContent).toBe('1');
+  });
+
+  // M57.4c: Review's third queue, the page writes agents queued.
+  it('counts a queued page write in the tab and names it in the summary', async () => {
+    resetMockFs();
+    __seedReview({ cards: [] });
+    await queueAgentWrite('/vault', {
+      actor: 'process:release-scout',
+      runId: 'run-1',
+      tool: 'create_note',
+      input: { folder: 'records/risks', slug: 'vendor-delay', body: '# Vendor delay\n' },
+    });
+    useVaultStore.setState({
+      vaultPath: '/vault',
+      entries: [concept({ path: 'knowledge/metrics/fresh.md', title: 'Fresh' })],
+    });
+    render(<KnowledgePage selection={{ kind: 'knowledge', nav: { tab: 'all' } }} />);
+    expect(await screen.findByText('1 to verify · 1 page write')).not.toBeNull();
+    expect(screen.getByTestId('knowledge-tab-review').textContent).toBe('Review2');
+    resetMockFs();
+  });
+
+  it('never says nothing to review when the queued writes could not be read', async () => {
+    failNext('pending_writes');
+    useVaultStore.setState({
+      vaultPath: '/vault',
+      entries: [
+        concept({
+          path: 'knowledge/signed.md',
+          title: 'Signed',
+          properties: props({ verified: [{ by: 'human:josef', at: '2026-07-01' }] }),
+        }),
+      ],
+    });
+    render(<KnowledgePage selection={{ kind: 'knowledge', nav: { tab: 'all' } }} />);
+    expect(await screen.findByText('nothing to verify')).not.toBeNull();
+    expect(screen.queryByText('nothing to review')).toBeNull();
+    expect(screen.getByTestId('knowledge-tab-review').textContent).toBe('Review');
   });
 });

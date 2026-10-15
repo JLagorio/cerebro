@@ -52,7 +52,8 @@ export interface Toolset {
  * manifest: the row's door, the generated door for an op the policy table
  * offers agents, or the CLI row. Either spelling, short or `mcp__cerebro__`;
  * false for a name the manifest does not know. A panel turn that called one
- * ends with a rescan and, in a git vault, its own checkpoint (M9.5).
+ * ends with a rescan (ChatTurnsHost); its commit is Rust's, made before the
+ * run's Done (M58.3).
  */
 export function isWriteTool(name: string): boolean {
   return toolFacts(name)?.writes === true;

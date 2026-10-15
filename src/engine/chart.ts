@@ -24,7 +24,9 @@ import type {
  *
  * The Y axis reuses `aggregateNumbers`, the same arithmetic a rollup column
  * runs. A chart that summed its own way would disagree with the number in the
- * table beside it the first time a value arrived as the string "3".
+ * table beside it the first time a value arrived as the string "3". Every
+ * measured value is read through `schema.fieldValue` (M60.1), so a rollup or
+ * a computed field charts like a stored one.
  */
 
 export interface ChartSlice {
@@ -102,6 +104,10 @@ export interface ChartData {
   bands: ChartRosterItem[];
   /** The groupBy roster, first-seen declared order; [] when no groupBy. */
   series: ChartRosterItem[];
+  /** Bands that held rows but no number to measure (M60.1). They are left
+   * out — a bar of 0 would claim a measured zero — and the caption counts
+   * them. Always 0 under `count`. */
+  unmeasured: number;
   blocked: ChartBlocked;
 }
 
@@ -169,6 +175,7 @@ export function computeChart(
     measure: measureLabel(chart),
     bands,
     series,
+    unmeasured: 0,
     blocked,
   });
 
@@ -181,6 +188,11 @@ export function computeChart(
 
   const valueField = chart?.value ?? '';
   const def = agg === 'count' ? null : defFor(entries, valueField, schema);
+  // What a row contributes to a sum or an average: the value a filter reads.
+  const measuredValues = (rows: Entry[]): unknown[] =>
+    rows
+      .map((e) => schema.fieldValue(e, valueField))
+      .filter((v) => v !== undefined && v !== null && v !== '');
 
   // A number chart totals every visible row. It has no axis at all, so it
   // never reaches the no-group gate below (M44.2).
@@ -197,13 +209,11 @@ export function computeChart(
         measure: measureLabel(chart),
         bands: [],
         series: [],
+        unmeasured: 0,
         blocked: null,
       };
     }
-    const values = entries
-      .map((e) => e.properties[valueField])
-      .filter((v) => v !== undefined && v !== null && v !== '');
-    const n = aggregateNumbers(values, agg);
+    const n = aggregateNumbers(measuredValues(entries), agg);
     if (n === null) return empty('no-numbers');
     return {
       slices: [],
@@ -215,6 +225,7 @@ export function computeChart(
       measure: measureLabel(chart),
       bands: [],
       series: [],
+      unmeasured: 0,
       blocked: null,
     };
   }
@@ -223,18 +234,28 @@ export function computeChart(
   const nodes = groupTree(entries, [band], schema);
 
   let measured = 0;
+  let unmeasured = 0;
   const slices: ChartSlice[] = [];
   for (const node of nodes) {
     let value: number;
     if (agg === 'count') {
       value = node.entries.length;
     } else {
-      const values = node.entries
-        .map((e) => e.properties[valueField])
-        .filter((v) => v !== undefined && v !== null && v !== '');
-      const n = aggregateNumbers(values, agg);
-      if (n !== null) measured += 1;
-      value = n ?? 0;
+      const n = aggregateNumbers(measuredValues(node.entries), agg);
+      if (n !== null) {
+        measured += 1;
+        value = n;
+      } else if (node.entries.length > 0) {
+        // Rows, but nothing to measure: absent is never zero (CV-05). Left
+        // out before its hue is stamped, the way omitZero leaves a band out,
+        // and counted so the caption can say so.
+        unmeasured += 1;
+        continue;
+      } else {
+        // A declared band holding no rows sums to zero rows' worth: a real
+        // measurement, drawn as the board draws the empty column.
+        value = 0;
+      }
     }
     if (chart?.omitZero === true && value === 0) continue;
     slices.push({
@@ -254,9 +275,11 @@ export function computeChart(
     });
   }
 
-  // Every band held rows and not one of them held a number — a chart of zeroes
-  // would state, falsely, that the property is zero everywhere.
-  if (agg !== 'count' && slices.length > 0 && measured === 0) return empty('no-numbers');
+  // Not one band held a number — a chart of zeroes would state, falsely, that
+  // the property is zero everywhere.
+  if (agg !== 'count' && measured === 0 && (slices.length > 0 || unmeasured > 0)) {
+    return empty('no-numbers');
+  }
   if (slices.length === 0) return empty('no-rows');
 
   // The legend's roster: every band at its stamped hue, hidden ones included.
@@ -325,14 +348,10 @@ export function computeChart(
         if (sub.entries.length === 0 || hiddenSeries.has(sub.key)) continue;
         const hue = seriesHue.get(sub.key)!;
         const partValue =
-          agg === 'count'
-            ? sub.entries.length
-            : (aggregateNumbers(
-                sub.entries
-                  .map((e) => e.properties[valueField])
-                  .filter((v) => v !== undefined && v !== null && v !== ''),
-                agg,
-              ) ?? 0);
+          agg === 'count' ? sub.entries.length : aggregateNumbers(measuredValues(sub.entries), agg);
+        // A part with rows but no number draws no segment (M60.1): a 0 there
+        // would read as a measured zero.
+        if (partValue === null) continue;
         parts.push({
           key: sub.key,
           label: sub.label,
@@ -429,6 +448,7 @@ export function computeChart(
     measure: measureLabel(chart),
     bands,
     series,
+    unmeasured,
     blocked: null,
   };
 }

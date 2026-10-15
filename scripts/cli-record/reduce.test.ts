@@ -416,6 +416,33 @@ describe('the allowlist', () => {
       answer: { hookSpecificOutput: { permissionDecision: 'defer' } },
     });
   });
+
+  it("keeps the gate's log to the call the hook handed it and its answer (M57.1)", () => {
+    expect(
+      keepProbeEntry({
+        mode: 'gate',
+        arguments: {
+          session_id: 's',
+          tool_use_id: 'toolu_1',
+          tool_name: 'mcp__probe__slow_echo',
+          tool_input: '{"text":"alpha"}',
+          agent_id: '',
+          transcript_path: '/RECORD/a',
+        },
+        answer: { content: [{ type: 'text', text: '{}' }] },
+      }),
+    ).toEqual({
+      mode: 'gate',
+      arguments: {
+        session_id: 's',
+        tool_use_id: 'toolu_1',
+        tool_name: 'mcp__probe__slow_echo',
+        tool_input: '{"text":"alpha"}',
+        agent_id: '',
+      },
+      answer: { content: [{ type: 'text', text: '{}' }] },
+    });
+  });
 });
 
 function rawStep(overrides: Partial<RawStep> = {}): RawStep {
@@ -513,6 +540,55 @@ describe('reduceScenario', () => {
     expect(fixture.source).toBe('recorded');
     expect(fixture.steps[0].argv[3]).toBe('/RECORD/probe/mcp-config.json');
     expect(fixture.steps[0].stderr).toBe('warning in /RECORD/claude-config');
+    expect(scan(await formatJson(fixture))).toEqual([]);
+  });
+
+  it('writes the placeholder for a record folder whose path holds an id, and keeps the ids in order', async () => {
+    const scratch = `/private/tmp/claude-501/-Users-someone/${UUID_A}/scratchpad/msg_01Ab/rec`;
+    const machine: Machine = { ...MACHINE, recordDir: scratch, realRecordDir: undefined };
+    const inScratch: RawScenario = {
+      ...raw,
+      steps: [
+        rawStep({
+          argv: [
+            '-p',
+            'hi',
+            '--mcp-config',
+            `${scratch}/probe/mcp-config.json`,
+            '--session-id',
+            session,
+          ],
+          stdout: [
+            INIT(session),
+            JSON.stringify({
+              type: 'assistant',
+              session_id: session,
+              message: {
+                id: 'msg_01AbC',
+                content: [
+                  {
+                    type: 'tool_use',
+                    id: 'toolu_01Xy',
+                    name: 'Write',
+                    input: { file_path: `${scratch}/vault/notes/gamma.md` },
+                  },
+                ],
+              },
+            }),
+          ],
+          stderr: `warning in ${scratch}/claude-config`,
+        }),
+      ],
+    };
+    const fixture = reduceScenario(inScratch, machine);
+    const [step] = fixture.steps;
+    expect(step.argv[3]).toBe('/RECORD/probe/mcp-config.json');
+    expect(step.argv.at(-1)).toBe('00000000-0000-4000-8000-000000000001');
+    expect(step.stderr).toBe('warning in /RECORD/claude-config');
+    const [call] = (step.stream[1].message as { content: { input: { file_path: string } }[] })
+      .content;
+    expect(call.input.file_path).toBe('/RECORD/vault/notes/gamma.md');
+    expect((step.stream[1].message as { id: string }).id).toBe('msg_000000000000000000000001');
     expect(scan(await formatJson(fixture))).toEqual([]);
   });
 

@@ -15,7 +15,8 @@
 //! Pure: no I/O. The fold (`super::fold`) owns a `Failures` for each turn and
 //! feeds it the lines it already reads, so a turn watched live and a thread
 //! rebuilt from the session file get the same notice; the init gate
-//! (`super::InitGate`) makes the tools notice. TS renders these words and
+//! (`super::InitGate`) makes the tools notice and, since M57.2, the
+//! ask-first one. TS renders these words and
 //! never switches on the kind (D3).
 
 use chrono::{DateTime, SecondsFormat};
@@ -38,11 +39,14 @@ pub enum FailureKind {
     RequestRefused,
     ToolsUnavailable,
     TurnLimit,
+    /// A run whose plan asks before running commands started in another
+    /// permission mode or on an older Claude Code (M57.2, the init gate).
+    AskUnavailable,
 }
 
 impl FailureKind {
     /// Every kind, in declaration order.
-    pub const ALL: [FailureKind; 11] = [
+    pub const ALL: [FailureKind; 12] = [
         FailureKind::NotSignedIn,
         FailureKind::AccountBlocked,
         FailureKind::UsageLimit,
@@ -54,6 +58,7 @@ impl FailureKind {
         FailureKind::RequestRefused,
         FailureKind::ToolsUnavailable,
         FailureKind::TurnLimit,
+        FailureKind::AskUnavailable,
     ];
 
     /// Does this failure pause unattended work (the meter's `quota_failed`)?
@@ -68,9 +73,9 @@ impl FailureKind {
     /// The fix the card offers, when there is one.
     pub fn action(self) -> Option<NoticeAction> {
         match self {
-            FailureKind::NotSignedIn | FailureKind::AccountBlocked => {
-                Some(NoticeAction::OpenSettings)
-            }
+            FailureKind::NotSignedIn
+            | FailureKind::AccountBlocked
+            | FailureKind::AskUnavailable => Some(NoticeAction::OpenSettings),
             FailureKind::ModelUnavailable => Some(NoticeAction::ChooseModel),
             FailureKind::ContextFull => Some(NoticeAction::NewConversation),
             _ => None,
@@ -90,6 +95,7 @@ impl FailureKind {
             FailureKind::RequestRefused => "Your organization's policy refused this request",
             FailureKind::ToolsUnavailable => "Cerebro's tools didn't load",
             FailureKind::TurnLimit => "The run reached its turn limit",
+            FailureKind::AskUnavailable => "This run couldn't ask first",
         }
     }
 }
@@ -225,6 +231,7 @@ fn body(kind: FailureKind, window: Option<&str>) -> String {
         FailureKind::RequestRefused => "Your organization's data-loss-prevention policy refused what this run would have sent. Ask again without the material it guards.".into(),
         FailureKind::ToolsUnavailable => init_refusal("unreported"),
         FailureKind::TurnLimit => "The run used every turn it was allowed before it finished. Ask again to carry on from where it stopped.".into(),
+        FailureKind::AskUnavailable => crate::policy::tool_approval::messages().mode_mismatch.clone(),
     }
 }
 
@@ -256,6 +263,15 @@ pub fn tools_unavailable(word: &str, cli_version: Option<&str>) -> FailureNotice
     FailureNotice {
         body: init_refusal(word),
         ..notice(FailureKind::ToolsUnavailable, None, None, cli_version)
+    }
+}
+
+/// The notice the init gate attaches to a run that had to ask first and
+/// could not (M57.2): `message` is the table's `mode_mismatch`.
+pub fn ask_unavailable(message: &str, cli_version: Option<&str>) -> FailureNotice {
+    FailureNotice {
+        body: message.to_string(),
+        ..notice(FailureKind::AskUnavailable, None, None, cli_version)
     }
 }
 
@@ -687,6 +703,18 @@ mod tests {
         assert_eq!(notice.title, "Cerebro's tools didn't load");
         assert_eq!(notice.body, init_refusal("failed"));
         assert_eq!(notice.action, None);
+    }
+
+    #[test]
+    fn ask_unavailable_maps_with_open_settings() {
+        let message = &crate::policy::tool_approval::messages().mode_mismatch;
+        let notice = ask_unavailable(message, Some("2.1.249"));
+        assert_eq!(notice.kind, FailureKind::AskUnavailable);
+        assert_eq!(notice.title, "This run couldn't ask first");
+        assert_eq!(&notice.body, message);
+        assert_eq!(notice.action, Some(NoticeAction::OpenSettings));
+        assert_eq!(notice.cli_version.as_deref(), Some("2.1.249"));
+        assert!(!FailureKind::AskUnavailable.is_quota(), "it pauses nothing");
     }
 
     // --- The golden ---------------------------------------------------------

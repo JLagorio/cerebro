@@ -30,23 +30,112 @@ deliberately does not do — with your machine is most of its security story.
   A process that starts its own session (`setsid`) leaves the group and
   escapes that signal; Cerebro trusts the CLI to end its own shells on TERM,
   which is why TERM comes first.
-- **Tool permissions are enforced, not described.** One Settings switch, the
-  shell ceiling, decides whether a run gets Bash and the CLI's own file tools.
-  A run without it has the CLI's built-in writers (Write, Edit, MultiEdit,
-  NotebookEdit, Bash) passed in `--disallowedTools`, so the CLI's own edit
-  auto-approval cannot write around Cerebro's guards. A read-scoped run loses
-  the shell and is denied the built-in readers (Read, Glob, Grep) too.
-  Cerebro's own internal runs (ingest, maintenance, synthesis) are denied all
-  of those, plus the web tools and Task. Cerebro's MCP tools enforce the rest
-  themselves: a run's write scope, its read scope, the knowledge guard and
-  the note-corpus doors. One write crosses a run's scope on purpose (D7): a
+- **Tool permissions are enforced, not described.** Shell access in Settings
+  is off, ask or on (M57.2), and one table,
+  `shared/policy/tool-approval.v1.json`, turns it into what each run may do
+  with the CLI's own tools. Off denies the built-in writers (Write, Edit,
+  MultiEdit, NotebookEdit) and Bash in `--disallowedTools`, so the CLI's own
+  edit auto-approval cannot write around Cerebro's guards. On pre-approves
+  them and the built-in readers. Ask leaves the writers and Bash out of both
+  lists and starts the run in Claude Code's `default` mode, so each call
+  meets Cerebro's gate and waits for your card; a run whose start reports
+  another mode or a Claude Code older than 2.1.250 is stopped before it acts.
+  Ask asks only in a conversation you are watching: a scheduled run under Ask
+  is denied those tools instead, and its run records which. This
+  conversation allows only the exact command or path the card named, in
+  memory, for that conversation. Your own Claude Code allow rules and hooks
+  act before Cerebro asks, so a command they allow runs without a card, and
+  Settings counts them beside the switch. A writer or the shell an agent's
+  `allowed-tools:` leaves out is denied at every ceiling. A read-scoped run
+  loses the shell and is denied the built-in readers (Read, Glob, Grep) too.
+  The plan tool is refused, by the gate or in argv; the question tool asks
+  you only in a conversation you are watching (M57.3, below) and is denied in
+  argv everywhere else. Cerebro's
+  own internal runs (ingest, maintenance, synthesis) are denied every CLI
+  tool, the web tools and Task included. Cerebro's MCP tools enforce the rest
+  themselves: a run's write scope, its read scope, the knowledge guard, the
+  note-corpus doors and an ask-first agent's Allow (next items). One write crosses a run's scope on purpose (D7): a
   run may rewrite the `recent` key, and nothing else, on its own Agent record,
-  at most 30 lines and 4096 bytes. Every other key, and every other Agent
-  record, stays refused. A write that names `expect_hash` is also a read, and
+  at most 30 lines and 4096 bytes, and every other byte of the record stays as
+  the person wrote it, comments included. Every other key, and every other
+  Agent record, stays refused. A write that names `expect_hash` is also a read, and
   is held to the read scope. The one tool that rewrites note text in place,
   `edit_note`, needs read access to the note as well as write access, because
-  its refusals quote the note back. A vault's `allowed-tools:` can only narrow
-  that grant, never widen it.
+  its refusals quote the note back. Both scopes bind where a note path lands
+  as well as how it is spelled, so a symlink inside a scope cannot carry a
+  read or a write out of it. A vault's `allowed-tools:` can only narrow
+  that grant, never widen it. The argv decides every call but one a run may
+  stop to ask you about (next item): that tool is left out of the allow list
+  and meets Cerebro's gate instead.
+- **A run can wait for you, and only you can answer** (M57.1). A run that may
+  ask carries one PreToolUse hook in its own settings file (owner-only,
+  removed with the run). The hook rides the run's own bearer to Cerebro's
+  loopback, and there it can only register a wait in its own conversation and
+  read your decision; no MCP tool, hook or bearer records an answer. Your
+  answer enters only through the app's answer command. A tool that may ask is
+  never pre-approved in argv, so a hook that fails, times out or is switched
+  off refuses the call. A call still waiting when you press Stop, switch
+  vaults or quit is refused as not answered the next time its conversation
+  goes on.
+- **An ask-first agent's page writes wait for your Allow** (M57.4). An Agent
+  record that says `ask-first: true` (any value but `true` or `false` reads
+  the same, failing closed) has its page writes, the tools the manifest marks
+  `confirmable` (create, append, edit and frontmatter on notes), shown to you
+  on a card before they land. Rust reads `ask-first:` from the agent's own
+  record when its run starts, so the app's renderer can only tighten it.
+  Cerebro's dispatch is the boundary: such a write reaches disk only by
+  taking an approval the app's answer command recorded when you pressed
+  Allow, bound to its vault, Claude Code session, agent, tool and input,
+  used once and good for ten minutes. Your own Claude Code allow rules
+  and hooks can make the CLI call the tool sooner; they can never approve
+  it, and a write with no approval is refused and recorded against its run.
+  A run nobody watches cannot ask, so an ask-first agent's page writes wait
+  for you in Review instead (M57.4c, next item). Its own `recent` notes
+  never ask (D7).
+- **A page write queued for Review touches nothing until you allow it**
+  (M57.4c). Pending writes live in `runtime.db`, in the app's data folder,
+  outside the vault and outside git, and hold the agent's draft verbatim,
+  with the grant of the run that queued it. A write is queued only once it
+  passes every check it could pass then, on the bytes on disk; nothing
+  reaches disk before you press Allow. Allow re-runs every guard under the
+  queuing run's stored grant (its write and read scopes, its tool grant, the
+  note corpus, the knowledge bundle, Type docs and Agent records, and a
+  stale hash) under the write's own lock, and it never queues the write
+  again; a second decision is refused as already decided. Your edit there
+  is checked the same way and records nothing. One agent may have at most
+  20 writes waiting, of at most 256 KiB each; nothing expires. The agent's
+  next unattended run is told what became of each, once, with your reason
+  and every vault path quoted as data.
+- **You may edit an ask-first draft before Allow, and the edit never widens
+  the agent's grant** (M57.4b). The card's form is projected from the tool's
+  input schema. Rust re-checks your edit when you answer (its shape against
+  the schema, then the run's write and read scopes, its tool grant, the note
+  corpus and the knowledge bundle, under the grant the run was started
+  with, and since M57.4c the write itself previewed on the bytes on disk),
+  and a refusal comes back to the card and records nothing. It is
+  checked again at the write, under the write's own lock, with the same
+  guards as any agent write, Type docs and Agent records included. The
+  approval holds the asked input's hash and your version; dispatch lands
+  your version whichever of the two the CLI sends, and tells the agent which
+  keys you changed.
+- **The agent's questions are yours to answer, and only as text** (M57.3).
+  When an agent asks you a question mid-turn (Claude Code's AskUserQuestion),
+  its questions, options and previews are the agent's words: the card shows
+  them as plain text, never as HTML, and a preview stays folded until you open
+  it. Cerebro checks your answer's membership and counts (every question
+  answered once, every pick one of its options, Other at most 2000
+  characters with control characters removed) before it reaches Claude Code,
+  as the call's own input. A question set the card cannot show is refused,
+  and the agent is told why. The permission prompt tool Cerebro names on a
+  run you watch allows only a call you answered, and refuses every other. A run nobody watches is never offered the tool,
+  and every unattended run's message says that nobody will answer.
+- **A turn you closed the panel on is held in memory, never on disk**
+  (M57.6). Closing the assistant or switching threads leaves a run going,
+  so its events are held for the panel to re-attach: only a run you watch,
+  at most 4 MiB and 20,000 events a run and 16 MiB in all, for 30 minutes
+  after it ends or after its waiting card closes. They are never written to
+  disk, and are dropped at a vault switch and at quit. A re-attach names the
+  run's durable id, so a run number reused after a restart reads nothing.
 - **Untrusted vaults cannot add callable servers.** A vault's
   `.cerebro/connectors.json` travels with the vault, so a stdio connector
   entry could name an arbitrary command, and an http one a server of the
@@ -104,11 +193,44 @@ deliberately does not do — with your machine is most of its security story.
   self-certification), `recheck_concept` (which moves `stale_after` and
   nothing else, and refuses a concept a person verified) and `verify_concept`
   (scoped to the `verified` key).
+- **Every write says who made it, and an agent cannot write as you**
+  (M58.1). Each vault write carries a receipt its door's guard mints: your
+  commands stamp `human:me`, an agent's tools stamp the run's actor and run
+  from its grant, and a write you allowed names you as its approver while
+  keeping the agent as the actor. Only the commands the app's window calls can
+  mint your receipt; no MCP tool reaches that guard, so no agent write is
+  recorded as yours. The record is operational, in `runtime.db`'s
+  `vault_writes`, never the vault's ledger, and it observes writes without
+  gating them. Writes that pass no door (another editor, a sync, git, an
+  agent's own shell) record nothing, and a run whose plan let the shell run
+  says its record may be partial.
 - **A page's comments live beside it, in `.comments/`** (M70.2). Each page's
   threads are `.comments/<page path>.json`; no comment ever writes the page
   itself. Git carries that folder like any other, so a pushed vault shares
   its comments. The scan, search and the agent's note tools never read or
   write it, and a sidecar linked out of the vault is refused like any escape.
+- **A deleted page waits in the vault's own Trash, `.trash/`** (M60.8). A
+  delete moves the page and its comments to `.trash/<stamp>/`; nothing a
+  person deletes is unlinked. `.trash/` is gitignored, so a pushed vault
+  never carries a deleted page, and the scan, search and Cerebro's agent
+  tools never read or write it. Claude Code's own readers (Read, Glob, Grep)
+  can still open it until M60.8b denies them, and a shell-granted run always
+  can. Restore refuses to overwrite, a `.trash` linked out of the vault is
+  refused like any escape, and at launch items past 30 days move to the
+  macOS Trash.
+- **Agents can comment on pages they can read** (M70.3). comment_on_note,
+  reply_to_comment and resolve_comment write only the page's comment
+  sidecar, never the page, and are held to read scope (a refusal lists where
+  a quote appears, so it is a read) and to the tool grant, not to write
+  scope. A run posts at most 20 comments. Comment text reaches agents quoted
+  as data.
+- **A person's @mention in a thread runs one turn** (M70.4). A person's
+  comment that names an agent runs one turn of that agent, under its own
+  scope, read scope and tools, with no shell, web or connectors, booked to
+  Fleet with the page as its cause. Only a person's comment starts one; an
+  agent's comment never does. Cerebro posts the answer in place of the
+  placeholder, and a deleted placeholder drops it. An agent that cannot read
+  the page is not asked, because the question quotes the page.
 - **Claude Code's session files are read back, never copied** (M56.3).
   Claude Code writes each conversation's transcript under its own config
   folder, keyed by the vault's path, outside the vault. Cerebro reads a

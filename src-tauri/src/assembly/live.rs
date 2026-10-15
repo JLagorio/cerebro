@@ -69,6 +69,8 @@ impl Spawn for Live<'_> {
             self.run_id.clone(),
             // M53.10: bound to this vault, whatever is opened while it runs.
             self.vault,
+            // Cerebro's own construct: no page write asks (M57.4).
+            crate::mcp::WriteAsks::INTERNAL,
         )
     }
 
@@ -138,14 +140,19 @@ fn request(prompt: &str, token: &str, url: &str) -> AgentRequest {
         system_prompt: None,
         session_id: None,
         model: None,
+        // No shell ceiling (M57.2): an internal run's tool-approval plan
+        // denies every CLI tool whatever the ceiling, so none is sent.
+        shell: None,
         // Every one of these is an absence a MISSING field would grant.
-        shell: Some(false),
         connectors: Some(false),
         connector_names: Some(vec![]),
         // True, and this is the one place it differs from ingest: a person is
         // waiting, which is what `Mode::Attended` means to the meter and what
         // the legacy open mode is for.
         attended: Some(true),
+        // Cerebro's own construct, never an agent's: no page write asks
+        // (M57.4), and none is in its grant anyway.
+        ask_first: None,
         mcp_url: Some(url.to_string()),
         mcp_token: Some(token.to_string()),
         actor: Some(ACTOR.to_string()),
@@ -168,7 +175,7 @@ fn request(prompt: &str, token: &str, url: &str) -> AgentRequest {
         lane: None,
         // Cerebro's own run: attended means a person awaits the ANSWER, not
         // that anybody supervises the child, so the CLI built-ins are
-        // withdrawn here too. Only the three internal spawn sites set this.
+        // denied here too (the tool-approval table's internal run kind). Only the three internal spawn sites set this.
         internal: true,
     }
 }
@@ -180,7 +187,10 @@ mod tests {
     #[test]
     fn a_synthesis_run_asks_for_nothing_it_does_not_need() {
         let request = request("the rendered question", "token", "http://127.0.0.1:1/mcp");
-        assert_eq!(request.shell, Some(false), "it writes no files");
+        assert_eq!(request.shell, None, "no ceiling reaches it");
+        let plan = crate::policy::tool_approval::plan_for(&request, false);
+        assert!(plan.allowed.is_empty(), "it writes no files");
+        assert_eq!(plan.disallowed, crate::policy::tools::cli_names(|_| true));
         assert_eq!(request.connectors, Some(false), "and reaches no systems");
         assert_eq!(request.connector_names, Some(vec![]));
         assert_eq!(request.approved_stdio, Some(vec![]));
@@ -223,7 +233,7 @@ mod tests {
     fn a_synthesis_run_is_marked_as_cerebros_own_though_a_person_waits() {
         // Attended is a METERING fact — someone awaits the answer; nobody
         // supervises the child. The internal marker, not attendance, is what
-        // keys the CLI built-in withdrawal in build_args.
+        // keys the tool-approval table's denial of every CLI built-in.
         let request = request("q", "t", "u");
         assert!(request.internal);
         assert_eq!(request.attended, Some(true));

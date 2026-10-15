@@ -1,0 +1,353 @@
+{
+  "format": 1,
+  "artifact_version": 4,
+  "rule_version": "tool-approval/2026-10-14",
+  "cli_version": "2.1.250",
+  "min_cli_version": "2.1.250",
+  "ceilings": {
+    "none": [
+      "any"
+    ],
+    "shell": [
+      "off",
+      "ask",
+      "on"
+    ],
+    "ask_first": [
+      "yes",
+      "no"
+    ]
+  },
+  "run_kinds": [
+    {
+      "id": "attended",
+      "can_ask": true
+    },
+    {
+      "id": "unattended",
+      "can_ask": false
+    },
+    {
+      "id": "internal",
+      "can_ask": false
+    }
+  ],
+  "decisions": [
+    "allow",
+    "ask",
+    "deny",
+    "refuse",
+    "cli",
+    "queue"
+  ],
+  "permission_modes": {
+    "internal": "default",
+    "asks": "default",
+    "otherwise": "acceptEdits"
+  },
+  "read_scope": {
+    "file_write": "deny",
+    "shell": "deny",
+    "file_read": "deny"
+  },
+  "families": [
+    {
+      "id": "file_write",
+      "ceiling": "shell",
+      "needs_default_mode": true,
+      "grid": {
+        "attended": {
+          "off": "deny",
+          "ask": "ask",
+          "on": "allow"
+        },
+        "unattended": {
+          "off": "deny",
+          "ask": "ask",
+          "on": "allow"
+        },
+        "internal": {
+          "off": "deny",
+          "ask": "deny",
+          "on": "deny"
+        }
+      },
+      "card": {
+        "title": "Change this file?",
+        "kind": "permission",
+        "answers": [
+          "once",
+          "conversation"
+        ]
+      },
+      "message": null
+    },
+    {
+      "id": "shell",
+      "ceiling": "shell",
+      "needs_default_mode": true,
+      "grid": {
+        "attended": {
+          "off": "deny",
+          "ask": "ask",
+          "on": "allow"
+        },
+        "unattended": {
+          "off": "deny",
+          "ask": "ask",
+          "on": "allow"
+        },
+        "internal": {
+          "off": "deny",
+          "ask": "deny",
+          "on": "deny"
+        }
+      },
+      "card": {
+        "title": "Run this command?",
+        "kind": "permission",
+        "answers": [
+          "once",
+          "conversation"
+        ]
+      },
+      "message": null
+    },
+    {
+      "id": "file_read",
+      "ceiling": "shell",
+      "needs_default_mode": false,
+      "grid": {
+        "attended": {
+          "off": "cli",
+          "ask": "cli",
+          "on": "allow"
+        },
+        "unattended": {
+          "off": "cli",
+          "ask": "cli",
+          "on": "allow"
+        },
+        "internal": {
+          "off": "deny",
+          "ask": "deny",
+          "on": "deny"
+        }
+      },
+      "card": null,
+      "message": null
+    },
+    {
+      "id": "web",
+      "ceiling": "none",
+      "needs_default_mode": false,
+      "grid": {
+        "attended": {
+          "any": "cli"
+        },
+        "unattended": {
+          "any": "cli"
+        },
+        "internal": {
+          "any": "deny"
+        }
+      },
+      "card": null,
+      "message": null
+    },
+    {
+      "id": "delegate",
+      "ceiling": "none",
+      "needs_default_mode": false,
+      "grid": {
+        "attended": {
+          "any": "cli"
+        },
+        "unattended": {
+          "any": "cli"
+        },
+        "internal": {
+          "any": "deny"
+        }
+      },
+      "card": null,
+      "message": null
+    },
+    {
+      "id": "question",
+      "ceiling": "none",
+      "needs_default_mode": false,
+      "grid": {
+        "attended": {
+          "any": "ask"
+        },
+        "unattended": {
+          "any": "deny"
+        },
+        "internal": {
+          "any": "refuse"
+        }
+      },
+      "card": {
+        "title": "A question for you",
+        "kind": "question",
+        "answers": [
+          "once"
+        ]
+      },
+      "message": "Nobody is watching this run, so no one can answer a question. Make the call yourself and say what you assumed."
+    },
+    {
+      "id": "plan",
+      "ceiling": "none",
+      "needs_default_mode": false,
+      "grid": {
+        "attended": {
+          "any": "refuse"
+        },
+        "unattended": {
+          "any": "refuse"
+        },
+        "internal": {
+          "any": "refuse"
+        }
+      },
+      "card": null,
+      "message": "Cerebro doesn't use plan mode. Carry on with the work, or describe your plan in your reply."
+    },
+    {
+      "id": "confirmable",
+      "ceiling": "ask_first",
+      "needs_default_mode": false,
+      "grid": {
+        "attended": {
+          "yes": "ask",
+          "no": "allow"
+        },
+        "unattended": {
+          "yes": "queue",
+          "no": "allow"
+        },
+        "internal": {
+          "yes": "deny",
+          "no": "deny"
+        }
+      },
+      "card": {
+        "title": "Allow this page write?",
+        "kind": "write",
+        "answers": [
+          "once"
+        ]
+      },
+      "message": null
+    }
+  ],
+  "unlisted": {
+    "decision": "cli"
+  },
+  "messages": {
+    "person_denied": "The person said no, so this did not run. Don't try it again this turn; carry on without it, or say what you needed it for.",
+    "withheld": "The shell ceiling is Ask and nobody was watching this run, so it ran without:",
+    "denied": "Cerebro's settings don't allow this tool in this run.",
+    "unlisted": "Cerebro doesn't allow this tool here.",
+    "mode_mismatch": "This run had to ask before running commands, but Claude Code started in another permission mode or is older than 2.1.250, so Cerebro stopped it before it acted. Update Claude Code, or set Shell access to Off or On.",
+    "ask_first_unattended": "This agent asks before writing pages, and nobody is watching this run, so nothing was written. Say in your reply what you would have written.",
+    "ask_first_unapproved": "This write needs the person's Allow first, and Cerebro has none for it, so nothing was written. Call the tool again to ask them.",
+    "ask_first_declined": "The person declined this write, so nothing was written.",
+    "ask_first_reason": "Their reason: \"{reason}\"",
+    "question_declined": "The person chose not to answer, so decide yourself and say what you assumed.",
+    "question_malformed": "Cerebro couldn't show this question ({reason}). Ask again with 1 to 4 questions, each with 2 to 4 distinct options.",
+    "queued": "Queued for the person's review as {id}; nothing is written until they allow it. Your next run will be told whether it was applied or rejected, so do not queue it again.",
+    "queued_already": "This exact write already waits for review as {id}; nothing new was queued.",
+    "queue_full": "{n} of your writes already wait for review, the most one agent may have waiting, so nothing was queued and nothing was written.",
+    "queue_too_large": "This write is larger than Review holds ({max} bytes), so nothing was queued and nothing was written.",
+    "queue_unavailable": "Cerebro could not queue this write for review (its runtime database is unavailable), so nothing was written."
+  },
+  "ask_first": {
+    "record_key": "ask-first",
+    "family": "confirmable",
+    "cases": [
+      {
+        "why": "No key: the agent writes without asking.",
+        "held": "absent",
+        "value": null,
+        "on": false,
+        "warn": false
+      },
+      {
+        "why": "false: the agent writes without asking.",
+        "held": "property",
+        "value": false,
+        "on": false,
+        "warn": false
+      },
+      {
+        "why": "true: the agent asks before every page write.",
+        "held": "property",
+        "value": true,
+        "on": true,
+        "warn": false
+      },
+      {
+        "why": "An empty value reads on and warns: an odd value fails closed.",
+        "held": "property",
+        "value": null,
+        "on": true,
+        "warn": true
+      },
+      {
+        "why": "The text \"false\" is not false: on, with a warning.",
+        "held": "property",
+        "value": "false",
+        "on": true,
+        "warn": true
+      },
+      {
+        "why": "Any other text reads on and warns.",
+        "held": "property",
+        "value": "yes",
+        "on": true,
+        "warn": true
+      },
+      {
+        "why": "A number reads on and warns.",
+        "held": "property",
+        "value": 0,
+        "on": true,
+        "warn": true
+      },
+      {
+        "why": "A list reads on and warns.",
+        "held": "property",
+        "value": [
+          true
+        ],
+        "on": true,
+        "warn": true
+      },
+      {
+        "why": "A map reads on and warns.",
+        "held": "property",
+        "value": {
+          "when": "always"
+        },
+        "on": true,
+        "warn": true
+      },
+      {
+        "why": "A [[link]] arrives as a relation (CV-09): on, with a warning.",
+        "held": "relation",
+        "value": [
+          "release-scout"
+        ],
+        "on": true,
+        "warn": true
+      }
+    ]
+  },
+  "queue_limits": {
+    "open_per_actor": 20,
+    "input_bytes": 262144
+  }
+}

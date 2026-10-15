@@ -1,0 +1,240 @@
+{
+  "about": "M58.1 (CV-33): one row per write door. Each case runs in a fresh vault holding `seed`, calls the door with `args`, and either is refused with a message containing `refused`, or records exactly the row `records` names (null: no row) in vault_writes. IPC rows are stamped human_actor with no run; agent rows are stamped with their `stamp`. Replayed by src-tauri/src/lib.rs (ipc), src-tauri/src/mcp.rs (agent) and src/lib/mockIpc.test.ts (both). A path under /SOURCE/ is a file outside the vault, made by the replay.",
+  "human_actor": "human:me",
+  "ipc": [
+    {
+      "door": "save_note",
+      "seed": { "door-cases/a.md": "# A\n" },
+      "args": { "path": "door-cases/a.md", "body": "# A\n\nSaved.\n" },
+      "records": { "kind": "vault.write", "path": "door-cases/a.md" }
+    },
+    {
+      "door": "save_note",
+      "seed": { "door-cases/flow.mmd": "flowchart TD\n" },
+      "args": { "path": "door-cases/flow.mmd", "body": "graph LR\n" },
+      "records": { "kind": "vault.write", "path": "door-cases/flow.mmd" }
+    },
+    {
+      "door": "update_frontmatter",
+      "seed": { "door-cases/a.md": "---\nstatus: todo\n---\n\n# A\n" },
+      "args": { "path": "door-cases/a.md", "patch": { "status": "done" } },
+      "records": { "kind": "vault.write", "path": "door-cases/a.md" }
+    },
+    {
+      "door": "set_note_title",
+      "seed": { "door-cases/a.md": "# A\n" },
+      "args": { "path": "door-cases/a.md", "title": "Renamed" },
+      "records": { "kind": "vault.write", "path": "door-cases/a.md" }
+    },
+    {
+      "door": "set_note_title",
+      "args": { "path": "knowledge/concepts/a.md", "title": "Renamed" },
+      "refused": "read-only"
+    },
+    {
+      "door": "create_note",
+      "args": { "folder": "door-cases", "slug": "fresh", "frontmatter": {}, "body": "# Fresh\n" },
+      "records": { "kind": "vault.create", "path": "door-cases/fresh.md" }
+    },
+    {
+      "door": "create_note",
+      "args": { "folder": "knowledge", "slug": "fresh", "frontmatter": {}, "body": "# Fresh\n" },
+      "refused": "read-only"
+    },
+    {
+      "door": "save_view",
+      "args": { "id": "door-case", "yaml": "name: Door case\n", "folder": "door-cases" },
+      "records": { "kind": "vault.create", "path": "door-cases/views/door-case.yml" }
+    },
+    {
+      "door": "save_view",
+      "args": { "id": "door-case", "yaml": "name: Door case\n", "folder": "knowledge" },
+      "refused": "read-only",
+      "why": "save_view had no bundle guard on either backend until M58.1."
+    },
+    {
+      "door": "save_collection",
+      "args": { "folder": "door-cases", "yaml": "name: Door cases\n" },
+      "records": { "kind": "vault.create", "path": "door-cases/collection.yml" }
+    },
+    {
+      "door": "save_collection",
+      "args": { "folder": "knowledge", "yaml": "name: Bundle\n" },
+      "refused": "read-only"
+    },
+    {
+      "door": "save_list",
+      "args": { "folder": "door-cases", "id": "backlog", "yaml": "name: Backlog\n" },
+      "records": { "kind": "vault.create", "path": "door-cases/backlog.list.yml" }
+    },
+    {
+      "door": "save_list",
+      "args": { "folder": "knowledge", "id": "backlog", "yaml": "name: Backlog\n" },
+      "refused": "read-only"
+    },
+    {
+      "door": "create_folder",
+      "args": { "path": "door-cases/empty" },
+      "records": null,
+      "why": "A folder holds no bytes; write.rs UNRECORDED names it."
+    },
+    {
+      "door": "create_folder",
+      "args": { "path": "knowledge/empty" },
+      "refused": "read-only"
+    },
+    {
+      "door": "rename_note",
+      "seed": { "door-cases/a.md": "# A\n" },
+      "args": { "from": "door-cases/a.md", "to": "door-cases/b.md" },
+      "records": { "kind": "vault.rename", "path": "door-cases/a.md", "to": "door-cases/b.md" }
+    },
+    {
+      "door": "rename_note",
+      "seed": { "door-cases/a.md": "# A\n" },
+      "args": { "from": "door-cases/a.md", "to": "knowledge/a.md" },
+      "refused": "read-only"
+    },
+    {
+      "door": "delete_note",
+      "args": { "path": "knowledge/concepts/a.md" },
+      "refused": "read-only"
+    },
+    {
+      "door": "delete_note",
+      "seed": { "door-cases/a.md": "# A\n" },
+      "args": { "path": "door-cases/a.md" },
+      "records": { "kind": "vault.delete", "path": "door-cases/a.md" },
+      "why": "M60.8: a delete lands in the vault's own Trash, so it replays like any door."
+    },
+    {
+      "door": "delete_note",
+      "seed": { ".git/config": "[core]\n" },
+      "args": { "path": ".git/config" },
+      "refused": "is not a page Cerebro shows"
+    },
+    {
+      "door": "restore_from_trash",
+      "seed": {
+        ".trash/20261014T093000Z-a1b2/door-cases/a.md": "# A\n",
+        ".trash/20261014T093000Z-a1b2/.trashed.json": "{\n  \"format\": 1,\n  \"path\": \"door-cases/a.md\",\n  \"kind\": \"file\",\n  \"title\": \"A\",\n  \"deleted_at\": \"2026-10-14T09:30:00Z\"\n}\n"
+      },
+      "args": { "stamp": "20261014T093000Z-a1b2" },
+      "records": { "kind": "vault.create", "path": "door-cases/a.md" }
+    },
+    {
+      "door": "restore_from_trash",
+      "seed": {
+        "door-cases/a.md": "# Someone else\n",
+        ".trash/20261014T093000Z-a1b2/door-cases/a.md": "# A\n",
+        ".trash/20261014T093000Z-a1b2/.trashed.json": "{\n  \"format\": 1,\n  \"path\": \"door-cases/a.md\",\n  \"kind\": \"file\",\n  \"title\": \"A\",\n  \"deleted_at\": \"2026-10-14T09:30:00Z\"\n}\n"
+      },
+      "args": { "stamp": "20261014T093000Z-a1b2" },
+      "refused": "already exists, so nothing was restored"
+    },
+    {
+      "door": "restore_from_trash",
+      "seed": {
+        ".trash/20261014T093000Z-a1b2/knowledge/a.md": "# A\n",
+        ".trash/20261014T093000Z-a1b2/.trashed.json": "{\n  \"format\": 1,\n  \"path\": \"knowledge/a.md\",\n  \"kind\": \"file\",\n  \"title\": \"A\",\n  \"deleted_at\": \"2026-10-14T09:30:00Z\"\n}\n"
+      },
+      "args": { "stamp": "20261014T093000Z-a1b2" },
+      "refused": "read-only"
+    },
+    {
+      "door": "write_text_file",
+      "args": { "path": "door-cases/new.mmd", "content": "graph TD\n" },
+      "records": { "kind": "vault.create", "path": "door-cases/new.mmd" }
+    },
+    {
+      "door": "write_text_file",
+      "args": { "path": "knowledge/new.mmd", "content": "graph TD\n" },
+      "refused": "read-only"
+    },
+    {
+      "door": "import_attachment",
+      "args": { "source": "/SOURCE/door-case.pdf" },
+      "records": { "kind": "vault.create", "path": "attachments/door-case.pdf" }
+    },
+    {
+      "door": "verify_concept",
+      "seed": { "door-cases/a.md": "# A\n" },
+      "args": {
+        "path": "door-cases/a.md",
+        "patch": { "verified": { "by": "human:me", "at": "2026-10-14T09:00:00Z" } },
+        "viewed_body_hash": ""
+      },
+      "refused": "verify_concept only applies to knowledge/ concepts"
+    },
+    {
+      "door": "capture_concept_edit",
+      "seed": { "door-cases/a.md": "# A\n" },
+      "args": {
+        "request": {
+          "kind": "editorial",
+          "path": "door-cases/a.md",
+          "actor_id": "human:owner",
+          "ops": [],
+          "origin": "in_app",
+          "request_id": "door-case"
+        }
+      },
+      "refused": "capture applies only to knowledge/ projections"
+    },
+    {
+      "door": "restore_note_version",
+      "args": {
+        "path": "knowledge/concepts/a.md",
+        "commit": "0000000000000000000000000000000000000000"
+      },
+      "refused": "read-only",
+      "why": "Restore is a person's write (M58.4): its receipt is minted from the bundle guard. Only the refusal replays: a restore that lands needs a repository."
+    }
+  ],
+  "agent": [
+    {
+      "door": "append_to_note",
+      "seed": { "door-cases/a.md": "# A\n" },
+      "args": { "path": "door-cases/a.md", "content": "Appended." },
+      "stamp": { "actor": "process:release-scout", "run_id": "run-door-case" },
+      "records": { "kind": "vault.write", "path": "door-cases/a.md" }
+    },
+    {
+      "door": "append_to_note",
+      "args": { "path": "knowledge/concepts/a.md", "content": "Appended." },
+      "stamp": { "actor": "process:release-scout", "run_id": "run-door-case" },
+      "refused": "knowledge/ is written only through write_concept"
+    },
+    {
+      "door": "edit_note",
+      "seed": { "door-cases/a.md": "# A\n\nThe body.\n" },
+      "args": {
+        "path": "door-cases/a.md",
+        "edits": [{ "old": "The body.", "new": "The edited body." }]
+      },
+      "stamp": { "actor": "claude-code", "run_id": "run-door-case" },
+      "records": { "kind": "vault.write", "path": "door-cases/a.md" }
+    },
+    {
+      "door": "edit_note",
+      "args": {
+        "path": "knowledge/concepts/a.md",
+        "edits": [{ "old": "The body.", "new": "The edited body." }]
+      },
+      "stamp": { "actor": "claude-code", "run_id": "run-door-case" },
+      "refused": "knowledge/ is written only through write_concept"
+    },
+    {
+      "door": "create_note",
+      "args": { "folder": "door-cases", "slug": "fresh", "body": "# Fresh\n" },
+      "stamp": { "actor": "process:release-scout", "run_id": "run-door-case" },
+      "records": { "kind": "vault.create", "path": "door-cases/fresh.md" }
+    },
+    {
+      "door": "create_note",
+      "args": { "folder": "knowledge", "slug": "fresh", "body": "# Fresh\n" },
+      "stamp": { "actor": "process:release-scout", "run_id": "run-door-case" },
+      "refused": "knowledge/ is written only through write_concept"
+    }
+  ]
+}

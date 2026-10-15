@@ -6,7 +6,8 @@
 //! lock and the sidecar's (M55.1), reads the sidecar, applies one op and
 //! writes it back through the atomic funnel (`write::write_file`), so two
 //! writes take turns and neither loses the other. A rename or delete carries
-//! the sidecar (`write::rename_note_with`, `write::delete_note_with`).
+//! the sidecar (`write::rename_note_with`; a delete into the vault's Trash
+//! and back out, `trash::trash_locked` and `trash::untrash_locked`, M60.8).
 //!
 //! **Format v1**, the one format every later part writes: two-space JSON and a
 //! final newline. Keys in order: file `{format, threads}`; thread `{anchor?,
@@ -15,9 +16,12 @@
 //! after}`; stamp `{at, by}`. An optional key is omitted when unset. A
 //! thread's id is its first comment's. Ids are 16 lowercase hex characters
 //! and times RFC 3339 UTC to the second. An author is `human:owner`,
-//! `claude-code`, `process:<name>` or `agent:<id>`. `run_id`, `state` and
-//! `answers` belong to M70.3 and M70.4: this part reads, checks and keeps
-//! them, and never writes them.
+//! `claude-code`, `process:<name>` or `agent:<id>`. `run_id` is the run an
+//! agent's comment came from (`comment_tools.rs`, M70.3, writes it). `state`
+//! and `answers` mark an agent's answer to a person's @mention (M70.4): the
+//! thread turn posts a pending placeholder naming the comment it answers
+//! (`agent::thread_turn`), and `settle_answer` replaces it in place. No
+//! comment op writes either.
 //!
 //! A sidecar that does not parse reads as unavailable with its reason and is
 //! never overwritten. The exact place a shape check failed goes to the
@@ -102,7 +106,7 @@ pub struct Comment {
     pub answers: Option<String>,
 }
 
-/// Where an agent's answer stands (M70.4 writes it).
+/// Where an agent's answer stands (M70.4's thread turn writes it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CommentState {
@@ -749,11 +753,18 @@ fn read_sidecar(abs: &Path) -> Result<Option<Vec<u8>>, String> {
 /// `page`'s threads. No sidecar is zero threads; one that can't be read is
 /// its reason, never an empty file (CV-05). Reads take no lock.
 pub fn read_comments(vault: &Path, page: &str) -> Result<CommentsFile, String> {
+    sidecar_path(vault, page)?;
+    read_threads(vault, page)
+        .map_err(|reason| format!("Comments for {page} can't be read: {reason}."))
+}
+
+/// `read_comments` with the bare reason a sidecar can't be read, for the
+/// sentences an agent reads around it (`comment_tools.rs`, M70.3).
+pub fn read_threads(vault: &Path, page: &str) -> Result<CommentsFile, String> {
     let (_, abs) = sidecar_path(vault, page)?;
-    let unreadable = |reason: String| format!("Comments for {page} can't be read: {reason}.");
-    match read_sidecar(&abs).map_err(unreadable)? {
+    match read_sidecar(&abs)? {
         None => Ok(CommentsFile::empty()),
-        Some(bytes) => parse_bytes(page, &bytes).map_err(unreadable),
+        Some(bytes) => parse_bytes(page, &bytes),
     }
 }
 
@@ -767,12 +778,14 @@ pub fn list_comments(vault: &Path, page: &str) -> Result<CommentsFile, String> {
 /// the page must exist, the sidecar must read (an unreadable one refuses and
 /// is never overwritten), `change` computes the next file (`None` writes
 /// nothing), and the result must fit the cap and read back before it is
-/// written. Records one `vault.write` row for the sidecar under `actor`.
-/// M70.3 and M70.4 write through here too.
+/// written. Records one `vault.comment` row for the sidecar under `actor`
+/// and the run that asked (M58.1): a comment changes no page, so it never
+/// reads as a change to one. M70.3 and M70.4 write through here too.
 pub(crate) fn rewrite(
     vault: &Path,
     page: &str,
     actor: &str,
+    run_id: Option<&str>,
     change: impl FnOnce(&CommentsFile) -> Result<Option<CommentsFile>, String>,
 ) -> Result<CommentsFile, String> {
     write::note_join(vault, page, write::MARKDOWN)?;
@@ -801,11 +814,15 @@ pub(crate) fn rewrite(
     let hash = crate::ledger::sha256_hex(text.as_bytes());
     crate::runtime::vault_writes::record(
         vault,
-        "vault.write",
-        &rel,
-        None,
-        Some(&hash),
-        Some(actor),
+        &crate::runtime::vault_writes::WriteRow {
+            kind: "vault.comment",
+            path: &rel,
+            to: None,
+            content_hash: Some(&hash),
+            actor: Some(actor),
+            run_id,
+            approved_by: None,
+        },
     );
     Ok(next)
 }
@@ -821,7 +838,7 @@ pub fn check_size(page: &str, text: &str) -> Result<(), String> {
 }
 
 /// An id no comment in `file` has.
-fn fresh_id(file: &CommentsFile) -> String {
+pub(crate) fn fresh_id(file: &CommentsFile) -> String {
     loop {
         let id = format!("{:016x}", rand::random::<u64>());
         if !file.ids().any(|taken| taken == id) {
@@ -831,7 +848,7 @@ fn fresh_id(file: &CommentsFile) -> String {
 }
 
 /// Now, RFC 3339 UTC to the second.
-fn now() -> String {
+pub(crate) fn now() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
@@ -845,7 +862,7 @@ pub fn write_comment(
     by: &str,
     run_id: Option<&str>,
 ) -> Result<CommentsFile, String> {
-    rewrite(vault, page, by, |file| {
+    rewrite(vault, page, by, run_id, |file| {
         let ctx = OpContext {
             ids: vec![fresh_id(file)],
             now: now(),
@@ -855,6 +872,84 @@ pub fn write_comment(
         };
         apply_op(file, op, &ctx)
     })
+}
+
+/// What settling an agent's answer did (M70.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Settled {
+    /// The placeholder now holds the answer, in its place.
+    Written,
+    /// The placeholder, or its thread, was deleted (or is no longer the
+    /// run's pending one), so nothing was written.
+    Gone,
+}
+
+/// Replace run `run_id`'s pending placeholder `comment` in `thread` with
+/// `body`, now in `state`, under the sidecar's lock (M70.4). The comment
+/// keeps its id, author and place. A deleted thread or comment, or one that
+/// is no longer this run's pending placeholder, is `Gone` and writes nothing:
+/// a person who deleted the placeholder dropped the answer.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each names one part of the placeholder the thread turn bound"
+)]
+pub(crate) fn settle_answer(
+    vault: &Path,
+    page: &str,
+    thread: &str,
+    comment: &str,
+    run_id: &str,
+    actor: &str,
+    body: &str,
+    state: CommentState,
+) -> Result<Settled, String> {
+    let mut settled = Settled::Gone;
+    rewrite(vault, page, actor, Some(run_id), |file| {
+        let mut next = file.clone();
+        let Some(t) = next
+            .threads
+            .iter_mut()
+            .find(|t| t.id() == thread && t.deleted.is_none())
+        else {
+            return Ok(None);
+        };
+        let Some(c) = t.comments.iter_mut().find(|c| {
+            c.id == comment
+                && c.deleted.is_none()
+                && c.state == Some(CommentState::Pending)
+                && c.run_id.as_deref() == Some(run_id)
+        }) else {
+            return Ok(None);
+        };
+        c.body = body.to_string();
+        c.state = Some(state);
+        settled = Settled::Written;
+        Ok(Some(next))
+    })?;
+    Ok(settled)
+}
+
+/// Every page that has a sidecar, by the sidecar's path, sorted. A folder
+/// that can't be read lists nothing under it.
+pub fn pages_with_threads(vault: &Path) -> Vec<String> {
+    let root = vault.join(COMMENTS_DIR);
+    let mut pages: Vec<String> = walkdir::WalkDir::new(&root)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+        .filter_map(|e| {
+            let rel = e
+                .path()
+                .strip_prefix(vault)
+                .ok()?
+                .to_str()?
+                .replace('\\', "/");
+            page_of_sidecar(&rel)
+        })
+        .collect();
+    pages.sort();
+    pages
 }
 
 #[cfg(test)]
@@ -1184,38 +1279,64 @@ mod tests {
     }
 
     #[test]
-    fn a_comment_write_is_recorded_as_a_vault_write() {
+    fn a_comment_write_is_recorded_as_a_vault_comment() {
         let _sink = crate::runtime::sink::test_lock();
         let config = testutil::temp_vault("comments-recorded-config");
         let vault = vault_with_page("comments-recorded");
         crate::runtime::sink::arm(&config).unwrap();
         write_comment(&vault, PAGE, &start("Recorded."), OWNER, None).unwrap();
-        let text = std::fs::read_to_string(sidecar(&vault)).unwrap();
+        let mine = std::fs::read_to_string(sidecar(&vault)).unwrap();
+        write_comment(
+            &vault,
+            PAGE,
+            &start("Noted."),
+            "process:scout",
+            Some("run-1"),
+        )
+        .unwrap();
+        let theirs = std::fs::read_to_string(sidecar(&vault)).unwrap();
         let vault_id = crate::runtime::scope::derive_vault_id(&vault);
-        let rows: Vec<(String, String, Option<String>, Option<String>)> =
-            crate::runtime::sink::with_sink(|conn| {
-                let mut stmt = conn
-                    .prepare(
-                        "SELECT kind, path, content_hash, actor FROM vault_writes \
-                         WHERE vault_id = ?1 ORDER BY rowid",
-                    )
-                    .unwrap();
-                stmt.query_map([&vault_id], |r| {
-                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
-                })
-                .unwrap()
-                .collect::<Result<Vec<_>, _>>()
-                .unwrap()
+        type Row = (
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        );
+        let rows: Vec<Row> = crate::runtime::sink::with_sink(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT kind, path, content_hash, actor, run_id FROM vault_writes \
+                     WHERE vault_id = ?1 ORDER BY rowid",
+                )
+                .unwrap();
+            stmt.query_map([&vault_id], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
             })
-            .unwrap();
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+        })
+        .unwrap();
+        // A comment changes no page, so it is its own kind, never a write.
         assert_eq!(
             rows,
-            vec![(
-                "vault.write".to_string(),
-                ".comments/notes/plan.md.json".to_string(),
-                Some(crate::ledger::sha256_hex(text.as_bytes())),
-                Some(OWNER.to_string()),
-            )]
+            vec![
+                (
+                    "vault.comment".to_string(),
+                    ".comments/notes/plan.md.json".to_string(),
+                    Some(crate::ledger::sha256_hex(mine.as_bytes())),
+                    Some(OWNER.to_string()),
+                    None,
+                ),
+                (
+                    "vault.comment".to_string(),
+                    ".comments/notes/plan.md.json".to_string(),
+                    Some(crate::ledger::sha256_hex(theirs.as_bytes())),
+                    Some("process:scout".to_string()),
+                    Some("run-1".to_string()),
+                ),
+            ]
         );
         crate::runtime::sink::disarm();
         for dir in [&vault, &config] {

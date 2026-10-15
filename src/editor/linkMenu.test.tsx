@@ -4,12 +4,14 @@ import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createLinkedPage } from '@/app/listActions';
 import { makeEntry } from '@/engine/testHelpers';
+import { useOpenLogStore } from '@/stores/openLogStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import {
   charBeforeTrigger,
   creatableTitle,
   mentionAtWordStart,
+  mentionNamesPage,
   readLinkQuery,
   stemOfPath,
   type TriggerState,
@@ -120,6 +122,27 @@ describe('mentionAtWordStart', () => {
   });
   it.each(['a', '\u00E9', '1', '.', '-', '_', '+', null])('is mid-word after %j', (before) => {
     expect(mentionAtWordStart(before)).toBe(false);
+  });
+});
+
+describe('mentionNamesPage', () => {
+  it.each(['dana', 'Retro memo', 'Retro memo ', 'v1-2 notes', 'Caf\u00E9 plan'])(
+    '%j could name a page',
+    (query) => {
+      expect(mentionNamesPage(query)).toBe(true);
+    },
+  );
+  it.each([
+    'alex when done',
+    'dana about the launch plan',
+    'dana,',
+    'dana: see',
+    'v1.2',
+    'ok?',
+    'go!',
+    'a;b',
+  ])('%j reads as a sentence', (query) => {
+    expect(mentionNamesPage(query)).toBe(false);
   });
 });
 
@@ -268,6 +291,48 @@ describe('Create in the [[ and @ menus', () => {
     return (path: string | null) => act(async () => land(path));
   }
 
+  // M59.3 — the `[[` page rows rank: the match tier, then your own opens.
+  it('lists the page you opened first within its tier after [[', async () => {
+    useVaultStore.setState({
+      entries: [
+        ...useVaultStore.getState().entries,
+        makeEntry({ path: 'notes/plan-a.md', filename: 'plan-a.md', title: 'Plan a' }),
+        makeEntry({ path: 'notes/plan-b.md', filename: 'plan-b.md', title: 'Plan b' }),
+        makeEntry({ path: 'notes/unplanned.md', filename: 'unplanned.md', title: 'Unplanned' }),
+      ],
+    });
+    useOpenLogStore.setState({ logs: {}, saved: true });
+    useOpenLogStore.getState().record('/demo-vault', 'notes/plan-b.md');
+    useOpenLogStore.getState().record('/demo-vault', 'notes/unplanned.md');
+    const { editor } = await openEditor();
+    await type(editor, ' [[plan');
+    await waitFor(() =>
+      expect(rows().slice(0, 4)).toEqual(['# Link page', 'Plan b', 'Plan a', 'Unplanned']),
+    );
+  });
+
+  it('keeps People, Link page and Due date contiguous in the @ menu', async () => {
+    useVaultStore.setState({
+      entries: [
+        ...useVaultStore.getState().entries,
+        makeEntry({
+          path: 'types/person.md',
+          filename: 'person.md',
+          title: 'Person',
+          type: 'Type',
+        }),
+        makeEntry({ path: 'people/dana.md', filename: 'dana.md', title: 'Dana', type: 'Person' }),
+        makeEntry({ path: 'notes/due.md', filename: 'due.md', title: 'Due diligence' }),
+      ],
+    });
+    const { editor } = await openEditor();
+    await type(editor, ' @d');
+    await waitFor(() => expect(rows()).toContain('Dana'));
+    const headers = rows().filter((r) => r.startsWith('# '));
+    expect(headers.slice(0, 3)).toEqual(['# People', '# Link page', '# Due date']);
+    expect(new Set(headers).size).toBe(headers.length);
+  });
+
   // Which bracket opens the menu decides what the query holds, and the two
   // comments MarkdownEditor carried disagreed about it.
   it('opens the menu again on the second bracket of [[, so the query starts after both', async () => {
@@ -341,6 +406,25 @@ describe('Create in the [[ and @ menus', () => {
       expect(rows()).toEqual([`# ${editor.dictionary.suggestion_menu.no_items_title}`]),
     );
   });
+
+  // BlockNote closes a menu four characters past its last query with rows. A
+  // Create row on every query kept the `@` menu open to the end of the line,
+  // and its Enter made a page of the sentence.
+  it.each([' Ask @dana about the launch plan', ' Ping @alex when done', ' Hi @dana, see'])(
+    'lets the @ menu close on a sentence, so Enter after %j starts a line',
+    async (sentence) => {
+      const { editor } = await openEditor();
+      await type(editor, sentence);
+      await waitFor(menuClosed);
+      act(() => {
+        fireEvent.keyDown(editor.prosemirrorView.dom, { key: 'Enter' });
+      });
+      await type(editor, 'next line');
+      expect(createLinkedPage).not.toHaveBeenCalled();
+      expect(inline(editor)).toEqual([`Plain.${sentence}`]);
+      expect(editor.document[1].content).toEqual([{ type: 'text', text: 'next line', styles: {} }]);
+    },
+  );
 
   it('links where the caret was when the page lands, ahead of what was typed since', async () => {
     const land = deferCreate();

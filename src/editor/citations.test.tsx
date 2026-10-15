@@ -410,8 +410,10 @@ describe('the [^ menu', () => {
      stale link row behind when `^` swapped the list — measured in the app, a
      "Knowledge" page offered as a source to cite. */
   it('leaves no row of the link menu behind when two pages share a title', async () => {
+    // Different stems, so a link reaches each of them (M55.14 offers no row
+    // for a page whose every name belongs to another).
     const twin = (dir: string) =>
-      makeEntry({ path: `${dir}/twin.md`, filename: 'twin.md', title: 'Twin' });
+      makeEntry({ path: `${dir}/twin-${dir}.md`, filename: `twin-${dir}.md`, title: 'Twin' });
     useVaultStore.setState({
       entries: [...useVaultStore.getState().entries, twin('a'), twin('b')],
     });

@@ -1,0 +1,215 @@
+{
+  "why": "AskUserQuestion where nobody watches (M57.3): an unattended or internal run denies it in argv, and the host says nobody is watching, so the agent makes the call itself.",
+  "host_answers": [
+    {
+      "why": "Unattended, Shell access off: the question is denied with the nobody-watching message.",
+      "input": {
+        "kind": "unattended",
+        "shell": "off",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "AskUserQuestion",
+      "tool_input": {
+        "questions": [
+          {
+            "question": "Which release?",
+            "header": "Release",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "1.4",
+                "description": "This week"
+              },
+              {
+                "label": "1.5",
+                "description": "Next month"
+              }
+            ]
+          }
+        ]
+      },
+      "answer": {
+        "kind": "deny",
+        "message": "Nobody is watching this run, so no one can answer a question. Make the call yourself and say what you assumed."
+      }
+    },
+    {
+      "why": "Unattended, Shell access ask: the question is denied with the nobody-watching message.",
+      "input": {
+        "kind": "unattended",
+        "shell": "ask",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "AskUserQuestion",
+      "tool_input": {
+        "questions": [
+          {
+            "question": "Which release?",
+            "header": "Release",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "1.4",
+                "description": "This week"
+              },
+              {
+                "label": "1.5",
+                "description": "Next month"
+              }
+            ]
+          }
+        ]
+      },
+      "answer": {
+        "kind": "deny",
+        "message": "Nobody is watching this run, so no one can answer a question. Make the call yourself and say what you assumed."
+      }
+    },
+    {
+      "why": "Unattended, Shell access on: the question is denied with the nobody-watching message.",
+      "input": {
+        "kind": "unattended",
+        "shell": "on",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "AskUserQuestion",
+      "tool_input": {
+        "questions": [
+          {
+            "question": "Which release?",
+            "header": "Release",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "1.4",
+                "description": "This week"
+              },
+              {
+                "label": "1.5",
+                "description": "Next month"
+              }
+            ]
+          }
+        ]
+      },
+      "answer": {
+        "kind": "deny",
+        "message": "Nobody is watching this run, so no one can answer a question. Make the call yourself and say what you assumed."
+      }
+    },
+    {
+      "why": "Internal, Shell access off: the question is denied with the nobody-watching message.",
+      "input": {
+        "kind": "internal",
+        "shell": "off",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "AskUserQuestion",
+      "tool_input": {
+        "questions": [
+          {
+            "question": "Which release?",
+            "header": "Release",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "1.4",
+                "description": "This week"
+              },
+              {
+                "label": "1.5",
+                "description": "Next month"
+              }
+            ]
+          }
+        ]
+      },
+      "answer": {
+        "kind": "deny",
+        "message": "Nobody is watching this run, so no one can answer a question. Make the call yourself and say what you assumed."
+      }
+    },
+    {
+      "why": "Internal, Shell access ask: the question is denied with the nobody-watching message.",
+      "input": {
+        "kind": "internal",
+        "shell": "ask",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "AskUserQuestion",
+      "tool_input": {
+        "questions": [
+          {
+            "question": "Which release?",
+            "header": "Release",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "1.4",
+                "description": "This week"
+              },
+              {
+                "label": "1.5",
+                "description": "Next month"
+              }
+            ]
+          }
+        ]
+      },
+      "answer": {
+        "kind": "deny",
+        "message": "Nobody is watching this run, so no one can answer a question. Make the call yourself and say what you assumed."
+      }
+    },
+    {
+      "why": "Internal, Shell access on: the question is denied with the nobody-watching message.",
+      "input": {
+        "kind": "internal",
+        "shell": "on",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "AskUserQuestion",
+      "tool_input": {
+        "questions": [
+          {
+            "question": "Which release?",
+            "header": "Release",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "1.4",
+                "description": "This week"
+              },
+              {
+                "label": "1.5",
+                "description": "Next month"
+              }
+            ]
+          }
+        ]
+      },
+      "answer": {
+        "kind": "deny",
+        "message": "Nobody is watching this run, so no one can answer a question. Make the call yourself and say what you assumed."
+      }
+    }
+  ]
+}

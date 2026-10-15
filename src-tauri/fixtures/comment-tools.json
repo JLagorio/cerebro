@@ -1,0 +1,813 @@
+{
+  "format": 1,
+  "about": "The agent comment tools' rules (M70.3), replayed by src-tauri/src/comment_tools.rs (replays_the_shared_quote_filter, replays_the_shared_comment_tool_cases) and by src/lib/mockIpc.test.ts, so the packaged app and the browser mock find, refuse and post alike. `quotes`: the markdown a comment quote may not hold, named as its refusal names it (null: none). `matches`: where a quote reads as text on the page, as quote.rs's comment_matches and quote.ts's commentMatches keep the one finder's matches: the 1-based body line of each, in order, and the context its anchor stores (`before` and `after`, from its own line, cut at markdown and at 40 code points). `calls`: one tool call on `page`, whose file holds `bytes`, with its sidecar absent (none), holding `sidecar` (seeded) or holding these raw bytes; the answer `text` and whether it is an error, `{id}` standing for the new thread's id. A refused call changes no byte of the page or its sidecar. `posted` is the thread the call wrote: its anchor, how many comments it holds, whether it is resolved and its last comment's body; a comment the call posted is the run's actor's (claude-code), with its run id. The page's bytes never change. The per-run cap is Rust's alone, so it has no case here.",
+  "limits": {
+    "max_chars": 8000,
+    "per_run": 20,
+    "listed_threads": 20,
+    "listed_messages": 10,
+    "message_chars": 1000
+  },
+  "page": "notes/plan.md",
+  "bytes": "---\nstatus: draft\nowner: freeze team\n---\n\n# Plan\n\nWe ship on Thursdays, after the freeze.\nThe freeze starts on **Wednesday** at noon.\nSee [the freeze notes](freeze/notes.md) for details.\n\n```text\nfreeze in a fence\n```\n\n:::toggle Why a freeze\n:::\n- [ ] Book the freeze room\n",
+  "sidecar": {
+    "format": 1,
+    "threads": [
+      {
+        "anchor": {
+          "quote": "after the freeze",
+          "occurrence": 1,
+          "before": "We ship on Thursdays, ",
+          "after": "."
+        },
+        "comments": [
+          {
+            "id": "0000000000000001",
+            "author": "human:owner",
+            "created": "2026-10-13T08:00:00Z",
+            "body": "Is this right?"
+          }
+        ]
+      },
+      {
+        "resolved": {
+          "at": "2026-10-13T08:30:00Z",
+          "by": "human:owner"
+        },
+        "comments": [
+          {
+            "id": "0000000000000002",
+            "author": "human:owner",
+            "created": "2026-10-13T08:00:00Z",
+            "body": "Settled."
+          }
+        ]
+      },
+      {
+        "deleted": {
+          "at": "2026-10-13T08:30:00Z",
+          "by": "human:owner"
+        },
+        "comments": [
+          {
+            "id": "0000000000000003",
+            "author": "human:owner",
+            "created": "2026-10-13T08:00:00Z",
+            "body": "",
+            "deleted": {
+              "at": "2026-10-13T08:30:00Z",
+              "by": "human:owner"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "quotes": [
+    {
+      "quote": "after the freeze",
+      "markdown": null
+    },
+    {
+      "quote": "a_b",
+      "markdown": "`_`"
+    },
+    {
+      "quote": "use `x`",
+      "markdown": "a backtick"
+    },
+    {
+      "quote": "~~gone~~",
+      "markdown": "`~`"
+    },
+    {
+      "quote": "a <b>",
+      "markdown": "`<`"
+    },
+    {
+      "quote": "a > b",
+      "markdown": "`>`"
+    },
+    {
+      "quote": "a\\b",
+      "markdown": "`\\`"
+    },
+    {
+      "quote": "a | b",
+      "markdown": "`|`"
+    },
+    {
+      "quote": "one\r\ntwo",
+      "markdown": "a line break"
+    },
+    {
+      "quote": "#1, 2. and - plain",
+      "markdown": null
+    }
+  ],
+  "matches": [
+    {
+      "why": "the page: five appearances it shows, two it does not (a fence and a link target)",
+      "body": "\n# Plan\n\nWe ship on Thursdays, after the freeze.\nThe freeze starts on **Wednesday** at noon.\nSee [the freeze notes](freeze/notes.md) for details.\n\n```text\nfreeze in a fence\n```\n\n:::toggle Why a freeze\n:::\n- [ ] Book the freeze room\n",
+      "quote": "freeze",
+      "lines": [4, 5, 6, 12, 14],
+      "anchors": [
+        {
+          "before": "We ship on Thursdays, after the ",
+          "after": "."
+        },
+        {
+          "before": "The ",
+          "after": " starts on "
+        },
+        {
+          "before": "the ",
+          "after": " notes"
+        },
+        {
+          "before": "Why a ",
+          "after": ""
+        },
+        {
+          "before": "Book the ",
+          "after": " room"
+        }
+      ]
+    },
+    {
+      "why": "CRLF lines: the \\r is no text, and a quote ends where its line does",
+      "body": "Ship it\r\nShip it now\r\n",
+      "quote": "Ship it",
+      "lines": [1, 2],
+      "anchors": [
+        {
+          "before": "",
+          "after": ""
+        },
+        {
+          "before": "",
+          "after": " now"
+        }
+      ]
+    },
+    {
+      "why": "a fence closes only on its own character, at least as long; a tilde fence too",
+      "body": "````\nx\n```\nx\n````\nx\n~~~\nx\n~~~\nx\n",
+      "quote": "x",
+      "lines": [6, 10],
+      "anchors": [
+        {
+          "before": "",
+          "after": ""
+        },
+        {
+          "before": "",
+          "after": ""
+        }
+      ]
+    },
+    {
+      "why": "four spaces of indent open no fence",
+      "body": "    ```\nx\n",
+      "quote": "x",
+      "lines": [2],
+      "anchors": [
+        {
+          "before": "",
+          "after": ""
+        }
+      ]
+    },
+    {
+      "why": "a nested toggle's title is text; other directive lines are not",
+      "body": "::::toggle Plan B\n:::columns\n::::\n:::toggle-heading Plan B\n",
+      "quote": "Plan B",
+      "lines": [1],
+      "anchors": [
+        {
+          "before": "",
+          "after": ""
+        }
+      ]
+    },
+    {
+      "why": "blockquote, bullet, number and task markers come before the text",
+      "body": "> - [x] done 1\n> > 2) done 2\n### done 3\n#done 4\n",
+      "quote": "done",
+      "lines": [1, 2, 3, 4],
+      "anchors": [
+        {
+          "before": "",
+          "after": " 1"
+        },
+        {
+          "before": "",
+          "after": " 2"
+        },
+        {
+          "before": "",
+          "after": " 3"
+        },
+        {
+          "before": "#",
+          "after": " 4"
+        }
+      ]
+    },
+    {
+      "why": "a marker's own characters are no text",
+      "body": "1. one\n- one\n",
+      "quote": "1. one",
+      "lines": [],
+      "anchors": []
+    },
+    {
+      "why": "context stops at markdown and at the line's ends, and keeps 40 code points nearest the match",
+      "body": "**Bold** then a very long run of plain words before the word target and after it more words than forty code points hold\n",
+      "quote": "target",
+      "lines": [1],
+      "anchors": [
+        {
+          "before": "long run of plain words before the word ",
+          "after": " and after it more words than forty code"
+        }
+      ]
+    }
+  ],
+  "calls": [
+    {
+      "why": "a quote that appears once anchors there, with its occurrence and its line's context",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "after the freeze",
+        "text": "Is Thursday firm?"
+      },
+      "sidecar": "none",
+      "text": "Commented on notes/plan.md as thread {id}, on line 4: \"\\n# Plan\\n\\nWe ship on Thursdays, after the freeze.\\nThe freeze starts on **Wednesday** at …\"",
+      "is_error": false,
+      "posted": {
+        "thread": "{id}",
+        "anchor": {
+          "quote": "after the freeze",
+          "occurrence": 1,
+          "before": "We ship on Thursdays, ",
+          "after": "."
+        },
+        "comments": 1,
+        "resolved": false,
+        "last_body": "Is Thursday firm?"
+      }
+    },
+    {
+      "why": "no quote is a comment on the whole page, its text trimmed",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "text": "  Looks good overall.  "
+      },
+      "sidecar": "none",
+      "text": "Commented on notes/plan.md as thread {id}, about the whole page.",
+      "is_error": false,
+      "posted": {
+        "thread": "{id}",
+        "anchor": null,
+        "comments": 1,
+        "resolved": false,
+        "last_body": "Looks good overall."
+      }
+    },
+    {
+      "why": "a quote that appears more than once is refused with every appearance the page shows",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "freeze",
+        "text": "Which one?"
+      },
+      "sidecar": "none",
+      "text": "The quoted text appears 5 times. Pass `occurrence` (counting from 1) or quote a longer passage:\n  1. line 4: \"…# Plan\\n\\nWe ship on Thursdays, after the freeze.\\nThe freeze starts on **Wednesday** at …\"\n  2. line 5: \"…hip on Thursdays, after the freeze.\\nThe freeze starts on **Wednesday** at noon.\\nSee [t…\"\n  3. line 6: \"…arts on **Wednesday** at noon.\\nSee [the freeze notes](freeze/notes.md) for details.\\n\\n`…\"\n  4. line 12: \"…\\nfreeze in a fence\\n```\\n\\n:::toggle Why a freeze\\n:::\\n- [ ] Book the freeze room\\n\"\n  5. line 14: \"…:toggle Why a freeze\\n:::\\n- [ ] Book the freeze room\\n\"\nNothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "an occurrence picks that appearance",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "freeze",
+        "occurrence": 2,
+        "text": "This one."
+      },
+      "sidecar": "none",
+      "text": "Commented on notes/plan.md as thread {id}, on line 5: \"…hip on Thursdays, after the freeze.\\nThe freeze starts on **Wednesday** at noon.\\nSee [t…\"",
+      "is_error": false,
+      "posted": {
+        "thread": "{id}",
+        "anchor": {
+          "quote": "freeze",
+          "occurrence": 2,
+          "before": "The ",
+          "after": " starts on "
+        },
+        "comments": 1,
+        "resolved": false,
+        "last_body": "This one."
+      }
+    },
+    {
+      "why": "an occurrence past the last is refused with the appearances",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "freeze",
+        "occurrence": 9,
+        "text": "x"
+      },
+      "sidecar": "none",
+      "text": "`occurrence` is 9, but the quoted text appears 5 times:\n  1. line 4: \"…# Plan\\n\\nWe ship on Thursdays, after the freeze.\\nThe freeze starts on **Wednesday** at …\"\n  2. line 5: \"…hip on Thursdays, after the freeze.\\nThe freeze starts on **Wednesday** at noon.\\nSee [t…\"\n  3. line 6: \"…arts on **Wednesday** at noon.\\nSee [the freeze notes](freeze/notes.md) for details.\\n\\n`…\"\n  4. line 12: \"…\\nfreeze in a fence\\n```\\n\\n:::toggle Why a freeze\\n:::\\n- [ ] Book the freeze room\\n\"\n  5. line 14: \"…:toggle Why a freeze\\n:::\\n- [ ] Book the freeze room\\n\"\nNothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "an occurrence past the only one says time, not times",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "after the freeze",
+        "occurrence": 2,
+        "text": "x"
+      },
+      "sidecar": "none",
+      "text": "`occurrence` is 2, but the quoted text appears 1 time:\n  1. line 4: \"\\n# Plan\\n\\nWe ship on Thursdays, after the freeze.\\nThe freeze starts on **Wednesday** at …\"\nNothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "occurrence counts from 1",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "freeze",
+        "occurrence": 0,
+        "text": "x"
+      },
+      "sidecar": "none",
+      "text": "`occurrence` counts from 1. Nothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "an occurrence that is no whole number reads as 0",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "freeze",
+        "occurrence": "two",
+        "text": "x"
+      },
+      "sidecar": "none",
+      "text": "`occurrence` counts from 1. Nothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "a toggle's title is page text",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "Why a freeze",
+        "text": "Explain."
+      },
+      "sidecar": "none",
+      "text": "Commented on notes/plan.md as thread {id}, on line 12: \"…``text\\nfreeze in a fence\\n```\\n\\n:::toggle Why a freeze\\n:::\\n- [ ] Book the freeze room\\n\"",
+      "is_error": false,
+      "posted": {
+        "thread": "{id}",
+        "anchor": {
+          "quote": "Why a freeze",
+          "occurrence": 1,
+          "before": "",
+          "after": ""
+        },
+        "comments": 1,
+        "resolved": false,
+        "last_body": "Explain."
+      }
+    },
+    {
+      "why": "a task's text after its box is page text",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "Book the freeze room",
+        "text": "Booked?"
+      },
+      "sidecar": "none",
+      "text": "Commented on notes/plan.md as thread {id}, on line 14: \"…e\\n```\\n\\n:::toggle Why a freeze\\n:::\\n- [ ] Book the freeze room\\n\"",
+      "is_error": false,
+      "posted": {
+        "thread": "{id}",
+        "anchor": {
+          "quote": "Book the freeze room",
+          "occurrence": 1,
+          "before": "",
+          "after": ""
+        },
+        "comments": 1,
+        "resolved": false,
+        "last_body": "Booked?"
+      }
+    },
+    {
+      "why": "a link's label is page text, cut at its bracket for context",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "the freeze notes",
+        "text": "Link these."
+      },
+      "sidecar": "none",
+      "text": "Commented on notes/plan.md as thread {id}, on line 6: \"…e starts on **Wednesday** at noon.\\nSee [the freeze notes](freeze/notes.md) for details.\\n\\n```text…\"",
+      "is_error": false,
+      "posted": {
+        "thread": "{id}",
+        "anchor": {
+          "quote": "the freeze notes",
+          "occurrence": 1,
+          "before": "",
+          "after": ""
+        },
+        "comments": 1,
+        "resolved": false,
+        "last_body": "Link these."
+      }
+    },
+    {
+      "why": "a quote only in the frontmatter is refused",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "freeze team",
+        "text": "x"
+      },
+      "sidecar": "none",
+      "text": "The quoted text is in the frontmatter; comments anchor to the note's body. Nothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "a quote that is nowhere is refused",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "after the thaw",
+        "text": "x"
+      },
+      "sidecar": "none",
+      "text": "The quoted text is not in the note's body. Quote plain words exactly as get_note shows them (for a formatted passage, a part with no markdown inside), or read the note again if it may have changed. Nothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "a quote only inside a fence is refused",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "freeze in a fence",
+        "text": "x"
+      },
+      "sidecar": "none",
+      "text": "The quoted text appears only inside a fence, a `:::` line, a line's marker or a link's target, which the page doesn't show as text. Quote words the page shows. Nothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "a quote only in a link's target is refused",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "notes.md",
+        "text": "x"
+      },
+      "sidecar": "none",
+      "text": "The quoted text appears only inside a fence, a `:::` line, a line's marker or a link's target, which the page doesn't show as text. Quote words the page shows. Nothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "a quote that starts inside a line's marker is refused",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "# Plan",
+        "text": "x"
+      },
+      "sidecar": "none",
+      "text": "The quoted text appears only inside a fence, a `:::` line, a line's marker or a link's target, which the page doesn't show as text. Quote words the page shows. Nothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "a quote holding emphasis is refused, naming it",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "**Wednesday**",
+        "text": "x"
+      },
+      "sidecar": "none",
+      "text": "`quote` holds markdown (`*`). Quote plain words from one line, as the page reads, or leave `quote` out to comment on the whole page. Nothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "a quote holding a line break is refused",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "freeze.\nThe freeze",
+        "text": "x"
+      },
+      "sidecar": "none",
+      "text": "`quote` holds markdown (a line break). Quote plain words from one line, as the page reads, or leave `quote` out to comment on the whole page. Nothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "a quote holding a link bracket is refused",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "[the freeze notes]",
+        "text": "x"
+      },
+      "sidecar": "none",
+      "text": "`quote` holds markdown (`[`). Quote plain words from one line, as the page reads, or leave `quote` out to comment on the whole page. Nothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "an empty quote is refused",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "   ",
+        "text": "x"
+      },
+      "sidecar": "none",
+      "text": "`quote` is empty. Quote the passage the comment is about, or leave `quote` out to comment on the whole page. Nothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "an occurrence without a quote is refused",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "occurrence": 1,
+        "text": "x"
+      },
+      "sidecar": "none",
+      "text": "`occurrence` only applies with `quote`. Nothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "text is required",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "freeze"
+      },
+      "sidecar": "none",
+      "text": "comment_on_note needs `text`, the comment to post",
+      "is_error": true
+    },
+    {
+      "why": "blank text is refused",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "text": " \n "
+      },
+      "sidecar": "none",
+      "text": "`text` is empty. Write the comment to post. Nothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "a path is required",
+      "tool": "comment_on_note",
+      "args": {
+        "text": "x"
+      },
+      "sidecar": "none",
+      "text": "comment_on_note needs a path",
+      "is_error": true
+    },
+    {
+      "why": "a note that does not exist is refused",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/missing.md",
+        "text": "x"
+      },
+      "sidecar": "none",
+      "text": "no note at notes/missing.md",
+      "is_error": true
+    },
+    {
+      "why": "text is judged before the quote",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "quote": "**x**",
+        "text": ""
+      },
+      "sidecar": "none",
+      "text": "`text` is empty. Write the comment to post. Nothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "an unreadable sidecar refuses and is left alone",
+      "tool": "comment_on_note",
+      "args": {
+        "path": "notes/plan.md",
+        "text": "x"
+      },
+      "sidecar": "{ not json",
+      "text": "Cerebro could not read the comments on notes/plan.md (it is not valid JSON), so nothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "a reply lands at the end of an open thread",
+      "tool": "reply_to_comment",
+      "args": {
+        "path": "notes/plan.md",
+        "thread": "0000000000000001",
+        "text": "It is."
+      },
+      "sidecar": "seeded",
+      "text": "Replied in thread 0000000000000001 on notes/plan.md.",
+      "is_error": false,
+      "posted": {
+        "thread": "0000000000000001",
+        "anchor": {
+          "quote": "after the freeze",
+          "occurrence": 1,
+          "before": "We ship on Thursdays, ",
+          "after": "."
+        },
+        "comments": 2,
+        "resolved": false,
+        "last_body": "It is."
+      }
+    },
+    {
+      "why": "a resolved thread refuses a reply",
+      "tool": "reply_to_comment",
+      "args": {
+        "path": "notes/plan.md",
+        "thread": "0000000000000002",
+        "text": "x"
+      },
+      "sidecar": "seeded",
+      "text": "Thread 0000000000000002 on notes/plan.md is resolved, and reopening it is the person's call. Start a new comment if your point is new. Nothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "a deleted thread refuses a reply",
+      "tool": "reply_to_comment",
+      "args": {
+        "path": "notes/plan.md",
+        "thread": "0000000000000003",
+        "text": "x"
+      },
+      "sidecar": "seeded",
+      "text": "Thread 0000000000000003 on notes/plan.md was deleted. Nothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "an unknown thread refuses a reply",
+      "tool": "reply_to_comment",
+      "args": {
+        "path": "notes/plan.md",
+        "thread": "00000000000000ff",
+        "text": "x"
+      },
+      "sidecar": "seeded",
+      "text": "No thread 00000000000000ff on notes/plan.md. get_note lists a note's open threads with their ids. Nothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "a reply needs its thread and its text",
+      "tool": "reply_to_comment",
+      "args": {
+        "path": "notes/plan.md",
+        "thread": "0000000000000001"
+      },
+      "sidecar": "seeded",
+      "text": "reply_to_comment needs `thread`, the id get_note lists, and `text`",
+      "is_error": true
+    },
+    {
+      "why": "a reply needs a path",
+      "tool": "reply_to_comment",
+      "args": {
+        "thread": "0000000000000001",
+        "text": "x"
+      },
+      "sidecar": "seeded",
+      "text": "reply_to_comment needs a path",
+      "is_error": true
+    },
+    {
+      "why": "a resolve with no text only resolves",
+      "tool": "resolve_comment",
+      "args": {
+        "path": "notes/plan.md",
+        "thread": "0000000000000001"
+      },
+      "sidecar": "seeded",
+      "text": "Resolved thread 0000000000000001 on notes/plan.md.",
+      "is_error": false,
+      "posted": {
+        "thread": "0000000000000001",
+        "anchor": {
+          "quote": "after the freeze",
+          "occurrence": 1,
+          "before": "We ship on Thursdays, ",
+          "after": "."
+        },
+        "comments": 1,
+        "resolved": true,
+        "last_body": "Is this right?"
+      }
+    },
+    {
+      "why": "a resolve with text posts the closing reply in the same write",
+      "tool": "resolve_comment",
+      "args": {
+        "path": "notes/plan.md",
+        "thread": "0000000000000001",
+        "text": "Fixed in the plan."
+      },
+      "sidecar": "seeded",
+      "text": "Resolved thread 0000000000000001 on notes/plan.md, after your closing reply.",
+      "is_error": false,
+      "posted": {
+        "thread": "0000000000000001",
+        "anchor": {
+          "quote": "after the freeze",
+          "occurrence": 1,
+          "before": "We ship on Thursdays, ",
+          "after": "."
+        },
+        "comments": 2,
+        "resolved": true,
+        "last_body": "Fixed in the plan."
+      }
+    },
+    {
+      "why": "a resolved thread is not resolved twice",
+      "tool": "resolve_comment",
+      "args": {
+        "path": "notes/plan.md",
+        "thread": "0000000000000002"
+      },
+      "sidecar": "seeded",
+      "text": "Thread 0000000000000002 on notes/plan.md is already resolved. Nothing changed.",
+      "is_error": true
+    },
+    {
+      "why": "a deleted thread can't be resolved",
+      "tool": "resolve_comment",
+      "args": {
+        "path": "notes/plan.md",
+        "thread": "0000000000000003",
+        "text": "x"
+      },
+      "sidecar": "seeded",
+      "text": "Thread 0000000000000003 on notes/plan.md was deleted. Nothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "an unknown thread can't be resolved",
+      "tool": "resolve_comment",
+      "args": {
+        "path": "notes/plan.md",
+        "thread": "00000000000000ff"
+      },
+      "sidecar": "seeded",
+      "text": "No thread 00000000000000ff on notes/plan.md. get_note lists a note's open threads with their ids. Nothing was posted.",
+      "is_error": true
+    },
+    {
+      "why": "a resolve needs its thread",
+      "tool": "resolve_comment",
+      "args": {
+        "path": "notes/plan.md"
+      },
+      "sidecar": "seeded",
+      "text": "resolve_comment needs `thread`, the id get_note lists",
+      "is_error": true
+    },
+    {
+      "why": "a closing reply that is blank is refused",
+      "tool": "resolve_comment",
+      "args": {
+        "path": "notes/plan.md",
+        "thread": "0000000000000001",
+        "text": "  "
+      },
+      "sidecar": "seeded",
+      "text": "`text` is empty. Write the comment to post. Nothing was posted.",
+      "is_error": true
+    }
+  ]
+}

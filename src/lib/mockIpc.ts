@@ -5,31 +5,71 @@
 // "disk" state, page comment sidecars (`.comments/<page>.json`, M70.2)
 // included. Neither 'vault-changed' nor 'comments-changed' has an equivalent
 // here: startWatcher is a no-op, writers trigger rescans directly (see
-// vaultStore), and a comment write answers the file it wrote.
+// vaultStore), and a comment write answers the file it wrote. Every write is
+// also logged with its stamp, as Rust's `vault_writes` records it, on
+// window.__cerebroMockWrites (M58.1).
 import YAML, { type Document } from 'yaml';
 import type { CommentAnchor } from '@/engine/commentAnchor';
 import {
   applyCommentOp,
   carriedRel,
   emptyComments,
+  isCommentPage,
   OWNER,
   parseComments,
+  rustTrim,
   serializeComments,
   sizeRefusal,
   sidecarPathOf,
+  threadId,
   type CommentOp,
   type CommentsFile,
+  type CommentThread,
 } from '@/engine/comments';
+import { agentHandle, askFirstOf, isAgentEntry, parseReadScope, parseScope } from '@/engine/agents';
 import type { ConnectorStatusRow } from '@/engine/connectors';
+import { runOptionsRefusal, storedChoice } from '@/engine/runOptions';
+import { parseAllowedTools } from '@/engine/skills';
 import { diskFolded, hfsHeard, isKnowledgePath, KNOWLEDGE_DIR } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
+import {
+  MANIFEST,
+  TRASH_DIR,
+  UNREADABLE_ITEM,
+  alreadyExists,
+  expired,
+  isHiddenName,
+  isItemPath,
+  manifestBytes,
+  newStamp,
+  notAPage,
+  nothingAt,
+  parseManifest,
+  parseStamp,
+  rfc3339,
+  type TrashedItem,
+} from '@/engine/trash';
 import type { AgentStreamEvent, TranscriptRead } from '@/agent/types';
 import { normalizeAliasV1 } from './epistemic/normalize';
 import { validateFieldPath, validateOverridePointer } from './epistemic/schema';
 import { humanize, splitFrontmatter } from '@/engine/frontmatter';
-import { planEdits, type QuoteEdit } from '@/engine/quote';
+import {
+  anchorContext,
+  commentMatches,
+  context as quoteContext,
+  lineAt,
+  listed,
+  occurrencesOf,
+  planEdits,
+  quoteMarkdown,
+  type QuoteEdit,
+} from '@/engine/quote';
 import { firstH1LineIndex, parseNote } from './mockParse';
 import { sha256Hex } from './sha256';
+import { draftRefusal } from '@/engine/writeDraft';
+import type { PageAttribution, RunPageWrites } from '@/engine/attribution';
+import { APPROVAL_MESSAGES, QUEUE_LIMITS } from './policy/toolApproval';
+import { toolSchema } from './policy/tools';
 import {
   AMBIENT_CONCURRENCY_DEFAULT,
   AMBIENT_CONCURRENCY_MAX,
@@ -98,6 +138,262 @@ const times = new Map<string, { createdAt: string; modifiedAt: string }>();
 // represent an empty folder. Parity with real dirs on disk.
 const folders = new Set<string>();
 
+/** Who a person's writes are stamped as: vault/receipt.rs `HUMAN_ACTOR` (D1). */
+export const HUMAN_ACTOR = 'human:me';
+
+/** One write as Rust's `vault_writes` records it (M58.1), with its stamp. */
+export interface MockWrite {
+  kind: 'vault.write' | 'vault.create' | 'vault.rename' | 'vault.delete' | 'vault.comment';
+  path: string;
+  to: string | null;
+  actor: string;
+  runId: string | null;
+  approvedBy: string | null;
+}
+
+/** An agent write's stamp (M58.1): the run's actor and id, and who allowed
+ * it. Required on every agent door, so a caller that forgets it fails
+ * typecheck. */
+export interface WriteStamp {
+  actor: string;
+  runId: string;
+  approvedBy?: string | null;
+}
+
+/** The mock's write log, exposed as `window.__cerebroMockWrites` and reset
+ * with the mock fs. Every door logs its write, as Rust's records it, under
+ * Rust's kinds; unlike Rust, nothing coalesces. */
+const writes: MockWrite[] = [];
+
+/** What Rust's row holds beside a logged write's stamp (M58.1b): the hash of
+ * the bytes it wrote and when. Kept off `MockWrite`, whose shape the door
+ * replay compares whole. */
+const writtenAs = new WeakMap<MockWrite, { hash: string | null; at: string }>();
+
+/** Log one write under `stamp`, or as the person's when there is none. A
+ * comment's stamp is its author's, with or without a run. An agent door
+ * passes the bytes it replaced (`before`, null for a new file), so the row
+ * carries the lines it changed (M58.3, `mockRowLines`) and a live run keeps
+ * the path's first bytes for its changeset. */
+function logWrite(
+  kind: MockWrite['kind'],
+  path: string,
+  stamp: { actor: string; runId: string | null; approvedBy?: string | null } | null = null,
+  to: string | null = null,
+  before?: string | null,
+): void {
+  const logged: MockWrite = {
+    kind,
+    path,
+    to,
+    actor: stamp?.actor ?? HUMAN_ACTOR,
+    runId: stamp?.runId ?? null,
+    approvedBy: stamp?.approvedBy ?? null,
+  };
+  writes.push(logged);
+  if (before !== undefined) {
+    const { additions, deletions } = diffLines(before, files.get(path) ?? null);
+    rowLines.set(logged, { additions, deletions });
+    const live = logged.runId === null ? undefined : liveRuns.get(logged.runId);
+    if (live !== undefined && !live.baseline.has(path)) live.baseline.set(path, before);
+  }
+  // Every door logs after its bytes land, so this is the hash Rust records.
+  const landed = kind === 'vault.write' || kind === 'vault.create' ? files.get(path) : undefined;
+  writtenAs.set(logged, {
+    hash: landed === undefined ? null : sha256Hex(landed),
+    at: new Date().toISOString(),
+  });
+}
+
+/** The lines each agent door's write changed (M58.3), kept off `MockWrite`
+ * like `writtenAs`. */
+const rowLines = new WeakMap<MockWrite, { additions: number; deletions: number }>();
+
+/** A logged write's line counts, or null for a row no agent door wrote. */
+export function mockRowLines(write: MockWrite): { additions: number; deletions: number } | null {
+  return rowLines.get(write) ?? null;
+}
+
+/** `before` against `after`, line by line, the common head and tail left
+ * out: what the mock's changesets count and show. Null is no file. */
+export function diffLines(
+  before: string | null,
+  after: string | null,
+): { additions: number; deletions: number; removed: string[]; added: string[]; at: number } {
+  const lines = (text: string | null) =>
+    text === null || text === '' ? [] : text.replace(/\n$/, '').split('\n');
+  const a = lines(before);
+  const b = lines(after);
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) head++;
+  let tail = 0;
+  while (
+    tail < a.length - head &&
+    tail < b.length - head &&
+    a[a.length - 1 - tail] === b[b.length - 1 - tail]
+  ) {
+    tail++;
+  }
+  const removed = a.slice(head, a.length - tail);
+  const added = b.slice(head, b.length - tail);
+  return { additions: added.length, deletions: removed.length, removed, added, at: head };
+}
+
+/** One mock run that is live (M58.3), by its stamp's run id: its actor, where
+ * its writes start in the log, and each path's bytes before its first write. */
+interface LiveMockRun {
+  actor: string;
+  from: number;
+  baseline: Map<string, string | null>;
+}
+const liveRuns = new Map<string, LiveMockRun>();
+
+/** A mock run starts: from here, the paths it writes are its own until it
+ * ends, as Rust's `claim_run` holds them. */
+export function beginMockRun(runId: string, actor: string): void {
+  liveRuns.set(runId, { actor, from: writes.length, baseline: new Map() });
+}
+
+/** A mock run ends: its paths are no longer anyone's. */
+export function endMockRun(runId: string): void {
+  liveRuns.delete(runId);
+}
+
+/** The paths a live mock run wrote, in order, each once: its own stamp's
+ * rows only, never an IPC write in the same turn, which is the person's. */
+export function liveRunPaths(runId: string): string[] {
+  const live = liveRuns.get(runId);
+  if (live === undefined) return [];
+  const paths: string[] = [];
+  for (const w of writes.slice(live.from)) {
+    if (w.runId !== runId) continue;
+    for (const path of w.to === null ? [w.path] : [w.path, w.to]) {
+      if (!paths.includes(path)) paths.push(path);
+    }
+  }
+  return paths;
+}
+
+/** Every path a live mock run owns, with its run and actor (Rust's
+ * `changeset::owned_paths`). The first run to name a path keeps it. */
+export function liveRunOwners(): Map<string, { runId: string; actor: string }> {
+  const owners = new Map<string, { runId: string; actor: string }>();
+  for (const [runId, live] of liveRuns) {
+    for (const path of liveRunPaths(runId)) {
+      if (!owners.has(path)) owners.set(path, { runId, actor: live.actor });
+    }
+  }
+  return owners;
+}
+
+/** What one path of a mock run changed, for its commit. */
+export interface MockRunChange {
+  path: string;
+  kind: 'added' | 'modified' | 'deleted';
+  additions: number;
+  deletions: number;
+  /** Other stamps that wrote the path while the run was live. */
+  alsoBy: string[];
+  /** A unified diff of the change. */
+  patch: string;
+  /** The path's bytes before the run's first write, null for none (M58.4):
+   * what the mock's history reads as the page before the run's commit. */
+  before: string | null;
+}
+
+/** What a live mock run changed: each of its paths, its first bytes against
+ * the bytes now. A path whose bytes ended as they began changed nothing and
+ * is left out, as `git status` would leave it out. */
+export function mockRunChanges(runId: string): MockRunChange[] {
+  const live = liveRuns.get(runId);
+  if (live === undefined) return [];
+  const changes: MockRunChange[] = [];
+  for (const path of liveRunPaths(runId)) {
+    const before = live.baseline.has(path) ? (live.baseline.get(path) ?? null) : null;
+    const after = files.get(path) ?? null;
+    if (before === after) continue;
+    const diff = diffLines(before, after);
+    const alsoBy: string[] = [];
+    for (const w of writes.slice(live.from)) {
+      if (w.runId === runId || (w.path !== path && w.to !== path)) continue;
+      if (!alsoBy.includes(w.actor)) alsoBy.push(w.actor);
+    }
+    const header = [
+      `diff --git a/${path} b/${path}`,
+      before === null ? '--- /dev/null' : `--- a/${path}`,
+      after === null ? '+++ /dev/null' : `+++ b/${path}`,
+      `@@ -${diff.at + 1},${diff.deletions} +${diff.at + 1},${diff.additions} @@`,
+    ];
+    changes.push({
+      path,
+      kind: before === null ? 'added' : after === null ? 'deleted' : 'modified',
+      additions: diff.additions,
+      deletions: diff.deletions,
+      alsoBy,
+      patch: [
+        ...header,
+        ...diff.removed.map((l) => `-${l}`),
+        ...diff.added.map((l) => `+${l}`),
+      ].join('\n'),
+      before,
+    });
+  }
+  return changes;
+}
+
+/** How many renames into a path are followed back (`write_log::RENAME_HOPS`). */
+const RENAME_HOPS = 8;
+
+/**
+ * Who last changed one page (M58.1b), as Rust's `write_log::page_attribution`
+ * reads `vault_writes`: the newest write or create of the path, following
+ * renames into it back at most `RENAME_HOPS` times, held against the hash of
+ * the page's content now. An edit made straight to `__cerebroMockFs` logs
+ * nothing, so it reads unattributed. A path the map does not hold refuses,
+ * as Rust's read of a missing file does.
+ */
+export async function pageAttribution(_vault: string, path: string): Promise<PageAttribution> {
+  if (path.split('/').some((part) => part === '..') || path.startsWith('/')) {
+    return { state: 'not_recorded' };
+  }
+  const content = files.get(path);
+  if (content === undefined) throw new Error(`reading ${path}: No such file or directory`);
+  const bundle = isKnowledgePath(path);
+  let target = path;
+  let before = writes.length;
+  let found: MockWrite | undefined;
+  for (let hop = 0; hop <= RENAME_HOPS && found === undefined; hop++) {
+    let i = before - 1;
+    for (; i >= 0; i--) {
+      const w = writes[i];
+      if ((w.kind === 'vault.write' || w.kind === 'vault.create') && w.path === target) break;
+      if (w.kind === 'vault.rename' && w.to === target) break;
+    }
+    if (i < 0) break;
+    if (writes[i].kind === 'vault.rename') {
+      target = writes[i].path;
+      before = i;
+    } else {
+      found = writes[i];
+    }
+  }
+  if (found === undefined) return { state: bundle ? 'knowledge' : 'not_recorded' };
+  const { hash, at } = writtenAs.get(found) ?? { hash: null, at: new Date().toISOString() };
+  const last = {
+    kind: found.kind,
+    actor: found.actor,
+    run_id: found.runId,
+    approved_by: found.approvedBy,
+    at,
+  };
+  if (hash === null || hash === sha256Hex(content)) return { state: 'recorded', ...last };
+  return bundle ? { state: 'knowledge' } : { state: 'unattributed', ...last };
+}
+
+/** `vault.create` for a file that was absent, else `vault.write`. */
+const writeKind = (existed: boolean): MockWrite['kind'] =>
+  existed ? 'vault.write' : 'vault.create';
+
 /**
  * Restore the operational fixtures (M33.10). Exported for test isolation, and
  * called by `resetMockFs` so one reset puts the whole mock back.
@@ -122,6 +418,7 @@ export function resetOperational(): void {
   resetAgentPauses();
   resetPanelAgents();
   resetCliTranscripts();
+  resetPendingWrites();
 }
 
 /** Re-seed the file map alone. Split from `resetMockFs` because module init
@@ -131,6 +428,8 @@ function seedFiles(): void {
   files.clear();
   times.clear();
   folders.clear();
+  writes.length = 0;
+  liveRuns.clear();
   connectorsJson = '';
   for (const [absPath, raw] of Object.entries({
     ...seededNotes,
@@ -173,6 +472,7 @@ export function assignProjects(entries: Entry[]): Entry[] {
 
 if (typeof window !== 'undefined') {
   (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs = files;
+  (window as unknown as { __cerebroMockWrites: MockWrite[] }).__cerebroMockWrites = writes;
 }
 
 function touch(path: string): void {
@@ -276,6 +576,117 @@ export async function readNote(_vault: string, path: string): Promise<string> {
   return splitFrontmatter(mustGet(path)).body.replace(/^\n+/, '');
 }
 
+// --- ⌘K's page-text search (M59.4) -------------------------------------------
+//
+// search.rs `vault_search` ranks with BM25 over the cached corpus. The mock
+// does containment ONLY, on purpose, so it is no ranker twin (D3): the whole
+// trimmed query, ignoring case, in a title or a body, in scan order. Its
+// excerpt is the raw first matching line, since chip cleanup is Rust's.
+
+/** One run of an excerpt: marked when it is the query. Drawn as text. */
+export interface ExcerptPart {
+  text: string;
+  mark: boolean;
+}
+
+/** One ⌘K page-text hit (search.rs `VaultHit`). */
+export interface VaultHit {
+  path: string;
+  title: string;
+  type: string | null;
+  parts: ExcerptPart[];
+}
+
+/** ⌘K's page-text answer (search.rs `VaultSearch`): the hits, how many
+ * matched in all, whether nothing held every word, and how many long pages
+ * were searched in part. */
+export interface VaultSearch {
+  hits: VaultHit[];
+  total: number;
+  widened: boolean;
+  capped: number;
+}
+
+/** The most hits search_vault returns (search.rs `VAULT_SEARCH_MAX`). */
+const VAULT_SEARCH_MAX = 50;
+/** The mock's excerpt: this many characters before the first hit, so the
+ * hit always shows near the start, and at most this many in all. */
+const MOCK_LEAD = 60;
+const MOCK_WINDOW = 180;
+
+/** Set by `window.__cerebroFailSearchVault`: searchVault rejects with it
+ * until it is cleared with null. */
+let searchVaultFailure: string | null = null;
+
+/** Test-only seam, mirroring `window.__cerebroMockFs`: make searchVault
+ * reject with `message` until called again with null. */
+export function __failSearchVault(message: string | null): void {
+  searchVaultFailure = message;
+}
+
+/** `text`'s regex syntax escaped, so a query is matched as written. */
+const escapeRegExp = (text: string): string => text.replace(/[\^$\\.*+?()[\]{}|/]/g, '\\$&');
+
+/** `line` windowed around its first match, every whole match marked. */
+function mockExcerpt(line: string, matches: { start: number; end: number }[]): ExcerptPart[] {
+  const from = Math.max(0, (matches[0]?.start ?? 0) - MOCK_LEAD);
+  const to = Math.min(line.length, from + MOCK_WINDOW);
+  const parts: ExcerptPart[] = [];
+  const push = (text: string, mark: boolean) => {
+    if (text === '') return;
+    const last = parts.at(-1);
+    if (last !== undefined && last.mark === mark) last.text += text;
+    else parts.push({ text, mark });
+  };
+  if (from > 0) push('\u2026', false);
+  let at = from;
+  for (const m of matches) {
+    if (m.start < at || m.end > to) continue;
+    push(line.slice(at, m.start), false);
+    push(line.slice(m.start, m.end), true);
+    at = m.end;
+  }
+  push(line.slice(at, to), false);
+  if (to < line.length) push('\u2026', false);
+  return parts;
+}
+
+export async function searchVault(
+  vault: string,
+  query: string,
+  limit = VAULT_SEARCH_MAX,
+): Promise<VaultSearch> {
+  if (searchVaultFailure !== null) throw new Error(searchVaultFailure);
+  const needle = query.trim();
+  const found: VaultHit[] = [];
+  if (needle !== '') {
+    const pattern = new RegExp(escapeRegExp(needle), 'giu');
+    for (const entry of await scanVault(vault)) {
+      const body = await readNote(vault, entry.path);
+      let parts: ExcerptPart[] | null = null;
+      for (const line of body.split(/\r?\n/)) {
+        const matches = [...line.matchAll(pattern)].map((m) => ({
+          start: m.index,
+          end: m.index + m[0].length,
+        }));
+        if (matches.length > 0) {
+          parts = mockExcerpt(line, matches);
+          break;
+        }
+      }
+      if (parts === null && entry.title.match(pattern) !== null) {
+        const snippet = entry.snippet.trim();
+        parts = snippet === '' ? [] : [{ text: snippet, mark: false }];
+      }
+      if (parts !== null) {
+        found.push({ path: entry.path, title: entry.title, type: entry.type, parts });
+      }
+    }
+  }
+  const shown = Math.min(Math.max(1, Math.floor(limit)), VAULT_SEARCH_MAX);
+  return { hits: found.slice(0, shown), total: found.length, widened: false, capped: 0 };
+}
+
 /**
  * Mirrors src-tauri/src/knowledge.rs. The mock backend must refuse exactly
  * what Tauri refuses — otherwise the boundary "works" in dev and vitest and
@@ -285,8 +696,13 @@ const READ_ONLY_KNOWLEDGE =
   'knowledge/ is maintained by the AI knowledge base and is read-only here. ' +
   'Verify the concept, or ask the agent to revise it.';
 
-function guardHumanWrite(path: string): void {
+export function guardHumanWrite(path: string): void {
   if (isKnowledgePath(path)) throw new Error(READ_ONLY_KNOWLEDGE);
+}
+
+/** Log a person's write from outside this module (mockGit's discard). */
+export function logHumanWrite(kind: MockWrite['kind'], path: string): void {
+  logWrite(kind, path);
 }
 
 /** What the markdown-only note writers accept (write.rs `MARKDOWN`). */
@@ -348,6 +764,30 @@ function guardNoteTarget(path: string, extensions: readonly string[]): void {
   }
 }
 
+/** One file's bytes on the mock disk, or null when there is none (M58.4):
+ * what a mock commit snapshots. */
+export function peekFile(path: string): string | null {
+  return files.get(path) ?? null;
+}
+
+/** Restore's target (M58.4), as git_commands.rs `restore_note_version_in`
+ * judges it before it mints a receipt: a markdown note, as `note_join`
+ * says, then the bundle guard, in Rust's words. */
+export function guardRestoreTarget(path: string): void {
+  guardNoteTarget(path, MARKDOWN);
+  guardHumanWrite(path);
+}
+
+/** Restore's write (M58.4), as write.rs `restore_note`: the target judged,
+ * then `raw` exactly, logged as the person's write, its times stamped. */
+export function restoreFile(path: string, raw: string): void {
+  guardRestoreTarget(path);
+  mustGet(path);
+  files.set(path, raw);
+  touch(path);
+  logWrite('vault.write', path);
+}
+
 export async function saveNote(_vault: string, path: string, body: string): Promise<void> {
   // Note targets first, as save_note's note_join does (PLATFORM-API-1).
   guardNoteTarget(path, MARKDOWN_OR_DIAGRAM);
@@ -361,11 +801,13 @@ export async function saveNote(_vault: string, path: string, body: string): Prom
     mustGet(path);
     files.set(path, body);
     touch(path);
+    logWrite('vault.write', path);
     return;
   }
   const { yaml } = splitFrontmatter(mustGet(path));
   files.set(path, yaml !== null ? `---\n${yaml}\n---\n\n${body}` : body);
   touch(path);
+  logWrite('vault.write', path);
 }
 
 /** Mirror of knowledge.rs `AGENT_USE_WRITE_CONCEPT`: the agent's refusal at
@@ -428,8 +870,9 @@ function staleContentMessage(path: string): string {
  * The agent's `append_to_note` (mcp.rs `tool_append_in`), for the browser-mode
  * mock agent (M53.6): the content as its own paragraph at the end of the
  * body, under the frontmatter the note already has, and the file touched the
- * way an MCP write moves its stamp. Refuses what Rust refuses, in Rust's
- * order and words, before writing a byte: a malformed `expectHash`
+ * way an MCP write moves its stamp, and logged under the run's `stamp`
+ * (M58.1). Refuses what Rust refuses, in Rust's order and words, before
+ * writing or logging a byte: a malformed `expectHash`
  * (`parse_expect_hash`), the bundle (`guard_agent_write`), a `.mmd` and
  * anything that is not a note (`append_note_checked`), then bytes other than
  * the ones `expectHash` names (`stale_content`, M55.3), then a Type doc or an
@@ -440,7 +883,8 @@ export async function agentAppend(
   _vault: string,
   path: string,
   content: string,
-  expectHash?: string,
+  expectHash: string | undefined,
+  stamp: WriteStamp,
 ): Promise<void> {
   const expected = parseExpectHash(expectHash);
   if (isKnowledgePath(path)) throw new Error(AGENT_USE_WRITE_CONCEPT);
@@ -469,6 +913,7 @@ export async function agentAppend(
   if (minted !== null) throw new Error(minted);
   files.set(path, saved);
   touch(path);
+  logWrite('vault.write', path, stamp, null, current);
 }
 
 /**
@@ -482,14 +927,16 @@ export async function agentAppend(
  * names (`stale_content`), a Type doc or an Agent record as the note stands,
  * the quotes themselves (`planEdits`, the twin of quote.rs), and bytes the
  * edits would make a Type doc or an Agent record. The read scope that gates
- * it in Rust is the grant's, which the mock agent has none of. Returns the
- * report the tool answers with.
+ * it in Rust is the grant's, which the mock agent has none of. A landed edit
+ * is logged under the run's `stamp` (M58.1). Returns the report the tool
+ * answers with.
  */
 export async function agentEdit(
   _vault: string,
   path: string,
   edits: readonly QuoteEdit[],
-  expectHash?: string,
+  expectHash: string | undefined,
+  stamp: WriteStamp,
 ): Promise<string> {
   const expected = parseExpectHash(expectHash);
   if (isKnowledgePath(path)) throw new Error(AGENT_USE_WRITE_CONCEPT);
@@ -510,12 +957,46 @@ export async function agentEdit(
   if (minted !== null) throw new Error(minted);
   files.set(path, saved);
   touch(path);
+  logWrite('vault.write', path, stamp, null, current);
   const count = `${edits.length} ${edits.length === 1 ? 'edit' : 'edits'}`;
   return [
     `Edited ${path}: ${count}; nothing outside the quoted text changed.`,
     ...plan.lines.map((line, i) => `  ${i + 1}. now at line ${line}`),
     `Hash: ${sha256Hex(saved)}`,
   ].join('\n');
+}
+
+/**
+ * The agent's `create_note` (mcp.rs `tool_create_note`), for the
+ * browser-mode mock agent (M57.4): a new note in `folder` named by `slug`,
+ * `-2`, `-3` and so on when the name is taken, holding `body` under no
+ * frontmatter. Refuses what Rust refuses, in Rust's order and words, before
+ * writing a byte: the bundle (`guard_agent_write`), a slug that is not one
+ * name (`safe_component`), then anything the planned file would be that is
+ * no note (`judge_new_note`). A governed type in its frontmatter stays
+ * Rust's to refuse (M53.6): the mock agent writes none. The new note is
+ * logged under the run's `stamp` (M58.1). Returns the report the tool answers
+ * with.
+ */
+export async function agentCreate(
+  _vault: string,
+  args: { folder: string; slug: string; body: string },
+  stamp: WriteStamp,
+): Promise<string> {
+  const { folder, slug, body } = args;
+  if (isKnowledgePath(folder)) throw new Error(AGENT_USE_WRITE_CONCEPT);
+  if (slug === '' || slug === '.' || slug === '..' || /[/\\]/.test(slug)) {
+    throw new Error(`invalid slug: ${JSON.stringify(slug)}`);
+  }
+  const prefix = folder === '' ? '' : `${folder}/`;
+  let name = slug;
+  for (let n = 2; files.has(`${prefix}${name}.md`); n++) name = `${slug}-${n}`;
+  const path = `${prefix}${name}.md`;
+  guardNoteTarget(path, MARKDOWN);
+  files.set(path, body);
+  touch(path);
+  logWrite('vault.create', path, stamp, null, null);
+  return `Created ${path}`;
 }
 
 export async function updateFrontmatter(
@@ -566,9 +1047,11 @@ export async function updateFrontmatter(
     // A captured write answers no hash, as Rust's valve answers None: the
     // projection is the ledger's, and the next scan reads it (M55.2).
     await writeFrontmatter(path, patch);
+    logWrite('vault.write', path);
     return null;
   }
   await writeFrontmatter(path, patch);
+  logWrite('vault.write', path);
   // The hash of the bytes written, as lib.rs `update_frontmatter` answers it.
   return sha256Hex(mustGet(path));
 }
@@ -594,7 +1077,8 @@ export async function verifyConcept(
   if (sha256Hex(await readNote(vault, path)) !== viewedBodyHash) {
     throw new Error(`stale_view: ${path} changed since you opened it — reopen it and verify again`);
   }
-  return writeFrontmatter(path, patch);
+  await writeFrontmatter(path, patch);
+  logWrite('vault.write', path);
 }
 
 /** A wire TypedValue → its plain JSON value (`missing` means delete). */
@@ -643,6 +1127,7 @@ export async function captureConceptEdit(
     if (ops.length === 0) throw new Error('an editorial capture with no ops changes nothing');
     for (const op of ops) validateOverridePointer(String(op.field_path ?? ''));
     applyCaptureOps(path, ops);
+    logWrite('vault.write', path);
     return;
   }
   if (kind === 'structured') {
@@ -665,6 +1150,7 @@ export async function captureConceptEdit(
       const existing = (doc.get('aliases') as string[] | undefined) ?? [];
       await writeFrontmatter(path, { aliases: [...existing, ...aliases] });
     }
+    logWrite('vault.write', path);
     return;
   }
   throw new Error(`unknown capture kind ${String(kind)}`);
@@ -738,6 +1224,7 @@ export async function createNote(
       : finalBody,
   );
   touch(path);
+  logWrite('vault.create', path);
   return path;
 }
 
@@ -767,6 +1254,7 @@ export async function setNoteTitle(_vault: string, path: string, title: string):
   }
   files.set(path, yaml !== null ? `---\n${yaml}\n---\n${newBody}` : newBody);
   touch(path);
+  logWrite('vault.write', path);
 }
 
 interface RawList {
@@ -839,6 +1327,9 @@ export async function listViews(_vault: string): Promise<RawList[]> {
   const views: RawList[] = [];
   for (const p of [...files.keys()].sort()) {
     if (!p.endsWith('.yml')) continue;
+    // write.rs `vault_walker` never enters a dot-folder: a List in the
+    // Trash (M60.8) is no List.
+    if (p.split('/').slice(0, -1).some(isHidden)) continue;
 
     if (p.endsWith(LIST_SUFFIX)) {
       const id = (p.split('/').pop() ?? '').slice(0, -LIST_SUFFIX.length);
@@ -885,6 +1376,8 @@ export async function listViews(_vault: string): Promise<RawList[]> {
   return views;
 }
 
+/** As lib.rs save_view: the bundle guard on the file it writes, which
+ * neither backend had before M58.1. */
 export async function saveView(
   _vault: string,
   id: string,
@@ -892,13 +1385,17 @@ export async function saveView(
   folder: string | null = null,
 ): Promise<void> {
   const path = folder === null ? `views/${id}.yml` : `${folder}/views/${id}.yml`;
+  guardHumanWrite(path);
+  const existed = files.has(path);
   files.set(path, yaml);
   touch(path);
+  logWrite(writeKind(existed), path);
 }
 
 export async function listCollections(_vault: string): Promise<{ folder: string; yaml: string }[]> {
   return [...files.keys()]
     .filter((p) => p === COLLECTION_MARKER || p.endsWith(`/${COLLECTION_MARKER}`))
+    .filter((p) => !p.split('/').slice(0, -1).some(isHidden))
     .map((p) => ({ folder: dirOf(p), yaml: files.get(p) ?? '' }))
     .sort((a, b) => a.folder.localeCompare(b.folder));
 }
@@ -909,8 +1406,10 @@ export async function saveCollection(_vault: string, folder: string, yaml: strin
   guardHumanWrite(folder);
   if (folder === '') throw new Error('the vault root is not a collection');
   const path = `${folder}/${COLLECTION_MARKER}`;
+  const existed = files.has(path);
   files.set(path, yaml);
   touch(path);
+  logWrite(writeKind(existed), path);
 }
 
 export async function saveList(
@@ -922,12 +1421,16 @@ export async function saveList(
   // As lib.rs save_list guards it (M53.28), and as saveCollection does.
   guardHumanWrite(folder);
   const path = folder === '' ? `${id}${LIST_SUFFIX}` : `${folder}/${id}${LIST_SUFFIX}`;
+  const existed = files.has(path);
   files.set(path, yaml);
   touch(path);
+  logWrite(writeKind(existed), path);
 }
 
 export async function startWatcher(_vault: string): Promise<void> {
-  // No-op: the mock has no file watcher; writers trigger rescans directly.
+  // The mock has no file watcher; writers trigger rescans directly. The open
+  // does run lib.rs's launch purge of the Trash (M60.8).
+  purgeExpiredTrash(new Date());
 }
 
 // The browser mock has no ledger (M21.7): the tamper-evident chain is a Rust
@@ -1275,6 +1778,7 @@ if (typeof window !== 'undefined') {
 
 // --- Vault format v2 file operations (M2 Task 3) ---
 
+/** A folder holds no bytes, so it logs nothing (write.rs `UNRECORDED`). */
 export async function createFolder(_vault: string, path: string): Promise<void> {
   guardHumanWrite(path);
   folders.add(path);
@@ -1290,23 +1794,27 @@ function carryComments(from: string, to: string, isDir: boolean): void {
   const sideTo = carriedRel(to, isDir);
   if (sideFrom === null || sideTo === null) return;
   if (!isDir) {
-    files.delete(sideTo);
+    if (files.delete(sideTo)) logWrite('vault.delete', sideTo);
     const sidecar = files.get(sideFrom);
     if (sidecar !== undefined) {
       files.set(sideTo, sidecar);
       files.delete(sideFrom);
+      logWrite('vault.rename', sideFrom, null, sideTo);
     }
     return;
   }
   for (const p of [...files.keys()]) {
     if (p.startsWith(`${sideTo}/`)) files.delete(p);
   }
+  let carried = false;
   for (const p of [...files.keys()]) {
     if (p.startsWith(`${sideFrom}/`)) {
       files.set(`${sideTo}/${p.slice(sideFrom.length + 1)}`, files.get(p)!);
       files.delete(p);
+      carried = true;
     }
   }
+  if (carried) logWrite('vault.rename', sideFrom, null, sideTo);
 }
 
 /** Move a note — or a whole folder prefix — within the vault, and its
@@ -1327,6 +1835,7 @@ export async function renameNote(_vault: string, from: string, to: string): Prom
       times.delete(from);
     }
     touch(to);
+    logWrite('vault.rename', from, null, to);
     return;
   }
   // Folder move: rewrite every key under the prefix.
@@ -1345,34 +1854,224 @@ export async function renameNote(_vault: string, from: string, to: string): Prom
     }
   }
   if (folders.delete(from)) folders.add(to);
+  logWrite('vault.rename', from, null, to);
 }
 
-/** Delete a note or folder (the real backend moves it to the OS trash), and
- * its comment sidecars after it (M70.2). */
-export async function deleteNote(_vault: string, path: string): Promise<void> {
+// --- The vault's Trash (M60.8) ---------------------------------------------
+//
+// Mirrors src-tauri/src/vault/trash.rs in its order and its words: a delete
+// moves the keys under `.trash/<stamp>/`, its sidecar under
+// `.trash/<stamp>/.comments/`, and writes the manifest key beside them;
+// Restore puts both back and refuses to overwrite. scanVault and listFolders
+// already hide `.trash/`, a dot-folder. Both backends replay
+// src-tauri/fixtures/trash-cases.json.
+
+/** Every key under `prefix/`, plus whether `prefix` is a kept folder. */
+const keysUnder = (prefix: string): string[] =>
+  [...files.keys()].filter((p) => p.startsWith(`${prefix}/`));
+
+/** Is anything — a file, a folder's files, an empty folder — at `path`? */
+const occupied = (path: string): boolean =>
+  files.has(path) || keysUnder(path).length > 0 || folders.has(path);
+
+/** Move a file key and its times. */
+function moveKey(from: string, to: string): void {
+  files.set(to, files.get(from)!);
+  files.delete(from);
+  const t = times.get(from);
+  times.delete(from);
+  if (t) times.set(to, t);
+}
+
+/** Move `from` (a file, or every key and kept folder under it) to `to`. */
+function moveTree(from: string, to: string): void {
+  if (files.has(from)) {
+    moveKey(from, to);
+    return;
+  }
+  for (const p of keysUnder(from)) moveKey(p, `${to}${p.slice(from.length)}`);
+  for (const dir of [...folders]) {
+    if (dir === from || dir.startsWith(`${from}/`)) {
+      folders.delete(dir);
+      folders.add(`${to}${dir.slice(from.length)}`);
+    }
+  }
+}
+
+/** Pages under a trashed item: 1 or 0 for a file, every shown `.md`/`.mmd`
+ * under a folder (trash.rs `count_pages`). */
+function trashedPages(itemKey: string, rel: string, isDir: boolean): number {
+  const isPage = (name: string) => name.endsWith('.md') || name.endsWith('.mmd');
+  if (!isDir) return isPage(rel) ? 1 : 0;
+  return keysUnder(itemKey).filter((p) => {
+    const inside = p.slice(itemKey.length + 1).split('/');
+    return isPage(p) && !inside.some(isHiddenName);
+  }).length;
+}
+
+/** Does a stamp dir hold anything but dot-names? */
+const holdsAnItem = (stampDir: string): boolean =>
+  [...files.keys(), ...folders].some(
+    (p) =>
+      p.startsWith(`${stampDir}/`) && !isHiddenName(p.slice(stampDir.length + 1).split('/')[0]),
+  );
+
+/** A stamp's manifest, under the words a restore refuses with. */
+function readTrashManifest(stamp: string) {
+  if (parseStamp(stamp) === null) throw new Error(nothingAt(stamp));
+  const dir = `${TRASH_DIR}/${stamp}`;
+  const text = files.get(`${dir}/${MANIFEST}`);
+  if (text === undefined) {
+    throw new Error(holdsAnItem(dir) ? UNREADABLE_ITEM : nothingAt(stamp));
+  }
+  const manifest = parseManifest(text);
+  if (manifest === null) throw new Error(UNREADABLE_ITEM);
+  return manifest;
+}
+
+/** Move a note or folder to the vault's Trash, and its comment sidecar
+ * after it (lib.rs `delete_note`, trash.rs `trash_locked`). */
+export async function deleteNote(_vault: string, path: string): Promise<TrashedItem> {
   // Mirrors lib.rs delete_note (M17.1). This was the one write path with no
   // guard on either backend — parity here is the point of this file.
   guardHumanWrite(path);
-  const prefix = `${path}/`;
-  const hadFile = files.delete(path);
-  times.delete(path);
-  let hadChildren = false;
-  for (const p of [...files.keys()]) {
-    if (p.startsWith(prefix)) {
+  if (path === '' || path.startsWith('/') || path.split('/').includes('..')) {
+    throw new Error(`path escapes the vault: ${path}`);
+  }
+  if (!isItemPath(path)) throw new Error(notAPage(path));
+  const isDir = !files.has(path);
+  if (!occupied(path)) throw new Error(`not found: ${path}`);
+  let stamp = newStamp(new Date(), Math.floor(Math.random() * 0x10000));
+  while (occupied(`${TRASH_DIR}/${stamp}`)) {
+    stamp = newStamp(new Date(), Math.floor(Math.random() * 0x10000));
+  }
+  const dir = `${TRASH_DIR}/${stamp}`;
+  const name = path.split('/').at(-1) ?? path;
+  const raw = files.get(path);
+  const title =
+    raw !== undefined && (path.endsWith('.md') || path.endsWith('.mmd'))
+      ? parseNote(path, raw, SEED_TIME, SEED_TIME).title
+      : name;
+  const deletedAt = rfc3339(parseStamp(stamp)!);
+  const kind = isDir ? 'folder' : 'file';
+  files.set(
+    `${dir}/${MANIFEST}`,
+    manifestBytes({ format: 1, path, kind, title, deleted_at: deletedAt }),
+  );
+  moveTree(path, `${dir}/${path}`);
+  logWrite('vault.delete', path);
+  const side = carriedRel(path, isDir);
+  if (side !== null && occupied(side)) {
+    moveTree(side, `${dir}/${side}`);
+    logWrite('vault.delete', side);
+  }
+  return {
+    stamp,
+    path,
+    kind,
+    title,
+    deletedAt,
+    pages: trashedPages(`${dir}/${path}`, path, isDir),
+  };
+}
+
+/** Every item in the Trash, newest first (trash.rs `list_trash`). */
+export async function listTrash(_vault: string): Promise<TrashedItem[]> {
+  const stamps = new Set<string>();
+  for (const p of [...files.keys(), ...folders]) {
+    const names = p.split('/');
+    if (names[0] === TRASH_DIR && names.length > 2 && parseStamp(names[1]) !== null) {
+      stamps.add(names[1]);
+    }
+  }
+  const items: TrashedItem[] = [];
+  for (const stamp of [...stamps].sort().reverse()) {
+    const dir = `${TRASH_DIR}/${stamp}`;
+    const text = files.get(`${dir}/${MANIFEST}`);
+    const manifest = text === undefined ? null : parseManifest(text);
+    if (manifest !== null) {
+      const itemKey = `${dir}/${manifest.path}`;
+      if (!occupied(itemKey)) continue;
+      items.push({
+        stamp,
+        path: manifest.path,
+        kind: manifest.kind,
+        title: manifest.title,
+        deletedAt: manifest.deleted_at,
+        pages: trashedPages(itemKey, manifest.path, manifest.kind === 'folder'),
+      });
+    } else if (holdsAnItem(dir)) {
+      items.push({
+        stamp,
+        path: dir,
+        kind: 'unreadable',
+        title: '',
+        deletedAt: rfc3339(parseStamp(stamp)!),
+        pages: null,
+      });
+    }
+  }
+  return items;
+}
+
+/** Put a Trash item back (lib.rs `restore_from_trash`, trash.rs
+ * `untrash_locked`): never over anything, its sidecar too unless one now
+ * sits at its place. Resolves the path it restored. */
+export async function restoreFromTrash(_vault: string, stamp: string): Promise<string> {
+  const manifest = readTrashManifest(stamp);
+  const target = manifest.path;
+  guardHumanWrite(target);
+  const dir = `${TRASH_DIR}/${stamp}`;
+  const itemKey = `${dir}/${target}`;
+  const isDir = manifest.kind === 'folder';
+  const there = isDir ? keysUnder(itemKey).length > 0 || folders.has(itemKey) : files.has(itemKey);
+  if (!there) throw new Error(occupied(itemKey) ? UNREADABLE_ITEM : nothingAt(stamp));
+  if (occupied(target)) throw new Error(alreadyExists(target));
+  moveTree(itemKey, target);
+  if (isDir) folders.add(target);
+  logWrite('vault.create', target);
+  const side = carriedRel(target, isDir);
+  if (side !== null && occupied(`${dir}/${side}`) && !occupied(side)) {
+    moveTree(`${dir}/${side}`, side);
+    logWrite('vault.create', side);
+  }
+  files.delete(`${dir}/${MANIFEST}`);
+  for (const kept of [...folders]) {
+    if (kept === dir || kept.startsWith(`${dir}/`)) folders.delete(kept);
+  }
+  return target;
+}
+
+/** The launch purge (trash.rs `purge_expired`): every stamp dir past its
+ * days at `now`, by its stamp, goes to `remove` — by default, gone from the
+ * mock disk, as the OS Trash takes it — and one `remove` refuses stays. */
+export function purgeExpiredTrash(
+  now: Date,
+  remove: (stampDir: string) => void = (stampDir) => {
+    for (const p of keysUnder(stampDir)) {
       files.delete(p);
       times.delete(p);
-      hadChildren = true;
+    }
+    for (const kept of [...folders]) if (kept.startsWith(`${stampDir}/`)) folders.delete(kept);
+  },
+): { moved: number; kept: number } {
+  const report = { moved: 0, kept: 0 };
+  const stamps = new Set<string>();
+  for (const p of [...files.keys(), ...folders]) {
+    const names = p.split('/');
+    if (names[0] === TRASH_DIR && names.length > 2) stamps.add(names[1]);
+  }
+  for (const stamp of [...stamps].sort()) {
+    const at = parseStamp(stamp);
+    if (at === null || !expired(at, now)) continue;
+    try {
+      remove(`${TRASH_DIR}/${stamp}`);
+      report.moved += 1;
+    } catch {
+      report.kept += 1;
     }
   }
-  const hadFolder = folders.delete(path);
-  if (!hadFile && !hadChildren && !hadFolder) throw new Error(`Note not found: ${path}`);
-  const side = carriedRel(path, !hadFile);
-  if (side !== null) {
-    files.delete(side);
-    for (const p of [...files.keys()]) {
-      if (p.startsWith(`${side}/`)) files.delete(p);
-    }
-  }
+  return report;
 }
 
 // --- Page comments (M70.2) --------------------------------------------------
@@ -1448,6 +2147,8 @@ export function writeMockComment(
     );
   }
   files.set(sidecarPathOf(path), text);
+  // A comment changes no page: its own kind, as comments.rs records it.
+  logWrite('vault.comment', sidecarPathOf(path), { actor: by, runId });
   return outcome.file;
 }
 
@@ -1503,6 +2204,510 @@ export async function deleteCommentThread(
   return writeMockComment(path, { op: 'delete_thread', thread }, OWNER, null);
 }
 
+// --- The agent comment tools (M70.3) ------------------------------------------
+//
+// Mirrors src-tauri/src/comment_tools.rs in its order and its words: the
+// arguments, the note (a markdown page that exists, then commentPage), the
+// sidecar, the thread or the quote, then the write as the run's actor with
+// its run id. The quote is found by quote.ts's one finder, kept where the
+// page shows it as text (`commentMatches`). Both replay
+// src-tauri/fixtures/comment-tools.json. The per-run cap of 20 is Rust's
+// alone (the M53.6 precedent for Rust-only rules). Each answers the report
+// the tool answers with, and throws its refusal.
+
+const NOTHING_POSTED = 'Nothing was posted.';
+/** The most characters (code points) an agent's comment holds. */
+export const AGENT_COMMENT_MAX_CHARS = 8000;
+
+/** A string argument, as Rust's `arg_str` reads one: anything else is absent. */
+const commentArg = (args: Record<string, unknown>, key: string): string | undefined =>
+  typeof args[key] === 'string' ? (args[key] as string) : undefined;
+
+/** `text`, trimmed as the store trims it, or why it can't be posted. */
+function agentCommentText(text: string): string {
+  const trimmed = rustTrim(text);
+  if (trimmed === '') {
+    throw new Error(`\`text\` is empty. Write the comment to post. ${NOTHING_POSTED}`);
+  }
+  const n = [...trimmed].length;
+  if (n > AGENT_COMMENT_MAX_CHARS) {
+    throw new Error(
+      `A comment holds at most ${AGENT_COMMENT_MAX_CHARS} characters; this one has ${n}. ${NOTHING_POSTED}`,
+    );
+  }
+  return trimmed;
+}
+
+/** `occurrence` as Rust reads it: absent or null is none, a whole number
+ * from 0 up is that one, and anything else is 0, which is refused. */
+function agentOccurrence(args: Record<string, unknown>): number | undefined {
+  const value = args.occurrence;
+  if (value === undefined || value === null) return undefined;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+/** The page a comment tool works on: a markdown note that exists. */
+function agentNote(path: string): void {
+  if (!isCommentPage(path) || !files.has(path)) throw new Error(`no note at ${path}`);
+  commentPage(path);
+}
+
+function agentThreads(path: string): CommentsFile {
+  const current = readSidecar(path);
+  if ('reason' in current) {
+    throw new Error(
+      `Cerebro could not read the comments on ${path} (${current.reason}), so nothing was posted.`,
+    );
+  }
+  return current;
+}
+
+function agentPost(path: string, op: CommentOp, stamp: WriteStamp): CommentsFile {
+  const runId = stamp.runId.trim() === '' ? null : stamp.runId;
+  try {
+    return writeMockComment(path, op, stamp.actor, runId);
+  } catch (err) {
+    const error = (err instanceof Error ? err.message : String(err)).replace(/\.+$/, '');
+    throw new Error(
+      `Cerebro could not save the comment on ${path} (${error}), so nothing was posted.`,
+      { cause: err },
+    );
+  }
+}
+
+/** Where `quote` sits in `body` among the page's own text, or why not. */
+function agentLocate(
+  body: string,
+  prefix: string,
+  quote: string,
+  occurrence: number | undefined,
+): number {
+  const found = commentMatches(body, quote);
+  const refuseListed = (head: string): never => {
+    throw new Error([...listed(head, body, quote, found), NOTHING_POSTED].join('\n'));
+  };
+  const n = found.length;
+  if (n === 0) {
+    if (occurrencesOf(body, quote).length > 0) {
+      throw new Error(
+        `The quoted text appears only inside a fence, a \`:::\` line, a line's marker or a link's target, which the page doesn't show as text. Quote words the page shows. ${NOTHING_POSTED}`,
+      );
+    }
+    if (prefix.includes(quote)) {
+      throw new Error(
+        `The quoted text is in the frontmatter; comments anchor to the note's body. ${NOTHING_POSTED}`,
+      );
+    }
+    throw new Error(
+      `The quoted text is not in the note's body. Quote plain words exactly as get_note shows them (for a formatted passage, a part with no markdown inside), or read the note again if it may have changed. ${NOTHING_POSTED}`,
+    );
+  }
+  if (occurrence === undefined) {
+    if (n === 1) return found[0];
+    return refuseListed(
+      `The quoted text appears ${n} times. Pass \`occurrence\` (counting from 1) or quote a longer passage:`,
+    );
+  }
+  if (occurrence > n) {
+    return refuseListed(
+      `\`occurrence\` is ${occurrence}, but the quoted text appears ${n} ${n === 1 ? 'time' : 'times'}:`,
+    );
+  }
+  return found[occurrence - 1];
+}
+
+/** Thread `id` on `path`, open: refused unknown, deleted, and resolved in
+ * `resolved`'s words. */
+function agentOpenThread(
+  file: CommentsFile,
+  path: string,
+  id: string,
+  resolved: string,
+): CommentThread {
+  const thread = file.threads.find((t) => threadId(t) === id);
+  if (thread === undefined) {
+    throw new Error(
+      `No thread ${id} on ${path}. get_note lists a note's open threads with their ids. ${NOTHING_POSTED}`,
+    );
+  }
+  if (thread.deleted) throw new Error(`Thread ${id} on ${path} was deleted. ${NOTHING_POSTED}`);
+  if (thread.resolved) throw new Error(`Thread ${id} on ${path} ${resolved}`);
+  return thread;
+}
+
+/**
+ * The agent's `comment_on_note` (comment_tools.rs), for the browser-mode
+ * mock agent: a new thread on the whole page, or on the quoted passage,
+ * written as `stamp`'s actor with its run. The page's bytes never change.
+ */
+export async function agentComment(
+  _vault: string,
+  args: Record<string, unknown>,
+  stamp: WriteStamp,
+): Promise<string> {
+  const path = commentArg(args, 'path');
+  if (path === undefined) throw new Error('comment_on_note needs a path');
+  const raw = commentArg(args, 'text');
+  if (raw === undefined) throw new Error('comment_on_note needs `text`, the comment to post');
+  const text = agentCommentText(raw);
+  const quote = commentArg(args, 'quote');
+  const occurrence = agentOccurrence(args);
+  if (quote !== undefined) {
+    if (rustTrim(quote) === '') {
+      throw new Error(
+        `\`quote\` is empty. Quote the passage the comment is about, or leave \`quote\` out to comment on the whole page. ${NOTHING_POSTED}`,
+      );
+    }
+    const what = quoteMarkdown(quote);
+    if (what !== null) {
+      throw new Error(
+        `\`quote\` holds markdown (${what}). Quote plain words from one line, as the page reads, or leave \`quote\` out to comment on the whole page. ${NOTHING_POSTED}`,
+      );
+    }
+  } else if (occurrence !== undefined) {
+    throw new Error(`\`occurrence\` only applies with \`quote\`. ${NOTHING_POSTED}`);
+  }
+  if (occurrence === 0) throw new Error(`\`occurrence\` counts from 1. ${NOTHING_POSTED}`);
+  agentNote(path);
+  agentThreads(path);
+  if (quote === undefined) {
+    const file = agentPost(path, { op: 'start', anchor: null, body: text }, stamp);
+    const id = threadId(file.threads[file.threads.length - 1]);
+    return `Commented on ${path} as thread ${id}, about the whole page.`;
+  }
+  const current = mustGet(path);
+  const { body } = splitFrontmatter(current);
+  const prefix = current.slice(0, current.length - body.length);
+  const start = agentLocate(body, prefix, quote, occurrence);
+  const end = start + quote.length;
+  const k = commentMatches(body, quote).indexOf(start) + 1;
+  const anchor = { quote, occurrence: k, ...anchorContext(body, start, end) };
+  const file = agentPost(path, { op: 'start', anchor, body: text }, stamp);
+  const id = threadId(file.threads[file.threads.length - 1]);
+  return `Commented on ${path} as thread ${id}, on line ${lineAt(body, start)}: ${quoteContext(body, start, end)}`;
+}
+
+/** The agent's `reply_to_comment` (comment_tools.rs): a reply at the end of
+ * an open thread. */
+export async function agentReply(
+  _vault: string,
+  args: Record<string, unknown>,
+  stamp: WriteStamp,
+): Promise<string> {
+  const path = commentArg(args, 'path');
+  if (path === undefined) throw new Error('reply_to_comment needs a path');
+  const thread = commentArg(args, 'thread');
+  const raw = commentArg(args, 'text');
+  if (thread === undefined || raw === undefined) {
+    throw new Error('reply_to_comment needs `thread`, the id get_note lists, and `text`');
+  }
+  const text = agentCommentText(raw);
+  agentNote(path);
+  agentOpenThread(
+    agentThreads(path),
+    path,
+    thread,
+    `is resolved, and reopening it is the person's call. Start a new comment if your point is new. ${NOTHING_POSTED}`,
+  );
+  agentPost(path, { op: 'reply', thread, body: text }, stamp);
+  return `Replied in thread ${thread} on ${path}.`;
+}
+
+/** The agent's `resolve_comment` (comment_tools.rs): resolve an open
+ * thread, with a closing reply in the same write when `text` is given. */
+export async function agentResolve(
+  _vault: string,
+  args: Record<string, unknown>,
+  stamp: WriteStamp,
+): Promise<string> {
+  const path = commentArg(args, 'path');
+  if (path === undefined) throw new Error('resolve_comment needs a path');
+  const thread = commentArg(args, 'thread');
+  if (thread === undefined) {
+    throw new Error('resolve_comment needs `thread`, the id get_note lists');
+  }
+  const raw = commentArg(args, 'text');
+  const closing = raw === undefined ? null : agentCommentText(raw);
+  agentNote(path);
+  agentOpenThread(agentThreads(path), path, thread, 'is already resolved. Nothing changed.');
+  agentPost(path, { op: 'set_resolved', thread, resolved: true, closing }, stamp);
+  return closing === null
+    ? `Resolved thread ${thread} on ${path}.`
+    : `Resolved thread ${thread} on ${path}, after your closing reply.`;
+}
+
+// --- An @agent in a comment thread (M70.4) ----------------------------------
+//
+// Mirrors src-tauri/src/agent/thread_turn.rs in its order and its words:
+// exactly one agent answers the handle, it is not paused, the page is a note,
+// its read scope admits the page, the sidecar reads, the thread and the
+// comment exist, a person wrote it, and this agent has not answered it; then
+// the record's model and effort. Both replay
+// src-tauri/fixtures/thread-turns.json. The placeholder and its settling
+// write the sidecar as comments.rs's rewrite does.
+
+/** What a thread turn asks: the page, the thread, the comment, the handle. */
+export interface ThreadTurnRequest {
+  page: string;
+  thread: string;
+  message: string;
+  handle: string;
+}
+
+/** A turn the mock agreed to start: who answers, on what record's limits,
+ * and the person's text. */
+export interface ThreadTurnPlan {
+  title: string;
+  actor: string;
+  scope: string[] | null;
+  readScope: string[] | null;
+  allowedTools: string[] | null;
+  model: string | null;
+  effort: string | null;
+  askFirst: boolean;
+  text: string;
+}
+
+/** The prefix check both scope axes share (mcp.rs `scope_admits`). */
+function scopeAdmits(scope: string[] | null, path: string): boolean {
+  if (scope === null) return true;
+  const target = path.replace(/^\.\//, '').replace(/^\/+/, '');
+  return scope.some((raw) => {
+    const folder = raw.replace(/^\/+|\/+$/g, '');
+    return folder === '' || target === folder || target.startsWith(`${folder}/`);
+  });
+}
+
+/** The asking comment's checks (thread_turn.rs `asking_refusal`): answers
+ * the thread's index and the comment's, or throws the refusal. */
+function threadTurnAsking(
+  file: CommentsFile,
+  req: ThreadTurnRequest,
+  title: string,
+  actor: string,
+): [number, number] {
+  const t = file.threads.findIndex((x) => threadId(x) === req.thread && x.deleted === undefined);
+  if (t < 0) throw new Error('That thread is gone, so nobody was asked.');
+  const thread = file.threads[t];
+  const m = thread.comments.findIndex((c) => c.id === req.message && c.deleted === undefined);
+  if (m < 0) throw new Error('That comment is gone, so nobody was asked.');
+  if (!thread.comments[m].author.startsWith('human:')) {
+    throw new Error("Only a person's comment can ask an agent, so nobody was asked.");
+  }
+  const earlier = thread.comments.find((c) => c.answers === req.message && c.author === actor);
+  if (earlier !== undefined) {
+    throw new Error(
+      earlier.state === 'pending'
+        ? `${title} is already answering that comment.`
+        : `${title} has already answered that comment.`,
+    );
+  }
+  return [t, m];
+}
+
+/**
+ * Check a thread turn as thread_turn.rs `plan` does, in its words, and
+ * answer the plan. Writes nothing.
+ */
+export async function threadTurnRefusal(
+  vault: string,
+  req: ThreadTurnRequest,
+): Promise<ThreadTurnPlan> {
+  const entries = await scanVault(vault);
+  const answering = entries.filter(isAgentEntry).filter((e) => agentHandle(e) === req.handle);
+  if (answering.length === 0) {
+    throw new Error(`No agent answers to @${req.handle}, so nobody was asked.`);
+  }
+  if (answering.length > 1) {
+    const paths = answering.map((e) => e.path).sort();
+    throw new Error(
+      `More than one agent answers to @${req.handle} (${paths.join(', ')}), so nobody was asked. Give each its own \`slug:\`.`,
+    );
+  }
+  const record = answering[0];
+  const title = record.title;
+  const actor = `process:${agentHandle(record)}`;
+  if (record.properties.paused === true) {
+    throw new Error(`${title} is paused, so it can't answer here.`);
+  }
+  const page = req.page;
+  if (!entries.some((e) => e.path === page) || !page.endsWith('.md')) {
+    throw new Error(`no note at ${page}`);
+  }
+  commentPage(page);
+  const readScope = parseReadScope(record);
+  if (!scopeAdmits(readScope, page)) {
+    const folders =
+      readScope === null || readScope.length === 0 ? 'nothing' : `only ${readScope.join(', ')}`;
+    throw new Error(
+      `${title} can't read ${page} (it may read ${folders}), so it can't answer here.`,
+    );
+  }
+  const file = readSidecar(page);
+  if ('reason' in file) {
+    throw new Error(
+      `Cerebro could not read the comments on ${page} (${file.reason}), so nobody was asked.`,
+    );
+  }
+  const [t, m] = threadTurnAsking(file, req, title, actor);
+  const model = storedChoice(record.properties.model);
+  const effort = storedChoice(record.properties.effort);
+  const refused = runOptionsRefusal({ model, effort });
+  if (refused !== null) throw new Error(`${title}'s record: ${refused}`);
+  return {
+    title,
+    actor,
+    scope: parseScope(record),
+    readScope,
+    allowedTools: parseAllowedTools(record.properties['allowed-tools']),
+    model,
+    effort,
+    askFirst: askFirstOf(record).on,
+    text: file.threads[t].comments[m].body,
+  };
+}
+
+/**
+ * Post a turn's pending placeholder (thread_turn.rs `post_placeholder`):
+ * authored by the agent, bound to `runId`, naming the comment it answers,
+ * with the asking checks run again on the sidecar as it stands, so two
+ * starts post one. Answers the placeholder's id.
+ */
+export function postThreadPlaceholder(
+  req: ThreadTurnRequest,
+  plan: Pick<ThreadTurnPlan, 'title' | 'actor'>,
+  runId: string,
+): string {
+  commentPage(req.page);
+  const current = readSidecar(req.page);
+  if ('reason' in current) {
+    throw new Error(
+      `Cerebro could not save the comment on ${req.page} (Comments for ${req.page} can't be read (${current.reason}), so nothing was written), so nobody was asked.`,
+    );
+  }
+  const [t] = threadTurnAsking(current, req, plan.title, plan.actor);
+  const id = freshCommentId(current);
+  const next: CommentsFile = structuredClone(current);
+  next.threads[t].comments.push({
+    id,
+    author: plan.actor,
+    created: nowSecs(),
+    body: '',
+    run_id: runId,
+    state: 'pending',
+    answers: req.message,
+  });
+  writeSidecarAs(req.page, next, plan.actor, runId);
+  return id;
+}
+
+/** How a mock thread turn ended, as Rust's `RunEnd` carries it. */
+export interface ThreadTurnEnd {
+  outcome:
+    | 'succeeded'
+    | 'failed'
+    | 'quota_failed'
+    | 'cancelled'
+    | 'elapsed_aborted'
+    | 'abandoned_usage_unknown';
+  answer: string | null;
+  failure: string | null;
+}
+
+/** Where an answer is cut, in code points (thread_turn.rs). */
+export const THREAD_ANSWER_MAX_CHARS = 8000;
+
+/** The words a turn's ending settles its placeholder with, and its state
+ * (thread_turn.rs `settle_words`). */
+export function settleWords(
+  title: string,
+  end: ThreadTurnEnd,
+): { text: string; state: 'answered' | 'failed' } {
+  switch (end.outcome) {
+    case 'succeeded': {
+      const answer = end.answer !== null && rustTrim(end.answer) !== '' ? end.answer : null;
+      if (answer === null) {
+        return { text: `${title} finished without writing a reply.`, state: 'answered' };
+      }
+      const chars = [...answer];
+      if (chars.length > THREAD_ANSWER_MAX_CHARS) {
+        return {
+          text: `${chars.slice(0, THREAD_ANSWER_MAX_CHARS).join('')}\n\n(Cut at 8000 characters; the whole reply is in the run's transcript.)`,
+          state: 'answered',
+        };
+      }
+      return { text: answer, state: 'answered' };
+    }
+    case 'failed':
+    case 'quota_failed':
+      return {
+        text:
+          end.failure !== null && rustTrim(end.failure) !== ''
+            ? `${title} couldn't answer: ${end.failure}`
+            : `${title} couldn't answer. The run's detail in Fleet says what happened.`,
+        state: 'failed',
+      };
+    case 'cancelled':
+      return { text: `${title} was stopped before it answered.`, state: 'failed' };
+    case 'elapsed_aborted':
+      return { text: `${title} ran out of time before it answered.`, state: 'failed' };
+    case 'abandoned_usage_unknown':
+      return { text: `${title} ended before it finished answering.`, state: 'failed' };
+  }
+}
+
+/**
+ * Replace run `runId`'s pending placeholder with `text` in `state`
+ * (comments.rs `settle_answer`). A deleted thread or placeholder, or one no
+ * longer this run's pending answer, is 'gone' and writes nothing.
+ */
+export function settleThreadPlaceholder(
+  binding: { page: string; thread: string; placeholder: string; actor: string },
+  runId: string,
+  text: string,
+  state: 'answered' | 'failed',
+): 'written' | 'gone' {
+  commentPage(binding.page);
+  const current = readSidecar(binding.page);
+  if ('reason' in current) {
+    throw new Error(
+      `Comments for ${binding.page} can't be read (${current.reason}), so nothing was written.`,
+    );
+  }
+  const next: CommentsFile = structuredClone(current);
+  const thread = next.threads.find(
+    (t) => threadId(t) === binding.thread && t.deleted === undefined,
+  );
+  const comment = thread?.comments.find(
+    (c) =>
+      c.id === binding.placeholder &&
+      c.deleted === undefined &&
+      c.state === 'pending' &&
+      c.run_id === runId,
+  );
+  if (comment === undefined) return 'gone';
+  comment.body = text;
+  comment.state = state;
+  writeSidecarAs(binding.page, next, binding.actor, runId);
+  return 'written';
+}
+
+/** Write `file` as `page`'s sidecar, as the rewrite funnel does: the cap,
+ * the read-back, the files Map and one vault.comment row. */
+function writeSidecarAs(page: string, file: CommentsFile, by: string, runId: string): void {
+  const text = serializeComments(file);
+  const tooBig = sizeRefusal(page, text);
+  if (tooBig !== null) throw new Error(tooBig);
+  const back = parseComments(text);
+  if (!back.ok) {
+    throw new Error(
+      `Comments for ${page} would not read back (${back.reason}), so nothing was written.`,
+    );
+  }
+  files.set(sidecarPathOf(page), text);
+  logWrite('vault.comment', sidecarPathOf(page), { actor: by, runId });
+}
+
 // --- Attachments (M16.13c) --------------------------------------------------
 
 /** No native picker in a browser. `canPickFiles()` is what callers branch on;
@@ -1532,13 +2737,15 @@ export async function importAttachment(_vault: string, source: string): Promise<
     if (!files.has(rel)) {
       files.set(rel, '');
       touch(rel);
+      logWrite('vault.create', rel);
       return rel;
     }
   }
 }
 
 /**
- * Mirror of `vault::write::write_text_file` (M29.22): same knowledge guard,
+ * Mirror of lib.rs `write_text_file` and `vault::write::write_text_file`
+ * (M29.22): the same knowledge guard its command mints the receipt from,
  * same `.mmd`-only extension allowlist, same stem dedupe, the same vault
  * containment `safe_join` enforces (no absolute paths, no `..`, no empty
  * path), and the same note-target rules (PLATFORM-API-1): no dot-folder.
@@ -1564,6 +2771,7 @@ export async function writeTextFile(
   for (let n = 2; files.has(actual); n += 1) actual = `${stem}-${n}.${ext}`;
   files.set(actual, content);
   touch(actual);
+  logWrite('vault.create', actual);
   return actual;
 }
 
@@ -1745,6 +2953,277 @@ export async function revertApplication(
   }
   review.applications = review.applications.filter((a) => a.proposal_id !== proposalId);
   return 'apply';
+}
+
+// --- Queued page writes (M57.4c) -------------------------------------------
+//
+// Rust keeps these in runtime.db's `pending_writes` (`runtime::pending_writes`
+// and `mcp::decide_pending`); the browser keeps them here, in memory, with
+// the same dedupe key (vault, actor, tool, the draft's canonical hash), the
+// same cap and size from the table's `queue_limits`, the same words, and
+// the same decision shapes. A write is queued only once the mock door would
+// take it (`agentWriteRefusal`), and an Allow runs the door for real.
+
+/** One page write an ask-first agent queued for Review, as Rust's
+ * `pending_writes` command lists it. */
+export interface PendingWrite {
+  pending_id: string;
+  run_id: string;
+  actor: string;
+  tool: string;
+  /** The page the write lands on, or for a new page the file it would
+   * create. */
+  target: string;
+  /** The page's bytes' hash when it was queued; null for a new page. */
+  target_hash: string | null;
+  input: Record<string, unknown>;
+  queued_at: string;
+  state: string;
+}
+
+/** What a decision came to, as Rust's `PendingDecision` serializes it. */
+export type PendingDecision =
+  | { outcome: 'applied'; path: string }
+  | { outcome: 'refused'; reason: string }
+  | { outcome: 'rejected' }
+  | { outcome: 'edit_refused'; reason: string }
+  | { outcome: 'no_longer_waiting'; state: string };
+
+interface PendingRow extends PendingWrite {
+  vault: string;
+  inputHash: string;
+  reason: string | null;
+  result: string | null;
+}
+
+let pendingRows: PendingRow[] = [];
+
+function resetPendingWrites(): void {
+  pendingRows = [];
+}
+
+/** Mirror of mcp.rs `REJECTION_NEEDS_A_REASON`, word for word. */
+export const REJECTION_NEEDS_A_REASON = 'a rejection needs a reason';
+
+/** Mirror of pending_writes.rs `canonical_json`: every object's keys sorted,
+ * recursively. */
+function canonicalJson(value: unknown): string {
+  const sorted = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(sorted);
+    if (typeof v === 'object' && v !== null) {
+      const record = v as Record<string, unknown>;
+      return Object.fromEntries(
+        Object.keys(record)
+          .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+          .map((key) => [key, sorted(record[key])]),
+      );
+    }
+    return v;
+  };
+  return JSON.stringify(sorted(value));
+}
+
+const argText = (args: Record<string, unknown>, key: string): string =>
+  typeof args[key] === 'string' ? (args[key] as string) : '';
+
+/** One of the mock's agent doors, by tool name, writing under `stamp`:
+ * what it answers, and the page it wrote. The mock has no agent frontmatter
+ * door (M56.10). */
+async function agentDoor(
+  vault: string,
+  tool: string,
+  args: Record<string, unknown>,
+  stamp: WriteStamp,
+): Promise<{ path: string; reply: string }> {
+  const expectHash = typeof args.expect_hash === 'string' ? args.expect_hash : undefined;
+  switch (tool) {
+    case 'create_note': {
+      const reply = await agentCreate(
+        vault,
+        {
+          folder: argText(args, 'folder'),
+          slug: argText(args, 'slug'),
+          body: argText(args, 'body'),
+        },
+        stamp,
+      );
+      return { path: reply.replace(/^Created /, ''), reply };
+    }
+    case 'append_to_note': {
+      const path = argText(args, 'path');
+      await agentAppend(vault, path, argText(args, 'content'), expectHash, stamp);
+      return { path, reply: `Appended to ${path}` };
+    }
+    case 'edit_note': {
+      const path = argText(args, 'path');
+      const edits = Array.isArray(args.edits) ? (args.edits as QuoteEdit[]) : [];
+      return { path, reply: await agentEdit(vault, path, edits, expectHash, stamp) };
+    }
+    default:
+      throw new Error(`${tool} is not available here`);
+  }
+}
+
+/** The door run as a preview (Rust's `WriteMode::Preview`): what it would
+ * land on and the page's hash now, or its refusal. The mock doors refuse
+ * before writing, and a door that would land is undone at once, its logged
+ * write included, so a preview leaves the mock disk and its write log as it
+ * found them. */
+async function previewAgentWrite(
+  vault: string,
+  tool: string,
+  args: Record<string, unknown>,
+): Promise<{ target: string; hash: string | null } | { refused: string }> {
+  const kept = new Map(files);
+  const keptTimes = new Map(times);
+  const logged = writes.length;
+  try {
+    const { path } = await agentDoor(vault, tool, args, PREVIEW_STAMP);
+    const before = kept.get(path);
+    return { target: path, hash: before === undefined ? null : sha256Hex(before) };
+  } catch (err) {
+    return { refused: err instanceof Error ? err.message : String(err) };
+  } finally {
+    files.clear();
+    for (const [path, raw] of kept) files.set(path, raw);
+    times.clear();
+    for (const [path, at] of keptTimes) times.set(path, at);
+    writes.length = logged;
+  }
+}
+
+/** The stamp a preview's undone write carries; it never stays logged. */
+const PREVIEW_STAMP: WriteStamp = { actor: 'preview', runId: 'preview' };
+
+/** Why the mock door would refuse this write now, or null (M57.4c): both
+ * backends refuse a doomed write instead of queueing it. */
+export async function agentWriteRefusal(
+  vault: string,
+  tool: string,
+  args: Record<string, unknown>,
+): Promise<string | null> {
+  const preview = await previewAgentWrite(vault, tool, args);
+  return 'refused' in preview ? preview.refused : null;
+}
+
+/**
+ * An unattended ask-first write queued for Review (mcp.rs `queue_step`):
+ * refused as the door would refuse it, then over the table's `input_bytes`,
+ * then the same write already waiting answers with its id, then an agent at
+ * `open_per_actor` waiting writes is refused; else it waits. Resolves to
+ * what the model reads; a refusal throws, as the mock doors do.
+ */
+export async function queueAgentWrite(
+  vault: string,
+  write: { actor: string; runId: string; tool: string; input: Record<string, unknown> },
+): Promise<string> {
+  const preview = await previewAgentWrite(vault, write.tool, write.input);
+  if ('refused' in preview) throw new Error(preview.refused);
+  const input = canonicalJson(write.input);
+  if (new TextEncoder().encode(input).length > QUEUE_LIMITS.input_bytes) {
+    throw new Error(
+      APPROVAL_MESSAGES.queue_too_large.replace('{max}', String(QUEUE_LIMITS.input_bytes)),
+    );
+  }
+  const inputHash = sha256Hex(input);
+  const open = pendingRows.filter(
+    (row) => row.vault === vault && row.actor === write.actor && row.state === 'pending',
+  );
+  const twin = open.find((row) => row.tool === write.tool && row.inputHash === inputHash);
+  if (twin !== undefined) {
+    return APPROVAL_MESSAGES.queued_already.replace('{id}', twin.pending_id);
+  }
+  if (open.length >= QUEUE_LIMITS.open_per_actor) {
+    throw new Error(APPROVAL_MESSAGES.queue_full.replace('{n}', String(open.length)));
+  }
+  const id = [...crypto.getRandomValues(new Uint8Array(16))]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+  pendingRows.push({
+    pending_id: id,
+    run_id: write.runId,
+    actor: write.actor,
+    tool: write.tool,
+    target: preview.target,
+    target_hash: preview.hash,
+    input: JSON.parse(input) as Record<string, unknown>,
+    queued_at: new Date().toISOString(),
+    state: 'pending',
+    vault,
+    inputHash,
+    reason: null,
+    result: null,
+  });
+  return APPROVAL_MESSAGES.queued.replace('{id}', id);
+}
+
+/** The writes waiting in `vault`, oldest first (Rust's `list_open`). */
+export async function pendingWrites(vault: string): Promise<PendingWrite[]> {
+  return pendingRows
+    .filter((row) => row.vault === vault && row.state === 'pending')
+    .map((row) => ({
+      pending_id: row.pending_id,
+      run_id: row.run_id,
+      actor: row.actor,
+      tool: row.tool,
+      target: row.target,
+      target_hash: row.target_hash,
+      input: row.input,
+      queued_at: row.queued_at,
+      state: row.state,
+    }));
+}
+
+/**
+ * Review's decision of one queued write (mcp.rs `decide_pending`): a Reject
+ * needs a reason; an Allow holds the draft, or the person's edit, to the
+ * tool's schema and the door's refusals, so a refused edit answers
+ * `edit_refused` and keeps the write waiting, while a refused unedited write
+ * is settled refused; otherwise the door writes it, once.
+ */
+export async function decidePendingWrite(
+  vault: string,
+  pendingId: string,
+  allow: boolean,
+  input: Record<string, unknown> | null,
+  reason: string | null,
+): Promise<PendingDecision> {
+  if (!allow && (reason ?? '').trim() === '') throw new Error(REJECTION_NEEDS_A_REASON);
+  const row = pendingRows.find((r) => r.vault === vault && r.pending_id === pendingId);
+  if (row === undefined) throw new Error(`no queued write ${pendingId} in this vault`);
+  if (row.state !== 'pending') return { outcome: 'no_longer_waiting', state: row.state };
+  if (!allow) {
+    row.state = 'rejected';
+    row.reason = (reason ?? '').trim();
+    return { outcome: 'rejected' };
+  }
+  const edited = input !== null && canonicalJson(input) !== canonicalJson(row.input);
+  const draft = edited && input !== null ? input : row.input;
+  const refusal =
+    draftRefusal(toolSchema(row.tool), draft) ?? (await agentWriteRefusal(vault, row.tool, draft));
+  if (refusal !== null) {
+    if (edited) return { outcome: 'edit_refused', reason: refusal };
+    row.state = 'refused';
+    row.reason = refusal;
+    return { outcome: 'refused', reason: refusal };
+  }
+  row.state = 'applying';
+  try {
+    // The agent's write, under its run, that the person allowed (M57 Q21).
+    const { path } = await agentDoor(vault, row.tool, draft, {
+      actor: row.actor,
+      runId: row.run_id,
+      approvedBy: HUMAN_ACTOR,
+    });
+    row.state = 'applied';
+    row.result = path;
+    return { outcome: 'applied', path };
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err);
+    row.state = 'refused';
+    row.reason = why;
+    return { outcome: 'refused', reason: why };
+  }
 }
 
 // --- Belief chips (M27.5b) -------------------------------------------------
@@ -2299,7 +3778,8 @@ export interface FleetRefusal {
 }
 
 /**
- * One run, its governance joins, its model and what it was refused.
+ * One run, its governance joins, its model, what it was refused and what it
+ * wrote (M58.1b).
  *
  * `cost_components: null` means NOT RECORDED — pre-M31.6, or a path M31.6
  * does not cover. An empty array would mean "measured, and it cost nothing",
@@ -2319,6 +3799,10 @@ export interface FleetRunDetail {
   model_id: string | null;
   refusals: FleetRefusal[];
   refusals_total: number;
+  /** What the run wrote in the vault (M58.1b): `recorded` with no rows is
+   * measured, it wrote nothing; `partial` is booked, but the shell may have
+   * written elsewhere; `not_recorded` is a run whose writes were not booked. */
+  wrote: RunPageWrites;
 }
 
 /**
@@ -2390,6 +3874,31 @@ function fleetUnavailable(): Error {
   return new Error('no runtime database for this workspace');
 }
 
+/**
+ * Book a mock run's row (M57.2): the one browser path that writes the fleet,
+ * for a run whose shell ceiling withheld tools nobody could ask about, as
+ * Rust's meter books its `agent.ask` refusal. Nothing when the fleet is
+ * unavailable, as Rust records nothing without a runtime database.
+ */
+export function bookMockRun(detail: FleetRunDetail): boolean {
+  if (!fleetAvailable) return false;
+  fleetRuns = [...fleetRuns, detail.run];
+  fleetDetails = { ...fleetDetails, [detail.run.run_id]: detail };
+  return true;
+}
+
+/** A booked mock run ended: its row says how. */
+export function finishMockRun(runId: string, outcome: string): void {
+  const ended = new Date().toISOString();
+  const close = (run: FleetRun): FleetRun =>
+    run.run_id === runId ? { ...run, outcome, ended_at: ended } : run;
+  fleetRuns = fleetRuns.map(close);
+  const detail = fleetDetails[runId];
+  if (detail !== undefined) {
+    fleetDetails = { ...fleetDetails, [runId]: { ...detail, run: close(detail.run) } };
+  }
+}
+
 export async function fleetRunsPage(filter: FleetFilter = {}): Promise<FleetRun[]> {
   if (!fleetAvailable) throw fleetUnavailable();
   const matches = fleetRuns.filter(
@@ -2432,7 +3941,9 @@ export async function fleetRunDetail(runId: string): Promise<FleetRunDetail> {
   // Refused, not null — the same way Rust refuses. A typo and a run that
   // recorded nothing must not look the same.
   if (detail === undefined) throw new Error(`no run with id ${runId}`);
-  return detail;
+  // A seeded detail that names no writes reads not recorded, never "wrote
+  // nothing": an e2e seam's detail arrives untyped.
+  return { ...detail, wrote: detail.wrote ?? { state: 'not_recorded' } };
 }
 
 /** Run id → its transcript. The demo's are synthetic (`demoTranscripts.ts`). */
@@ -3142,4 +4653,10 @@ if (typeof window !== 'undefined') {
   };
   seams.__cerebroMockQuit = __mockQuit;
   seams.__cerebroMockQuitLog = quitLog;
+}
+
+if (typeof window !== 'undefined') {
+  (
+    window as unknown as { __cerebroFailSearchVault: typeof __failSearchVault }
+  ).__cerebroFailSearchVault = __failSearchVault;
 }

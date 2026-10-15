@@ -137,10 +137,26 @@ describe('PageIconHeader', () => {
     expect(screen.queryByTestId('page-add-cover')).toBeNull();
   });
 
-  it("a lucide icon shows but is not the page picker's to change", () => {
+  it('any other icon value is still the picker button, and Remove deletes it', async () => {
+    const user = userEvent.setup();
     renderChrome(page({ icon: 'rocket', color: 'blue' }));
-    expect(screen.getByTestId('page-icon').tagName).toBe('SPAN');
+    expect(screen.getByTestId('page-icon').tagName).toBe('BUTTON');
     expect(screen.queryByTestId('page-add-icon')).toBeNull();
+    await user.click(screen.getByTestId('page-icon'));
+    await user.click(screen.getByRole('button', { name: 'Remove' }));
+    await waitFor(() =>
+      expect(patchFrontmatter).toHaveBeenCalledWith('notes/plan.md', { icon: null }),
+    );
+  });
+
+  it('a stray icon string is replaced by the emoji the picker writes', async () => {
+    const user = userEvent.setup();
+    renderChrome(page({ icon: 'LiRocket' }));
+    await user.click(screen.getByTestId('page-icon'));
+    await user.click(screen.getByRole('button', { name: ROCKET }));
+    await waitFor(() =>
+      expect(patchFrontmatter).toHaveBeenCalledWith('notes/plan.md', { icon: ROCKET }),
+    );
   });
 
   it('the Upload tab offers Choose an image only when a native picker exists', async () => {

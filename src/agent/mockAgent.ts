@@ -1,4 +1,4 @@
-import { declinedText } from './mockInteractions';
+import { answeredText, declinedText, markMockQuestion, mockQuestions } from './mockInteractions';
 import type {
   AgentStreamEvent,
   FailureNotice,
@@ -7,6 +7,17 @@ import type {
   UiAction,
 } from './types';
 import type { QuoteEdit } from '@/engine/quote';
+import {
+  APPROVAL_MESSAGES,
+  familyCard,
+  hostAnswer,
+  writeDeclined,
+  type RunApproval,
+} from '@/lib/policy/toolApproval';
+import { answersFor, type QuestionAnswer } from '@/engine/questionForm';
+import { changedKeys } from '@/engine/writeDraft';
+import { isConfirmable, toolFacts } from '@/lib/policy/tools';
+import { slugify } from '@/lib/slug';
 
 /**
  * Scripted agent for browser dev, vitest, and Playwright (M6).
@@ -35,23 +46,147 @@ interface Script {
    */
   uiAction?: UiAction;
   /**
-   * What its `append_to_note` call writes (M53.6) — one of the two scripts
-   * that change the vault, so a page open on the file has a real write to
-   * hear mid-turn.
+   * What its `append_to_note` calls write (M53.6), in call order — one of the
+   * scripts that change the vault, so a page open on the file has a real
+   * write to hear mid-turn. Two or more when the message chains appends with
+   * " then " (M58.3), so a turn writes two files.
    */
-  append?: { path: string; content: string };
-  /** What its `edit_note` call replaces (M55.5) — the other one. */
+  appends?: { path: string; content: string }[];
+  /** What its `edit_note` call replaces (M55.5) — another. */
   edit?: { path: string; edits: QuoteEdit[] };
+  /** Its comment tool's call (M70.3): it posts beside a page and changes no
+   * file the vault lists, so a run of it announces the page's comments. */
+  comment?: CommentCall;
+  /** What its `create_note` call writes (M57.4): the page an ask-first
+   * agent's card asks about. */
+  create?: CreateArgs;
+  /** Its first call waits, once started, until `releaseHeldMockRuns` (M57.5):
+   * a turn that stays mid-tool for as long as a spec needs. */
+  held?: true;
   text: string;
 }
 
-/** `append "<content>" to <note>.md`, as typed: a write script (M53.6). */
-const APPEND = /^append "([^"]+)" to (\S+\.md)$/;
+/** A comment script's call (M70.3): which comment tool, and its arguments. */
+export interface CommentCall {
+  tool: CommentTool;
+  args: Record<string, unknown>;
+}
 
-/** `edit "<old>" to "<new>" in <note>.md`, as typed: the other write script
+export type CommentTool = 'comment_on_note' | 'reply_to_comment' | 'resolve_comment';
+
+/** `create_note`'s arguments as the create script sends them. */
+export interface CreateArgs {
+  folder: string;
+  slug: string;
+  body: string;
+}
+
+/** What the model reads after a write the person edited before allowing it
+ * (M57.4b), as mcp.rs's `edited_sentence` words it. */
+export function editedText(keys: string[]): string {
+  return `The person changed your draft before allowing it (${keys.join(', ')}); what landed is their version.`;
+}
+
+/** `create "<title>" in <folder>` (M57.4), on the message's last line, a
+ * leading `@handle ` stripped: the page write an ask-first agent asks about.
+ * Matched right after APPEND and before the keyword branches, because the
+ * risk branch would catch `records/risks`. */
+const CREATE = /(?:^|\n)(?:@[A-Za-z0-9][A-Za-z0-9_-]*\s+)?create "([^"]+)" in ([^\s"]+)[ \t]*$/;
+
+/** `append "<content>" to <note>.md`, as typed: a write script (M53.6).
+ * Several, joined by " then ", append in turn (M58.3). */
+const APPEND = /^append "([^"]+)" to (\S+\.md)$/;
+const THEN = / then (?=append ")/;
+
+/** `edit "<old>" to "<new>" in <note>.md`, as typed: a write script
  * (M55.5). Inside the quotes `\n` is a line break, and `<new>` may be empty,
  * which deletes the passage. */
 const EDIT = /^edit "([^"]+)" to "([^"]*)" in (\S+\.md)$/;
+
+/** The comment scripts (M70.3), as typed: `comment "<quote>" #<k> on
+ * <note>.md: <text>` (the `#<k>` an occurrence, and optional), `comment on
+ * <note>.md: <text>` for the whole page, `reply to <thread> on <note>.md:
+ * <text>` and `resolve <thread> on <note>.md`, with an optional `: <text>`
+ * closing reply. Each calls its comment tool, which posts beside the page. */
+const COMMENT_QUOTED = /^comment "([^"]+)"(?: #(\d+))? on (\S+\.md): (.+)$/;
+const COMMENT_PAGE = /^comment on (\S+\.md): (.+)$/;
+const REPLY = /^reply to (\S+) on (\S+\.md): (.+)$/;
+const RESOLVE = /^resolve (\S+) on (\S+\.md)(?:: (.+))?$/;
+
+/** The comment script `message` asks for, or null. */
+function commentScript(message: string): Script | null {
+  const quoted = COMMENT_QUOTED.exec(message);
+  const page = COMMENT_PAGE.exec(message);
+  const reply = REPLY.exec(message);
+  const resolve = RESOLVE.exec(message);
+  let call: CommentCall;
+  let text: string;
+  if (quoted !== null) {
+    const [, quote, k, path, body] = quoted;
+    const args: Record<string, unknown> = { path, quote, text: body };
+    if (k !== undefined) args.occurrence = Number(k);
+    call = { tool: 'comment_on_note', args };
+    text = `I commented on ${path}.`;
+  } else if (page !== null) {
+    const [, path, body] = page;
+    call = { tool: 'comment_on_note', args: { path, text: body } };
+    text = `I commented on ${path}.`;
+  } else if (reply !== null) {
+    const [, thread, path, body] = reply;
+    call = { tool: 'reply_to_comment', args: { path, thread, text: body } };
+    text = `I replied in ${thread} on ${path}.`;
+  } else if (resolve !== null) {
+    const [, thread, path, body] = resolve;
+    const args: Record<string, unknown> = { path, thread };
+    if (body !== undefined) args.text = body;
+    call = { tool: 'resolve_comment', args };
+    text = `I resolved ${thread} on ${path}.`;
+  } else {
+    return null;
+  }
+  return { tools: [{ name: call.tool, input: JSON.stringify(call.args) }], comment: call, text };
+}
+
+/** `run "<command>"` and `ask me "<question>"` (M57.2): a call to the CLI's
+ * own Bash or AskUserQuestion, on a line of its own, in the message or in a
+ * job's standing instructions. Each decides through the run's tool-approval
+ * plan, so the mock asks, runs and refuses as the table says. */
+const RUN = /(?:^|\n)run "([^"]+)"[ \t]*(?=\n|$)/;
+const ASK_ME = /(?:^|\n)ask me "([^"]+)"[ \t]*(?=\n|$)/;
+
+/** `ask me which format` (M57.3): AskUserQuestion with two questions, one
+ * single-select and one multi-select, as a card shows them. `ask me
+ * "<question>"` above offers no options, so it is a set no card can show. */
+const ASK_FORMAT = /(?:^|\n)ask me which format[ \t]*(?=\n|$)/;
+
+/** The questions `ask me which format` asks. */
+export const FORMAT_QUESTIONS = {
+  questions: [
+    {
+      question: 'Which format?',
+      header: 'Format',
+      multiSelect: false,
+      options: [
+        { label: 'Markdown', description: 'Headings, lists and links' },
+        { label: 'Plain text', description: 'No markup at all' },
+      ],
+    },
+    {
+      question: 'Which sections?',
+      header: 'Sections',
+      multiSelect: true,
+      options: [
+        { label: 'Summary', description: 'What happened' },
+        { label: 'Risks', description: 'What could go wrong' },
+        { label: 'Next steps', description: 'Who does what next' },
+      ],
+    },
+  ],
+};
+
+/** Where a job's standing instructions start in its system prompt
+ * (useJobRunner's block). */
+const STANDING = 'Your standing instructions, from ';
 
 /** A quoted script argument, its `\n`s made line breaks. */
 const unquote = (text: string): string => text.replace(/\\n/g, '\n');
@@ -78,6 +213,40 @@ const DEMO_CAPTURE = 'inbox/warehouse-cutover-thought.md';
  */
 export const VAULT_OVERVIEW_REPLY =
   'This vault tracks work as typed markdown: every note is a page, typed notes are records in their databases, and a knowledge bundle I maintain waits for you to verify. Ask me to find something, file an Inbox capture, or write up what I have learned.';
+
+/** `wait for me …` (M57.5): a turn that starts get_vault_context and holds
+ * there until `releaseHeldMockRuns`, so a spec can type, queue and steer
+ * while a run is mid-tool. */
+const WAIT_FOR_ME = /^wait for me\b/i;
+
+/** The gate every held run waits on, and its release; null while no run
+ * waits. One gate, so one release frees every held run. */
+let heldGate: { promise: Promise<void>; release: () => void } | null = null;
+
+function heldRuns(): Promise<void> {
+  if (heldGate === null) {
+    let release = () => {};
+    const promise = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    heldGate = { promise, release };
+  }
+  return heldGate.promise;
+}
+
+/** Let every held `wait for me` run go on (M57.5). A run stopped while held
+ * has already said Cancelled and Done, and says nothing more. */
+export function releaseHeldMockRuns(): void {
+  const gate = heldGate;
+  heldGate = null;
+  gate?.release();
+}
+
+// Browser mode only: the spec's handle on the gate, beside the scripts.
+if (typeof window !== 'undefined' && !('__TAURI_INTERNALS__' in window)) {
+  (window as { __cerebroReleaseMockRuns?: () => void }).__cerebroReleaseMockRuns =
+    releaseHeldMockRuns;
+}
 
 /** `<path> ("<title>")` — how every surface prompt names its subject
  * (src/lib/prompts.ts). Null when the message does not name one. */
@@ -253,7 +422,100 @@ function knowledgeScript(prompt: string, message: string, systemPrompt?: string)
   return null;
 }
 
+/** The CLI-tool scripts (M57.2), read off the message, then off a job's
+ * standing instructions. */
+function cliScript(message: string, systemPrompt?: string): Script | null {
+  const at = systemPrompt?.indexOf(STANDING) ?? -1;
+  const standing = systemPrompt !== undefined && at >= 0 ? systemPrompt.slice(at) : '';
+  for (const text of [message.trim(), standing]) {
+    const run = RUN.exec(text);
+    if (run !== null) {
+      const command = run[1];
+      return {
+        tools: [
+          {
+            name: 'Bash',
+            input: JSON.stringify({ command, description: `Run ${command}` }),
+            output: `$ ${command}\n(mock) done`,
+          },
+        ],
+        text: `I ran ${command}.`,
+      };
+    }
+    if (ASK_FORMAT.test(text)) {
+      return {
+        tools: [{ name: 'AskUserQuestion', input: JSON.stringify(FORMAT_QUESTIONS) }],
+        // What the reply says when the person does not answer; their answers
+        // rewrite it (`runMockAgent`'s resume).
+        text: 'You chose not to answer, so I went ahead with Markdown and every section.',
+      };
+    }
+    const ask = ASK_ME.exec(text);
+    if (ask !== null) {
+      const question = ask[1];
+      return {
+        tools: [
+          {
+            name: 'AskUserQuestion',
+            input: JSON.stringify({ questions: [{ question, options: [] }] }),
+          },
+        ],
+        text: `I meant to ask you: ${question}`,
+      };
+    }
+  }
+  return null;
+}
+
+/** What review notes open with (M58.5, `engine/reviewNotes.ts` notesPrompt). */
+const REVIEW_NOTES = 'I reviewed your changes and left';
+
+/** The inline code span `line` opens with, unpadded, or null. */
+function leadingSpan(line: string): string | null {
+  const span = /^(`+)(.*?)\1(?!`)/.exec(line);
+  if (span === null) return null;
+  const inner = span[2];
+  return inner.startsWith(' ') && inner.endsWith(' ') && inner.length > 1
+    ? inner.slice(1, -1)
+    : inner;
+}
+
+/**
+ * The review-notes script (M58.5): a notes prompt gets a tool-free reply
+ * naming how many notes it holds (its numbered items, or one when it has
+ * none) and their paths, the item code spans in order. Checked first: a
+ * note's text and excerpts are free, and may name a script's keyword.
+ */
+function reviewNotesScript(message: string): Script | null {
+  const text = message.trim();
+  if (!text.startsWith(REVIEW_NOTES)) return null;
+  const items = text
+    .split('\n')
+    .map((line) => /^\d+\. (.*)$/.exec(line))
+    .filter((m) => m !== null);
+  const paths =
+    items.length > 0
+      ? items.map((m) => leadingSpan(m[1]))
+      : [leadingSpan(text.split('\n')[0].slice(`${REVIEW_NOTES} a note on `.length))];
+  const count = Math.max(items.length, 1);
+  const named = paths.filter((p) => p !== null);
+  return {
+    text: `I have ${count} review ${count === 1 ? 'note' : 'notes'} to work through, on ${named.join(', ')}.`,
+  };
+}
+
 function scriptFor(message: string, systemPrompt?: string): Script {
+  const notes = reviewNotesScript(message);
+  if (notes !== null) return notes;
+  const cli = cliScript(message, systemPrompt);
+  if (cli !== null) return cli;
+  if (WAIT_FOR_ME.test(message.trim())) {
+    return {
+      tools: [{ name: 'get_vault_context', input: '{}', output: 'Read the vault context.' }],
+      held: true,
+      text: 'Done waiting.',
+    };
+  }
   // First, and on the raw message: the content is quoted as typed, and a
   // note path may name an inbox or a risk without this being about either.
   const edit = EDIT.exec(message.trim());
@@ -266,13 +528,36 @@ function scriptFor(message: string, systemPrompt?: string): Script {
       text: `I edited ${path}.`,
     };
   }
-  const append = APPEND.exec(message.trim());
-  if (append !== null) {
-    const [, content, path] = append;
+  // The comment scripts, on the raw message too (M70.3): a comment's text is
+  // free, and may name an inbox or a risk.
+  const comment = commentScript(message.trim());
+  if (comment !== null) return comment;
+  const steps = message
+    .trim()
+    .split(THEN)
+    .map((step) => APPEND.exec(step));
+  if (steps.every((step) => step !== null)) {
+    const appends = steps.map((step) => {
+      const [, content, path] = step as RegExpExecArray;
+      return { path, content };
+    });
     return {
-      tools: [{ name: 'append_to_note', input: JSON.stringify({ path, content }) }],
-      append: { path, content },
-      text: `I appended that to ${path}.`,
+      tools: appends.map((target) => ({
+        name: 'append_to_note',
+        input: JSON.stringify(target),
+      })),
+      appends,
+      text: `I appended that to ${appends.map((a) => a.path).join(' and ')}.`,
+    };
+  }
+  const create = CREATE.exec(message.trim());
+  if (create !== null) {
+    const [, title, folder] = create;
+    const args: CreateArgs = { folder, slug: slugify(title), body: `# ${title}\n` };
+    return {
+      tools: [{ name: 'create_note', input: JSON.stringify(args) }],
+      create: args,
+      text: `I created "${title}" in ${folder}.`,
     };
   }
   const prompt = message.toLowerCase();
@@ -397,6 +682,7 @@ function runFailure(
       if (cancelled) return;
       cancelled = true;
       for (const timer of timers) clearTimeout(timer);
+      emit({ kind: 'Cancelled' });
       emit({ kind: 'Done' });
     },
   };
@@ -433,16 +719,49 @@ export interface MockRun {
   cancel: () => void;
 }
 
-/** A call the mock's gate holds for the person (M57.1). */
+/** A call the mock's gate holds for the person (M57.1). A table ask names
+ * its family and exact subject (M57.2). */
 export interface MockDeferral {
   toolId: string;
   toolName: string;
   input: string;
+  family?: string;
+  subject?: string;
+  /** A page write an ask-first agent asks about (M57.4): its manifest title
+   * and target, for a write card. */
+  write?: { title: string; target: string | null };
+}
+
+/** This conversation, per mock session (M57.2): the exact (family, subject)
+ * pairs the person allowed, kept in memory as Rust's book keeps them. Only a
+ * resumed run's answer writes it. */
+const conversationGrants = new Map<string, Set<string>>();
+
+const grantKey = (family: string, subject: string) => `${family}\u0000${subject}`;
+
+/** Test seam: forget every conversation's grants. */
+export function resetMockGrants(): void {
+  conversationGrants.clear();
+}
+
+/** The note or folder a page write aims at, by its manifest row's target
+ * argument, or null when the input does not name one. */
+function writeTarget(name: string, input: unknown): string | null {
+  const arg = toolFacts(name)?.target?.arg ?? null;
+  if (arg === null || typeof input !== 'object' || input === null) return null;
+  const value = (input as Record<string, unknown>)[arg];
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+/** Is this the CLI's own tool, which the tool-approval table decides? */
+function isCliTool(approval: RunApproval, name: string): boolean {
+  return approval.decisions.some((row) => row.tool === name);
 }
 
 /**
  * Replay a scripted run. Returns a handle whose `cancel` stops emission —
- * the mock equivalent of killing the child process.
+ * the mock equivalent of killing the child process — then reports Cancelled
+ * and Done, as Rust's reader closes a run stopped on purpose (M57.5).
  *
  * Steps run in order, one `delayMs` apart, and a step that writes is awaited
  * before the next starts: the reply streams after the tool result, as it does
@@ -456,10 +775,16 @@ export function runMockAgent(
     onUiAction,
     onAppend,
     onEdit,
+    onCreate,
+    onComment,
+    onReply,
+    onResolve,
+    onQueue,
     systemPrompt,
     sessionId = UNNAMED_SESSION,
     model = null,
     asks,
+    approval,
     onDefer,
     resume,
   }: {
@@ -472,6 +797,21 @@ export function runMockAgent(
      * `agentEdit`, which answers with the tool's report. Absent, the tool
      * refuses. */
     onEdit?: (path: string, edits: QuoteEdit[]) => Promise<string>;
+    /** Carries out the create script's `create_note` (M57.4): the mock
+     * backend's `agentCreate`, which answers with the tool's report.
+     * Absent, the tool refuses. */
+    onCreate?: (args: CreateArgs) => Promise<string>;
+    /** Carry out the comment scripts' comment_on_note, reply_to_comment and
+     * resolve_comment (M70.3): the mock backend's `agentComment`,
+     * `agentReply` and `agentResolve`, which answer with the tool's report.
+     * Absent, the tool refuses. */
+    onComment?: (args: Record<string, unknown>) => Promise<string>;
+    onReply?: (args: Record<string, unknown>) => Promise<string>;
+    onResolve?: (args: Record<string, unknown>) => Promise<string>;
+    /** Queues an unattended ask-first page write for Review (M57.4c): the
+     * mock backend's `queueAgentWrite`, which answers what the model reads
+     * and throws its refusal. Absent, the write is refused as unqueueable. */
+    onQueue?: (tool: string, input: Record<string, unknown>) => Promise<string>;
     /** The turn's system prompt, whose context snapshot says what the page
      * in front of the user holds (M52.3) — the mock reads Knowledge there. */
     systemPrompt?: string;
@@ -486,6 +826,11 @@ export function runMockAgent(
      * A call it asks for is held: its card, its deferral and Done, and the
      * turn stops there. */
     asks?: (toolName: string) => boolean;
+    /** The run's tool-approval plan (M57.2): a call to one of the CLI's own
+     * tools runs, is refused or asks as the table says, and so does an
+     * ask-first agent's page write (M57.4), which the plan reads by its
+     * `askFirst` and run kind. Absent, every call runs. */
+    approval?: RunApproval;
     /** Registers a held call with the book and gives its card, or null for
      * a deferral the book did not register. The caller resumes the turn
      * with `resume` below once the person answers. */
@@ -547,6 +892,32 @@ export function runMockAgent(
       (refusal) => `I could not append to ${target.path}: ${refusal}`,
     );
 
+  /** The create script's call: its report names the file it landed in,
+   * which is the one announced. `edited` names the keys the person changed
+   * before allowing it (M57.4b): the report says so, as mcp.rs's does, and
+   * so does the reply. */
+  const create = async (id: string, args: CreateArgs, edited: string[] = []) => {
+    await writeGate();
+    if (cancelled) return;
+    let output: string;
+    try {
+      if (onCreate === undefined) throw new Error('create_note is not available here');
+      output = await onCreate(args);
+    } catch (err) {
+      const refusal = err instanceof Error ? err.message : String(err);
+      reply = `I could not create that in ${args.folder}: ${refusal}`;
+      if (!cancelled) emit({ kind: 'ToolDone', tool_id: id, output: refusal, is_error: true });
+      return;
+    }
+    const path = output.replace(/^Created /, '');
+    onUiAction?.({ action: 'vault_changed', paths: [path] });
+    if (edited.length > 0) {
+      output = `${output}\n${editedText(edited)}`;
+      reply = `I created ${path} with your changes to ${edited.join(', ')}.`;
+    }
+    if (!cancelled) emit({ kind: 'ToolDone', tool_id: id, output });
+  };
+
   const edit = (id: string, target: { path: string; edits: QuoteEdit[] }) =>
     writeStep(
       id,
@@ -558,6 +929,43 @@ export function runMockAgent(
       (refusal) => `I could not edit ${target.path}: ${refusal}`,
     );
 
+  /** A comment script's call (M70.3): the report comes from the tool, and a
+   * post announces the page's comments, never the vault. A refusal rewrites
+   * the reply as the script's words for it. */
+  const comment = async (id: string, call: CommentCall) => {
+    await writeGate();
+    if (cancelled) return;
+    const path = String(call.args.path);
+    const thread = String(call.args.thread ?? '');
+    const handlers = {
+      comment_on_note: onComment,
+      reply_to_comment: onReply,
+      resolve_comment: onResolve,
+    };
+    let output: string;
+    try {
+      const handler = handlers[call.tool];
+      if (handler === undefined) throw new Error(`${call.tool} is not available here`);
+      output = await handler(call.args);
+    } catch (err) {
+      const refusal = err instanceof Error ? err.message : String(err);
+      reply =
+        call.tool === 'comment_on_note'
+          ? `I could not comment on ${path}: ${refusal}`
+          : call.tool === 'reply_to_comment'
+            ? `I could not reply in ${thread} on ${path}: ${refusal}`
+            : `I could not resolve ${thread} on ${path}: ${refusal}`;
+      if (!cancelled) emit({ kind: 'ToolDone', tool_id: id, output: refusal, is_error: true });
+      return;
+    }
+    onUiAction?.({ action: 'comments_changed', path });
+    if (call.tool === 'comment_on_note') {
+      const posted = /as thread ([0-9a-f]+)/.exec(output)?.[1] ?? '';
+      reply = `I commented on ${path} as thread ${posted}.`;
+    }
+    if (!cancelled) emit({ kind: 'ToolDone', tool_id: id, output });
+  };
+
   const acting: Step[] = [];
   acting.push(() => emit({ kind: 'Init', session_id: sessionId }));
   // The model answering, as the fold reports it once per turn (M56.3).
@@ -567,41 +975,207 @@ export function runMockAgent(
   }
   const tools = script.tools ?? [];
   // A resume starts after the held call, so its earlier calls are not run again.
-  const resumeAt = resume === undefined ? -1 : tools.findIndex((_, i) => `t-${i + 1}` === resume.toolId);
+  const resumeAt =
+    resume === undefined ? -1 : tools.findIndex((_, i) => `t-${i + 1}` === resume.toolId);
+  // Each append_to_note call takes the next of the script's appends.
+  let appendAt = 0;
   tools.forEach(({ name, input, output }, i) => {
     const id = `t-${i + 1}`;
+    const appended = name === 'append_to_note' ? script.appends?.[appendAt++] : undefined;
     if (i < resumeAt) return;
-    const appended = name === 'append_to_note' ? script.append : undefined;
     const edited = name === 'edit_note' ? script.edit : undefined;
+    const created = name === 'create_note' ? script.create : undefined;
+    const commented = name === script.comment?.tool ? script.comment : undefined;
     const completion: Step =
       appended !== undefined
         ? () => append(id, appended)
         : edited !== undefined
           ? () => edit(id, edited)
-          : () =>
-              emit(
-                output === undefined
-                  ? { kind: 'ToolDone', tool_id: id }
-                  : { kind: 'ToolDone', tool_id: id, output },
-              );
+          : created !== undefined
+            ? () => create(id, created)
+            : commented !== undefined
+              ? () => comment(id, commented)
+              : () =>
+                  emit(
+                    output === undefined
+                      ? { kind: 'ToolDone', tool_id: id }
+                      : { kind: 'ToolDone', tool_id: id, output },
+                  );
+    // M57.2: a CLI tool's call decides through the run's plan. Argv denies
+    // what the plan disallows; the host answers the rest.
+    const table = approval !== undefined && isCliTool(approval, name);
+    let parsed: unknown = null;
+    try {
+      parsed = JSON.parse(input);
+    } catch {
+      // Not JSON: the call is named by its text.
+    }
+    // M57.4: an ask-first agent's page write decides through the same
+    // plan, by its full name, as Rust's gate and dispatch do.
+    const confirmable = approval !== undefined && isConfirmable(name);
+    const planned = confirmable ? `mcp__cerebro__${name}` : name;
+    const host =
+      approval !== undefined && (table || confirmable)
+        ? hostAnswer(
+            approval,
+            (family, subject) =>
+              conversationGrants.get(sessionId)?.has(grantKey(family, subject)) ?? false,
+            planned,
+            parsed,
+          )
+        : null;
+    // M57.3: a question the table asks draws a question card, once its
+    // questions parse; a set no card can show is refused as Rust's gate
+    // refuses it.
+    const asked =
+      host?.kind === 'ask' && familyCard(host.family)?.kind === 'question'
+        ? mockQuestions(parsed)
+        : null;
     if (i === resumeAt && resume !== undefined) {
-      // The held call, answered: allow runs it; deny refuses it in Rust's
-      // words, and the reply says so rather than claim the write.
+      // The held call, answered: allow runs it, and This conversation keeps
+      // its exact subject for the rest of the session; deny refuses it in
+      // Rust's words, and the reply says so rather than claim the work.
+      const answer = resume.answer;
+      if (answer.kind === 'allow' && answer.remember === 'conversation' && host?.kind === 'ask') {
+        const held = conversationGrants.get(sessionId) ?? new Set<string>();
+        held.add(grantKey(host.family, host.subject));
+        conversationGrants.set(sessionId, held);
+      }
+      if (answer.kind === 'answers') {
+        // The answers return as the call's input, and Claude Code reads them
+        // back to the model as its tool result.
+        const answers: QuestionAnswer[] = answer.answers;
+        acting.push(() => {
+          const checked =
+            asked !== null && 'questions' in asked ? answersFor(asked.questions, answers) : null;
+          const map = checked !== null && 'ok' in checked ? checked.ok : {};
+          reply = `Got it: ${Object.values(map).join('; ')}.`;
+          emit({ kind: 'ToolDone', tool_id: id, output: answeredText(map) });
+        });
+        return;
+      }
+      // M57.4b: an Allow with the person's edit runs their version, as
+      // Rust's dispatch runs the approved input.
+      const approved =
+        answer.kind === 'allow' && answer.updatedInput !== undefined && created !== undefined
+          ? (answer.updatedInput as unknown as CreateArgs)
+          : null;
       acting.push(
-        resume.answer.kind === 'allow'
-          ? completion
-          : () => {
-              const refusal = declinedText(resume.answer);
-              reply = `I did not run ${name}: you declined it.`;
-              emit({ kind: 'ToolDone', tool_id: id, output: refusal, is_error: true });
-            },
+        approved !== null && created !== undefined
+          ? () =>
+              create(
+                id,
+                approved,
+                changedKeys(
+                  created as unknown as Record<string, unknown>,
+                  approved as unknown as Record<string, unknown>,
+                ),
+              )
+          : answer.kind === 'allow'
+            ? completion
+            : () => {
+                const said = answer.message?.trim() ?? '';
+                if (asked !== null) {
+                  // Don't answer: the agent decides itself, and its reply says
+                  // what it went ahead with.
+                  const declined = APPROVAL_MESSAGES.question_declined;
+                  const refusal = said === '' ? declined : `${declined} They said: ${said}`;
+                  emit({ kind: 'ToolDone', tool_id: id, output: refusal, is_error: true });
+                  return;
+                }
+                // A write card's Deny (M57.4) is the table's ask on a page
+                // writer; the debug seam's ask on one is M57.1's.
+                const writeCard = confirmable && host?.kind === 'ask';
+                const refusal = writeCard
+                  ? writeDeclined(said)
+                  : host?.kind === 'ask'
+                    ? `${APPROVAL_MESSAGES.person_denied}${said === '' ? '' : ` They said: ${said}`}`
+                    : declinedText(answer);
+                reply = writeCard
+                  ? `I did not write it: ${refusal}`
+                  : `I did not run ${name}: you declined it.`;
+                emit({ kind: 'ToolDone', tool_id: id, output: refusal, is_error: true });
+              },
       );
       return;
     }
     acting.push(() => emit({ kind: 'ToolStart', tool_name: name, tool_id: id, input }));
-    if (asks?.(name) === true) {
+    // M57.5: a held script's first call waits here, mid-tool, for the release.
+    if (script.held === true && i === 0) acting.push(() => heldRuns());
+    // M57.4c: an unattended ask-first page write waits in Review, as Rust's
+    // dispatch queues it: the model reads that it waits, and nothing lands.
+    const queues =
+      confirmable && approval?.decisions.find((row) => row.tool === planned)?.decision === 'queue';
+    if (queues) {
+      const draft =
+        created !== undefined
+          ? (created as unknown as Record<string, unknown>)
+          : typeof parsed === 'object' && parsed !== null
+            ? (parsed as Record<string, unknown>)
+            : {};
+      acting.push(async () => {
+        let output: string;
+        try {
+          if (onQueue === undefined) throw new Error(APPROVAL_MESSAGES.queue_unavailable);
+          output = await onQueue(name, draft);
+        } catch (err) {
+          const refusal = err instanceof Error ? err.message : String(err);
+          reply = refusal;
+          if (!cancelled) emit({ kind: 'ToolDone', tool_id: id, output: refusal, is_error: true });
+          return;
+        }
+        reply = output;
+        if (!cancelled) emit({ kind: 'ToolDone', tool_id: id, output });
+      });
+      return;
+    }
+    if (approval !== undefined && table && approval.disallowed.includes(name)) {
+      // Denied in argv: the CLI never offers the tool.
       acting.push(() => {
-        const card = onDefer?.({ toolId: id, toolName: name, input }) ?? null;
+        reply = `${name} is not available in this run.`;
+        emit({ kind: 'ToolDone', tool_id: id, output: reply, is_error: true });
+      });
+      return;
+    }
+    if (host?.kind === 'deny') {
+      // A page write the table denies is refused at dispatch, in the
+      // ask-first words when its agent asks first (M57.4); an unattended
+      // ask-first write queues above instead (M57.4c).
+      const refusal = confirmable ? APPROVAL_MESSAGES.ask_first_unattended : host.message;
+      acting.push(() => {
+        reply = refusal;
+        emit({ kind: 'ToolDone', tool_id: id, output: refusal, is_error: true });
+      });
+      return;
+    }
+    if (asked !== null && 'deny' in asked) {
+      acting.push(() => {
+        reply = asked.deny;
+        emit({ kind: 'ToolDone', tool_id: id, output: asked.deny, is_error: true });
+      });
+      return;
+    }
+    const tableAsk = host?.kind === 'ask' ? host : null;
+    if (asks?.(name) === true || tableAsk !== null) {
+      acting.push(() => {
+        const card =
+          onDefer?.({
+            toolId: id,
+            toolName: name,
+            input,
+            ...(tableAsk !== null ? { family: tableAsk.family, subject: tableAsk.subject } : {}),
+            ...(confirmable && tableAsk !== null
+              ? {
+                  write: {
+                    title: toolFacts(name)?.title ?? name,
+                    target: writeTarget(name, parsed),
+                  },
+                }
+              : {}),
+          }) ?? null;
+        if (card !== null && asked !== null && 'questions' in asked) {
+          markMockQuestion(card, asked.questions);
+        }
         if (card !== null) emit({ kind: 'Interaction', interaction: card });
         emit({ kind: 'ToolDeferred', tool_id: id, tool_name: name });
         suspended = true;
@@ -652,10 +1226,11 @@ export function runMockAgent(
 
   return {
     cancel: () => {
-      // A held run already sent its Done.
+      // A run suspended on a call already sent its Done.
       if (cancelled || suspended) return;
       cancelled = true;
       for (const timer of timers) clearTimeout(timer);
+      emit({ kind: 'Cancelled' });
       emit({ kind: 'Done' });
     },
   };

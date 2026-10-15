@@ -79,6 +79,9 @@ pub fn resolve(
     let safe = command::safe_relative(vault_relative)?;
     let dir = ws.dir();
     let git_path = ws.to_git_relative(&safe);
+    // An index writer: one at a time per repository (M58.3).
+    let lock = super::commit::repo_lock(&dir);
+    let _held = super::commit::hold(&lock);
 
     let rebasing = mode(ws) == ConflictMode::Rebase;
     let flag = match (keep, rebasing) {
@@ -105,6 +108,8 @@ pub fn commit_resolution(ws: &GitWorkspaceInfo) -> Result<String, String> {
         ));
     }
     let dir = ws.dir();
+    let lock = super::commit::repo_lock(&dir);
+    let _held = super::commit::hold(&lock);
     match mode(ws) {
         ConflictMode::Rebase => {
             command::run_str(&dir, &["rebase", "--continue"])?;
@@ -124,6 +129,8 @@ pub fn commit_resolution(ws: &GitWorkspaceInfo) -> Result<String, String> {
 /// Back out of a conflicted operation entirely.
 pub fn abort(ws: &GitWorkspaceInfo) -> Result<(), String> {
     let dir = ws.dir();
+    let lock = super::commit::repo_lock(&dir);
+    let _held = super::commit::hold(&lock);
     match mode(ws) {
         ConflictMode::Rebase => command::run_str(&dir, &["rebase", "--abort"]).map(|_| ()),
         ConflictMode::Merge => command::run_str(&dir, &["merge", "--abort"]).map(|_| ()),

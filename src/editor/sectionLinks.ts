@@ -134,7 +134,7 @@ export function blockContent(block: Element): HTMLElement | null {
  * `data-show-children="false"`; its own button is the only thing that opens
  * it, and opening one also records the choice the way a click would.
  */
-function openTogglesAround(block: HTMLElement): void {
+export function openTogglesAround(block: HTMLElement): void {
   const closed: HTMLElement[] = [];
   for (
     let outer = block.parentElement?.closest<HTMLElement>('.bn-block');

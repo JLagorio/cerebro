@@ -33,6 +33,11 @@ const STREAM_JSON_ONLY: &str =
 
 const BOOKKEEPING: &str = "the CLI's own bookkeeping for the session, with nothing to show";
 
+/// A model swap is named where it lands: the fold reads the answering model
+/// off each assistant line (ModelChanged), so the swap's own notice adds nothing.
+const MODEL_SWAP: &str =
+    "the CLI swapped models; the next assistant line names the model that answered, and the fold reports it from there";
+
 /// One row per kind, sorted. Seeded from the sanitized recordings in
 /// `fixtures/cli-stream/real/` (CLI 2.1.250) and the kinds that CLI's schema
 /// names beside them; the session-file kinds (M56.3) from the 2.1.250 session
@@ -159,6 +164,27 @@ pub(crate) const STREAM_KINDS: &[(&str, Handling)] = &[
         Ignored("a command typed into the CLI's own UI, never a panel turn"),
     ),
     (
+        "system/memory_recall",
+        Ignored("the CLI's note of which memory files it surfaced, which belongs to its own UI"),
+    ),
+    (
+        "system/model_consent_fallback",
+        Ignored(MODEL_SWAP),
+    ),
+    ("system/model_fallback", Ignored(MODEL_SWAP)),
+    (
+        "system/model_refusal_fallback",
+        Ignored(MODEL_SWAP),
+    ),
+    (
+        "system/model_refusal_no_fallback",
+        Ignored("a refusal with no model to fall back to; the turn's own error or result reports it"),
+    ),
+    (
+        "system/notification",
+        Ignored("a notice for the CLI's own UI, such as a spinner's text"),
+    ),
+    (
         "system/status",
         Ignored("a progress word such as requesting; the panel shows its own"),
     ),
@@ -167,8 +193,16 @@ pub(crate) const STREAM_KINDS: &[(&str, Handling)] = &[
         Ignored("what the CLI's Stop hooks said, which belongs to the CLI's own UI"),
     ),
     (
+        "system/thinking_tokens",
+        Ignored("a running estimate of the thinking tokens, sent beside each thinking delta; the result carries the usage"),
+    ),
+    (
         "tool_progress",
         Ignored("a long tool's heartbeat; its result follows"),
+    ),
+    (
+        "tool_use_summary",
+        Ignored("the CLI's one-line summary of tool calls the transcript already shows"),
     ),
     (
         "user/image",

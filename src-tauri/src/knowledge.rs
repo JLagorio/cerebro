@@ -334,12 +334,47 @@ fn refuse_owned(surface: &str, detail: String) -> String {
 /// The one code every bundle-boundary guard reports under.
 const GUARD_CODE: &str = "malformed_arguments";
 
-/// Reject a write from the human-facing UI into the bundle.
-pub fn guard_human_write(path: &str) -> Result<(), String> {
+/// Proof that the human bundle guard cleared a write (M58.1): what
+/// `WriteReceipt::ipc` mints a person's receipt from. Its private field means
+/// only this module builds one, so no command reaches a human writer without
+/// asking `guard_human_write` or `guard_human_move` first.
+#[derive(Debug)]
+pub struct HumanCleared(());
+
+/// Proof that a person's write into the bundle came through one of its own
+/// doors (M58.1): Verify (`guard_verify`), the capture valve or a Review
+/// decision (`concept_door`). What `WriteReceipt::ipc` mints a person's
+/// concept receipt from; only this module builds one.
+#[derive(Debug)]
+pub struct ConceptCleared(());
+
+/// Which of a person's bundle doors a write comes through (M58.1).
+#[derive(Debug, Clone, Copy)]
+pub enum HumanConcept<'a> {
+    /// The capture valve, for an in-app edit of the projection at this path.
+    Capture(&'a str),
+    /// A Review decision: approving, rejecting or reverting a proposal.
+    Review,
+}
+
+/// A person's concept door, cleared (M58.1): `Capture` only for a path in
+/// the bundle (anything else is an ordinary page, which `guard_human_write`
+/// clears instead), and `Review` always. Refuses nothing in words: the
+/// capture and the decision answer for themselves.
+pub fn concept_door(door: HumanConcept<'_>) -> Option<ConceptCleared> {
+    match door {
+        HumanConcept::Capture(path) => is_knowledge_path(path).then_some(ConceptCleared(())),
+        HumanConcept::Review => Some(ConceptCleared(())),
+    }
+}
+
+/// Reject a write from the human-facing UI into the bundle. Clears every
+/// other path with the proof a person's receipt is minted from (M58.1).
+pub fn guard_human_write(path: &str) -> Result<HumanCleared, String> {
     if is_knowledge_path(path) {
         return Err(refuse("human_write", READ_ONLY));
     }
-    Ok(())
+    Ok(HumanCleared(()))
 }
 
 /// Reject an AGENT write that reaches into the bundle by any door other than
@@ -370,15 +405,17 @@ otherwise; `verified` is the user's stamp and is never yours to set.";
 
 /// A move must be refused from BOTH sides: dragging a concept out would
 /// strip it of the boundary, dragging a note in would smuggle human content
-/// into the agent's corpus.
-pub fn guard_human_move(from: &str, to: &str) -> Result<(), String> {
+/// into the agent's corpus. Clears the move with the proof a person's rename
+/// receipt is minted from (M58.1).
+pub fn guard_human_move(from: &str, to: &str) -> Result<HumanCleared, String> {
     guard_human_write(from)?;
     guard_human_write(to)
 }
 
 /// `verify_concept` is scoped to concepts, and to the `verified` key alone —
 /// it must not become a general-purpose way around `guard_human_write`.
-pub fn guard_verify(path: &str, patch: &Map<String, Value>) -> Result<(), String> {
+/// Clears a Verify with the proof its concept receipt is minted from (M58.1).
+pub fn guard_verify(path: &str, patch: &Map<String, Value>) -> Result<ConceptCleared, String> {
     if !is_knowledge_path(path) {
         return Err(refuse(
             "verify_concept",
@@ -400,7 +437,7 @@ pub fn guard_verify(path: &str, patch: &Map<String, Value>) -> Result<(), String
             "verify_concept requires a `verified` value",
         ));
     }
-    Ok(())
+    Ok(ConceptCleared(()))
 }
 
 // --- The update log (M8.2) -------------------------------------------------
@@ -1104,6 +1141,152 @@ fn resolve_concept(
     by_path(&index.resolve(trimmed)?.path)
 }
 
+/// The bundle's concept graph, walked once per request (M59.2): read by
+/// `about()` and by search_notes's hit labels, so both say the same thing
+/// about what replaced or contradicts a concept.
+#[derive(Debug, Default)]
+pub struct ConceptGraph {
+    /// Concepts whose replacement RETIRED them: what `supersedes` declared,
+    /// less what the K22 gate turned into proposals.
+    replaced_by: std::collections::BTreeMap<String, Vec<String>>,
+    /// Concepts that claim to replace one without being able to retire it.
+    replacement_proposed: std::collections::BTreeMap<String, Vec<String>>,
+    /// Concepts that declared they contradict one.
+    contradicted_by: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+impl ConceptGraph {
+    /// Walk the concepts among `entries`, resolved through `index`.
+    pub fn build(
+        entries: &[crate::vault::entry::Entry],
+        index: &crate::vault::link::TargetIndex<'_>,
+        ledger: Option<&LedgerReview>,
+    ) -> Self {
+        let concepts: Vec<&crate::vault::entry::Entry> =
+            entries.iter().filter(|e| is_concept(e)).collect();
+        let concept_paths: std::collections::HashSet<&str> =
+            concepts.iter().map(|c| c.path.as_str()).collect();
+
+        // The graph is walked once per request, forwards, and read backwards
+        // out of these two maps. Both relations have to be answerable from
+        // the end that did not declare them: a replaced concept is never
+        // rewritten to say so, and `contradicts` is symmetric — so a concept
+        // asked about itself would look current and uncontested however
+        // retired it was.
+        let mut replaced_by: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+        let mut replacement_proposed: std::collections::BTreeMap<String, Vec<String>> =
+            Default::default();
+        let mut contradicted_by: std::collections::BTreeMap<String, Vec<String>> =
+            Default::default();
+        for other in &concepts {
+            for (field, into) in [
+                ("supersedes", &mut replaced_by),
+                ("contradicts", &mut contradicted_by),
+            ] {
+                for declared in link_field(other, field) {
+                    let Some(hit) = resolve_concept(&declared, &concept_paths, index) else {
+                        continue;
+                    };
+                    if hit != other.path {
+                        into.entry(hit).or_default().push(other.path.clone());
+                    }
+                }
+            }
+        }
+
+        // M49.8 (K22): a `supersedes` edge RETIRES only when it could have
+        // passed review. An unreviewed concept claiming to replace a
+        // human-reviewed one is a PROPOSAL — the verified claim stays current
+        // until a person agrees — and two concepts that each claim to replace
+        // the other retire neither. Before, one unreviewed write retired a
+        // verified claim in the UI and in every agent's context, with no card.
+        let trust_of = |path: &str| {
+            concepts
+                .iter()
+                .find(|c| c.path == path)
+                .map(|c| review_label(c, ledger))
+                .unwrap_or("unverified")
+        };
+        let approved = |new: &str, old: &str| {
+            ledger.is_some_and(|l| l.approved.contains(&(new.to_string(), old.to_string())))
+        };
+        // Judged against the edges as DECLARED — a snapshot, so removing one
+        // end of a mutual pair cannot hide the other end's mutuality.
+        let declared = replaced_by.clone();
+        let pairs: Vec<(String, String)> = declared
+            .iter()
+            .flat_map(|(old, news)| news.iter().map(move |new| (old.clone(), new.clone())))
+            .collect();
+        for (old, new) in pairs {
+            let mutual = declared
+                .get(&new)
+                .is_some_and(|replacers| replacers.contains(&old));
+            // A person who approved the replacement on its card has agreed.
+            let outranked = trust_of(&old) == "human-reviewed"
+                && trust_of(&new) != "human-reviewed"
+                && !approved(&new, &old);
+            if mutual || outranked {
+                if let Some(replacers) = replaced_by.get_mut(&old) {
+                    replacers.retain(|r| r != &new);
+                }
+                replacement_proposed.entry(old).or_default().push(new);
+            }
+        }
+        replaced_by.retain(|_, replacers| !replacers.is_empty());
+
+        ConceptGraph {
+            replaced_by,
+            replacement_proposed,
+            contradicted_by,
+        }
+    }
+}
+
+/// One concept's standing, as `about()` reports it and search_notes labels
+/// it (M59.2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConceptStatus {
+    pub trust: &'static str,
+    /// `stable`, `draft` or `deprecated` from the file, unless a governed
+    /// retirement (`superseded`, `archived`, `retired`) outranks it.
+    pub lifecycle: String,
+    /// The concepts whose replacement retired this one.
+    pub superseded_by: Vec<String>,
+    pub contested: bool,
+    pub stale: bool,
+}
+
+/// `entry`'s standing in `graph` on `today` (YYYY-MM-DD).
+pub fn concept_status(
+    entry: &crate::vault::entry::Entry,
+    graph: &ConceptGraph,
+    ledger: Option<&LedgerReview>,
+    today: &str,
+) -> ConceptStatus {
+    let stale_after = stale_after_of(entry.properties.get("stale_after"));
+    ConceptStatus {
+        trust: trust_label(entry, ledger),
+        // A governed retirement outranks what the file says (K45): the
+        // projection never renders it.
+        lifecycle: match ledger.and_then(|l| l.governed.retired.get(&entry.path)) {
+            Some(governed) => (*governed).to_string(),
+            None => match entry.properties.get("lifecycle").and_then(Value::as_str) {
+                Some(raw @ ("draft" | "deprecated")) => raw.to_string(),
+                _ => "stable".to_string(),
+            },
+        },
+        superseded_by: graph
+            .replaced_by
+            .get(&entry.path)
+            .cloned()
+            .unwrap_or_default(),
+        contested: ledger.is_some_and(|l| l.governed.contested.contains(&entry.path)),
+        // `stale_after` is an ABSOLUTE date, so staleness is a plain
+        // comparison with no reference to when it was read (OKF §5.5).
+        stale: is_stale(stale_after.as_deref(), today),
+    }
+}
+
 /// Everything the bundle knows about the entity `target` names.
 ///
 /// `target` may be a vault path (`records/risks/r-1.md`) or a bare wikilink
@@ -1135,71 +1318,7 @@ pub fn about(
         entries.iter().filter(|e| is_concept(e)).collect();
     let concept_paths: std::collections::HashSet<&str> =
         concepts.iter().map(|c| c.path.as_str()).collect();
-
-    // The graph is walked ONCE, forwards, and read backwards out of these two
-    // maps. Both relations have to be answerable from the end that did not
-    // declare them: a replaced concept is never rewritten to say so, and
-    // `contradicts` is symmetric — so a concept asked about itself would look
-    // current and uncontested however retired it was.
-    let mut replaced_by: std::collections::BTreeMap<String, Vec<String>> = Default::default();
-    let mut replacement_proposed: std::collections::BTreeMap<String, Vec<String>> =
-        Default::default();
-    let mut contradicted_by: std::collections::BTreeMap<String, Vec<String>> = Default::default();
-    for other in &concepts {
-        for (field, into) in [
-            ("supersedes", &mut replaced_by),
-            ("contradicts", &mut contradicted_by),
-        ] {
-            for declared in link_field(other, field) {
-                let Some(hit) = resolve_concept(&declared, &concept_paths, &index) else {
-                    continue;
-                };
-                if hit != other.path {
-                    into.entry(hit).or_default().push(other.path.clone());
-                }
-            }
-        }
-    }
-
-    // M49.8 (K22): a `supersedes` edge RETIRES only when it could have
-    // passed review. An unreviewed concept claiming to replace a
-    // human-reviewed one is a PROPOSAL — the verified claim stays current
-    // until a person agrees — and two concepts that each claim to replace
-    // the other retire neither. Before, one unreviewed write retired a
-    // verified claim in the UI and in every agent's context, with no card.
-    let trust_of = |path: &str| {
-        concepts
-            .iter()
-            .find(|c| c.path == path)
-            .map(|c| review_label(c, ledger))
-            .unwrap_or("unverified")
-    };
-    let approved = |new: &str, old: &str| {
-        ledger.is_some_and(|l| l.approved.contains(&(new.to_string(), old.to_string())))
-    };
-    // Judged against the edges as DECLARED — a snapshot, so removing one
-    // end of a mutual pair cannot hide the other end's mutuality.
-    let declared = replaced_by.clone();
-    let pairs: Vec<(String, String)> = declared
-        .iter()
-        .flat_map(|(old, news)| news.iter().map(move |new| (old.clone(), new.clone())))
-        .collect();
-    for (old, new) in pairs {
-        let mutual = declared
-            .get(&new)
-            .is_some_and(|replacers| replacers.contains(&old));
-        // A person who approved the replacement on its card has agreed.
-        let outranked = trust_of(&old) == "human-reviewed"
-            && trust_of(&new) != "human-reviewed"
-            && !approved(&new, &old);
-        if mutual || outranked {
-            if let Some(replacers) = replaced_by.get_mut(&old) {
-                replacers.retain(|r| r != &new);
-            }
-            replacement_proposed.entry(old).or_default().push(new);
-        }
-    }
-    replaced_by.retain(|_, replacers| !replacers.is_empty());
+    let graph = ConceptGraph::build(entries, &index, ledger);
 
     // The same key `listSubjects` groups by: an anchor that resolves is keyed
     // by the note it found, and one that does not is keyed by what it said.
@@ -1222,6 +1341,7 @@ pub fn about(
         .iter()
         .map(|entry| {
             let stale_after = stale_after_of(entry.properties.get("stale_after"));
+            let status = concept_status(entry, &graph, ledger, today);
             let mut contradicts: Vec<RelationTarget> = link_field(entry, "contradicts")
                 .into_iter()
                 .map(|target| RelationTarget {
@@ -1230,7 +1350,7 @@ pub fn about(
                 })
                 .filter(|edge| edge.path.as_deref() != Some(entry.path.as_str()))
                 .collect();
-            for other in contradicted_by.get(&entry.path).into_iter().flatten() {
+            for other in graph.contradicted_by.get(&entry.path).into_iter().flatten() {
                 // Declared by both ends: one edge, not two.
                 if contradicts
                     .iter()
@@ -1260,23 +1380,14 @@ pub fn about(
                     .filter(|s| !s.is_empty())
                     .map(str::to_string),
                 concept_type: entry.entry_type.clone(),
-                // A governed retirement outranks what the file says (K45):
-                // the projection never renders it.
-                lifecycle: match ledger.and_then(|l| l.governed.retired.get(&entry.path)) {
-                    Some(governed) => (*governed).to_string(),
-                    None => match entry.properties.get("lifecycle").and_then(Value::as_str) {
-                        Some(raw @ ("draft" | "deprecated")) => raw.to_string(),
-                        _ => "stable".to_string(),
-                    },
-                },
-                contested: ledger.is_some_and(|l| l.governed.contested.contains(&entry.path)),
-                trust: trust_label(entry, ledger),
-                // `stale_after` is an ABSOLUTE date, so staleness is a plain
-                // comparison with no reference to when it was read (OKF §5.5).
-                stale: is_stale(stale_after.as_deref(), today),
+                lifecycle: status.lifecycle,
+                contested: status.contested,
+                trust: status.trust,
+                stale: status.stale,
                 stale_after,
-                superseded_by: replaced_by.get(&entry.path).cloned().unwrap_or_default(),
-                replacement_proposed_by: replacement_proposed
+                superseded_by: status.superseded_by,
+                replacement_proposed_by: graph
+                    .replacement_proposed
                     .get(&entry.path)
                     .cloned()
                     .unwrap_or_default(),
@@ -1830,6 +1941,42 @@ mod tests {
             vec!["knowledge/risks/thermal-margin.md".to_string()],
             "declared once, reported once"
         );
+    }
+
+    /// M59.2: search_notes labels a concept from `concept_status`, so it
+    /// must be exactly what `about()` reports for the same concept.
+    #[test]
+    fn concept_status_is_what_about_reports() {
+        let mut entries = corpus();
+        entries
+            .iter_mut()
+            .find(|e| e.path == "knowledge/risks/thermal-margin.md")
+            .unwrap()
+            .properties
+            .insert("verified".into(), serde_json::json!({ "by": "process:x" }));
+        let index = crate::vault::link::TargetIndex::build(&entries);
+        let graph = ConceptGraph::build(&entries, &index, None);
+        let answer = about(&entries, "rq-84b-kestrel", TODAY, 20, None);
+        assert!(!answer.concepts.is_empty());
+        for reported in &answer.concepts {
+            let entry = entries.iter().find(|e| e.path == reported.path).unwrap();
+            let status = concept_status(entry, &graph, None, TODAY);
+            assert_eq!(status.trust, reported.trust, "{}", reported.path);
+            assert_eq!(status.lifecycle, reported.lifecycle, "{}", reported.path);
+            assert_eq!(status.superseded_by, reported.superseded_by);
+            assert_eq!(status.contested, reported.contested);
+            assert_eq!(status.stale, reported.stale, "{}", reported.path);
+        }
+        let old = entries
+            .iter()
+            .find(|e| e.path == "knowledge/risks/thermal-margin.md")
+            .unwrap();
+        let status = concept_status(old, &graph, None, TODAY);
+        assert_eq!(
+            status.superseded_by,
+            ["knowledge/risks/thermal-margin-rev-b.md"]
+        );
+        assert_eq!(status.trust, "machine-confirmed");
     }
 
     // M49.8 (K22): an unreviewed concept cannot retire a human-reviewed

@@ -11,6 +11,7 @@ import {
   titleFrom,
 } from '@/agent/conversations';
 import type { ChatMessage, Conversation } from '@/agent/types';
+import type { RunChangeset } from '@/engine/changeset';
 import { ASK_BASE_LABEL, askedAbout } from '@/lib/prompts';
 
 const msg = (role: ChatMessage['role'], text: string): ChatMessage => ({
@@ -214,6 +215,45 @@ describe('persistence', () => {
     expect('notice' in second).toBe(false);
     expect(first.error).toBe('raw');
   });
+
+  it('keeps a reply’s changesets through save and load, and drops malformed ones (M58.3)', () => {
+    const good = {
+      state: 'committed',
+      run_id: 'run-1',
+      commit: 'c'.repeat(40),
+      files: [
+        {
+          path: 'notes/a.md',
+          previous_path: null,
+          kind: 'modified',
+          additions: 2,
+          deletions: 1,
+          also_by: ['human:me'],
+        },
+      ],
+      additions: 2,
+      deletions: 1,
+      binary: 0,
+      shell_unrecorded: false,
+    } satisfies RunChangeset;
+    const kept = { ...msg('assistant', 'done'), changesets: [good] };
+    saveConversations([{ ...newConversation(), messages: [kept] }]);
+    expect(loadConversations()[0].messages[0].changesets).toEqual([good]);
+
+    const c = {
+      ...newConversation(),
+      messages: [
+        { ...msg('assistant', 'a'), changesets: [good, { state: 'committed', run_id: 7 }] },
+        { ...msg('assistant', 'b'), changesets: 'nonsense' },
+        { ...msg('assistant', 'c'), changesets: [{ state: 'nothing' }] },
+      ],
+    };
+    window.localStorage.setItem('cerebro.conversations', JSON.stringify([c]));
+    const [first, second, third] = loadConversations()[0].messages;
+    expect(first.changesets).toEqual([good]);
+    expect('changesets' in second).toBe(false);
+    expect('changesets' in third).toBe(false);
+  });
 });
 
 describe('ordered', () => {
@@ -298,11 +338,20 @@ describe('a stored place this build cannot read (M17.5)', () => {
     expect(c.placeLabel).toBe('My work');
   });
 
-  it('keeps a Work anchor and the name it had', () => {
+  // M59.1 — a bare destination's label is the table's, so the names the nav
+  // stopped saying heal on load.
+  it('keeps a Work anchor stored as Workspace and reads it as Work', () => {
     write({ kind: 'workspace' }, 'Workspace');
     const [c] = loadConversations();
     expect(c.place).toEqual({ kind: 'workspace' });
-    expect(c.placeLabel).toBe('Workspace');
+    expect(c.placeLabel).toBe('Work');
+  });
+
+  it('reads a thread stored as Pulse as History', () => {
+    write({ kind: 'pulse' }, 'Pulse');
+    const [c] = loadConversations();
+    expect(c.place).toEqual({ kind: 'pulse' });
+    expect(c.placeLabel).toBe('History');
   });
 
   it('rebuilds a My work label that went missing', () => {
@@ -477,5 +526,49 @@ describe('a conversation’s model and effort (M56.5)', () => {
     expect([a.model, a.effort]).toEqual([null, 'high']);
     expect([b.model, b.effort]).toEqual(['opus', null]);
     expect([c.model, c.effort]).toEqual([null, null]);
+  });
+});
+
+describe('a turn left running (M57.6)', () => {
+  const reply: ChatMessage = { ...msg('assistant', 'half'), seq: 12, gap: true, streaming: true };
+  const thread = (over: Partial<Conversation> = {}): Conversation => ({
+    ...newConversation(),
+    messages: [msg('user', 'go'), reply],
+    live: { run: 7, attach: 'run-0001', assistantId: reply.id },
+    ...over,
+  });
+
+  it('round-trips live with its reply’s seq and gap, and still strips streaming', () => {
+    saveConversations([thread()]);
+    const [loaded] = loadConversations();
+    expect(loaded.live).toEqual({ run: 7, attach: 'run-0001', assistantId: reply.id });
+    expect(loaded.messages[1].seq).toBe(12);
+    expect(loaded.messages[1].gap).toBe(true);
+    expect(loaded.messages[1].streaming).toBeUndefined();
+  });
+
+  it('drops a malformed live, seq or gap on load', () => {
+    const bad = [
+      { run: 1.5, attach: 'run-1', assistantId: reply.id },
+      { run: 1, attach: 'has a space', assistantId: reply.id },
+      { run: 1, attach: 'run-1', assistantId: 'not-in-the-thread' },
+      'run-1',
+    ];
+    for (const live of bad) {
+      window.localStorage.setItem('cerebro.conversations', JSON.stringify([{ ...thread(), live }]));
+      expect(loadConversations()[0].live ?? null).toBeNull();
+    }
+    window.localStorage.setItem(
+      'cerebro.conversations',
+      JSON.stringify([
+        {
+          ...thread({ live: null }),
+          messages: [msg('user', 'go'), { ...reply, seq: -1, gap: 'yes' }],
+        },
+      ]),
+    );
+    const [loaded] = loadConversations();
+    expect('seq' in loaded.messages[1]).toBe(false);
+    expect('gap' in loaded.messages[1]).toBe(false);
   });
 });

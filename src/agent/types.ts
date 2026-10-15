@@ -1,4 +1,7 @@
+import type { RunChangeset } from '@/engine/changeset';
 import type { Place } from '@/engine/place';
+import type { QuestionAnswer, QuestionSet } from '@/engine/questionForm';
+import type { ShellCeiling } from '@/lib/policy/toolApproval';
 
 /**
  * Local agent types (M6). The events are the ones src-tauri/src/agent/fold.rs
@@ -60,23 +63,49 @@ export type AgentStreamEvent =
   /** Local only, never from Rust (M57.1): the person stopped a turn whose
    * call was waiting, so the call is refused and reads cancelled. */
   | { kind: 'ToolCancelled'; tool_id: string }
+  /** The run was stopped on purpose (M57.5): Stop, Steer, the run list, a
+   * vault switch or quit. Live only, once, right before Done; never for a
+   * run that ended on its own or that the watchdog aborted. */
+  | { kind: 'Cancelled' }
+  /** What the run changed (M58.3): its own commit, or why there is none.
+   * Live only, once per run, after its books close and before its closing
+   * events; never from a session file. */
+  | { kind: 'Changeset'; changeset: RunChangeset }
   | { kind: 'Done' };
 
 /**
  * A call waiting for the person's answer (M57.1), as Rust's book draws it
- * (`agent::interaction::InteractionCard`). `kind` picks the card's renderer;
- * `permission` is the one this build draws, and a kind it does not know is
- * drawn as one.
+ * (`agent::interaction::InteractionCard`). `kind` picks the card's renderer:
+ * `permission`, `write` for an ask-first agent's page write (M57.4), or
+ * `question` for AskUserQuestion (M57.3); a kind this build does not know is
+ * drawn as a permission.
  */
 export interface PendingInteraction {
   /** 128-bit hex, the id the answer names. */
   id: string;
-  kind: 'permission' | (string & {});
+  kind: 'permission' | 'write' | 'question' | (string & {});
   tool_name: string;
   tool_id: string;
   session_id: string;
   /** The tool's title and its target, else its name. */
   summary: string;
+  /** A tool-approval ask's family (M57.2): what the card is titled by, and
+   * what This conversation covers with the subject. Null, or absent from an
+   * older book, for any other ask, which offers no This conversation. */
+  family?: string | null;
+  /** The exact command, path or input the card names (M57.2). */
+  subject?: string | null;
+  /** A cerebro tool's manifest title (M57.4): a write card's headline. */
+  title?: string | null;
+  /** The note or folder the call is aimed at, when its input names one
+   * (M57.4). */
+  target?: string | null;
+  /** Who asks (M57.4): the run's actor, `process:<handle>` for an agent;
+   * null for the plain panel. */
+  actor?: string | null;
+  /** A question card's questions (M57.3), parsed by Rust's book; absent on
+   * every other card. */
+  questions?: QuestionSet | null;
   /** The call's input, pretty JSON, at most 256 KiB. */
   input: string;
   /** RFC 3339. */
@@ -84,8 +113,41 @@ export interface PendingInteraction {
 }
 
 /** A person's answer to a waiting call (M57.1). Only the answer command
- * carries it to Rust; nothing the agent holds can send one. */
-export type PersonAnswer = { kind: 'allow' } | { kind: 'deny'; message?: string };
+ * carries it to Rust; nothing the agent holds can send one. An allow holds
+ * for this call (`once`, the default) or, for a tool-approval ask, for every
+ * call in the conversation with the same family and exact subject
+ * (`conversation`, M57.2). An allow of a write card may carry the person's
+ * edit of the draft (`updatedInput`, M57.4b), which the adapter sends as the
+ * command's `updatedInput` key and Rust re-checks. A question card is
+ * answered with its answers, one per question (M57.3), or declined with a
+ * deny. */
+export type PersonAnswer =
+  | {
+      kind: 'allow';
+      remember?: 'once' | 'conversation';
+      updatedInput?: Record<string, unknown>;
+    }
+  | { kind: 'deny'; message?: string }
+  | { kind: 'answers'; answers: QuestionAnswer[] };
+
+/**
+ * The person's own Claude Code settings, counted (M57.2,
+ * `agent::user_settings`): never a rule's text. `unreadable` is a read that
+ * failed, never an empty file (CV-05); `browser` is the mock, which has
+ * none to read.
+ */
+export type ClaudeUserSettings =
+  | {
+      state: 'read';
+      path: string;
+      allow: number;
+      ask: number;
+      deny: number;
+      hook_events: string[];
+    }
+  | { state: 'absent'; path: string }
+  | { state: 'unreadable'; path: string; detail: string }
+  | { state: 'browser' };
 
 /**
  * A failure, typed and worded by Rust (M56.4, src-tauri/src/agent/failure.rs).
@@ -142,8 +204,22 @@ export type TranscriptRead =
 /** Every event names the run (child process) it came from (PR #5 review):
  * a killed child's terminal Done arrives after the kill — sometimes in the
  * very dispatch that hands the stream to the next turn — and only the tag
- * lets a listener refuse it instead of ending whichever turn is active. */
-export type AgentEvent = AgentStreamEvent & { run: number };
+ * lets a listener refuse it instead of ending whichever turn is active.
+ * `seq` is its place in that run, from 1 (M57.6): the cursor a panel
+ * re-attaches from, so each event shows once. */
+export type AgentEvent = AgentStreamEvent & { run: number; seq: number };
+
+/**
+ * A turn whose run may still be going while nobody watches it (M57.6): the
+ * run's process tag, its attach key (the durable run id in Tauri), and the
+ * reply bubble its events land in. Saved with the thread, so reopening it,
+ * or reloading, re-attaches.
+ */
+export interface LiveTurn {
+  run: number;
+  attach: string;
+  assistantId: string;
+}
 
 export interface AgentStatus {
   installed: boolean;
@@ -233,6 +309,8 @@ export interface ToolPayload {
  * when the copy is gone (M56.3). Never the vault, because a transcript is a
  * tool log, not a note — writing it there would feed it to the distiller
  * that reads the vault, which is exactly the loop M8 was designed to avoid.
+ * A turn still running when the panel closed or the thread switched is
+ * named by `live` (M57.6), so the thread re-attaches to it when it opens.
  */
 export interface Conversation {
   id: string;
@@ -253,6 +331,9 @@ export interface Conversation {
    * clear when the session file is gone. Absent on older threads, which then
    * fall back to `createdAt`. */
   updatedAt?: string;
+  /** The turn this thread left running (M57.6), re-attached when it opens;
+   * null or absent once its turn ended. Healed on load. */
+  live?: LiveTurn | null;
   /** The model and effort this conversation's turns ask Claude Code for
    * (M56.5), picked in the composer. Null or absent is unset: an addressed
    * agent's record decides, else Claude Code's default. A stored value Rust
@@ -296,6 +377,21 @@ export interface ChatMessage {
   model?: string;
   /** Assistant only: the turn never ended — stopped, or cut off. */
   interrupted?: boolean;
+  /** Assistant only: the seq of the last live event applied to this reply
+   * (M57.6), the cursor a re-attach reads after. Saved with it. */
+  seq?: number;
+  /** Assistant only: the journal dropped events of this reply's run while
+   * the panel was closed (M57.6), so it says so and rebuilds from the
+   * session file when the turn finishes. */
+  gap?: true;
+  /** Assistant only: a person stopped this turn (M57.5), with Stop or by
+   * steering past it. It reads "Cancelled" in place of the interrupted copy;
+   * the text it wrote before the stop stays. */
+  cancelled?: true;
+  /** Assistant only: what each of this reply's runs changed (M58.3), one per
+   * run, upserted by run id: a turn resumed after a held call has two. Saved
+   * with the thread; a thread rebuilt from the session file has none. */
+  changesets?: RunChangeset[];
   /**
    * Assistant only, in memory only: what the reducer keeps while a turn is
    * live (`transcript.ts`) — the last message's text, every message's text,
@@ -336,16 +432,17 @@ export interface ChatMessage {
  *
  * The permission model is the folder model instead: the agent owns
  * `knowledge/` and writes there freely, and cerebro's own tools are the only
- * way it reaches anything else. Shell access is the one thing left that a
- * folder boundary cannot express, so it is the one thing still switchable —
- * once, in Settings, as a ceiling rather than a per-turn choice.
+ * way it reaches anything else. Beside them, the CLI's own tools are set once
+ * in Settings by a shell ceiling: off, ask or on (M57.2), which
+ * `shared/policy/tool-approval.v1.json` turns into what each run may run,
+ * ask about or is refused.
  *
- * Enforcement lives in agent.rs, not here: a tool the agent never receives is
- * a rule, a tool it receives and is asked not to use is a suggestion.
+ * Enforcement lives in Rust, not here: a tool the agent never receives is a
+ * rule, a tool it receives and is asked not to use is a suggestion.
  */
 export interface AgentPolicy {
-  /** Bash + the CLI's own file tools, scoped to the vault directory. */
-  shell: boolean;
+  /** The shell ceiling: what the CLI's own shell and file tools may do. */
+  shell: ShellCeiling;
 }
 
 /** A filing the agent suggests for an Inbox capture — shown, never applied (M7). */
@@ -359,11 +456,19 @@ export interface OrganizeProposal {
 
 export type UiAction =
   | { action: 'open_note'; path: string }
-  | { action: 'navigate'; to: string; id?: string }
+  /** navigate's arguments (M59.1): a place id from `engine/destinations.ts`,
+   * or `view` with the database and, optionally, its saved view. */
+  | { action: 'navigate'; to: string; database?: string; view?: string }
   /**
    * An agent tool wrote the vault (M53.6). `paths` names the files it changed,
    * as the scan lists them, when the tool could name them; absent means
    * "somewhere — rescan", never "nothing changed".
    */
   | { action: 'vault_changed'; paths?: string[] }
+  /**
+   * An agent's comment tool posted beside a page (M70.3): only that page's
+   * comments changed, never a file the vault lists, so this reloads its
+   * threads and rescans nothing.
+   */
+  | { action: 'comments_changed'; path: string }
   | ({ action: 'propose_organize' } & OrganizeProposal);

@@ -16,6 +16,7 @@ import { groupEntries } from '@/engine/grouping';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { fixtureVault, makeEntry } from '@/test/factories';
+import { computedVault, epics as computedEpics } from '@/test/computedVault';
 import type { Entry, Presentation, Schema } from '@/engine/types';
 
 const presentation: Presentation = {
@@ -563,6 +564,48 @@ describe('handleDragEnd', () => {
     });
     expect(patchFrontmatter).not.toHaveBeenCalled();
     expect(toast).toHaveBeenCalledWith("Can't move cards grouped by a multi-select field");
+  });
+
+  // M60.1: a derived relation's band is the linking records' to change, not
+  // the card's. A write would plant a mirror key nothing reads.
+  it('refuses a drop between bands of a derived relation, with one toast', () => {
+    const vault = computedVault();
+    const computed = buildSchema(vault);
+    const derivedColumns = dropTargets(computedEpics(), 'tasks', computed);
+    const patchFrontmatter = vi.fn();
+    const toast = vi.fn();
+    const event = {
+      active: { id: 'epics/big.md' },
+      over: { id: 'small-1' },
+    } as unknown as DragEndEvent;
+    handleDragEnd(event, {
+      groupBy: 'tasks',
+      columns: derivedColumns,
+      schema: computed,
+      patchFrontmatter,
+      toast,
+    });
+    expect(patchFrontmatter).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(toast).toHaveBeenCalledWith("Can't move cards grouped by a computed property");
+  });
+
+  it('refuses a drop between bands of a rollup too', () => {
+    const computed = buildSchema(computedVault());
+    const rollupColumns = dropTargets(computedEpics(), 'task_count', computed);
+    const patchFrontmatter = vi.fn();
+    const toast = vi.fn();
+    const event = { active: { id: 'epics/big.md' }, over: { id: '9' } } as unknown as DragEndEvent;
+    handleDragEnd(event, {
+      groupBy: 'task_count',
+      columns: rollupColumns,
+      schema: computed,
+      patchFrontmatter,
+      toast,
+    });
+    expect(patchFrontmatter).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(toast).toHaveBeenCalledWith("Can't move cards grouped by a computed property");
   });
 
   it('wraps the written value as a wikilink when the grouped field is person/relation-kind', () => {

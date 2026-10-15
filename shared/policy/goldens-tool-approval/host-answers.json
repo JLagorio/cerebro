@@ -1,0 +1,363 @@
+{
+  "why": "The gate's answer for one call (host_answer / hostAnswer): pass leaves it to argv and the CLI, allow is a This conversation grant for this exact subject, deny carries what the model reads, and ask names the family and the exact subject a card shows.",
+  "host_answers": [
+    {
+      "why": "Under Ask, Bash asks and names its exact command.",
+      "input": {
+        "kind": "attended",
+        "shell": "ask",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "Bash",
+      "tool_input": {
+        "command": "git status",
+        "description": "Show the working tree"
+      },
+      "answer": {
+        "kind": "ask",
+        "family": "shell",
+        "subject": "git status"
+      }
+    },
+    {
+      "why": "A This conversation grant for the exact command allows it.",
+      "input": {
+        "kind": "attended",
+        "shell": "ask",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [
+        [
+          "shell",
+          "git status"
+        ]
+      ],
+      "tool": "Bash",
+      "tool_input": {
+        "command": "git status"
+      },
+      "answer": {
+        "kind": "allow"
+      }
+    },
+    {
+      "why": "A grant covers its subject only: another command asks again.",
+      "input": {
+        "kind": "attended",
+        "shell": "ask",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [
+        [
+          "shell",
+          "git status"
+        ]
+      ],
+      "tool": "Bash",
+      "tool_input": {
+        "command": "git status --short"
+      },
+      "answer": {
+        "kind": "ask",
+        "family": "shell",
+        "subject": "git status --short"
+      }
+    },
+    {
+      "why": "A writer asks and names its path.",
+      "input": {
+        "kind": "attended",
+        "shell": "ask",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "Write",
+      "tool_input": {
+        "file_path": "/VAULT/notes/a.md",
+        "content": "x"
+      },
+      "answer": {
+        "kind": "ask",
+        "family": "file_write",
+        "subject": "/VAULT/notes/a.md"
+      }
+    },
+    {
+      "why": "NotebookEdit names its notebook.",
+      "input": {
+        "kind": "attended",
+        "shell": "ask",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "NotebookEdit",
+      "tool_input": {
+        "notebook_path": "/VAULT/a.ipynb",
+        "new_source": "x"
+      },
+      "answer": {
+        "kind": "ask",
+        "family": "file_write",
+        "subject": "/VAULT/a.ipynb"
+      }
+    },
+    {
+      "why": "A shell grant never covers a writer with the same text.",
+      "input": {
+        "kind": "attended",
+        "shell": "ask",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [
+        [
+          "shell",
+          "/VAULT/notes/a.md"
+        ]
+      ],
+      "tool": "Edit",
+      "tool_input": {
+        "file_path": "/VAULT/notes/a.md",
+        "old_string": "a",
+        "new_string": "b"
+      },
+      "answer": {
+        "kind": "ask",
+        "family": "file_write",
+        "subject": "/VAULT/notes/a.md"
+      }
+    },
+    {
+      "why": "ExitPlanMode is always refused with the plan message.",
+      "input": {
+        "kind": "attended",
+        "shell": "on",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "ExitPlanMode",
+      "tool_input": {
+        "plan": "Do it"
+      },
+      "answer": {
+        "kind": "deny",
+        "message": "Cerebro doesn't use plan mode. Carry on with the work, or describe your plan in your reply."
+      }
+    },
+    {
+      "why": "Read is left to the CLI under Ask.",
+      "input": {
+        "kind": "attended",
+        "shell": "ask",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "Read",
+      "tool_input": {
+        "file_path": "/VAULT/a.md"
+      },
+      "answer": {
+        "kind": "pass"
+      }
+    },
+    {
+      "why": "Cerebro's own tools are not the table's: they pass.",
+      "input": {
+        "kind": "attended",
+        "shell": "ask",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "mcp__cerebro__get_note",
+      "tool_input": {
+        "path": "a.md"
+      },
+      "answer": {
+        "kind": "pass"
+      }
+    },
+    {
+      "why": "A tool the manifest does not list is unlisted, which is cli: it passes.",
+      "input": {
+        "kind": "attended",
+        "shell": "ask",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "CronCreate",
+      "tool_input": {
+        "cron": "* * * * *"
+      },
+      "answer": {
+        "kind": "pass"
+      }
+    },
+    {
+      "why": "Under On, Bash is pre-approved, so the host passes.",
+      "input": {
+        "kind": "attended",
+        "shell": "on",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "Bash",
+      "tool_input": {
+        "command": "ls"
+      },
+      "answer": {
+        "kind": "pass"
+      }
+    },
+    {
+      "why": "Under Off, a writer that reaches the host is denied by the settings.",
+      "input": {
+        "kind": "attended",
+        "shell": "off",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "Write",
+      "tool_input": {
+        "file_path": "/VAULT/a.md",
+        "content": "x"
+      },
+      "answer": {
+        "kind": "deny",
+        "message": "Cerebro's settings don't allow this tool in this run."
+      }
+    },
+    {
+      "why": "An unattended run under Ask denies what it would have asked.",
+      "input": {
+        "kind": "unattended",
+        "shell": "ask",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "Bash",
+      "tool_input": {
+        "command": "git status"
+      },
+      "answer": {
+        "kind": "deny",
+        "message": "Cerebro's settings don't allow this tool in this run."
+      }
+    },
+    {
+      "why": "No subject field: the whole input names it, compact.",
+      "input": {
+        "kind": "attended",
+        "shell": "ask",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "Bash",
+      "tool_input": {
+        "cmd": "ls",
+        "n": 1
+      },
+      "answer": {
+        "kind": "ask",
+        "family": "shell",
+        "subject": "{\"cmd\":\"ls\",\"n\":1}"
+      }
+    },
+    {
+      "why": "An ask-first agent's page write asks, under the confirmable family, naming the call's whole input.",
+      "input": {
+        "kind": "attended",
+        "shell": "off",
+        "ask_first": true,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "mcp__cerebro__create_note",
+      "tool_input": {
+        "body": "# Vendor delay\n",
+        "folder": "records/risks",
+        "slug": "vendor-delay"
+      },
+      "answer": {
+        "kind": "ask",
+        "family": "confirmable",
+        "subject": "{\"body\":\"# Vendor delay\\n\",\"folder\":\"records/risks\",\"slug\":\"vendor-delay\"}"
+      }
+    },
+    {
+      "why": "A confirmable card offers Allow once only, so no This conversation grant can allow the next write.",
+      "input": {
+        "kind": "attended",
+        "shell": "off",
+        "ask_first": true,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [
+        [
+          "confirmable",
+          "{\"body\":\"# Vendor delay\\n\",\"folder\":\"records/risks\",\"slug\":\"vendor-delay\"}"
+        ]
+      ],
+      "tool": "mcp__cerebro__create_note",
+      "tool_input": {
+        "body": "# Vendor delay\n",
+        "folder": "records/risks",
+        "slug": "vendor-delay"
+      },
+      "answer": {
+        "kind": "ask",
+        "family": "confirmable",
+        "subject": "{\"body\":\"# Vendor delay\\n\",\"folder\":\"records/risks\",\"slug\":\"vendor-delay\"}"
+      }
+    },
+    {
+      "why": "Without ask-first a page write passes the gate: dispatch lets it land.",
+      "input": {
+        "kind": "attended",
+        "shell": "off",
+        "ask_first": false,
+        "read_scoped": false,
+        "narrowing": null
+      },
+      "granted": [],
+      "tool": "mcp__cerebro__create_note",
+      "tool_input": {
+        "body": "# Vendor delay\n",
+        "folder": "records/risks",
+        "slug": "vendor-delay"
+      },
+      "answer": {
+        "kind": "pass"
+      }
+    }
+  ]
+}

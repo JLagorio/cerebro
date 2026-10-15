@@ -215,11 +215,11 @@ describe('ProposalCard (M52.2)', () => {
   // Approve. The act a stale card offers is to ask for it again.
   it('offers a fresh proposal in place of an Approve the ledger would refuse', () => {
     const onDecide = vi.fn();
-    useUiStore.setState({ aiPanelOpen: false, agentPendingPrompt: null });
+    useUiStore.setState({ aiPanelOpen: false, handoffs: [] });
     render(<ProposalCard card={CARD} busy={false} onDecide={onDecide} />);
     expect((screen.getByTestId('approve') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByTestId('ask-fresh'));
-    const asked = useUiStore.getState().agentPendingPrompt;
+    const asked = useUiStore.getState().handoffs.at(-1);
     expect(asked?.subject).toBe(PATH);
     expect(asked?.label).toBe('Ask for a fresh proposal · The offline guarantee');
     expect(asked?.text).toContain(CARD.proposal_id);

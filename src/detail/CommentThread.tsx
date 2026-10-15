@@ -85,7 +85,7 @@ function CommentRow({
               e.stopPropagation();
               setConfirming(true);
             }}
-            className="rounded border-0 bg-transparent px-1 text-2xs text-n-400 hover:bg-n-50 hover:text-danger-600"
+            className="rounded-sm border-0 bg-transparent px-1 text-2xs text-n-400 hover:bg-n-50 hover:text-danger-600"
           >
             Delete
           </button>

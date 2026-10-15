@@ -581,6 +581,36 @@ describe('ChartView', () => {
     expect(caption.textContent).toContain('biggest first');
   });
 
+  // M60.1: a band with rows but no number is left out, never drawn as 0, and
+  // the caption is where its absence is admitted.
+  it('the caption counts a band without a number', () => {
+    const entries = wide();
+    const d = entries.find((e) => e.path === 'items/d.md')!;
+    d.properties = { status: 'done' } as Entry['properties'];
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { agg: 'sum', value: 'estimate' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    expect(screen.getByTestId('chart-caption').textContent).toContain('1 band without a number');
+  });
+
+  it('the caption says nothing of unmeasured bands when every band holds a number', () => {
+    const entries = wide();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { agg: 'sum', value: 'estimate' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    expect(screen.getByTestId('chart-caption').textContent).not.toContain('without a number');
+  });
+
   /** computeChart ignores `cumulative` for a donut (a ring of running
    * totals lies), so the caption must not claim one either — even for a
    * hand-edited spec the panel itself would never produce (parseChart

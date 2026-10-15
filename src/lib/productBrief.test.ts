@@ -148,6 +148,29 @@ const BUILDERS: Record<string, () => string[]> = {
         ),
       ),
     ),
+  panelAgentPrompt: () =>
+    GRANTS.flatMap((grant) =>
+      SCOPES.flatMap((scope) =>
+        SCOPES.flatMap((readScope) =>
+          [MEMORY, EMPTY_MEMORY].flatMap((memory) =>
+            ['Read the boards.', ''].map((body) =>
+              prompts.panelAgentPrompt(
+                grant,
+                {
+                  path: 'records/agents/scout.md',
+                  title: 'Scout',
+                  actor: 'process:scout',
+                  memory,
+                  scope,
+                  readScope,
+                },
+                body,
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
   agentRunPrompt: () =>
     GRANTS.flatMap((grant) =>
       TRIGGERS.flatMap((trigger) =>

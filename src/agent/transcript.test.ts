@@ -1,7 +1,13 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { applyEvent, endLiveTurn, healFromTranscript, replayTranscript } from '@/agent/transcript';
+import {
+  applyEvent,
+  endLiveTurn,
+  healFromTranscript,
+  replaceLastTurn,
+  replayTranscript,
+} from '@/agent/transcript';
 import type { AgentStreamEvent, ChatMessage } from '@/agent/types';
 
 /**
@@ -337,9 +343,21 @@ describe('applyEvent', () => {
     );
     expect(resumed.tools[0]).toMatchObject({ done: true, deferred: true });
     // A deferral read without its start still gets a row.
-    const lone = applyEvent(bubble(), { kind: 'ToolDeferred', tool_id: 't9', tool_name: 'Bash' }, 'live');
+    const lone = applyEvent(
+      bubble(),
+      { kind: 'ToolDeferred', tool_id: 't9', tool_name: 'Bash' },
+      'live',
+    );
     expect(lone.tools).toEqual([
-      { id: 't9', name: 'Bash', input: null, output: null, done: false, failed: false, deferred: true },
+      {
+        id: 't9',
+        name: 'Bash',
+        input: null,
+        output: null,
+        done: false,
+        failed: false,
+        deferred: true,
+      },
     ]);
   });
 
@@ -357,9 +375,53 @@ describe('applyEvent', () => {
       { kind: 'ToolDone', tool_id: 't2' },
       'live',
     );
-    expect(applyEvent(done, { kind: 'ToolCancelled', tool_id: 't2' }, 'live').tools[0].cancelled).toBe(
-      undefined,
+    expect(
+      applyEvent(done, { kind: 'ToolCancelled', tool_id: 't2' }, 'live').tools[0].cancelled,
+    ).toBe(undefined);
+  });
+
+  it('marks a stopped reply cancelled live and keeps its text (M57.5)', () => {
+    const stopped = endLiveTurn(
+      run([{ kind: 'TextDelta', text: 'Half an ans' }, { kind: 'Cancelled' }], 'live'),
     );
+    expect(stopped.cancelled).toBe(true);
+    expect(stopped.text).toBe('Half an ans');
+    expect(stopped.streaming).toBe(false);
+    // No golden's session file says Cancelled: it is the live reader's word.
+    for (const golden of goldens) {
+      expect((golden.session?.events ?? []).some((e) => e.kind === 'Cancelled')).toBe(false);
+    }
+  });
+
+  it('upserts a run’s Changeset by run id, and a resume adds a second (M58.3)', () => {
+    const commit = (run_id: string, additions: number) =>
+      ({
+        kind: 'Changeset',
+        changeset: {
+          state: 'committed',
+          run_id,
+          commit: 'b'.repeat(40),
+          files: [],
+          additions,
+          deletions: 0,
+          binary: 0,
+          shell_unrecorded: false,
+        },
+      }) as AgentStreamEvent;
+    const once = run([commit('run-1', 1)], 'live');
+    expect(once.changesets?.map((c) => c.run_id)).toEqual(['run-1']);
+    const again = applyEvent(once, commit('run-1', 2), 'live');
+    expect(again.changesets).toHaveLength(1);
+    expect(again.changesets?.[0]).toMatchObject({ additions: 2 });
+    const resumed = applyEvent(again, commit('run-2', 3), 'live');
+    expect(resumed.changesets?.map((c) => c.run_id)).toEqual(['run-1', 'run-2']);
+    // No golden's session file says Changeset: it is the live reader's word,
+    // so a replayed thread carries none and the goldens read as before.
+    for (const golden of goldens) {
+      expect((golden.session?.events ?? []).some((e) => e.kind === 'Changeset')).toBe(false);
+      const { messages } = replayTranscript(golden.session?.events ?? [], 'S');
+      expect(messages.every((m) => m.changesets === undefined)).toBe(true);
+    }
   });
 
   it('replays the deferred golden as a held turn, never an interrupted one (M57.1)', () => {
@@ -457,5 +519,53 @@ describe('healFromTranscript', () => {
       { id: 'a', role: 'assistant', text: 'r', tools: [tool('t-1', false)] },
     ];
     expect(healFromTranscript(cached, [])).toBe(cached);
+  });
+});
+
+describe('replaceLastTurn (M57.6)', () => {
+  const cached: ChatMessage[] = [
+    { id: 'u-1', role: 'user', text: 'first', tools: [] },
+    { id: 'a-1', role: 'assistant', text: 'one', tools: [] },
+    { id: 'u-2', role: 'user', text: 'second', tools: [] },
+    {
+      id: 'a-2',
+      role: 'assistant',
+      text: 'half a rep',
+      tools: [],
+      streaming: true,
+      gap: true,
+      cancelled: true,
+      seq: 41,
+    },
+  ];
+  const file: ChatMessage[] = [
+    { id: 's-t1-u', role: 'user', text: 'first', tools: [] },
+    { id: 's-t1-a', role: 'assistant', text: 'one', tools: [] },
+    { id: 's-t2-u', role: 'user', text: 'second', tools: [] },
+    {
+      id: 's-t2-a',
+      role: 'assistant',
+      text: 'half a reply, whole',
+      tools: [{ id: 't-1', name: 'Read', input: 'a.md', output: 'x', done: true, failed: false }],
+    },
+  ];
+
+  it("swaps in the file's last reply and keeps cancelled", () => {
+    const next = replaceLastTurn(cached, 'a-2', file);
+    expect(next[0]).toBe(cached[0]);
+    expect(next[1]).toBe(cached[1]);
+    expect(next[3]).toMatchObject({
+      id: 'a-2',
+      text: 'half a reply, whole',
+      cancelled: true,
+    });
+    expect(next[3].tools).toEqual(file[3].tools);
+    expect(next[3].streaming).toBeUndefined();
+    expect(next[3].gap).toBeUndefined();
+  });
+
+  it('changes nothing with no replayed reply or no such message', () => {
+    expect(replaceLastTurn(cached, 'a-2', [])).toBe(cached);
+    expect(replaceLastTurn(cached, 'gone', file)).toBe(cached);
   });
 });

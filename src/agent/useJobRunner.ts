@@ -10,7 +10,7 @@ import { describeTrigger, firstMatch, parseTriggers } from '@/engine/triggers';
 import { newRunId, shouldYield } from './runs';
 import { fireKeyDate, isSkillEntry, parseAllowedTools, parseSchedule } from '@/engine/skills';
 import { listConcepts } from '@/engine/okf';
-import { grantedTools, type PromptGrant } from '@/engine/toolGrant';
+import { grantedTools, holdsShell, type PromptGrant } from '@/engine/toolGrant';
 import {
   fleetActorSummary,
   jobLedgerClaim,
@@ -31,6 +31,7 @@ import {
   scheduledSkillPrompt,
   schemaRecheckPrompt,
 } from '@/lib/prompts';
+import { effectiveCeiling, type ShellCeiling } from '@/lib/policy/toolApproval';
 import { todayIso } from '@/lib/templates';
 import { useRunLogStore } from '@/stores/runLogStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -106,7 +107,7 @@ export function useJobRunner(): void {
   // could set. Also the signal that this runner is free again — `agentBusy`
   // flipping back to false was what re-ran the effect below, by accident.
   const yielding = useUiStore((s) => shouldYield(s.runs));
-  const shell = useUiStore((s) => s.agentShellAccess);
+  const shell = useUiStore((s) => s.agentShell);
   const connectors = useUiStore((s) => s.agentConnectors);
   const issuePrefixes = useUiStore((s) => s.issuePrefixes);
 
@@ -406,18 +407,25 @@ export function useJobRunner(): void {
           : job.kind === 'scheduled'
             ? parseAllowedTools(entry?.properties['allowed-tools'])
             : null;
-      // Unattended runs execute vault-authored content, so none of them
-      // inherit the Settings toggle — that grant is the assistant's, made
-      // for turns a person is watching (PR #5 review). Here it is only a
-      // CEILING: the one path to shell on a schedule is an Agent record
-      // declaring `tools: shell`, and no record can grant itself what
-      // Settings denies.
-      const shellGrant = job.kind === 'agent' && shell && (agent?.shell ?? false);
+      // M57.2 — the shell ceiling this run may hold. Unattended runs
+      // execute vault-authored content, so the one path to the shell on a
+      // schedule is an Agent record declaring `tools: shell`, capped by the
+      // Settings ceiling; every other job runs at off. Nobody watches, so
+      // under Ask the table withholds what it would have asked for, and the
+      // run's row says so.
+      const ceiling: ShellCeiling =
+        job.kind === 'agent' ? effectiveCeiling(shell, agent?.shell ?? false) : 'off';
       // What this run's prompts may name (M54.7): its narrowed tools, the
-      // shell a read limit has not withdrawn (M53.5), and nobody watching.
+      // shell its ceiling plans for an unwatched run, less a read limit
+      // (M53.5), and nobody watching.
       const grant: PromptGrant = {
         tools: grantedTools(narrowing),
-        shell: shellGrant && agent?.readScope == null,
+        shell: holdsShell({
+          shell: ceiling,
+          attended: false,
+          readScoped: agent?.readScope != null,
+          narrowing,
+        }),
         attended: false,
       };
 
@@ -630,8 +638,8 @@ export function useJobRunner(): void {
             // record is fixed (Q12).
             model: agent?.model ?? null,
             effort: agent?.effort ?? null,
-            // A ceiling, never the Settings toggle itself: see shellGrant.
-            shell: shellGrant,
+            // The ceiling worked out above, never the Settings one itself.
+            shell: ceiling,
             // M17.13/M17.8: the record's own declarations, enforced in Rust.
             // Each is a narrowing — none can widen what Settings granted —
             // and the tools are the narrowing the grant above was read from.
@@ -652,6 +660,10 @@ export function useJobRunner(): void {
             // on this machine (PR #5 security review, M54.9): a job whose
             // record names none reaches none.
             attended: false,
+            // M57.4: the record's `ask-first:`. Nobody watches this run, so
+            // its page writes are refused at dispatch and recorded; Rust
+            // reads the record again, so this can only tighten it.
+            askFirst: agent?.askFirst ?? false,
             // M34.2.4: the job's kind IS its budget lane — the run claims a
             // dispatcher lease and faces the ambient gate, so schedules and
             // ingest share one budget and one deferral record.

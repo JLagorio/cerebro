@@ -3,6 +3,7 @@ import { Icon } from '@/components/ui/Icon';
 import { RunList } from '@/agent/RunList';
 import { isFailure } from '@/engine/git';
 import { useGit } from '@/git/useGit';
+import { APP_VERSION } from '@/lib/appVersion';
 import * as git from '@/lib/gitIpc';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -23,8 +24,6 @@ import { useVaultStore } from '@/stores/vaultStore';
  * destinations the nav already owns (History, Settings) were removed, and so
  * was "Commit", which navigated instead of committing.
  */
-
-const APP_VERSION = '2026.7.29';
 
 function Segment({
   icon,

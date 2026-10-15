@@ -1,0 +1,44 @@
+{
+  "why": "A scheduled run of an ask-first agent: nobody can answer, so its page writes queue for the person in Review (M57.4c). Nothing is refused and nothing is written; they stay callable in argv, so the call reaches dispatch, which queues it.",
+  "input": {
+    "kind": "unattended",
+    "shell": "off",
+    "ask_first": true,
+    "read_scoped": false,
+    "narrowing": null
+  },
+  "expected": {
+    "permission_mode": "acceptEdits",
+    "allowed": [],
+    "disallowed": [
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "NotebookEdit",
+      "Bash",
+      "AskUserQuestion",
+      "ExitPlanMode"
+    ],
+    "matcher": [],
+    "withheld": [],
+    "decisions": {
+      "Write": "deny",
+      "Edit": "deny",
+      "MultiEdit": "deny",
+      "NotebookEdit": "deny",
+      "Bash": "deny",
+      "Read": "cli",
+      "Glob": "cli",
+      "Grep": "cli",
+      "WebFetch": "cli",
+      "WebSearch": "cli",
+      "Task": "cli",
+      "AskUserQuestion": "deny",
+      "ExitPlanMode": "deny",
+      "mcp__cerebro__create_note": "queue",
+      "mcp__cerebro__update_frontmatter": "queue",
+      "mcp__cerebro__append_to_note": "queue",
+      "mcp__cerebro__edit_note": "queue"
+    }
+  }
+}

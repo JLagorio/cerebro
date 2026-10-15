@@ -1,6 +1,6 @@
 //! Walk a vault folder and produce an Entry per markdown file.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use walkdir::WalkDir;
 
@@ -55,27 +55,41 @@ fn rel_path(vault: &Path, path: &Path) -> Result<String, String> {
         .join("/"))
 }
 
+/// A file time as RFC 3339 UTC, or now when the disk recorded none. That
+/// fallback reads a missing time as a fresh write, so list_notes (M59.5)
+/// cannot tell the two apart and sorts such a note newest. Saying "not
+/// recorded" instead needs an `Option` on `Entry`'s times, a change across
+/// the TypeScript too, left for a later part.
 fn iso_or_now(t: Option<std::time::SystemTime>) -> String {
     let t = t.unwrap_or_else(std::time::SystemTime::now);
     chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
-fn timestamps(path: &Path) -> (String, String) {
-    let meta = std::fs::metadata(path).ok();
-    let modified = meta.as_ref().and_then(|m| m.modified().ok());
-    let created = meta.as_ref().and_then(|m| m.created().ok()).or(modified);
+fn timestamps(meta: Option<&std::fs::Metadata>) -> (String, String) {
+    let modified = meta.and_then(|m| m.modified().ok());
+    let created = meta.and_then(|m| m.created().ok()).or(modified);
     (iso_or_now(created), iso_or_now(modified))
 }
 
-/// Scan every `.md` and `.mmd` file in the vault into Entries with
-/// vault-relative forward-slash paths, sorted by path. Dotfiles and
-/// dot-folders are hidden, Obsidian-style ([`is_hidden`]), and `views/` and
-/// `attachments/` are skipped.
-pub fn scan_vault(vault: &Path) -> Result<Vec<Entry>, String> {
+/// One note file the walk found: its vault-relative forward-slash path,
+/// where it sits on disk, and its metadata, or `None` when it could not be
+/// read (M59.4).
+pub(crate) struct NoteFile {
+    pub rel: String,
+    pub path: PathBuf,
+    pub meta: Option<std::fs::Metadata>,
+}
+
+/// The scan's walk (M59.4): every `.md` and `.mmd` file the scan lists, in
+/// walk order. Dotfiles and dot-folders are hidden, Obsidian-style
+/// ([`is_hidden`]), and `views/` and `attachments/` are skipped. The scan
+/// and search's corpus (`vault/corpus.rs`) both walk with it, so the two
+/// can never list different notes.
+pub(crate) fn note_files(vault: &Path) -> Result<Vec<NoteFile>, String> {
     if !vault.is_dir() {
         return Err(format!("not a directory: {}", vault.display()));
     }
-    let mut entries = Vec::new();
+    let mut files = Vec::new();
     let walker = WalkDir::new(vault)
         .into_iter()
         .filter_entry(|e| e.depth() == 0 || keep(e));
@@ -92,23 +106,52 @@ pub fn scan_vault(vault: &Path) -> Result<Vec<Entry>, String> {
         ) {
             continue;
         }
-        let rel = rel_path(vault, item.path())?;
-        let (created, modified) = timestamps(item.path());
+        files.push(NoteFile {
+            rel: rel_path(vault, item.path())?,
+            path: item.path().to_path_buf(),
+            meta: std::fs::metadata(item.path()).ok(),
+        });
+    }
+    Ok(files)
+}
+
+/// One note's Entry from what reading it gave (M59.4): the scan and search's
+/// corpus build every entry here, from the one read each makes.
+pub(crate) fn entry_from_read(
+    rel: &str,
+    read: &std::io::Result<String>,
+    meta: Option<&std::fs::Metadata>,
+) -> Entry {
+    let (created, modified) = timestamps(meta);
+    match read {
+        Ok(content) => build_entry(rel, content, created, modified),
         // M1.x per-file degrade: one unreadable/non-UTF-8 .md used to abort
         // the whole scan — degrade to a parse_error entry the UI can show.
-        let entry = match std::fs::read_to_string(item.path()) {
-            Ok(content) => build_entry(&rel, &content, created, modified),
-            Err(e) => {
-                let mut entry = build_entry(&rel, "", created, modified);
-                entry.parse_error = Some(format!("unreadable: {e}"));
-                // The empty string stood in for bytes nobody read, so its
-                // hash names nothing on disk: not recorded (M55.2).
-                entry.hash = None;
-                entry
-            }
-        };
-        entries.push(entry);
+        Err(e) => {
+            let mut entry = build_entry(rel, "", created, modified);
+            entry.parse_error = Some(format!("unreadable: {e}"));
+            // The empty string stood in for bytes nobody read, so its
+            // hash names nothing on disk: not recorded (M55.2).
+            entry.hash = None;
+            entry
+        }
     }
+}
+
+/// Scan every `.md` and `.mmd` file in the vault into Entries with
+/// vault-relative forward-slash paths, sorted by path: [`note_files`]'s
+/// walk, one read per file, [`entry_from_read`], then project containment.
+pub fn scan_vault(vault: &Path) -> Result<Vec<Entry>, String> {
+    let mut entries: Vec<Entry> = note_files(vault)?
+        .iter()
+        .map(|file| {
+            entry_from_read(
+                &file.rel,
+                &std::fs::read_to_string(&file.path),
+                file.meta.as_ref(),
+            )
+        })
+        .collect();
     entries.sort_by(|a, b| a.path.cmp(&b.path));
     assign_projects(&mut entries);
     Ok(entries)
@@ -117,7 +160,7 @@ pub fn scan_vault(vault: &Path) -> Result<Vec<Entry>, String> {
 /// Vault format v2 containment post-pass: an entry's project is the nearest
 /// ancestor directory holding a `project.md` (parity with assignProjects in
 /// mockIpc.ts). A vault-root project.md is ignored — it would own every file.
-fn assign_projects(entries: &mut [Entry]) {
+pub(crate) fn assign_projects(entries: &mut [Entry]) {
     let project_dirs: Vec<String> = entries
         .iter()
         .filter(|e| e.path.ends_with("/project.md"))

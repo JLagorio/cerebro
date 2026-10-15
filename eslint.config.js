@@ -27,12 +27,17 @@ const ENGINE_IMPORTS = new RegExp(
     'yaml$',
     // Pure leaves: no DOM, no store, no IPC. tsconfig.engine.json typechecks
     // them through these imports, which is the only check that reaches them.
-    '@/lib/(?:slug|templates|sha256|policy/(?:table|tools))$',
+    '@/lib/(?:slug|templates|sha256|policy/(?:table|tools|toolApproval))$',
     // viewTab.ts's one edge into views, deliberate: capability data over
     // engine types with no React in it (its comment says why).
     '@/views/viewKinds$',
     // okf.ts reads the staleness table the backends share.
     '\\.\\./\\.\\./shared/policy/[\\w.-]+\\.json$',
+    // The whiteboard scene core's two pinned upstream libraries (M68.1), bare
+    // names only; src/engine/scene/boundary.test.ts pins the one file that
+    // loads each (ink.ts, order.ts).
+    'perfect-freehand$',
+    'fractional-indexing$',
   ].join('|')})`,
 );
 
@@ -65,7 +70,7 @@ const RAILS = {
     // `typeof import('…')` names a module too, so the engine checks types.
     types: true,
     message:
-      'engine/ is the pure core: it imports engine modules, yaml, the lib leaves slug, templates, sha256, policy/table and policy/tools, views/viewKinds and shared/policy JSON. Move the code into engine/, or have the caller pass the value in.',
+      'engine/ is the pure core: it imports engine modules, yaml, the lib leaves slug, templates, sha256, policy/table, policy/tools and policy/toolApproval, views/viewKinds, shared/policy JSON, and the scene libraries perfect-freehand and fractional-indexing. Move the code into engine/, or have the caller pass the value in.',
   },
 };
 

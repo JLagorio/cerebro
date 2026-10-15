@@ -1,9 +1,9 @@
 // @vitest-environment node
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CLI_VERSION } from './reduce';
-import { SCENARIO_NAMES, SCENARIOS } from './spike';
+import { RECORD_OWED, SCENARIO_NAMES, SCENARIOS } from './spike';
 
 /**
  * The transport facts the D4 record states (M56.1), one case per fact, each
@@ -39,6 +39,7 @@ interface Block {
 
 interface Line {
   type?: string;
+  attachment?: { type?: string; toolUseID?: string };
   subtype?: string;
   uuid?: string;
   session_id?: string;
@@ -78,6 +79,12 @@ interface Line {
 
 interface ProbeEntry {
   mode: string;
+  arguments?: {
+    session_id?: string;
+    tool_use_id?: string;
+    tool_name?: string;
+    tool_input?: string;
+  };
   tool_name?: string;
   tool_use_id?: string;
   input?: { tool_name?: string; tool_use_id?: string; file_path?: string };
@@ -182,7 +189,7 @@ const FACTS: Record<string, { claim: string; fixtures: string[] }> = {
   },
   F4: {
     claim:
-      'a PreToolUse defer ends the run as success with stop_reason and terminal_reason tool_deferred, names the call in deferred_tool_use, exits 0 and leaves the tool_use unanswered in the session file',
+      'a PreToolUse defer ends the run as success with stop_reason and terminal_reason tool_deferred, names the call in deferred_tool_use, exits 0 and leaves the tool_use unanswered in the session file, followed by a hook_deferred_tool marker naming it',
     fixtures: ['defer-resume'],
   },
   F5: {
@@ -192,7 +199,7 @@ const FACTS: Record<string, { claim: string; fixtures: string[] }> = {
   },
   F6: {
     claim:
-      'with two calls in one message, the defer names one; on resume that call runs and the other gets no result',
+      'two calls in one message reach the hook one streamed line each, so each defer writes its own hook_deferred_tool marker and the result names the last; on resume that call runs and the other gets no result',
     fixtures: ['defer-resume'],
   },
   F7: {
@@ -257,6 +264,33 @@ const FACTS: Record<string, { claim: string; fixtures: string[] }> = {
 };
 
 const title = (id: string) => `${id} ${FACTS[id].claim}`;
+
+/**
+ * M57.1's gate facts, read from `defer-gate.json`. That scenario is owed its
+ * first live run (RECORD_OWED): until the owner's login records it, there is
+ * no fixture, so each case skips under a title that says the run is owed, and
+ * M57.1 builds on the claims as derived from the 2.1.250 bundle (the D4
+ * record's "M57.1: the gate").
+ */
+const GATE_FACTS: Record<string, string> = {
+  F21: 'an mcp_tool PreToolUse hook calls the named server with the interpolated call, and the text it answers is read as hook JSON',
+  F22: 'an empty-prompt resume runs the hook again for the same tool_use id: allow pairs the result with that id and applies updatedInput, and deny returns its reason as the tool result',
+  F23: 'a hook that fails or times out leaves the call to argv, which refuses a tool it does not allow',
+  F24: 'a message with two calls ignores a defer and writes no hook_deferred_tool marker',
+  F25: 'a resume with new text settles a deferred call first, through the hook, then runs the new prompt',
+  F26: 'a matcher of names joined by a bar is an exact list: a name it only nearly holds never runs the hook',
+  F27: 'the hook reaches a tool the server never lists',
+};
+const GATE = 'defer-gate';
+const gateRecorded = existsSync(join(SPIKE, `${GATE}.json`));
+const gateTitle = (id: string) =>
+  `${id} ${GATE_FACTS[id]}${gateRecorded ? '' : ' (live run owed)'}`;
+const gateCalls = (step: Step) => step.probe.filter((entry) => entry.mode === 'gate');
+const deferredId = (step: Step) => ofType(step.stream, 'result')[0]?.deferred_tool_use?.id;
+const markers = (lines: Line[]) =>
+  lines.filter(
+    (line) => line.type === 'attachment' && line.attachment?.type === 'hook_deferred_tool',
+  );
 
 describe('the transport facts', () => {
   it(title('F0'), () => {
@@ -336,6 +370,12 @@ describe('the transport facts', () => {
     expect(step.exit.code).toBe(0);
     expect(toolUses(step.session.lines).map((block) => block.id)).toContain(call.id);
     expect(resultFor(step.session.lines, call.id)).toEqual([]);
+    const lines = step.session.lines;
+    const callAt = lines.findIndex((line) => toolUses([line]).some((b) => b.id === call.id));
+    const markerAt = lines.findIndex(
+      (line) => markers([line])[0]?.attachment?.toolUseID === call.id,
+    );
+    expect(markerAt).toBeGreaterThan(callAt);
   });
 
   it(title('F5'), () => {
@@ -360,12 +400,23 @@ describe('the transport facts', () => {
   });
 
   it(title('F6'), () => {
+    // Contested with F24 until the live run: the bundle's solo-only defer
+    // check counts the calls in the call's own streamed line, which holds one
+    // unless a batch tool decomposes, so this pins the per-line reading.
     const { steps } = load('defer-resume');
     const ids = toolUses(steps[4].stream).map((block) => block.id);
     expect(new Set(calls(steps[4]).map((line) => line.message?.id)).size).toBe(1);
     expect(ids).toHaveLength(2);
+    for (const line of ofType(steps[4].stream, 'assistant'))
+      expect(toolUses([line])).toHaveLength(1);
+    expect(hooks(steps[4]).map((entry) => entry.input?.tool_use_id)).toEqual(ids);
+    for (const entry of hooks(steps[4]))
+      expect(entry.answer?.hookSpecificOutput?.permissionDecision).toBe('defer');
+    const marked = markers(steps[4].session.lines).map((line) => line.attachment?.toolUseID);
+    expect(marked).toEqual(ids);
     const named = ofType(steps[4].stream, 'result')[0].deferred_tool_use?.id;
-    expect(ids).toContain(named);
+    expect(named).toBe(marked.at(-1));
+    expect(hooks(steps[5]).map((entry) => entry.input?.tool_use_id)).toEqual([named]);
     // The model may call again after the resume; the dropped call's own id never gets a result.
     const other = ids.find((id) => id !== named);
     expect(resultFor(steps[5].stream, named)).toHaveLength(1);
@@ -539,8 +590,90 @@ describe('the transport facts', () => {
     }
   });
 
+  it.skipIf(!gateRecorded)(gateTitle('F21'), () => {
+    const [step] = load(GATE).steps;
+    const id = deferredId(step);
+    const [call] = gateCalls(step);
+    expect(call.arguments?.tool_use_id).toBe(id);
+    expect(call.arguments?.tool_name).toBe(SLOW);
+    expect(JSON.parse(call.arguments?.tool_input ?? 'null')).toMatchObject({ text: 'alpha' });
+    expect(ofType(step.stream, 'result')[0].stop_reason).toBe('tool_deferred');
+    expect(markers(step.session.lines).map((line) => line.attachment?.toolUseID)).toEqual([id]);
+  });
+
+  it.skipIf(!gateRecorded)(gateTitle('F22'), () => {
+    const { steps } = load(GATE);
+    for (const [deferred, resumed] of [
+      [0, 1],
+      [2, 3],
+    ] as const) {
+      const id = deferredId(steps[deferred]);
+      expect(steps[resumed].argv[1]).toBe('');
+      expect(gateCalls(steps[resumed]).map((call) => call.arguments?.tool_use_id)).toContain(id);
+      const [answer] = resultFor(steps[resumed].stream, id);
+      if (resumed === 1) {
+        expect(answer.is_error ?? false).toBe(false);
+        expect(textOf(answer)).toBe('gamma');
+      } else {
+        expect(answer.is_error).toBe(true);
+        expect(textOf(answer)).toContain('Not today.');
+      }
+    }
+  });
+
+  it.skipIf(!gateRecorded)(gateTitle('F23'), () => {
+    const step = load(GATE).steps[4];
+    expect(gateCalls(step)).not.toHaveLength(0);
+    const [call] = toolUses(step.stream);
+    const [answer] = resultFor(step.stream, call.id);
+    expect(answer.is_error).toBe(true);
+    expect(textOf(answer)).not.toContain('delta');
+    expect(ofType(step.stream, 'result')[0].stop_reason).not.toBe('tool_deferred');
+  });
+
+  it.skipIf(!gateRecorded)(gateTitle('F24'), () => {
+    const step = load(GATE).steps[5];
+    expect(toolUses(step.stream)).toHaveLength(2);
+    expect(new Set(calls(step).map((line) => line.message?.id)).size).toBe(1);
+    expect(ofType(step.stream, 'result')[0].deferred_tool_use).toBeUndefined();
+    expect(markers(step.session.lines)).toEqual([]);
+  });
+
+  it.skipIf(!gateRecorded)(gateTitle('F25'), () => {
+    const { steps } = load(GATE);
+    const id = deferredId(steps[6]);
+    const [settled] = resultFor(steps[7].stream, id);
+    expect(settled.is_error).toBe(true);
+    expect(textOf(settled)).toContain('Never answered.');
+    const lines = steps[7].session.lines;
+    const answeredAt = lines.findIndex((line) =>
+      toolResults([line]).some((block) => block.tool_use_id === id),
+    );
+    const promptAt = lines.findIndex(
+      (line) => line.type === 'user' && line.message?.content === 'Reply with the one word: next.',
+    );
+    expect(answeredAt).toBeGreaterThan(-1);
+    expect(promptAt).toBeGreaterThan(answeredAt);
+    expect(ofType(steps[7].stream, 'result')[0].result).toMatch(/next/i);
+  });
+
+  it.skipIf(!gateRecorded)(gateTitle('F26'), () => {
+    const step = load(GATE).steps[8];
+    expect(flag(step.argv, '--settings')).toMatch(/settings-gate-near\.json$/);
+    expect(gateCalls(step)).toEqual([]);
+    expect(ofType(step.stream, 'result')[0].stop_reason).not.toBe('tool_deferred');
+  });
+
+  it.skipIf(!gateRecorded)(gateTitle('F27'), () => {
+    const [step] = load(GATE).steps;
+    const [init] = inits(step.stream);
+    expect(init.tools).not.toContain('mcp__probe__gate');
+    expect(gateCalls(step)).not.toHaveLength(0);
+  });
+
   it(`every init reads ${CLI_VERSION} and names no API-key source`, () => {
     for (const name of SCENARIO_NAMES) {
+      if (RECORD_OWED.includes(name) && !existsSync(join(SPIKE, `${name}.json`))) continue;
       const fixture = load(name);
       expect(fixture.cli_version).toBe(CLI_VERSION);
       const found = fixture.steps.flatMap((step) => inits(step.stream));
@@ -587,6 +720,22 @@ describe('the D4 record', () => {
       expect(status.startsWith('measured'), `${id}: ${status}`).toBe(sources.includes('recorded'));
       expect(status.includes('owed'), `${id}: ${status}`).toBe(sources.includes('derived'));
     }
+  });
+
+  it('states the gate facts in their own section, owed until recorded (M57.1)', () => {
+    const record = readFileSync(RECORD, 'utf8');
+    expect(record).toContain('## M57.1: the gate');
+    for (const [id, claim] of Object.entries(GATE_FACTS)) {
+      const row = rows.get(id);
+      expect(row?.claim, id).toBe(claim);
+      expect(row?.fixtures, id).toEqual([GATE]);
+      const source = gateRecorded ? load(GATE).source : 'derived';
+      expect(row?.status.startsWith('measured'), `${id}: ${row?.status}`).toBe(
+        source === 'recorded',
+      );
+      expect(row?.status.includes('owed'), `${id}: ${row?.status}`).toBe(source === 'derived');
+    }
+    expect([...(SCENARIOS[GATE].facts as string[])]).toEqual(Object.keys(GATE_FACTS));
   });
 
   it('cites, for each fact, exactly the scenarios the driver says answer it', () => {

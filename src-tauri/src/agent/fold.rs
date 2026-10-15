@@ -34,7 +34,9 @@
 //! - A turn that failed carries a notice on its `Error` when Claude Code's
 //!   typed fields say how (M56.4, `super::failure`): the turn's `Failures`
 //!   reads the limit events, retries, API-error replies and the result the
-//!   fold already sees, in either format.
+//!   fold already sees, in either format. An API-error reply no kind names
+//!   yet holds its `Error` for the turn's result, or its end: a context-full
+//!   turn replies `invalid_request` and only its result says why.
 //! - A tool call's input and result cross as previews: each long input
 //!   string cut, a result cut at 2000 characters. When a preview cut
 //!   something, the whole follows as a `ToolPayload` (M56.8), up to
@@ -129,6 +131,11 @@ struct Turn {
     deferred: HashSet<String>,
     /// What the turn's lines said about how it failed (M56.4).
     failures: Failures,
+    /// An API-error reply's Error that no kind named yet, as its message and
+    /// code: held for the turn's result, which may name the kind (a
+    /// context-full turn replies `invalid_request` first, then its result
+    /// says `prompt_too_long`), or for the turn's end.
+    held: Option<(String, Option<String>)>,
 }
 
 /// The line-by-line fold. `fold_lines` is the batch fold, a loop over it.
@@ -415,12 +422,17 @@ impl TranscriptFold {
             self.turn.failures.observe(line);
             if !self.turn.errored {
                 self.turn.errored = true;
-                events.push(AgentEvent::Error {
-                    message: text_of(content)
-                        .unwrap_or_else(|| "Claude Code reported an API error".into()),
-                    code: str_of(line, "error").map(str::to_string),
-                    notice: self.notice(),
-                });
+                let message =
+                    text_of(content).unwrap_or_else(|| "Claude Code reported an API error".into());
+                let code = str_of(line, "error").map(str::to_string);
+                match self.notice() {
+                    Some(notice) => events.push(AgentEvent::Error {
+                        message,
+                        code,
+                        notice: Some(notice),
+                    }),
+                    None => self.turn.held = Some((message, code)),
+                }
             }
             return LineClass::Translated;
         }
@@ -546,6 +558,7 @@ impl TranscriptFold {
         self.close_message();
         if text.starts_with(INTERRUPT_MARKER) {
             if self.turn.open && !self.turn.ended {
+                self.release_held(events);
                 self.turn.ended = true;
                 events.push(AgentEvent::TurnInterrupted {
                     reason: "stopped".into(),
@@ -574,15 +587,24 @@ impl TranscriptFold {
             return;
         }
         self.turn.failures.observe(line);
+        self.release_held(events);
         let text = str_of(line, "result").unwrap_or_default().to_string();
         if flag(line, "is_error") {
             if !self.turn.errored {
                 self.turn.errored = true;
+                // A failed result with no `result` text may say why in
+                // `errors` instead: a `--resume` whose session file is gone
+                // answers "No conversation found with session ID: ..." there.
+                let reported = if text.is_empty() {
+                    result_errors(line)
+                } else {
+                    text
+                };
                 events.push(AgentEvent::Error {
-                    message: if text.is_empty() {
+                    message: if reported.is_empty() {
                         "the agent reported an error".into()
                     } else {
-                        text
+                        reported
                     },
                     code: str_of(line, "subtype").map(str::to_string),
                     notice: self.notice(),
@@ -615,6 +637,18 @@ impl TranscriptFold {
         }
     }
 
+    /// Send the held API-error Error, carrying whatever notice the turn's
+    /// lines name by now (M56.4).
+    fn release_held(&mut self, events: &mut Vec<AgentEvent>) {
+        if let Some((message, code)) = self.turn.held.take() {
+            events.push(AgentEvent::Error {
+                message,
+                code,
+                notice: self.notice(),
+            });
+        }
+    }
+
     /// End the open turn, once. A `result` (Some, with its stop reason when it
     /// named one) always ends it. Otherwise the last message's terminal stop
     /// reason, or an error, ends it; a last message that asked for nothing
@@ -625,6 +659,7 @@ impl TranscriptFold {
         if !self.turn.open || self.turn.ended {
             return;
         }
+        self.release_held(events);
         self.turn.ended = true;
         // A suspended turn ends with no word: it waits on a deferred call,
         // and whatever answers that call says how it went.
@@ -652,6 +687,22 @@ impl TranscriptFold {
             },
         });
     }
+}
+
+/// The non-blank strings of a result's `errors` array, joined, or empty.
+fn result_errors(line: &Value) -> String {
+    line.get("errors")
+        .and_then(Value::as_array)
+        .map(|errors| {
+            errors
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|e| !e.is_empty())
+                .collect::<Vec<_>>()
+                .join("; ")
+        })
+        .unwrap_or_default()
 }
 
 /// A pr-link record as a link, when it names a positive number, an https url
@@ -1064,6 +1115,32 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_result_with_no_text_says_its_errors() {
+        // Measured on CLI 2.1.250: a `--resume` whose session file is gone
+        // answers with `errors` and no `result` text.
+        let events = one(
+            json!({ "type": "result", "subtype": "error_during_execution",
+            "is_error": true, "errors": [
+                "No conversation found with session ID: 00000000-0000-4000-8000-000000000009", " "
+            ] }),
+        );
+        assert!(
+            matches!(events.as_slice(), [AgentEvent::Error { message, .. }, AgentEvent::TurnEnded { .. }]
+                if message == "No conversation found with session ID: 00000000-0000-4000-8000-000000000009"),
+            "{events:?}"
+        );
+        let bare = one(
+            json!({ "type": "result", "subtype": "error_during_execution",
+            "is_error": true, "errors": [] }),
+        );
+        assert!(
+            matches!(bare.as_slice(), [AgentEvent::Error { message, .. }, AgentEvent::TurnEnded { .. }]
+                if message == "the agent reported an error"),
+            "{bare:?}"
+        );
+    }
+
+    #[test]
     fn unknown_and_malformed_lines_are_ignored_rather_than_shown() {
         // The CLI's wire format changes between versions; an unknown shape
         // must not become a visible error in the conversation, and it must be
@@ -1395,6 +1472,57 @@ mod tests {
         fold.entry(&prompt("again", "u9"));
         assert!(!fold.is_quota());
         assert_eq!(fold.notice(), None);
+    }
+
+    #[test]
+    fn a_context_full_turn_sends_one_error_with_its_notice() {
+        // 2.1.250 ends a context-full turn with an invalid_request reply, then
+        // the result naming prompt_too_long: the reply alone names no kind, so
+        // its Error waits for the result and carries the result's notice.
+        let reply = json!({ "type": "assistant", "uuid": "a1", "error": "invalid_request",
+            "is_api_error_message": true, "message": { "id": "m1", "model": "<synthetic>",
+            "content": [{ "type": "text", "text": "Prompt is too long" }] } });
+        let folded = fold_lines(&[
+            json!({ "type": "system", "subtype": "init", "session_id": "s1",
+                "model": "claude-test", "claude_code_version": "2.1.250" }),
+            reply.clone(),
+            json!({ "type": "result", "subtype": "success", "is_error": true,
+                "result": "Prompt is too long", "terminal_reason": "prompt_too_long",
+                "session_id": "s1" }),
+        ]);
+        let errors: Vec<&AgentEvent> = folded
+            .events
+            .iter()
+            .filter(|event| matches!(event, AgentEvent::Error { .. }))
+            .collect();
+        assert!(
+            matches!(errors.as_slice(), [AgentEvent::Error { code: Some(code), message, notice: Some(notice) }]
+                if code == "invalid_request" && message == "Prompt is too long"
+                    && notice.kind == failure::FailureKind::ContextFull
+                    && notice.action == Some(failure::NoticeAction::NewConversation)),
+            "{:?}",
+            folded.events
+        );
+        assert!(matches!(
+            folded.events.last(),
+            Some(AgentEvent::TurnEnded { .. })
+        ));
+
+        // A session file has no result: the held Error goes at the turn's
+        // end, still one, and with no kind to name it keeps its words alone.
+        let folded = fold_lines(&[prompt("hi", "u0"), reply]);
+        assert!(
+            matches!(
+                folded.events.as_slice(),
+                [
+                    AgentEvent::UserPrompt { .. },
+                    AgentEvent::Error { notice: None, .. },
+                    AgentEvent::TurnEnded { .. }
+                ]
+            ),
+            "{:?}",
+            folded.events
+        );
     }
 
     #[test]

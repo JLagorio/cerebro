@@ -1,4 +1,6 @@
 import { Fragment, useMemo, type CSSProperties, type ReactNode } from 'react';
+import { PAGE_PREVIEW_GROUP, PagePreview } from '@/components/PagePreview';
+import { HoverCard } from '@/components/ui/HoverCard';
 import type { Entry } from '@/engine/types';
 import { resolveTarget } from '@/engine/wikilink';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -509,7 +511,8 @@ const HEADING_CLASS = {
 const alignment = (align: Align): CSSProperties | undefined =>
   align === null ? undefined : { textAlign: align };
 
-/** `inLink`: a wikilink inside a link's label is its label — a button cannot sit in an anchor. */
+/** `inLink`: a wikilink inside a link's label is its label — a button cannot sit in an anchor,
+ * and it gets no hover card. */
 function renderInline(nodes: Inline[], ctx: RenderContext, inLink = false): ReactNode[] {
   return nodes.map((node, i) => {
     if (typeof node === 'string') {
@@ -535,15 +538,34 @@ function renderInline(nodes: Inline[], ctx: RenderContext, inLink = false): Reac
       case 'wikilink': {
         const label = node.alias ?? resolveTarget(node.target, ctx.entries)?.title ?? node.target;
         if (inLink) return <Fragment key={i}>{label}</Fragment>;
+        // Hovering previews the page (M59.7), as an editor chip does.
         return (
-          <button
+          <HoverCard
             key={i}
-            type="button"
-            onClick={() => ctx.onOpen(node.target)}
-            className={WIKILINK}
+            label="Page preview"
+            group={PAGE_PREVIEW_GROUP}
+            content={({ close }) => (
+              <PagePreview
+                target={node.target}
+                onOpen={() => {
+                  close();
+                  ctx.onOpen(node.target);
+                }}
+              />
+            )}
           >
-            {label}
-          </button>
+            {({ ref, describedBy }) => (
+              <button
+                ref={ref}
+                type="button"
+                aria-describedby={describedBy}
+                onClick={() => ctx.onOpen(node.target)}
+                className={WIKILINK}
+              >
+                {label}
+              </button>
+            )}
+          </HoverCard>
         );
       }
       case 'link': {

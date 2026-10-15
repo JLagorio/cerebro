@@ -441,7 +441,8 @@ export function keepSessionLine(line: unknown): JsonObject {
   return out;
 }
 
-/** One line of the probe's log: what the prompt tool or the hook was asked and said. */
+/** One line of the probe's log: what the prompt tool, the hook or the gate
+ * (M57.1) was asked and said. */
 export function keepProbeEntry(entry: unknown): JsonObject {
   if (!isObject(entry)) return { unparsed: true };
   if (entry.mode === 'hook') {
@@ -454,6 +455,17 @@ export function keepProbeEntry(entry: unknown): JsonObject {
       'permission_mode',
     ]);
     return { mode: 'hook', input, answer: cutDeep(entry.answer) };
+  }
+  // M57.1: what the mcp_tool hook handed the gate (F21) and what it answered.
+  if (entry.mode === 'gate') {
+    const args = keep(entry.arguments, [
+      'session_id',
+      'tool_use_id',
+      'tool_name',
+      'tool_input',
+      'agent_id',
+    ]);
+    return { mode: 'gate', arguments: args, answer: cutDeep(entry.answer) };
   }
   return keep(entry, ['mode', 'tool_name', 'input', 'tool_use_id', 'answer']);
 }
@@ -547,7 +559,10 @@ export function reduceScenario(raw: RawScenario, machine: Machine): SpikeFixture
   if (why) throw new Error(`Refusing to reduce ${raw.scenario}: ${why}.`);
   const ids = new IdMap();
   const pairs = placeholders(machine);
-  const scrub = (text: string) => applyPlaceholders(ids.replaceIn(text), pairs);
+  // Placeholders first: a machine path holding a UUID or a msg_ token (a
+  // session's scratch folder, say) would otherwise lose that token to the id
+  // map, stop matching its placeholder, and reach the fixture whole.
+  const scrub = (text: string) => ids.replaceIn(applyPlaceholders(text, pairs));
   const steps = raw.steps.map((step): FixtureStep => {
     const context: ReduceContext = { ids, sent: new Map() };
     const argv = scrubDeep(step.argv, scrub) as string[];

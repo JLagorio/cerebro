@@ -18,7 +18,7 @@ describe('StudioPage', () => {
       history: [{ kind: 'studio' }],
       historyIndex: 0,
     });
-    useUiStore.setState({ aiPanelOpen: false, agentPendingPrompt: null });
+    useUiStore.setState({ aiPanelOpen: false, handoffs: [] });
   });
   afterEach(cleanup);
 
@@ -55,10 +55,10 @@ describe('StudioPage', () => {
     const ui = useUiStore.getState();
     // The chat rail IS the assistant panel — opened, aimed at the folder.
     expect(ui.aiPanelOpen).toBe(true);
-    expect(ui.agentPendingPrompt?.text).toContain('studio/landing/');
-    expect(ui.agentPendingPrompt?.subject).toBe('studio/landing/index.md');
+    expect(ui.handoffs.at(-1)?.text).toContain('studio/landing/');
+    expect(ui.handoffs.at(-1)?.subject).toBe('studio/landing/index.md');
     // The bubble names the act and the prototype, not the prompt (M52.4).
-    expect(ui.agentPendingPrompt?.label).toBe('Build with the assistant · Landing');
+    expect(ui.handoffs.at(-1)?.label).toBe('Build with the assistant · Landing');
   });
 
   it('says plainly when a deep-linked prototype no longer exists', async () => {

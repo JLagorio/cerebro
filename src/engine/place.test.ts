@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { destination, isDestinationKind } from '@/engine/destinations';
 import {
   isPlace,
   placeKey,
@@ -6,6 +7,7 @@ import {
   placeOf,
   samePlace,
   selectionKey,
+  windowTitle,
   type Place,
 } from '@/engine/place';
 import type { CollectionFile, ListFile, Selection } from '@/engine/types';
@@ -257,5 +259,33 @@ describe('placeKey', () => {
     // Lists would share a thread.
     expect(placeKey({ kind: 'list', id: 'c', collection: 'a/b' })).toBe('list:a/b/c');
     expect(list().id).not.toContain('/');
+  });
+});
+
+describe('placeLabel — a destination says what the nav says (M59.1)', () => {
+  it("labels every bare destination with the table's label", () => {
+    let walked = 0;
+    for (const selection of Object.values(ONE_OF_EACH)) {
+      const place = placeOf(selection);
+      if (placeKey(place) !== place.kind || !isDestinationKind(place.kind)) continue;
+      walked += 1;
+      expect(placeLabel(place), place.kind).toBe(destination(place.kind).label);
+    }
+    // Every destination but the two subjects ONE_OF_EACH fills in (a Studio
+    // prototype, an agent).
+    expect(walked).toBe(9);
+  });
+
+  it('says History for pulse and Work for workspace', () => {
+    expect(placeLabel({ kind: 'pulse' })).toBe('History');
+    expect(placeLabel({ kind: 'workspace' })).toBe('Work');
+  });
+
+  it("prefixes a prototype with Studio's label", () => {
+    expect(placeLabel({ kind: 'studio', project: 'proto/landing' })).toBe('Studio / landing');
+  });
+
+  it('titles the window with the place and the app', () => {
+    expect(windowTitle('History')).toBe('History — Cerebro');
   });
 });

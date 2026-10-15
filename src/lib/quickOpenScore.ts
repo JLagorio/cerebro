@@ -12,26 +12,34 @@ function hasWordBoundaryMatch(candidate: string, query: string): boolean {
 }
 
 /**
- * Fuzzy score for quick open (⌘K). 0 = no match; higher = better.
- * Tiers: exact prefix (3) > word-boundary (2) > substring (1), case-insensitive.
- * Key-shaped candidates ('FLD-7') also match hyphen-less queries ('fld7') at prefix tier.
- * Ties within a tier break deterministically toward the shorter candidate.
+ * How well the whole query names one candidate: the tier step of
+ * `src/lib/nameRank.ts` (M59.3), which ranks every name picker. It is not
+ * fuzzy: 0 = no match, then substring (1) < word boundary (2) < exact prefix
+ * (3), case-insensitive. Key-shaped candidates ('FLD-7') also match
+ * hyphen-less queries ('fld7') at the prefix tier.
  */
-export function quickOpenScore(query: string, candidate: string): number {
+export function quickOpenTier(query: string, candidate: string): 0 | 1 | 2 | 3 {
   const q = query.trim().toLowerCase();
   const c = candidate.toLowerCase();
   if (q === '' || c === '') return 0;
 
-  let tier = 0;
-  if (c.startsWith(q)) tier = 3;
-  else if (hasWordBoundaryMatch(c, q)) tier = 2;
-  else if (c.includes(q)) tier = 1;
-  else if (KEY_SHAPE.test(candidate)) {
+  if (c.startsWith(q)) return 3;
+  if (hasWordBoundaryMatch(c, q)) return 2;
+  if (c.includes(q)) return 1;
+  if (KEY_SHAPE.test(candidate)) {
     const qKey = q.replace(/[^a-z0-9]/g, '');
     const cKey = c.replace(/-/g, '');
-    if (qKey !== '' && cKey.startsWith(qKey)) tier = 3;
+    if (qKey !== '' && cKey.startsWith(qKey)) return 3;
   }
+  return 0;
+}
 
+/**
+ * The tier as one number, ties broken toward the shorter candidate (M1).
+ * 0 = no match; higher = better.
+ */
+export function quickOpenScore(query: string, candidate: string): number {
+  const tier = quickOpenTier(query, candidate);
   if (tier === 0) return 0;
   return tier * 1000 - Math.min(candidate.length, 999);
 }

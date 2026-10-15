@@ -38,12 +38,8 @@
     "type": "attachment",
     "attachment": {
       "type": "deferred_tools_delta",
-      "addedNames": [
-        "WebFetch"
-      ],
-      "addedLines": [
-        "WebFetch"
-      ],
+      "addedNames": ["WebFetch"],
+      "addedLines": ["WebFetch"],
       "removedNames": []
     },
     "uuid": "00000000-0000-4000-8000-000000005722",

@@ -1,3 +1,4 @@
+import { upsertChangeset } from '@/engine/changeset';
 import type { AgentStreamEvent, ChatMessage, PrLink, ToolCall, ToolPayload } from './types';
 
 /**
@@ -17,12 +18,17 @@ import type { AgentStreamEvent, ChatMessage, PrLink, ToolCall, ToolPayload } fro
  * cut off) keeps all of it, and reads interrupted. A turn suspended on a
  * deferred call (M57.1) has not ended either, and is not interrupted: its
  * call reads waiting, cancelled or not run (transcriptRows.ts), and the
- * resume that answers it goes on in the same bubble.
+ * resume that answers it goes on in the same bubble. A turn a person stopped
+ * (Rust's Cancelled, M57.5, live only) reads cancelled and keeps what it
+ * wrote; the session file never says it, so a replay reads it interrupted.
  *
  * A tool call's input and output arrive as previews; where a preview cut
  * one, a ToolPayload follows with the whole (M56.8), and it lands on the tool
  * by id in either mode. Payloads stay in memory: conversations.ts saves the
  * previews only.
+ *
+ * A run's Changeset (M58.3, live only) lands on the reply, one per run by its
+ * run id: a resume after a held call is a second run, so a second entry.
  */
 
 export type ReduceMode = 'live' | 'replay';
@@ -166,6 +172,11 @@ export function applyEvent(
       };
     case 'TurnInterrupted':
       return { ...message, live: { ...live, ended: true }, interrupted: true };
+    case 'Cancelled':
+      // M57.5: the partial text stays; the bubble says a person stopped it.
+      return { ...message, cancelled: true };
+    case 'Changeset':
+      return { ...message, changesets: upsertChangeset(message.changesets, event.changeset) };
     case 'Error':
       // The notice rides beside the raw words (M56.4): the card shows both.
       return event.notice != null
@@ -303,4 +314,43 @@ export function healFromTranscript(cached: ChatMessage[], rebuilt: ChatMessage[]
     return { ...message, tools };
   });
   return changed ? healed : cached;
+}
+
+/**
+ * Put a turn's reply back as its session file says it ended (M57.6): a
+ * re-attach that found a gap in the journal, or no journal at all, reads the
+ * file and replaces the reply `assistantId` names with the file's last
+ * reply, its text, tools, error and notice. What the panel knows and the
+ * file does not stays: a person's cancel. The reply stops streaming and
+ * loses its gap line. With no replayed reply, or no such message, the same
+ * array comes back.
+ */
+export function replaceLastTurn(
+  messages: ChatMessage[],
+  assistantId: string,
+  replayed: ChatMessage[],
+): ChatMessage[] {
+  const last = [...replayed].reverse().find((m) => m.role === 'assistant');
+  if (last === undefined || !messages.some((m) => m.id === assistantId)) return messages;
+  return messages.map((m) => {
+    if (m.id !== assistantId) return m;
+    const {
+      streaming: _streaming,
+      gap: _gap,
+      live: _live,
+      error: _error,
+      notice: _notice,
+      interrupted: _interrupted,
+      ...kept
+    } = m;
+    return {
+      ...kept,
+      text: last.text,
+      tools: last.tools,
+      ...(last.error === undefined ? {} : { error: last.error }),
+      ...(last.notice === undefined ? {} : { notice: last.notice }),
+      ...(last.interrupted === true ? { interrupted: true } : {}),
+      ...(last.model === undefined ? {} : { model: last.model }),
+    };
+  });
 }

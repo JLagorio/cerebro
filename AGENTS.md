@@ -33,7 +33,8 @@ enforced: `.github/workflows/mac-app.yml`
 
 ## Repo map — what is real and what is vendored
 
-- `src/` — React app. `engine/` is the pure domain core (best-tested layer);
+- `src/` — React app. `engine/` is the pure domain core (best-tested layer),
+  and `engine/scene/` the whiteboard scene core (M68.1, CV-45);
   `views/`, `pages/`, `app/`, `detail/`, `knowledge/`, `agent/`, `editor/`,
   `git/`, `library/`, `workspace/`, `status/` are surfaces; `stores/` is
   Zustand; `lib/` holds IPC + browser mocks. Lint (`eslint.config.js`) and the
@@ -45,7 +46,9 @@ enforced: `.github/workflows/mac-app.yml`
 - **Knowledge is three tabs, and a concept is a page** (M50–M51). The page
   (`pages/KnowledgePage.tsx`) is Concepts (every concept, filed by folder),
   Review (the queue — `engine/okf.ts` `reviewQueue` orders it and names each
-  row's reason — then the proposal cards under "Waiting on you") and Activity
+  row's reason — then "Waiting on you": the ledger's proposal cards and the
+  page writes ask-first agents queued while nobody watched, which are
+  operational and live in runtime.db, M57.4c) and Activity
   (what changed, the attention lanes, the update log, and the machinery
   folded under System). `knowledge/BaseItself.tsx` supplies those status
   sections from `src/status/`, each owning its own read and its own failure.
@@ -74,10 +77,13 @@ enforced: `.github/workflows/mac-app.yml`
   (`cerebro.navClosed`; Databases keeps `typesOpen`). The chrome is the DS's:
   sunken sidebar, `--surface-selected` + cortex ink for the current row,
   quiet mono counts — never a filled pill (M42.1).
-  The destination names are asserted in `app/Sidebar.test.tsx`; specs scope
-  destination clicks to `nav-surfaces` (nested rows live OUTSIDE those
-  containers precisely because they share accessible names with
-  destinations). Sections are addressed by `data-section`, never
+  The destination names are asserted in `app/Sidebar.test.tsx`, and every
+  destination is one row of `engine/destinations.ts` (M59.1): the sidebar
+  rows and doors, ⌘K Go to, the window title, thread labels and navigate's
+  `to` read it, and `destinations.test.ts` holds `tools.v1.json`'s navigate
+  list to it. Specs scope destination clicks to `nav-surfaces` (nested rows
+  live OUTSIDE those containers precisely because they share accessible
+  names with destinations). Sections are addressed by `data-section`, never
   by a per-section testid, and the `KnowledgeNav` selection type carries the
   tab (plus `run`, for one fleet detail) so a tab is a place the back button
   returns to.
@@ -90,15 +96,28 @@ enforced: `.github/workflows/mac-app.yml`
   so Back never lands on a forwarder; only construct actors keep a page on the
   Agents surface.
 - `src-tauri/src/` — Rust: `vault/` (scan/parse/write, and `comments.rs`,
-  each page's comment sidecar under `.comments/`), `git/`, `mcp.rs`
+  each page's comment sidecar under `.comments/`; `receipt.rs` is the
+  receipt every write carries, minted only by its door's guard, M58.1;
+  `corpus.rs` is search's stat-keyed cache, one read per changed file and
+  never an index, M17.19 and M59.4; `trash.rs` is the vault's own Trash,
+  where a delete waits in `.trash/<stamp>/` until Settings restores it or
+  the launch purge hands it to the OS Trash, M60.8),
+  `git/`, `mcp.rs`
   (loopback MCP server), `agent/` (CLI spawn; `fold.rs` folds the live
   stream and Claude Code's session file into one event vocabulary, and
-  `transcript.rs` finds that file and reads it back), `knowledge.rs` (OKF guards),
+  `transcript.rs` finds that file and reads it back; `interaction.rs` is the
+  ask seam's book, where a run waits on a call and only a person's answer
+  resumes it, and where the Allow of an ask-first agent's page write waits
+  for dispatch: an Agent record's `ask-first:` and the tool manifest's
+  `confirmable` column, M57.4; `thread_turn.rs` is an @agent turn in a
+  comment thread, M70.4), `comment_tools.rs` (the agent comment tools,
+  M70.3), `knowledge.rs` (OKF guards),
   `connectors.rs`, `shell/` (the main window, built in setup so its
-  navigation guard is attached; `open.rs` is Open with: Finder, the default
-  app, agent links and the clipboard; `quit.rs` owns ⌘Q and the close guard,
-  which flush every pending save before exit (M55.10), while Dock Quit,
-  logout and shutdown exit without them), `runtime/fleet.rs` (run history,
+  navigation guard is attached and its title follows the page's; `open.rs`
+  is Open with: Finder, the default app, agent links and the clipboard;
+  `quit.rs` owns ⌘Q and the close guard, which flush every pending save
+  before exit (M55.10), while Dock Quit, logout and shutdown exit without
+  them), `runtime/fleet.rs` (run history,
   read through `runtime::ReadOnly`, a connection SQLite refuses writes on; a
   phase that needs a new fact still goes through the Meter or the governance
   writers).
@@ -311,8 +330,32 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
   session file fold through `src-tauri/src/agent/fold.rs` into one event
   vocabulary, and `src/agent/transcript.ts` is the one reducer from events to
   messages, live and restored. A third reader of either format is a defect;
-  the meter's Tally reads raw lines for accounting only.
+  the meter's Tally reads raw lines for accounting only, and
+  `transcript::pending_deferral` reads the session file's tail only for an
+  open deferral marker (M57.1).
   enforced: `src-tauri/src/agent/fold.rs::every_recorded_line_is_classified`, `src/agent/transcript.test.ts::replays the transcript goldens`
+- **CV-28 A run waits; only a person answers** (M57.1). A run asks through
+  its own loopback connection and can only wait: no MCP tool, hook or bearer
+  records an answer; answers enter through `answer_interaction`, a Tauri
+  command. A tool the gate may defer is never pre-approved in argv, so a hook
+  that fails or never runs leaves the call refused.
+  enforced: `src-tauri/src/agent/interaction.rs::only_the_answer_command_mints_a_person_answer`, `src-tauri/src/agent/mod.rs::a_tool_the_gate_may_defer_is_never_pre_approved`
+- **CV-29 One table decides what Claude Code may run** (M57.2). Whether one
+  of the CLI's own tools runs, asks the person or is refused is decided only
+  by `shared/policy/tool-approval.v1.json`, by tool family (the manifest's
+  `family` column), run kind and ceiling. Allow and deny ride argv; ask and
+  refuse meet the gate on a seated run and are never pre-approved, and
+  refuse rides `--disallowedTools` where no gate sits, so a hook outage fails
+  closed. A writer or the shell that an agent's record narrows out is denied
+  in argv, so acceptEdits can't approve it. A run nobody watches never asks:
+  its asks become denials, recorded as one `capability_unavailable` row.
+  enforced: `src-tauri/src/policy/tool_approval.rs::replays_the_tool_approval_goldens`, `src/lib/policy/toolApproval.test.ts::replays the tool-approval goldens`
+- **CV-30 A turn outlives its panel** (M57.6). Closing the assistant,
+  switching threads or starting a new one detaches a running turn and never
+  stops it; only Stop, Steer, deleting its thread, a vault switch and quit
+  end a run. Every live event carries a run-local seq, and the panel
+  re-attaches through `agent_events_since`, so each event shows once.
+  enforced: `src/agent/useAgentChat.test.tsx::closing the panel mid-turn detaches and never stops the run`, `e2e/agent-detach.spec.ts`
 - **CV-31 Comments live beside the page, never in it** (M70.2). A page's
   threads are `<vault>/.comments/<page path>.json`. Only `vault/comments.rs`
   and its mock twin write them, under the page's path lock, and a rename or
@@ -320,6 +363,56 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
   vault-changed and every note writer leave `.comments/` alone. A sidecar
   that does not parse reads as unavailable and is never overwritten.
   enforced: `src-tauri/src/vault/comments.rs::a_comment_never_touches_the_page_bytes`, `src-tauri/src/vault/comments.rs::replays_the_shared_comment_cases`, `src/engine/comments.test.ts::replays the shared comment cases`
+- **CV-32 An ask-first write lands only on a person's Allow** (M57.4). On an
+  agent whose record says `ask-first: true`, a write the tool manifest marks
+  `confirmable` reaches disk only through an Allow the person gave in the
+  app, in an attended card or in Review (M57.4c: a run nobody watches queues
+  it there). Rust reads ask-first from the agent's own record, so the
+  renderer can only tighten it. Rust's dispatch is the boundary: argv, hooks
+  and the user's own allow rules can only ask sooner, never approve, and
+  only the webview's answer commands mint an approval or apply a queued
+  write.
+  enforced: `src-tauri/src/mcp.rs::an_ask_first_write_never_lands_without_a_persons_allow`, `src-tauri/src/mcp.rs::a_renderer_cannot_drop_ask_first`, `src-tauri/src/mcp.rs::an_unattended_ask_first_write_waits_in_review_and_nowhere_on_disk`, `src/lib/policy/toolApproval.test.ts::replays the tool-approval goldens`
+- **CV-33 Every vault write carries a receipt** (M58.1). A writer in
+  `vault::write`, the ledger's concept writers and git's discard take a
+  `WriteReceipt<Door>` (Human, Agent, ConceptDoor, System) that only its
+  door's guard can mint, and record actor and run_id in `vault_writes` under
+  the path the scan lists, or are listed in `UNRECORDED` with their reason.
+  IPC doors stamp `human:me`; MCP doors stamp the run's grant, and a write a
+  person allowed names them as approver; the mock stamps the same doors.
+  enforced: `src-tauri/src/vault/receipt.rs::receipts_are_minted_only_at_their_doors`, `src/lib/mockIpc.test.ts::replays the shared write doors`
+- **CV-34 A run commits only what it wrote** (M58.3). When a run ends, Rust
+  commits exactly the paths its `vault_writes` rows and its own Write and
+  Edit calls name, one commit at a time per repository, with `Cerebro-Run`
+  and `Cerebro-Actor` trailers. Every other commit leaves a live run's paths
+  alone.
+  enforced: `src-tauri/src/git/changeset.rs::a_run_commit_takes_only_its_paths`, `src-tauri/src/git/commit.rs::commit_all_leaves_a_live_runs_paths_alone`
+- **CV-35 Attribution is recorded, never inferred** (M58.4). History names
+  an agent for a commit only when runtime.db's `run_commits` record says
+  that agent's run made it; a run's commit writes that row and nothing else
+  does. A trailer, a message, a git author or a `vault_writes` row never
+  names one; on a recorded commit, `vault_writes` rows only add who else
+  edited it. Everything else reads "unattributed", and a record that could
+  not be read reads "attribution unknown".
+  enforced: `src-tauri/src/runtime/fleet.rs::a_commit_names_a_run_only_from_its_record`
+- **CV-36 Only a person asks an agent in a thread** (M70.4). A comment
+  thread starts an agent's turn only from a person's own comment that names
+  it with `@handle`, through `start_thread_turn`. An agent's comment, reply
+  or answer never starts one, and a reply without a mention infers nothing.
+  The turn runs under the agent's own record with no shell, web or
+  connectors, and Cerebro, not the agent, posts the answer in place of the
+  placeholder bound to the run's id; a deleted placeholder drops the answer.
+  enforced: `src-tauri/src/agent/thread_turn.rs::an_agents_comment_never_starts_a_turn`, `src-tauri/src/agent/thread_turn.rs::only_the_command_starts_a_thread_turn`
+- **CV-37 Nothing is hard-deleted** (M60.8). Deleting moves a page and its
+  comments to `.trash/<stamp>/<path>`, outside scan, search and Cerebro's
+  agent tools. Restore refuses to overwrite. The launch purge moves items
+  past 30 days to the OS Trash. No code under `vault/` unlinks a page.
+  enforced: `src-tauri/src/vault/trash.rs::no_vault_writer_unlinks_a_page`, `src/lib/mockIpc.test.ts::replays the shared trash cases`
+- **CV-45 The whiteboard scene core stays self-contained** (M68.1).
+  `src/engine/scene/` imports only its own files, perfect-freehand (in
+  `ink.ts` alone) and fractional-indexing (in `order.ts` alone), reads no
+  clock or randomness, and takes every new id from its caller.
+  enforced: `src/engine/scene/boundary.test.ts::the scene core imports only itself and its two upstream libraries`, `scripts/lint-rails.test.ts::engine imports admit the two scene libraries and no subpath`
 
 ## Verifying UI work
 

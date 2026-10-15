@@ -20,7 +20,13 @@ import {
   parseDateProperty,
   toIsoDate,
 } from './dates';
-import { applyFormat, computeRollup, formatNumber, formatTimestamp } from './properties';
+import {
+  applyFormat,
+  computeRollup,
+  formatNumber,
+  formatTimestamp,
+  rollupCalcMeta,
+} from './properties';
 import { buildRelationIndex, childrenOf } from './relations';
 import { parseTabList, parseViewList } from './views';
 import { resolveTarget } from './wikilink';
@@ -269,6 +275,35 @@ export function serializeLayoutConfig(l: LayoutConfig): Record<string, unknown> 
   return Object.keys(out).length === 0 ? null : out;
 }
 
+/**
+ * The fields every entry answers from its own facts, never from frontmatter
+ * (M60.1). They come first in `fieldValue`'s one order — virtual, then a
+ * declared computed kind, then a relationship, then a property — so a
+ * frontmatter `title:` key never outranks the page title a sort and the
+ * Title column already read.
+ */
+export const VIRTUAL_FIELDS = ['title', 'type', 'createdAt', 'modifiedAt'] as const;
+
+export type VirtualField = (typeof VIRTUAL_FIELDS)[number];
+
+function virtualValue(e: Entry, field: VirtualField): unknown {
+  switch (field) {
+    case 'title':
+      return e.title;
+    case 'type':
+      return e.type ?? undefined;
+    case 'createdAt':
+      return e.createdAt;
+    case 'modifiedAt':
+      return e.modifiedAt;
+  }
+}
+
+const isVirtualField = (field: string): field is VirtualField =>
+  (VIRTUAL_FIELDS as readonly string[]).includes(field);
+
+const fileStem = (path: string): string => (path.split('/').pop() ?? path).replace(/\.md$/, '');
+
 function isEmptyValue(raw: unknown): boolean {
   return (
     raw === undefined || raw === null || raw === '' || (Array.isArray(raw) && raw.length === 0)
@@ -354,9 +389,63 @@ export function buildSchema(entries: Entry[]): Schema {
     return own !== undefined && own.length > 0 ? 'type' : 'default';
   }
 
-  function resolveField(e: Entry, field: string): ResolvedField {
+  function declaredDef(e: Entry, field: string): FieldDef | null {
     const typeDef = e.type !== null ? types.get(e.type) : undefined;
-    const def = typeDef?.fields.find((f) => f.name === field) ?? null;
+    return typeDef?.fields.find((f) => f.name === field) ?? null;
+  }
+
+  /** A derived relation's records: those of `from.type` whose `from.field`
+   * links here. `resolveField` and `fieldValue` both read it, so the cell and
+   * the filter cannot disagree about who links to a record. */
+  function derivedSources(e: Entry, from: NonNullable<FieldDef['from']>): Entry[] {
+    return childrenOf(
+      e,
+      { direction: 'reverse', type: from.type, field: from.field },
+      entries,
+      relations,
+    );
+  }
+
+  const derivedStems = (sources: Entry[]): string[] => sources.map((s) => fileStem(s.path));
+
+  // Per-schema, so a sort comparing n·log n pairs resolves each rollup once.
+  // buildSchema is rebuilt whenever entries change, which retires the memo.
+  const memo = new WeakMap<Entry, Map<string, unknown>>();
+
+  function computeFieldValue(e: Entry, field: string): unknown {
+    if (isVirtualField(field)) return virtualValue(e, field);
+    const def = declaredDef(e, field);
+    if (def?.kind === 'created_time') return e.createdAt;
+    if (def?.kind === 'last_edited_time') return e.modifiedAt;
+    if (def?.kind === 'rollup') {
+      const computed = computeRollup(e, def, entries, relations);
+      if (computed === '') return undefined;
+      if (!rollupCalcMeta(def.calculate).yieldsNumber) return computed;
+      const n = Number(computed);
+      return Number.isFinite(n) ? n : undefined;
+    }
+    if ((def?.kind === 'relation' || def?.kind === 'person') && def.from !== undefined) {
+      return derivedStems(derivedSources(e, def.from));
+    }
+    const rel = e.relationships[field];
+    if (rel !== undefined) return rel;
+    return e.properties[field];
+  }
+
+  function fieldValue(e: Entry, field: string): unknown {
+    let row = memo.get(e);
+    if (row === undefined) {
+      row = new Map();
+      memo.set(e, row);
+    }
+    if (row.has(field)) return row.get(field);
+    const value = computeFieldValue(e, field);
+    row.set(field, value);
+    return value;
+  }
+
+  function resolveField(e: Entry, field: string): ResolvedField {
+    const def = declaredDef(e, field);
     const relTargets = e.relationships[field];
     const raw: unknown = relTargets !== undefined ? relTargets : e.properties[field];
 
@@ -397,16 +486,10 @@ export function buildSchema(entries: Entry[]): Schema {
     // gating on the kind NAME left a derived person field reading its own
     // empty frontmatter and rendering blank.
     if ((def?.kind === 'relation' || def?.kind === 'person') && def.from !== undefined) {
-      const sources = childrenOf(
-        e,
-        { direction: 'reverse', type: def.from.type, field: def.from.field },
-        entries,
-        relations,
-      );
-      const stems = sources.map((s) => (s.path.split('/').pop() ?? s.path).replace(/\.md$/, ''));
+      const sources = derivedSources(e, def.from);
       return {
         def,
-        raw: stems,
+        raw: derivedStems(sources),
         display: sources.map((s) => s.title).join(', '),
         color: null,
         ghost: false,
@@ -500,5 +583,6 @@ export function buildSchema(entries: Entry[]): Schema {
     statusSetFor,
     statusSourceFor,
     resolveField,
+    fieldValue,
   };
 }

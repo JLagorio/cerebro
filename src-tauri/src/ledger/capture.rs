@@ -44,6 +44,7 @@ use super::schema::{
 };
 use super::writer::{member_ref, LedgerWriter};
 use super::{ledger_dir, read_ledger, shadow};
+use crate::vault::receipt::{ConceptDoor, WriteReceipt};
 
 /// One ordinary field change: pointer plus typed before/after, with an
 /// optional correction trail (the extracted-claim-text carve-out).
@@ -138,17 +139,45 @@ pub enum WireRequest {
     Editorial(EditorialRequest),
 }
 
-/// Parse and dispatch one IPC capture request. `None` when no ledger
-/// writer is active for the vault.
-pub fn capture_from_json(vault: &Path, request: &serde_json::Value) -> Option<Result<(), String>> {
+/// What every capture of a path outside the bundle refuses with.
+pub const NOT_A_PROJECTION: &str = "capture applies only to knowledge/ projections";
+
+/// Parse and dispatch one IPC capture request, recording the projection it
+/// changed under `by` (M58.1). `None` when no ledger writer is active for the
+/// vault.
+pub fn capture_from_json(
+    vault: &Path,
+    request: &serde_json::Value,
+    by: &WriteReceipt<ConceptDoor>,
+) -> Option<Result<(), String>> {
     let parsed: WireRequest = match serde_json::from_value(request.clone()) {
         Ok(parsed) => parsed,
         Err(e) => return Some(Err(format!("malformed capture request: {e}"))),
     };
-    match parsed {
+    let path = match &parsed {
+        WireRequest::Structured(request) => request.path.clone(),
+        WireRequest::Editorial(request) => request.path.clone(),
+    };
+    recorded(vault, &path, by, || match parsed {
         WireRequest::Structured(request) => capture_structured(vault, &request),
         WireRequest::Editorial(request) => capture_editorial(vault, &request),
+    })
+}
+
+/// Run one in-app capture of `path`, and record the projection under `by`
+/// when the capture changed its bytes (M58.1).
+fn recorded(
+    vault: &Path,
+    path: &str,
+    by: &WriteReceipt<ConceptDoor>,
+    capture: impl FnOnce() -> Option<Result<(), String>>,
+) -> Option<Result<(), String>> {
+    let before = crate::vault::write::snapshot(vault, &[path]);
+    let captured = capture();
+    if matches!(captured, Some(Ok(()))) {
+        crate::vault::write::record_changed(vault, &before, by);
     }
+    captured
 }
 
 /// The suspension refusal while the divergence circuit breaker is open.
@@ -451,7 +480,7 @@ fn capture_structured_adopting(
     let krel = request
         .path
         .strip_prefix("knowledge/")
-        .ok_or("capture applies only to knowledge/ projections")?;
+        .ok_or(NOT_A_PROJECTION)?;
     if request.fields.is_empty() && request.relations.is_empty() && request.alias_adds.is_empty() {
         return Err("an empty capture request captures nothing".to_string());
     }
@@ -789,7 +818,7 @@ fn capture_editorial_adopting(
     let krel = request
         .path
         .strip_prefix("knowledge/")
-        .ok_or("capture applies only to knowledge/ projections")?;
+        .ok_or(NOT_A_PROJECTION)?;
     if request.ops.is_empty() {
         return Err("an editorial capture with no ops changes nothing".to_string());
     }
@@ -976,9 +1005,7 @@ fn capture_file_with(
     path: &str,
     chosen: bool,
 ) -> Result<(), String> {
-    let krel = path
-        .strip_prefix("knowledge/")
-        .ok_or("capture applies only to knowledge/ projections")?;
+    let krel = path.strip_prefix("knowledge/").ok_or(NOT_A_PROJECTION)?;
     let raw = std::fs::read_to_string(vault.join(path)).map_err(|e| format!("{path}: {e}"))?;
     super::project::parse_okf(&raw)?; // unparsable bytes refuse early
 
@@ -1098,12 +1125,20 @@ fn capture_diff_with(
 }
 
 /// The M23.7 valve, body half: an in-app body edit to a projection is a
-/// captured change, not a refused write. `None` without an active writer.
-pub fn capture_body_edit(vault: &Path, path: &str, body: &str) -> Option<Result<(), String>> {
+/// captured change, not a refused write, recorded under `by` (M58.1).
+/// `None` without an active writer.
+pub fn capture_body_edit(
+    vault: &Path,
+    path: &str,
+    body: &str,
+    by: &WriteReceipt<ConceptDoor>,
+) -> Option<Result<(), String>> {
+    recorded(vault, path, by, || capture_body_edit_now(vault, path, body))
+}
+
+fn capture_body_edit_now(vault: &Path, path: &str, body: &str) -> Option<Result<(), String>> {
     shadow::with_writer(vault, |writer| {
-        let krel = path
-            .strip_prefix("knowledge/")
-            .ok_or("capture applies only to knowledge/ projections")?;
+        let krel = path.strip_prefix("knowledge/").ok_or(NOT_A_PROJECTION)?;
         let state = current_state(writer, vault)?;
         if super::reconcile::global_stop(vault, &state)? {
             return Err(RECONCILIATION_SUSPENDED.to_string());
@@ -1146,16 +1181,26 @@ pub fn capture_body_edit(vault: &Path, path: &str, body: &str) -> Option<Result<
 /// frontmatter partitions exactly like every other capture — presentation
 /// keys become editorial ops, epistemic keys become assertions plus their
 /// revision, relation/alias keys their paired events; provenance stamps and
-/// alias removal stay refused. `None` without an active writer.
+/// alias removal stay refused. Recorded under `by` (M58.1). `None` without
+/// an active writer.
 pub fn capture_frontmatter_patch(
+    vault: &Path,
+    path: &str,
+    patch: &serde_json::Map<String, serde_json::Value>,
+    by: &WriteReceipt<ConceptDoor>,
+) -> Option<Result<(), String>> {
+    recorded(vault, path, by, || {
+        capture_frontmatter_patch_now(vault, path, patch)
+    })
+}
+
+fn capture_frontmatter_patch_now(
     vault: &Path,
     path: &str,
     patch: &serde_json::Map<String, serde_json::Value>,
 ) -> Option<Result<(), String>> {
     shadow::with_writer(vault, |writer| {
-        let krel = path
-            .strip_prefix("knowledge/")
-            .ok_or("capture applies only to knowledge/ projections")?;
+        let krel = path.strip_prefix("knowledge/").ok_or(NOT_A_PROJECTION)?;
         let state = current_state(writer, vault)?;
         if super::reconcile::global_stop(vault, &state)? {
             return Err(RECONCILIATION_SUSPENDED.to_string());

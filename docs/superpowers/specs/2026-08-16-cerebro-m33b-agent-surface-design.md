@@ -94,6 +94,11 @@ the question a person actually has.
 **D8 — Addressing an agent does not create a new chat surface.** An existing
 thread gains a recipient. The place anchor stays.
 
+> Amended by M70.4 (D10 b), 2026-10-14: a page's comment thread is a second
+> place an @handle reaches an agent. A person's comment that names one runs
+> one turn there, and its answer is posted in that thread. The panel still
+> gains no new chat surface.
+
 ---
 
 ## 4. Phases

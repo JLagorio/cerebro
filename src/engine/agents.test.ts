@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { agentRef, listAgents, narrowTools, readAddress } from './agents';
+import { TOOL_APPROVAL } from '@/lib/policy/toolApproval';
+import { agentRef, askFirstOf, linkedTiers, listAgents, narrowTools, readAddress } from './agents';
 import { makeEntry } from './testHelpers';
 
 const agent = (title: string, patch: Parameters<typeof makeEntry>[0] = {}) =>
@@ -271,6 +272,31 @@ describe('memory tiers', () => {
       expect(agentRef(entry).memory.preferences).toBe('[[atlas]]');
       expect(entry).toEqual(before);
     });
+
+    it('names the tiers it rebuilt from links, so nothing saves over them', () => {
+      const entry = (
+        properties: Record<string, unknown>,
+        relationships: Record<string, string[]>,
+      ) =>
+        makeEntry({
+          path: 'records/agents/scout.md',
+          title: 'Scout',
+          type: 'Agent',
+          properties: properties as never,
+          relationships,
+        });
+      expect(linkedTiers(entry({}, { preferences: ['maya-chen', 'atlas'] }))).toEqual({
+        recent: false,
+        preferences: true,
+      });
+      expect(linkedTiers(entry({ preferences: 'be terser' }, { preferences: ['atlas'] }))).toEqual({
+        recent: false,
+        preferences: false,
+      });
+      expect(linkedTiers(entry({}, { memory: ['old-note'] })).recent).toBe(true);
+      expect(linkedTiers(entry({ recent: 'plain' }, { memory: ['old-note'] })).recent).toBe(false);
+      expect(linkedTiers(entry({}, { preferences: [' '] })).preferences).toBe(false);
+    });
   });
 });
 
@@ -384,5 +410,45 @@ describe('narrowTools', () => {
     // that asked for no tools must not be widened by whoever it is addressed to.
     expect(narrowTools([], ['get_note'])).toEqual([]);
     expect(narrowTools(['get_note'], [])).toEqual([]);
+  });
+});
+
+describe('askFirstOf (M57.4)', () => {
+  it('replays the tool-approval artifact’s ask_first cases', () => {
+    const { record_key: key, cases } = TOOL_APPROVAL.ask_first;
+    for (const c of cases) {
+      const entry = agent('Release Scout', {
+        properties: {
+          tools: 'safe',
+          ...(c.held === 'property' ? { [key]: c.value } : {}),
+        },
+        ...(c.held === 'relation' ? { relationships: { [key]: c.value as string[] } } : {}),
+      });
+      const read = askFirstOf(entry);
+      expect(read.on, c.why).toBe(c.on);
+      expect(read.warning !== null, c.why).toBe(c.warn);
+      expect(agentRef(entry).askFirst, c.why).toBe(c.on);
+    }
+  });
+
+  it('reads a relation-valued ask-first on, and warns with its links', () => {
+    const entry = agent('Release Scout', { relationships: { 'ask-first': ['release-scout'] } });
+    expect(askFirstOf(entry)).toEqual({
+      on: true,
+      warning: 'ask-first: [[release-scout]] — read as on until you choose',
+    });
+    expect(agentRef(entry).askFirstWarning).toBe(
+      'ask-first: [[release-scout]] — read as on until you choose',
+    );
+  });
+
+  it('names an odd value as the file holds it', () => {
+    const odd = (value: unknown) =>
+      askFirstOf(agent('Scout', { properties: { 'ask-first': value } })).warning;
+    expect(odd('yes')).toBe('ask-first: yes — read as on until you choose');
+    expect(odd(1)).toBe('ask-first: 1 — read as on until you choose');
+    expect(odd(true)).toBeNull();
+    expect(odd(false)).toBeNull();
+    expect(agentRef(agent('Scout')).askFirst).toBe(false);
   });
 });

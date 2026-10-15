@@ -15,7 +15,8 @@ import { buildSchema } from './schema';
 import { makeEntry } from './testHelpers';
 import { parseListYaml, serializeList } from './views';
 import { FIELD_KINDS, FILTER_OPS } from './types';
-import type { FilterGroup, FilterRule } from './types';
+import type { Entry, FilterGroup, FilterRule } from './types';
+import { bigEpic, computedVault, emptyEpic, smallEpic } from '@/test/computedVault';
 
 const entry = makeEntry({
   path: 'items/fld-2.md',
@@ -122,6 +123,55 @@ describe('evaluateFilters — single ops', () => {
 
   it.each(cases)('%s', (_name, rule, expected) => {
     expect(evaluateFilters(entry, wrap(rule), schema)).toBe(expected);
+  });
+});
+
+// M60.1: a filter reads `schema.fieldValue`, so computed values answer the
+// way their cells show them. Before, every one of these read empty frontmatter.
+describe('evaluateFilters — computed values (M60.1)', () => {
+  const vault = computedVault();
+  const computed = buildSchema(vault);
+  const holds = (e: Entry, rule: FilterRule) => evaluateFilters(e, wrap(rule), computed);
+
+  it('`edited on_or_after` reads modifiedAt', () => {
+    const rule: FilterRule = { field: 'edited', op: 'on_or_after', value: '2026-07-21' };
+    expect(holds(bigEpic, rule)).toBe(true);
+    expect(holds(smallEpic, rule)).toBe(false);
+  });
+
+  // The measured bug: created time read the empty frontmatter key, so this
+  // excluded every record.
+  it('`created after 2026-07-01` holds for a record created 2026-08-01', () => {
+    const rule: FilterRule = { field: 'created', op: 'after', value: '2026-07-01' };
+    expect(holds(bigEpic, rule)).toBe(true);
+    expect(holds(smallEpic, rule)).toBe(false);
+  });
+
+  it('reads the virtual createdAt and modifiedAt the same way', () => {
+    expect(holds(bigEpic, { field: 'createdAt', op: 'after', value: '2026-07-01' })).toBe(true);
+    expect(holds(smallEpic, { field: 'modifiedAt', op: 'before', value: '2026-07-21' })).toBe(true);
+  });
+
+  it('`is_empty` is false on a populated derived relation', () => {
+    expect(holds(bigEpic, { field: 'tasks', op: 'is_empty' })).toBe(false);
+    expect(holds(emptyEpic, { field: 'tasks', op: 'is_empty' })).toBe(true);
+    expect(holds(bigEpic, { field: 'tasks', op: 'any_of', value: ['big-3'] })).toBe(true);
+  });
+
+  it('a count rollup `gt 9` holds for 10 — a number, not the string "10"', () => {
+    expect(holds(bigEpic, { field: 'task_count', op: 'gt', value: 9 })).toBe(true);
+    expect(holds(smallEpic, { field: 'task_count', op: 'gt', value: 9 })).toBe(false);
+    expect(holds(bigEpic, { field: 'task_count', op: 'equals', value: 10 })).toBe(true);
+  });
+
+  it('an absent rollup sum is empty, never 0', () => {
+    expect(holds(emptyEpic, { field: 'points', op: 'is_empty' })).toBe(true);
+    expect(holds(emptyEpic, { field: 'points', op: 'equals', value: 0 })).toBe(false);
+  });
+
+  it('`title contains` reads the page title, not a frontmatter `title:`', () => {
+    expect(holds(bigEpic, { field: 'title', op: 'contains', value: 'big' })).toBe(true);
+    expect(holds(bigEpic, { field: 'title', op: 'contains', value: 'zeta' })).toBe(false);
   });
 });
 
@@ -738,6 +788,37 @@ describe('searchEntries (M16.26)', () => {
   });
   it('an empty query is not a filter', () => {
     expect(searchEntries(corpus, '   ')).toHaveLength(2);
+  });
+  /** M59.2: frontmatter is read by engine/searchable.ts, the rule search_notes reads by. */
+  it('a nested value never matches as [object Object]', () => {
+    const nested = makeEntry({
+      path: 'types/decision.md',
+      title: 'Decision',
+      type: 'Type',
+      properties: { fields: { status: { kind: 'select' } } } as unknown as Entry['properties'],
+    });
+    expect(searchEntries([nested], 'object')).toHaveLength(0);
+    expect(searchEntries([nested], 'select')).toHaveLength(0);
+  });
+  it("an agent's memory is not searchable", () => {
+    const agent = makeEntry({
+      path: 'records/agents/scout.md',
+      title: 'Scout',
+      type: 'Agent',
+      properties: { recent: 'zanzibar', memory: ['zanzibar'], preferences: 'zanzibar' },
+    });
+    expect(searchEntries([agent], 'zanzibar')).toHaveLength(0);
+    expect(searchEntries([agent], 'scout')).toHaveLength(1);
+  });
+  it('app-managed keys are not searchable', () => {
+    const page = makeEntry({
+      path: 'notes/n.md',
+      title: 'Note',
+      properties: { _organized: 'filed-by-librarian', icon: 'rocket', cover: '#ff8800' },
+    });
+    for (const term of ['librarian', 'rocket', 'ff8800']) {
+      expect(searchEntries([page], term)).toHaveLength(0);
+    }
   });
 });
 

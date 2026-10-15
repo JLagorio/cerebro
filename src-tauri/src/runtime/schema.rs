@@ -1320,3 +1320,152 @@ pub const SCHEMA_V21: &str = "
     CREATE INDEX runs_by_cli_session ON runs (cli_session_id)
         WHERE cli_session_id IS NOT NULL;
 ";
+
+/// M57.4c — the page writes an ask-first agent queued for the person.
+///
+/// A run nobody watches cannot ask, so an ask-first agent's confirmable write
+/// waits here for Review instead of landing (`runtime::pending_writes`). One
+/// queue, two doors: the MCP door queues a row, and Review's Allow or Reject
+/// decides it. Operational, never epistemic: the vault and the ledger hear of
+/// a pending write only once it is applied, through the write itself.
+///
+/// - `pending_id` is 128 bits of lowercase hex; `vault_id` a registered vault.
+/// - `actor` is always a `process:` agent: only an agent asks first. `tool` is
+///   1 to 64 characters, with no tool list here (CV-04): Rust inserts only
+///   the manifest's confirmable rows.
+/// - `target` is the page or folder the write names (at most 1024
+///   characters), and `target_hash` the SHA-256 of the page's bytes when it
+///   was queued, NULL for a page that did not exist yet.
+/// - `input` is the agent's draft, a key-sorted JSON object of at most
+///   256 KiB (the table's `queue_limits.input_bytes`), `input_hash` its
+///   canonical hash, and `grant_json` the queuing run's grant, which the
+///   apply re-runs every guard under.
+/// - `state` is pending until a person decides. `applying` is the claim, so
+///   two decisions cannot both apply; `applied`, `rejected` and `refused` are
+///   decided; `interrupted` is an apply a crash cut short, which the agent is
+///   told to check. `decided_at` is NULL exactly while pending, a rejection
+///   and a refusal carry their `reason`, and `reported_run_id` names the run
+///   that heard the outcome, only once decided.
+/// - `pending_writes_open_once` keeps one open row per vault, actor, tool and
+///   input: the dedupe is a constraint, never a read-then-write. A rejected
+///   write can be queued again.
+pub const SCHEMA_V22: &str = "
+    CREATE TABLE pending_writes (
+        pending_id TEXT PRIMARY KEY
+            CHECK (length(pending_id) = 32 AND NOT pending_id GLOB '*[^0-9a-f]*'),
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        run_id TEXT NOT NULL CHECK (length(run_id) > 0),
+        actor TEXT NOT NULL CHECK (actor LIKE 'process:_%'),
+        tool TEXT NOT NULL CHECK (length(tool) BETWEEN 1 AND 64),
+        target TEXT NOT NULL CHECK (length(target) <= 1024),
+        target_hash TEXT CHECK (target_hash IS NULL OR (
+            length(target_hash) = 64 AND NOT target_hash GLOB '*[^0-9a-f]*')),
+        input TEXT NOT NULL CHECK (
+            json_valid(input) AND json_type(input) = 'object' AND length(input) <= 262144),
+        input_hash TEXT NOT NULL
+            CHECK (length(input_hash) = 64 AND NOT input_hash GLOB '*[^0-9a-f]*'),
+        grant_json TEXT NOT NULL
+            CHECK (json_valid(grant_json) AND json_type(grant_json) = 'object'),
+        queued_at TEXT NOT NULL CHECK (queued_at LIKE '____-__-__T%Z'),
+        state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN
+            ('pending', 'applying', 'applied', 'rejected', 'refused', 'interrupted')),
+        decided_at TEXT CHECK (decided_at IS NULL OR decided_at LIKE '____-__-__T%Z'),
+        decided_by TEXT CHECK (decided_by IS NULL OR length(decided_by) BETWEEN 1 AND 256),
+        reason TEXT CHECK (reason IS NULL OR length(reason) <= 4096),
+        applied_input TEXT CHECK (applied_input IS NULL OR (
+            json_valid(applied_input) AND json_type(applied_input) = 'object'
+            AND length(applied_input) <= 262144)),
+        result TEXT CHECK (result IS NULL OR length(result) <= 4096),
+        reported_run_id TEXT CHECK (reported_run_id IS NULL OR length(reported_run_id) > 0),
+        CHECK ((state = 'pending') = (decided_at IS NULL)),
+        CHECK (state NOT IN ('rejected', 'refused') OR length(trim(coalesce(reason, ''))) > 0),
+        CHECK (reported_run_id IS NULL OR state NOT IN ('pending', 'applying'))
+    );
+    CREATE UNIQUE INDEX pending_writes_open_once
+        ON pending_writes (vault_id, actor, tool, input_hash) WHERE state = 'pending';
+    CREATE INDEX pending_writes_open ON pending_writes (vault_id, queued_at)
+        WHERE state = 'pending';
+    CREATE INDEX pending_writes_unreported ON pending_writes (vault_id, actor, decided_at)
+        WHERE reported_run_id IS NULL AND state NOT IN ('pending', 'applying');
+";
+
+/// M58.1 — every vault write records who made it, in which run.
+///
+/// `vault_writes` is rebuilt the v14 way (rename, create, copy in rowid
+/// order, drop, then the indexes), because a CHECK cannot change in place:
+///
+/// - `kind` keeps the three kinds v17 admits and adds `vault.create` (a file
+///   that did not exist) and `vault.comment` (a page's comment sidecar,
+///   M70.2), which never counts as a change to the page.
+/// - `run_id` is the run a write belongs to: NULL for a person's write or
+///   the app's, never empty.
+/// - `approved_by` names who allowed a run's write (M57 Q21): NULL, or a
+///   `human:` actor, and only on a run's row.
+/// - `first_at` is when an autosave burst began, `recorded_at` its latest
+///   write (`runtime::vault_writes`, Q3). A copied row's burst is itself.
+///
+/// Every earlier row survives with NULL run and approver: v17 recorded
+/// neither. The indexes serve a page's history (by path), a time window
+/// (by time) and a run's writes (by run, only where one is set).
+///
+/// `runs.writes_booked` says whether a run's writes are in that table: 1
+/// for every row from here on (the default, so no INSERT changes), 2 for a
+/// run whose plan let the CLI's own writers or the shell run (booked, but
+/// the shell may have written elsewhere), and 0 for every run before this
+/// step, whose writes read as not recorded rather than as none.
+pub const SCHEMA_V23: &str = "
+    ALTER TABLE vault_writes RENAME TO vault_writes_v17;
+    CREATE TABLE vault_writes (
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        kind TEXT NOT NULL CHECK (kind IN
+            ('vault.write', 'vault.create', 'vault.rename', 'vault.delete', 'vault.comment')),
+        path TEXT NOT NULL CHECK (length(path) > 0),
+        to_path TEXT CHECK (to_path IS NULL OR length(to_path) > 0),
+        content_hash TEXT CHECK (content_hash IS NULL OR length(content_hash) = 64),
+        actor TEXT,
+        run_id TEXT CHECK (run_id IS NULL OR length(run_id) > 0),
+        approved_by TEXT CHECK (approved_by IS NULL OR
+            (approved_by LIKE 'human:_%' AND run_id IS NOT NULL)),
+        first_at TEXT NOT NULL CHECK (first_at LIKE '____-__-__T%Z'),
+        recorded_at TEXT NOT NULL CHECK (recorded_at LIKE '____-__-__T%Z'),
+        CHECK ((kind = 'vault.rename') = (to_path IS NOT NULL))
+    );
+    INSERT INTO vault_writes (rowid, vault_id, kind, path, to_path, content_hash, actor,
+                              run_id, approved_by, first_at, recorded_at)
+        SELECT rowid, vault_id, kind, path, to_path, content_hash, actor, NULL, NULL,
+               recorded_at, recorded_at
+        FROM vault_writes_v17 ORDER BY rowid;
+    DROP TABLE vault_writes_v17;
+    CREATE INDEX vault_writes_by_path ON vault_writes (vault_id, path);
+    CREATE INDEX vault_writes_by_time ON vault_writes (vault_id, recorded_at);
+    CREATE INDEX vault_writes_by_run ON vault_writes (run_id) WHERE run_id IS NOT NULL;
+    ALTER TABLE runs ADD COLUMN writes_booked INTEGER NOT NULL DEFAULT 1
+        CHECK (writes_booked IN (0, 1, 2));
+    UPDATE runs SET writes_booked = 0;
+";
+
+/// M58.4 — which run made which commit.
+///
+/// `run_commits` is the one record History names an agent from (CV-35): a
+/// run's commit (`git::changeset::settle_run`) writes its row right after
+/// `git commit` hands back the full hash, and nothing else writes one. A
+/// trailer, a message or a git author never names a run; a commit with no
+/// row here reads "unattributed".
+///
+/// - `commit_sha`: the full hash, 40 hex (sha1) or 64 (sha256), lowercase,
+///   so a short or upper-case spelling can never match.
+/// - `committed_at`: when the row was written, the stored spelling, so it
+///   compares with `vault_writes` times as a string.
+///
+/// Keyed by vault and hash: the same commit seen from two vaults that share
+/// a repository is two rows, each naming its own run.
+pub const SCHEMA_V24: &str = "
+    CREATE TABLE run_commits (
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        commit_sha TEXT NOT NULL CHECK (length(commit_sha) IN (40, 64)
+            AND NOT commit_sha GLOB '*[^0-9a-f]*'),
+        run_id TEXT NOT NULL REFERENCES runs (run_id),
+        committed_at TEXT NOT NULL CHECK (committed_at LIKE '____-__-__T%Z'),
+        PRIMARY KEY (vault_id, commit_sha)
+    );
+";

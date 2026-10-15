@@ -5,7 +5,9 @@ import { createTarget } from '@/engine/createRecord';
 import { humanize } from '@/engine/schema';
 import { typeStyle } from '@/engine/typeCatalog';
 import type { Entry, Schema } from '@/engine/types';
+import { rankNames } from '@/lib/nameRank';
 import { slugify } from '@/lib/slug';
+import { useRecency } from '@/stores/openLogStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -59,6 +61,7 @@ export function RelationPicker({
   const [busy, setBusy] = useState(false);
   const createItem = useVaultStore((s) => s.createItem);
   const toast = useUiStore((s) => s.toast);
+  const recency = useRecency();
 
   const candidates = useMemo(
     () =>
@@ -76,18 +79,22 @@ export function RelationPicker({
 
   const trimmed = query.trim();
   const linkedSet = new Set(value);
-  const results = useMemo(() => {
-    const needle = trimmed.toLowerCase();
-    return candidates.filter(
-      (e) =>
-        !linkedSet.has(pathStem(e.path)) &&
-        (needle === '' ||
-          e.title.toLowerCase().includes(needle) ||
-          e.path.toLowerCase().includes(needle)),
-    );
+  // Ranked by the one name ranker (M59.3), uncapped: this picker has always
+  // listed every candidate. An empty box lists your opened targets first,
+  // then the rest alphabetically.
+  const results = useMemo(
+    () =>
+      rankNames({
+        query: trimmed,
+        items: candidates.filter((e) => !linkedSet.has(pathStem(e.path))),
+        texts: (e) => [e.title, e.path],
+        path: (e) => e.path,
+        recency,
+      }).items,
     // linkedSet is derived from `value`, which is in the dep list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candidates, trimmed, value]);
+    [candidates, trimmed, value, recency],
+  );
 
   const exactExists = candidates.some((e) => e.title.toLowerCase() === trimmed.toLowerCase());
   const canCreate = targetType !== null && trimmed !== '' && !exactExists;

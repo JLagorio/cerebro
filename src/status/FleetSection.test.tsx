@@ -60,8 +60,13 @@ function run(over: Partial<FleetRun> = {}): FleetRun {
 }
 
 /** A detail's M56.9 fields for a run with no model recorded and nothing
- * refused. */
-const MEASURED = { model_id: null, refusals: [], refusals_total: 0 };
+ * refused, and its writes not booked (M58.1b). */
+const MEASURED = {
+  model_id: null,
+  refusals: [],
+  refusals_total: 0,
+  wrote: { state: 'not_recorded' as const },
+};
 
 /** An agent record answering to `process:weekly-digest`. */
 const digestAgent = makeEntry({
@@ -371,6 +376,7 @@ describe('FleetSection', () => {
         },
       ],
       refusals_total: 1,
+      wrote: { state: 'not_recorded' },
     });
     render(<FleetSection />);
     fireEvent.click(await screen.findByTestId('fleet-row'));

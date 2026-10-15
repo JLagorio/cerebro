@@ -326,10 +326,32 @@ describe('section links in the editor', () => {
 
   const scrolledTo = () => scroll.mock.calls.map(([el]) => (el as Element).getAttribute('data-id'));
 
-  it('labels a section link Title › Heading, with the path and fragment on hover', async () => {
+  /** Hover a chip until its preview card opens (M59.7). Each hover lands
+   * somewhere new: the card opens only for a real move. */
+  let at = 40;
+  const hoverCard = async () => {
+    at += 3;
+    act(() => {
+      chip().dispatchEvent(
+        new MouseEvent('pointermove', { bubbles: true, screenX: at, screenY: at }),
+      );
+    });
+    return waitFor(() => {
+      const card = document.querySelector<HTMLElement>('[data-testid="hover-card"]');
+      if (card === null) throw new Error('no hover card');
+      return card;
+    });
+  };
+
+  it('labels a section link Title › Heading, and its card names the page and heading', async () => {
     await openNote(SCHEDULE, 'Before a release, read [[systems-map#Rollback]].\n');
     await waitFor(() => expect(chip().textContent).toBe('Systems map › Rollback'));
-    expect(chip().getAttribute('title')).toBe(`${MAP}#Rollback`);
+    expect(chip().hasAttribute('title')).toBe(false);
+    const card = await hoverCard();
+    expect(card.querySelector('[data-testid="page-preview-title"]')?.textContent).toBe(
+      'Systems map › Rollback',
+    );
+    expect(card.querySelector('[data-testid="page-preview-path"]')?.textContent).toBe(MAP);
   });
 
   it('jumps within the page for [[#Heading]], lights the heading, and does not navigate', async () => {
@@ -374,7 +396,8 @@ describe('section links in the editor', () => {
   it('dangles a section link whose page names nothing, naming the page half', async () => {
     await openNote(SCHEDULE, 'See [[nothing#X]].\n');
     await waitFor(() => expect(chip().textContent).toBe('nothing#X'));
-    expect(chip().getAttribute('title')).toBe('No page named "nothing"');
+    const card = await hoverCard();
+    expect(card.textContent).toBe('No page named "nothing"');
     fireEvent.click(chip());
     expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: SCHEDULE });
   });

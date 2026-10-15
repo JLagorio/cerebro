@@ -4,7 +4,7 @@ import { rowClass } from '@/app/sidebarChrome';
 import { listSections, reviewQueue } from '@/engine/okf';
 import type { KnowledgeNav as Nav } from '@/engine/types';
 import { useConcepts } from '@/knowledge/useConcepts';
-import { usePendingCards } from '@/knowledge/usePendingCards';
+import { usePendingCards, usePendingWrites } from '@/knowledge/usePendingCards';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -79,13 +79,18 @@ export function KnowledgeNav({
   const concepts = useConcepts();
   const sections = useMemo(() => listSections(concepts), [concepts]);
   const queued = useMemo(() => reviewQueue(concepts).length, [concepts]);
-  // Review holds the proposals agents queued as well as the concepts to
-  // verify, so its count is both (M52.5) — "3" beside six decisions was the
-  // row undercounting its own page. Cards that could not be read are left
-  // out rather than counted as none.
+  // Review holds the proposals agents queued and the page writes they queued
+  // (M57.4c) as well as the concepts to verify, so its count is all three
+  // (M52.5) — "3" beside six decisions was the row undercounting its own
+  // page. Cards that could not be read are left out rather than counted as
+  // none; a write queue that could not be read takes the count away, since
+  // any number would claim to know what waits (CV-05).
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const pending = usePendingCards(vaultPath);
   const proposals = pending.kind === 'ready' ? pending.data.length : 0;
+  const writes = usePendingWrites(vaultPath);
+  const queuedWrites = writes.kind === 'ready' ? writes.data.length : 0;
+  const reviewCount = writes.kind === 'unavailable' ? undefined : queued + proposals + queuedWrites;
   const here: Nav = nav ?? { tab: 'all' };
   const is = (candidate: Nav) => current && sameTab(here, candidate);
 
@@ -108,7 +113,7 @@ export function KnowledgeNav({
       <NavRow
         icon="shield-check"
         label="Review"
-        count={queued + proposals}
+        count={reviewCount}
         nav={{ tab: 'review' }}
         active={is({ tab: 'review' })}
       />

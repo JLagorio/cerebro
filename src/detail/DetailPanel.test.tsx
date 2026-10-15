@@ -129,6 +129,16 @@ describe('DetailPanel', () => {
     expect(screen.queryByText('Cover')).toBeNull();
   });
 
+  // M59.1 — the type badge calls an untyped page a Page, as ⌘K does.
+  it('labels an untyped page Page in the type badge', () => {
+    const vault = fixtureVault().map((e) => (e.path === FLD_1 ? { ...e, type: null } : e));
+    useVaultStore.setState({ entries: vault });
+    render(<DetailPanel />);
+    const badge = screen.getByTestId('detail-type');
+    expect(badge.textContent).toBe('Page');
+    expect(badge.getAttribute('title')).toBe('Page');
+  });
+
   it('a record with no icon or cover draws neither in the peek', () => {
     render(<DetailPanel />);
     expect(screen.queryByTestId('page-icon')).toBeNull();

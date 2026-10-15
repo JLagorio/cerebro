@@ -4,7 +4,7 @@ import { Icon } from '@/components/ui/Icon';
 import { useEscapeLayer } from '@/components/ui/Popover';
 import { Select } from '@/components/ui/Select';
 import { PropertyRow } from '@/detail/PropertyRow';
-import { agentHandle } from '@/engine/agents';
+import { agentHandle, askFirstOf } from '@/engine/agents';
 import { parseConnectors, type ConnectorSpec } from '@/engine/connectors';
 import { agentDraft, agentPatch, type AgentDraft, type AgentKey } from '@/engine/libraryDraft';
 import {
@@ -31,6 +31,8 @@ import type { Entry } from '@/engine/types';
 import { deepEqual } from '@/lib/deepEqual';
 import { readConnectors } from '@/lib/ipc';
 import { slugify } from '@/lib/slug';
+import type { ShellCeiling } from '@/lib/policy/toolApproval';
+import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { GuardRow, TextField } from './chrome';
 import { Picker, type PickerOption } from './Picker';
@@ -54,6 +56,10 @@ const CONNECTOR_GROUP = 'Connectors';
  * Every axis is answered from something real:
  *
  * - **Scope** — folders that exist in this vault, with the count in each.
+ * - **Asks first** — `ask-first:`, which the tool-approval table reads
+ *   (M57.4): on, its page writes wait for your Allow in the panel and are
+ *   refused when it runs on its own; Rust reads the record again before a
+ *   run starts, so the page can only tighten it.
  * - **Tools** — the catalog the MCP server actually serves (engine/tools,
  *   read off the tool manifest the server serves from), and one "Every
  *   <name> tool" per enabled connector (M54.9).
@@ -108,6 +114,8 @@ export function AgentProperties({ entry }: { entry: Entry }) {
 
   // Parsed on every render: the closed rows always say what the FILE says.
   const draft = agentDraft(entry, '');
+  // The Settings shell ceiling, which caps what the record declares (M57.2).
+  const ceiling = useUiStore((s) => s.agentShell);
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const show = (key: string) => setOpen((s) => new Set(s).add(key));
   const hide = (key: string) =>
@@ -257,6 +265,30 @@ export function AgentProperties({ entry }: { entry: Entry }) {
             </p>
           </GuardRow>
         ),
+      )}
+
+      {/* M57.4 — whether its page writes wait for the person's Allow. An
+          odd value in the file reads as on until a choice is made, so Done
+          writes nothing until one is. */}
+      {boundary(
+        'ask-first',
+        ASK_FIRST_COPY.name,
+        'hand',
+        ['askFirst'],
+        askFirstWords(draft.askFirst, askFirstOf(entry).warning),
+        (d, set) => (
+          <ChoiceList
+            name="agent-ask-first"
+            ariaLabel={ASK_FIRST_COPY.name}
+            value={d.askFirst === null ? '' : d.askFirst ? 'on' : 'off'}
+            options={[
+              { value: 'on', label: ASK_FIRST_COPY.on },
+              { value: 'off', label: ASK_FIRST_COPY.off },
+            ]}
+            onChange={(choice) => set({ ...d, askFirst: choice === 'on' })}
+          />
+        ),
+        (d) => d.askFirst === null,
       )}
 
       {/* M36.3 — the READ axis, its own row. Cerebro's tools have refused
@@ -416,13 +448,11 @@ export function AgentProperties({ entry }: { entry: Entry }) {
         'Shell',
         'terminal',
         ['shell'],
-        draft.shell
-          ? 'host tools, capped by the Settings ceiling; withdrawn by a read limit'
-          : 'off',
+        shellWords(draft.shell, draft.readScope !== null, ceiling),
         (d, set) => (
           <GuardRow
             label="Let this agent run shell commands"
-            hint="The host tools, still capped by the ceiling in Settings. Unattended runs with shell access can do anything your account can. A read limit withdraws it: a shell reads past any folder list."
+            hint="The host tools, still capped by Shell access in Settings: On runs them, Ask asks first in the panel and leaves scheduled runs without them, Off withholds them. A read limit withdraws it: a shell reads past any folder list."
             tone="warn"
             checked={d.shell}
             onChange={(on) => set({ ...d, shell: on })}
@@ -431,6 +461,36 @@ export function AgentProperties({ entry }: { entry: Entry }) {
       )}
     </div>
   );
+}
+
+/** The Asks first row's words (M57.4). */
+export const ASK_FIRST_COPY = {
+  name: 'Asks first',
+  on: 'Asks before every page write',
+  off: 'Writes without asking',
+} as const;
+
+/** The Asks first row's closed words: on, off, or the file's odd value,
+ * which reads as on until the person chooses. */
+export function askFirstWords(askFirst: boolean | null, warning: string | null): string {
+  if (askFirst === null) return warning ?? ASK_FIRST_COPY.on;
+  return askFirst ? ASK_FIRST_COPY.on : ASK_FIRST_COPY.off;
+}
+
+/** The Shell row's closed words (M57.2): what the agent's runs actually get,
+ * its declaration capped by the Settings ceiling and withdrawn by a read
+ * limit. */
+export function shellWords(declared: boolean, readScoped: boolean, ceiling: ShellCeiling): string {
+  if (!declared) return 'off';
+  if (readScoped) return 'Withdrawn by its read limit';
+  switch (ceiling) {
+    case 'on':
+      return 'On';
+    case 'ask':
+      return 'Asks first in the panel; scheduled runs go without';
+    case 'off':
+      return 'Off in Settings';
+  }
 }
 
 /** What a stored value Rust would refuse reads as (M56.5). */
@@ -809,6 +869,22 @@ function ToolsEditor({
 }
 
 /**
+ * An editor open on a trigger already in the file. It is held by the trigger
+ * it was seeded from, never by its place in `when:`: another editor's Remove or
+ * an outside edit shifts the list under it, and a slot number would then point
+ * Done and Remove at a different trigger. `nth` of `copies` tells identical
+ * triggers apart.
+ */
+type OpenTrigger = { id: number; seed: Trigger; nth: number; copies: number; openedAt: number };
+
+/** Where an open editor's trigger sits now, or null when the file no longer
+ * holds it as it did — gone, edited, or copied — so no slot can be trusted. */
+function locate(triggers: readonly Trigger[], open: OpenTrigger): number | null {
+  const at = triggers.flatMap((t, i) => (deepEqual(t, open.seed) ? [i] : []));
+  return at.length === open.copies ? at[open.nth] : null;
+}
+
+/**
  * The Triggers row: one sentence per standing trigger, each opening its own
  * editor. "Add trigger" opens a new draft that reaches the file only on Done —
  * a bare `{event: changed}` is valid, and fires on every change.
@@ -832,40 +908,37 @@ function TriggersRow({
   fields: string[];
   valuesFor: (field: string) => string[];
 }) {
-  const editor = (key: string, index: number | null) => (
-    <TriggerEditor
-      key={key}
-      testId={`agent-editor-${key}`}
-      index={index ?? draft.triggers.length}
-      seed={index === null ? { event: 'changed' } : draft.triggers[index]}
-      folders={folders}
-      fields={fields}
-      valuesFor={valuesFor}
-      onClose={() => hide(key)}
-      // Built against the record as it stands at Done, so another row's
-      // write since this one opened is kept.
-      onDone={(trigger) =>
-        write(
-          {
-            ...draft,
-            triggers:
-              index === null
-                ? [...draft.triggers, trigger]
-                : draft.triggers.map((t, n) => (n === index ? trigger : t)),
-          },
-          ['triggers'],
-        )
-      }
-      onRemove={
-        index === null
-          ? null
-          : () =>
-              write({ ...draft, triggers: draft.triggers.filter((_, n) => n !== index) }, [
-                'triggers',
-              ])
-      }
-    />
-  );
+  const [editing, setEditing] = useState<readonly OpenTrigger[]>([]);
+  const nextId = useRef(0);
+  const placed = editing.map((o) => ({ o, at: locate(draft.triggers, o) }));
+  const openAt = (i: number) => placed.some((p) => p.at === i);
+  const edit = (i: number) => {
+    if (openAt(i)) return;
+    const seed = draft.triggers[i];
+    const same = draft.triggers.flatMap((t, n) => (deepEqual(t, seed) ? [n] : []));
+    const o = {
+      id: nextId.current++,
+      seed,
+      nth: same.indexOf(i),
+      copies: same.length,
+      openedAt: i,
+    };
+    setEditing((list) => [...list, o]);
+  };
+  const close = (id: number) => setEditing((list) => list.filter((o) => o.id !== id));
+
+  // Built against the record as it stands at Done, so another row's write
+  // since this one opened is kept; a trigger the file no longer holds as it
+  // was writes nothing.
+  const replace = (o: OpenTrigger, trigger: Trigger | null): Promise<boolean> => {
+    const at = locate(draft.triggers, o);
+    if (at === null) return Promise.resolve(false);
+    const triggers =
+      trigger === null
+        ? draft.triggers.filter((_, n) => n !== at)
+        : draft.triggers.map((t, n) => (n === at ? trigger : t));
+    return write({ ...draft, triggers }, ['triggers']);
+  };
 
   return (
     <div data-testid="agent-prop-triggers">
@@ -881,8 +954,8 @@ function TriggersRow({
               <button
                 type="button"
                 data-testid="agent-trigger-line"
-                aria-expanded={open.has(`trigger-${i}`)}
-                onClick={() => show(`trigger-${i}`)}
+                aria-expanded={openAt(i)}
+                onClick={() => edit(i)}
                 className="flex w-full min-w-0 items-start gap-1.5 rounded-sm border-0 bg-transparent px-1.5 py-1 text-left text-sm text-n-800 hover:bg-n-50"
               >
                 <Icon name="zap" size={12} color="var(--synapse-500)" />
@@ -901,8 +974,41 @@ function TriggersRow({
           </button>
         </div>
       </PropertyRow>
-      {draft.triggers.map((_, i) => (open.has(`trigger-${i}`) ? editor(`trigger-${i}`, i) : null))}
-      {open.has('trigger-new') && editor('trigger-new', null)}
+      {/* In list order; an editor whose trigger is gone sits last. The testid
+          counts editors in the order they opened, never a slot in `when:`. */}
+      {[...placed]
+        .sort((a, b) => (a.at ?? Infinity) - (b.at ?? Infinity))
+        .map(({ o, at }) => (
+          <TriggerEditor
+            key={o.id}
+            testId={`agent-editor-trigger-${o.id}`}
+            index={at ?? o.openedAt}
+            seed={o.seed}
+            lost={at === null}
+            folders={folders}
+            fields={fields}
+            valuesFor={valuesFor}
+            onClose={() => close(o.id)}
+            onDone={(trigger) => replace(o, trigger)}
+            onRemove={() => replace(o, null)}
+          />
+        ))}
+      {open.has('trigger-new') && (
+        <TriggerEditor
+          testId="agent-editor-trigger-new"
+          index={draft.triggers.length}
+          seed={{ event: 'changed' }}
+          lost={false}
+          folders={folders}
+          fields={fields}
+          valuesFor={valuesFor}
+          onClose={() => hide('trigger-new')}
+          onDone={(trigger) =>
+            write({ ...draft, triggers: [...draft.triggers, trigger] }, ['triggers'])
+          }
+          onRemove={null}
+        />
+      )}
     </div>
   );
 }
@@ -911,6 +1017,7 @@ function TriggerEditor({
   testId,
   index,
   seed,
+  lost,
   folders,
   fields,
   valuesFor,
@@ -921,6 +1028,9 @@ function TriggerEditor({
   testId: string;
   index: number;
   seed: Trigger;
+  /** True when the file no longer holds the trigger this editor opened on:
+   * Done and Remove write nothing until it is closed and opened again. */
+  lost: boolean;
   folders: PickerOption[];
   fields: string[];
   valuesFor: (field: string) => string[];
@@ -948,16 +1058,30 @@ function TriggerEditor({
       onClose();
       return;
     }
+    if (lost) return;
     settle(onDone(trigger));
   };
   const remove = () => {
     if (busy) return;
     if (onRemove === null) onClose();
-    else settle(onRemove());
+    else if (!lost) settle(onRemove());
   };
+  const unchanged = onRemove !== null && deepEqual(trigger, start);
 
   return (
-    <EditorShell shellRef={shell} testId={testId} busy={busy} onDone={done} onCancel={onClose}>
+    <EditorShell
+      shellRef={shell}
+      testId={testId}
+      busy={busy || (lost && !unchanged)}
+      onDone={done}
+      onCancel={onClose}
+    >
+      {lost && (
+        <p role="status" data-testid="agent-trigger-lost" className="text-xs text-n-600">
+          This trigger changed in the file since you opened it, so this editor writes nothing.
+          Cancel, then open it again.
+        </p>
+      )}
       <TriggerRow
         index={index}
         trigger={trigger}

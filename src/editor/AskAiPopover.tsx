@@ -98,7 +98,7 @@ export function AskAiPopover({
               'If the instruction cannot be applied, return the passage unchanged.',
             sessionId: null,
             model: null,
-            shell: false,
+            shell: 'off',
             connectors: false,
             attended: true,
             // No tools at all. A rewrite is a text transformation; giving it

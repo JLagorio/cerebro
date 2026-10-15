@@ -1,5 +1,5 @@
 import { slugify } from '@/lib/slug';
-import { parseMemory, parseReadScope, parseScope, type AgentMemory } from './agents';
+import { askFirstOf, parseMemory, parseReadScope, parseScope, type AgentMemory } from './agents';
 import { parseAllowedTools, parseArguments, type SkillArgument } from './skills';
 import { parseTriggers, type Trigger } from './triggers';
 import type { Entry } from './types';
@@ -98,6 +98,10 @@ export interface AgentDraft {
   /** `tools: shell` — the host tools, still capped by the Settings ceiling
    * and withdrawn in Rust by a read limit (M53.5). */
   shell: boolean;
+  /** `ask-first:` (M57.4): true asks before every page write, false writes
+   * without asking, and null is a value the file holds that is neither,
+   * which runs read as on until the person chooses. */
+  askFirst: boolean | null;
   /** `model:` and `effort:` (M56.5), trimmed; '' is unset, Claude Code's
    * default, and writes no key. */
   model: string;
@@ -122,6 +126,7 @@ export function agentDraft(entry: Entry, body: string): AgentDraft {
     disallowedTools: parseAllowedTools(entry.properties['disallowed-tools']),
     connectors: parseAllowedTools(entry.properties.connectors),
     shell: entry.properties.tools === 'shell',
+    askFirst: askFirstOf(entry).warning === null ? askFirstOf(entry).on : null,
     model: text(entry.properties.model),
     effort: text(entry.properties.effort),
     schedule: text(entry.properties.schedule),
@@ -137,8 +142,9 @@ export function agentDraft(entry: Entry, body: string): AgentDraft {
  * one or two of these and writes only those on Done: a grant written whole is
  * a grant some other row's half-built draft could overwrite.
  *
- * Never keys: `recent` (the agent's own notes), `disallowedTools` (shown,
- * edited in the file — M54.9) and the body, which the page editor saves.
+ * `askFirst` is `ask-first:` (M57.4), written `true` or removed. Never keys:
+ * `recent` (the agent's own notes), `disallowedTools` (shown, edited in the
+ * file — M54.9) and the body, which the page editor saves.
  */
 export type AgentKey =
   | 'slug'
@@ -148,6 +154,7 @@ export type AgentKey =
   | 'allowedTools'
   | 'connectors'
   | 'shell'
+  | 'askFirst'
   | 'model'
   | 'effort'
   | 'schedule'
@@ -162,6 +169,7 @@ export const AGENT_KEYS: readonly AgentKey[] = [
   'allowedTools',
   'connectors',
   'shell',
+  'askFirst',
   'model',
   'effort',
   'schedule',
@@ -201,6 +209,12 @@ export function agentPatch(draft: AgentDraft, keys: readonly AgentKey[]): Record
         // either way, but a record that says so out loud is one you can read
         // the policy off without knowing what the default is.
         out.tools = draft.shell ? 'shell' : 'safe';
+        break;
+      case 'askFirst':
+        // On is written out loud; off removes the key, the default. A draft
+        // still holding an odd value writes on, failing closed — the agent
+        // page blocks Done until a choice is made.
+        out['ask-first'] = draft.askFirst === false ? null : true;
         break;
       case 'model':
         out.model = blank(draft.model);

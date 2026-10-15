@@ -12,7 +12,7 @@ import { agentActive } from '@/engine/libraryDraft';
 import { argumentHint, listSkills, parseSchedule } from '@/engine/skills';
 import { parseTriggers } from '@/engine/triggers';
 import { listTemplates, templateFill } from '@/lib/templates';
-import { quickOpenScore } from '@/lib/quickOpenScore';
+import { nameMatches } from '@/lib/nameRank';
 import type { Entry } from '@/engine/types';
 
 /**
@@ -178,8 +178,9 @@ export function LibraryIndex({
   onDuty: (path: string, on: boolean) => void;
 }) {
   const cards = useMemo(() => libraryCards(tab, entries), [tab, entries]);
-  const shown = cards.filter(
-    (c) => query.trim() === '' || quickOpenScore(query.trim(), `${c.title} ${c.description}`) > 0,
+  // A filter, not a ranking: the shelf keeps its order (M59.3).
+  const shown = cards.filter((c) =>
+    nameMatches(query, [c.title, c.description, `${c.title} ${c.description}`]),
   );
   const counts = useMemo(
     () => Object.fromEntries(LIBRARY_KINDS.map((k) => [k, libraryCards(k, entries).length])),

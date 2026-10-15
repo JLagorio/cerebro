@@ -15,7 +15,8 @@
 //! the close button and ⌘W arrive as `CloseRequested`, which is prevented
 //! and handed to `quit::request`, so every pending edit saves before the
 //! window goes. No other file builds a window: `both_guards_are_attached`
-//! fails the build if one does.
+//! fails the build if one does. Its title follows the page's (M59.1): the
+//! webview sets `document.title` to the place, and this window copies it.
 //!
 //! That entry also turns WebKit's background throttling off (M53.13). Two of
 //! the app's clocks matter most while nobody is looking: `useJobRunner`'s 60 s
@@ -42,7 +43,9 @@ pub mod quit;
 pub const MAIN_WINDOW: &str = "main";
 
 /// Build the main window from its `tauri.conf.json` entry, with the link
-/// guard and the close guard attached. Called once, from `setup`.
+/// guard and the close guard attached. Called once, from `setup`. Its title
+/// follows the page's `document.title`: Rust sets it, so no capability grants
+/// the webview a title permission.
 ///
 /// The devUrl is the app's own origin only under `tauri dev`: tauri's own
 /// app URL reads the same switch (`get_app_url`, tauri-2.11.5
@@ -69,6 +72,12 @@ pub fn build_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Err
         })
         .on_new_window(move |url, _features| {
             links::route_new_window(&url, win_root.as_ref(), &links::open_in_browser)
+        })
+        // M59.1: the title is vault text, so a failure is logged without it.
+        .on_document_title_changed(|window, title| {
+            if let Err(err) = window.set_title(&title) {
+                log::warn!("the window title did not follow the page: {err}");
+            }
         })
         .build()?;
     // M55.10: the close button and ⌘W save first. The window closes when
@@ -214,6 +223,20 @@ mod tests {
             scanned > 50,
             "the scan is walking the real tree ({scanned} files)"
         );
+    }
+
+    #[test]
+    fn the_window_title_follows_the_page() {
+        let body = include_str!("mod.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .expect("the non-test half");
+        for hook in [".on_document_title_changed(", ".set_title("] {
+            assert!(
+                body.contains(hook),
+                "build_main_window lost {hook:?}: the window title would stay `Cerebro`"
+            );
+        }
     }
 
     #[test]

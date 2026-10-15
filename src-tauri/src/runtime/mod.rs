@@ -48,6 +48,7 @@ pub mod job_ledger;
 pub mod normalize;
 pub mod operational;
 pub mod parked;
+pub mod pending_writes;
 pub mod projection;
 pub mod read_only;
 pub mod recovery;
@@ -64,6 +65,7 @@ pub mod surface;
 pub mod taint;
 pub mod triggers;
 pub mod vault_writes;
+pub mod write_log;
 
 pub use read_only::ReadOnly;
 
@@ -104,8 +106,15 @@ pub const OPEN_MARKER: &str = "runtime.db.open";
 /// vault — at 19. M56.7 adds `runs.cause` and `runs.cli_session_id`, both
 /// nullable and never backfilled, each under a CHECK, at 20. M56.9 adds the
 /// two indexes a run's detail reads by — `operational_log` by run, and `runs`
-/// by Claude Code session — at 21.
-pub const USER_VERSION: i64 = 21;
+/// by Claude Code session — at 21. M57.4c adds `pending_writes` — the page
+/// writes an ask-first agent queued for Review, one open row per write by
+/// constraint — at 22. M58.1 rebuilds `vault_writes` with each write's run,
+/// approver and burst start, the `vault.create` and `vault.comment` kinds and
+/// the by-time and by-run indexes, and adds `runs.writes_booked` — 0 on every
+/// run before it, whose writes read as not recorded — at 23. M58.4 adds
+/// `run_commits` — which run made which commit, the one record History names
+/// an agent from — at 24.
+pub const USER_VERSION: i64 = 24;
 
 pub fn runtime_db_path(data_dir: &Path) -> PathBuf {
     data_dir.join(RUNTIME_DB)
@@ -298,7 +307,149 @@ const MIGRATIONS: &[Migration] = &[
         sql: schema::SCHEMA_V21,
         validate: validate_v21,
     },
+    Migration {
+        to: 22,
+        sql: schema::SCHEMA_V22,
+        validate: validate_v22,
+    },
+    Migration {
+        to: 23,
+        sql: schema::SCHEMA_V23,
+        validate: validate_v23,
+    },
+    Migration {
+        to: 24,
+        sql: schema::SCHEMA_V24,
+        validate: validate_v24,
+    },
 ];
+
+/// v24's promise (M58.4): every column of `run_commits` reads, and its CHECK
+/// holds a commit to a full lowercase hash, so a short or upper-case spelling
+/// can never be recorded or matched.
+fn validate_v24(conn: &Connection) -> Result<(), String> {
+    conn.prepare("SELECT vault_id, commit_sha, run_id, committed_at FROM run_commits")
+        .map_err(|e| format!("validating run_commits: {e}"))?;
+    let sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'run_commits'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("validating run_commits: {e}"))?;
+    for clause in [
+        "length(commit_sha) IN (40, 64)",
+        "'*[^0-9a-f]*'",
+        "PRIMARY KEY (vault_id, commit_sha)",
+    ] {
+        if !sql.contains(clause) {
+            return Err(format!("run_commits was created without {clause}"));
+        }
+    }
+    Ok(())
+}
+
+/// v23's promise (M58.1): every column of the rebuilt `vault_writes` reads,
+/// its CHECK names the five kinds and the approver's rule, its three indexes
+/// exist, the v17 table is gone, and `runs.writes_booked` reads with its
+/// default of 1, so a new run books its writes with no INSERT changing.
+fn validate_v23(conn: &Connection) -> Result<(), String> {
+    conn.prepare(
+        "SELECT vault_id, kind, path, to_path, content_hash, actor, run_id, approved_by, \
+         first_at, recorded_at FROM vault_writes",
+    )
+    .map_err(|e| format!("validating vault_writes: {e}"))?;
+    let sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'vault_writes'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("validating vault_writes: {e}"))?;
+    for clause in [
+        "'vault.create'",
+        "'vault.comment'",
+        "approved_by LIKE 'human:_%'",
+    ] {
+        if !sql.contains(clause) {
+            return Err(format!("vault_writes was rebuilt without {clause}"));
+        }
+    }
+    for index in [
+        "vault_writes_by_path",
+        "vault_writes_by_time",
+        "vault_writes_by_run",
+    ] {
+        let found: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = ?1 \
+                 AND tbl_name = 'vault_writes'",
+                [index],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("validating {index}: {e}"))?;
+        if found != 1 {
+            return Err(format!("index {index} on vault_writes is missing"));
+        }
+    }
+    let left: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE name = 'vault_writes_v17'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("checking for the old vault_writes: {e}"))?;
+    if left != 0 {
+        return Err("the v17 vault_writes survived its own migration".into());
+    }
+    let default: Option<String> = conn
+        .query_row(
+            "SELECT dflt_value FROM pragma_table_info('runs') WHERE name = 'writes_booked'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("validating runs.writes_booked: {e}"))?;
+    if default.as_deref() != Some("1") {
+        return Err(format!("runs.writes_booked defaults to {default:?}, not 1"));
+    }
+    Ok(())
+}
+
+/// v22's promise (M57.4c): every column of `pending_writes` reads, and its
+/// three indexes exist, the partial UNIQUE that makes the dedupe a
+/// constraint among them. A step without that index would queue one write
+/// twice.
+fn validate_v22(conn: &Connection) -> Result<(), String> {
+    conn.prepare(
+        "SELECT pending_id, vault_id, run_id, actor, tool, target, target_hash, input, \
+         input_hash, grant_json, queued_at, state, decided_at, decided_by, reason, \
+         applied_input, result, reported_run_id FROM pending_writes",
+    )
+    .map_err(|e| format!("validating pending_writes: {e}"))?;
+    for (index, unique) in [
+        ("pending_writes_open_once", true),
+        ("pending_writes_open", false),
+        ("pending_writes_unreported", false),
+    ] {
+        let sql: Option<String> = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?1 \
+                 AND tbl_name = 'pending_writes'",
+                [index],
+                |row| row.get(0),
+            )
+            .ok();
+        let Some(sql) = sql else {
+            return Err(format!("index {index} on pending_writes is missing"));
+        };
+        if unique != sql.contains("UNIQUE") || !sql.contains("WHERE") {
+            return Err(format!(
+                "index {index} on pending_writes has the wrong shape"
+            ));
+        }
+    }
+    Ok(())
+}
 
 /// v21's promise: both indexes a run's detail reads by exist (M56.9). A step
 /// that built one of the two would leave the refusals read scanning the log.
@@ -977,6 +1128,8 @@ mod tests {
             }
             validate_v20(&conn).unwrap_or_else(|e| panic!("upgrade from {from}: {e}"));
             validate_v21(&conn).unwrap_or_else(|e| panic!("upgrade from {from}: {e}"));
+            validate_v22(&conn).unwrap_or_else(|e| panic!("upgrade from {from}: {e}"));
+            validate_v24(&conn).unwrap_or_else(|e| panic!("upgrade from {from}: {e}"));
             drop(conn);
             let _ = std::fs::remove_dir_all(&dir);
         }
@@ -1129,6 +1282,374 @@ mod tests {
             )
             .unwrap();
         assert_eq!((runs, logged), (1, 1), "the step keeps every row it found");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The v22 database M58.1 migrates from, holding one vault, one finished
+    /// run, and two recorded writes: a save and a rename.
+    fn at_v22_with_writes(label: &str) -> (PathBuf, String) {
+        let (dir, vault) = at_version_with_a_run(label, 22);
+        let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+        conn.execute(
+            "INSERT INTO vault_writes (vault_id, kind, path, to_path, content_hash, actor, \
+             recorded_at) VALUES (?1, 'vault.write', 'notes/a.md', NULL, ?2, NULL, \
+             '2026-10-13T09:00:00.000Z')",
+            rusqlite::params![vault, "a".repeat(64)],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO vault_writes (vault_id, kind, path, to_path, content_hash, actor, \
+             recorded_at) VALUES (?1, 'vault.rename', 'notes/a.md', 'notes/b.md', NULL, \
+             'human:owner', '2026-10-13T09:05:00.000Z')",
+            [&vault],
+        )
+        .unwrap();
+        (dir, vault)
+    }
+
+    /// v23 (M58.1): every write a v22 database recorded survives the rebuild,
+    /// in its order, with no run and no approver, its burst its own; and the
+    /// rebuilt table takes the new kinds.
+    #[test]
+    fn a_previous_version_database_gains_run_ids_and_keeps_every_write() {
+        let (dir, vault) = at_v22_with_writes("runtime-upgrade-22");
+        let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+        assert!(validate_v23(&conn).is_err(), "no run ids before v23");
+        drop(conn);
+
+        let conn = open(&dir).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), USER_VERSION);
+        assert!(validate_v23(&conn).is_ok());
+        type Kept = (
+            i64,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            String,
+            String,
+        );
+        let kept: Vec<Kept> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT rowid, kind, actor, run_id, approved_by, first_at, recorded_at \
+                     FROM vault_writes ORDER BY rowid",
+                )
+                .unwrap();
+            stmt.query_map([], |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+        };
+        assert_eq!(
+            kept,
+            vec![
+                (
+                    1,
+                    "vault.write".to_string(),
+                    None,
+                    None,
+                    None,
+                    "2026-10-13T09:00:00.000Z".to_string(),
+                    "2026-10-13T09:00:00.000Z".to_string()
+                ),
+                (
+                    2,
+                    "vault.rename".to_string(),
+                    Some("human:owner".to_string()),
+                    None,
+                    None,
+                    "2026-10-13T09:05:00.000Z".to_string(),
+                    "2026-10-13T09:05:00.000Z".to_string()
+                ),
+            ],
+            "every row, in rowid order, run and approver NULL"
+        );
+        conn.execute(
+            "INSERT INTO vault_writes (vault_id, kind, path, actor, run_id, first_at, \
+             recorded_at) VALUES (?1, 'vault.comment', '.comments/notes/b.md.json', \
+             'process:scout', 'run-1', '2026-10-14T00:00:00.000Z', '2026-10-14T00:00:00.000Z')",
+            [&vault],
+        )
+        .unwrap();
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// v23's CHECKs: an unknown kind, a rename with nowhere to go, an
+    /// approver on a person's own write, an approver who is no person, and an
+    /// empty run id are each refused.
+    #[test]
+    fn the_new_checks_refuse_bad_rows() {
+        let (dir, vault) = at_v22_with_writes("runtime-checks-23");
+        let conn = open(&dir).unwrap();
+        let insert = |kind: &str, to: Option<&str>, run: Option<&str>, approver: Option<&str>| {
+            conn.execute(
+                "INSERT INTO vault_writes (vault_id, kind, path, to_path, actor, run_id, \
+                 approved_by, first_at, recorded_at) VALUES (?1, ?2, 'notes/a.md', ?3, \
+                 'process:scout', ?4, ?5, '2026-10-14T00:00:00.000Z', \
+                 '2026-10-14T00:00:00.000Z')",
+                rusqlite::params![vault, kind, to, run, approver],
+            )
+        };
+        assert!(insert("vault.write", None, Some("run-1"), Some("human:me")).is_ok());
+        assert!(insert("vault.create", None, None, None).is_ok());
+        assert!(
+            insert("vault.copy", None, None, None).is_err(),
+            "unknown kind"
+        );
+        assert!(
+            insert("vault.rename", None, None, None).is_err(),
+            "rename without to"
+        );
+        assert!(
+            insert("vault.write", None, None, Some("human:me")).is_err(),
+            "an approver needs a run"
+        );
+        assert!(
+            insert("vault.write", None, Some("run-1"), Some("process:scout")).is_err(),
+            "only a person approves"
+        );
+        assert!(
+            insert("vault.write", None, Some(""), None).is_err(),
+            "empty run id"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `runs.writes_booked`: the run from before v23 reads 0, not recorded;
+    /// a run inserted after it, by an INSERT that never names the column,
+    /// reads 1, booked.
+    #[test]
+    fn old_runs_read_writes_not_booked_and_new_runs_book_them() {
+        let (dir, vault) = at_v22_with_writes("runtime-booked-23");
+        let conn = open(&dir).unwrap();
+        conn.execute(
+            "INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, outcome, \
+             usage_state, input_tokens, output_tokens, cache_read, cache_write, \
+             reserved_total_tokens, reserved_output_tokens, proposals_submitted, applied, \
+             rejected) VALUES ('after-receipts', ?1, 'store', 'attended', 'agent', \
+             '2026-10-14T09:00:00.000Z', 'running', 'pending', 0, 0, 0, 0, 0, 0, 0, 0, 0)",
+            [&vault],
+        )
+        .unwrap();
+        let booked = |run: &str| -> i64 {
+            conn.query_row(
+                "SELECT writes_booked FROM runs WHERE run_id = ?1",
+                [run],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(booked("before-causes"), 0);
+        assert_eq!(booked("after-receipts"), 1);
+        assert!(
+            conn.execute(
+                "UPDATE runs SET writes_booked = 3 WHERE run_id = 'after-receipts'",
+                []
+            )
+            .is_err(),
+            "booked is 0, 1 or 2"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// v23's validation names a missing index, so a step that built two of
+    /// three rolls back.
+    #[test]
+    fn validate_catches_a_missing_index() {
+        let (dir, _vault) = at_v22_with_writes("runtime-index-23");
+        let conn = open(&dir).unwrap();
+        assert!(validate_v23(&conn).is_ok());
+        conn.execute_batch("DROP INDEX vault_writes_by_time")
+            .unwrap();
+        let err = validate_v23(&conn).unwrap_err();
+        assert!(err.contains("vault_writes_by_time"), "{err}");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// v24 (M58.4): a database at 23 keeps its run and its writes, and comes
+    /// back with `run_commits`, which takes a full lowercase hash for a run
+    /// it knows and refuses a short one, an upper-case one, a run nobody
+    /// recorded and a second row for the same commit.
+    #[test]
+    fn a_previous_version_database_gains_run_commits_and_keeps_every_row() {
+        let (dir, vault) = at_version_with_a_run("runtime-upgrade-23", 23);
+        let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+        conn.execute(
+            "INSERT INTO vault_writes (vault_id, kind, path, actor, run_id, first_at, \
+             recorded_at) VALUES (?1, 'vault.write', 'notes/a.md', 'process:scout', \
+             'before-causes', '2026-10-13T09:00:30.000Z', '2026-10-13T09:00:30.000Z')",
+            [&vault],
+        )
+        .unwrap();
+        assert!(validate_v24(&conn).is_err(), "no run_commits before v24");
+        drop(conn);
+
+        let conn = open(&dir).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), USER_VERSION);
+        assert!(validate_v24(&conn).is_ok());
+        let kept: (i64, i64) = conn
+            .query_row(
+                "SELECT (SELECT count(*) FROM runs), (SELECT count(*) FROM vault_writes)",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(kept, (1, 1), "the step keeps every row it found");
+        let insert = |sha: &str, run: &str| {
+            conn.execute(
+                "INSERT INTO run_commits (vault_id, commit_sha, run_id, committed_at) \
+                 VALUES (?1, ?2, ?3, '2026-10-13T09:01:00.000Z')",
+                rusqlite::params![vault, sha, run],
+            )
+        };
+        let run = "before-causes";
+        let takes = |sha: String, run: &str| insert(&sha, run).is_ok();
+        assert!(takes("a".repeat(40), run), "a sha1 hash");
+        assert!(takes("b".repeat(64), run), "a sha256 hash");
+        assert!(!takes("a".repeat(40), run), "one row a commit");
+        assert!(!takes("c".repeat(7), run), "a short hash");
+        assert!(!takes("C".repeat(40), run), "an upper-case hash");
+        assert!(!takes("g".repeat(40), run), "not hex");
+        assert!(!takes("d".repeat(40), "nobody"), "a run nobody recorded");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// v22 (M57.4c): a database at 21 keeps its runs and its log, and comes
+    /// back with the pending writes table and its three indexes.
+    #[test]
+    fn a_v21_database_gains_pending_writes_and_keeps_its_rows() {
+        let (dir, _vault) = at_version_with_a_run("runtime-upgrade-21", 21);
+        let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+        conn.execute(
+            "INSERT INTO operational_log (recorded_at, surface, code, detail, run_id) \
+             VALUES ('2026-10-14T00:00:00.000Z', 'create_note', 'write_outside_scope', 'x', \
+             'before-causes')",
+            [],
+        )
+        .unwrap();
+        assert!(validate_v22(&conn).is_err(), "no pending writes before v22");
+        drop(conn);
+
+        let conn = open(&dir).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), USER_VERSION);
+        assert!(validate_v22(&conn).is_ok());
+        let (runs, logged): (i64, i64) = conn
+            .query_row(
+                "SELECT (SELECT count(*) FROM runs), (SELECT count(*) FROM operational_log)",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((runs, logged), (1, 1), "the step keeps every row it found");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// v22's CHECKs refuse every row the table must never hold.
+    #[test]
+    fn the_pending_writes_checks_refuse_each_bad_row() {
+        let (dir, vault) = at_version_with_a_run("runtime-pending-checks", 21);
+        let conn = open(&dir).unwrap();
+        let insert = |overrides: &[(&str, &str)]| {
+            let mut row: Vec<(&str, String)> = vec![
+                ("pending_id", "a".repeat(32)),
+                ("vault_id", vault.clone()),
+                ("run_id", "run-1".into()),
+                ("actor", "process:release-scout".into()),
+                ("tool", "create_note".into()),
+                ("target", "records/risks".into()),
+                ("input", r#"{"folder":"records/risks","slug":"x"}"#.into()),
+                ("input_hash", "b".repeat(64)),
+                ("grant_json", "{}".into()),
+                ("queued_at", "2026-10-14T10:00:00.000Z".into()),
+                ("state", "pending".into()),
+            ];
+            for (key, value) in overrides {
+                match row.iter_mut().find(|(k, _)| k == key) {
+                    Some(slot) => slot.1 = (*value).to_string(),
+                    None => row.push((key, (*value).to_string())),
+                }
+            }
+            let columns: Vec<&str> = row.iter().map(|(k, _)| *k).collect();
+            let marks: Vec<String> = (1..=row.len()).map(|i| format!("?{i}")).collect();
+            let values: Vec<&String> = row.iter().map(|(_, v)| v).collect();
+            conn.execute(
+                &format!(
+                    "INSERT INTO pending_writes ({}) VALUES ({})",
+                    columns.join(", "),
+                    marks.join(", ")
+                ),
+                rusqlite::params_from_iter(values),
+            )
+        };
+        let decided = "2026-10-14T11:00:00.000Z";
+        let (stranger, twin, decided_twin) = ("f".repeat(32), "c".repeat(32), "d".repeat(32));
+        let big = format!(r#"{{"body":"{}"}}"#, "x".repeat(262_144));
+        for (why, overrides) in [
+            (
+                "an unknown state",
+                vec![("state", "maybe"), ("decided_at", decided)],
+            ),
+            ("non-JSON input", vec![("input", "not json")]),
+            ("input that is no object", vec![("input", "[1]")]),
+            ("oversize input", vec![("input", big.as_str())]),
+            (
+                "a decided row without decided_at",
+                vec![("state", "applied")],
+            ),
+            (
+                "a pending row with decided_at",
+                vec![("decided_at", decided)],
+            ),
+            (
+                "a rejection without a reason",
+                vec![("state", "rejected"), ("decided_at", decided)],
+            ),
+            (
+                "a refusal with a blank reason",
+                vec![
+                    ("state", "refused"),
+                    ("decided_at", decided),
+                    ("reason", " "),
+                ],
+            ),
+            ("a non-process actor", vec![("actor", "claude-code")]),
+            ("a bare process prefix", vec![("actor", "process:")]),
+            (
+                "an unregistered vault",
+                vec![("vault_id", stranger.as_str())],
+            ),
+            ("a reported pending row", vec![("reported_run_id", "run-2")]),
+        ] {
+            assert!(insert(&overrides).is_err(), "{why} must be refused");
+        }
+        insert(&[]).expect("a well-formed row lands");
+        insert(&[("pending_id", twin.as_str())])
+            .expect_err("one open row per vault, actor, tool and input");
+        insert(&[
+            ("pending_id", decided_twin.as_str()),
+            ("state", "rejected"),
+            ("decided_at", decided),
+            ("reason", "not yet"),
+        ])
+        .expect("a decided twin is no open row");
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -312,6 +312,9 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     const ticket = ++openTicket;
     const superseded = () => ticket !== openTicket;
     set({ vaultPath: path, status: 'scanning', error: null });
+    // M56.6: who answers in this vault's panel is read now, before the panel
+    // can mount, so a handoff that opens the panel finds the binding.
+    void useUiStore.getState().loadPanelAgent(path);
     // Its own scan, not a rescan pass: it lands only after its watcher
     // starts (M49), while rescans inside that window land early (M53.8). It
     // still obeys the ticket order and the write fence.

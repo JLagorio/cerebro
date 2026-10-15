@@ -168,7 +168,7 @@ function clip(label: string, band: number): string {
  * ring of running totals would lie), so the caption must not claim one
  * either — a hand-edited `kind: donut` + `cumulative: true` is reachable via
  * the vault even though the panel never produces that combination. */
-function captionNotes(chart: ChartSpec | undefined, kind: ChartKind): string[] {
+function captionNotes(chart: ChartSpec | undefined, kind: ChartKind, unmeasured: number): string[] {
   const notes: string[] = [];
   if (chart?.cumulative === true && kind !== 'donut') notes.push('cumulative');
   // An avg BAR under groupBy: each segment is its sub-band's average and the
@@ -182,6 +182,10 @@ function captionNotes(chart: ChartSpec | undefined, kind: ChartKind): string[] {
   if (chart?.sort === 'value-asc') notes.push('smallest first');
   if (chart?.sort === 'label') notes.push('A to Z');
   if (chart?.omitZero === true) notes.push('zeroes omitted');
+  // A band with rows but no number is left out rather than drawn as 0
+  // (M60.1), and the caption is where the missing band is admitted.
+  if (unmeasured === 1) notes.push('1 band without a number');
+  else if (unmeasured > 1) notes.push(`${unmeasured} bands without a number`);
   return notes;
 }
 
@@ -1093,9 +1097,9 @@ const DRILL_CAP = 9;
  * under membership, because `filterOpsFor` gives that family no `equals` at
  * all: `any_of [key]` is the op it has, and the right one. The key IS the
  * comparable value: person/relation bands key by the bare wikilink stem,
- * which is exactly what `evaluateFilters` reads out of the scanner's
- * bracket-stripped `entry.relationships` (never `bandValueFor`'s `[[…]]`
- * write-form). `contains` would be wrong for all three — substring matching
+ * which is exactly what `evaluateFilters` reads through `schema.fieldValue` —
+ * the bracket-stripped stems for a stored relation, and the linking records'
+ * stems for a derived one (never `bandValueFor`'s `[[…]]` write-form). `contains` would be wrong for all three — substring matching
  * catches 'darkred' in a 'red' band.
  */
 function bandRule(field: string, key: string, kind: FieldKind | undefined): FilterRule | null {
@@ -1265,7 +1269,7 @@ export function ChartView({
   // The donut defaults its legend on — the ring has no other labels; the
   // axis kinds default off and can opt in.
   const showLegend = chart?.legend ?? kind === 'donut';
-  const notes = captionNotes(chart, kind);
+  const notes = captionNotes(chart, kind, data.unmeasured);
 
   // The band under the pointer and where the pointer is, figure-relative.
   const figureRef = useRef<HTMLElement>(null);

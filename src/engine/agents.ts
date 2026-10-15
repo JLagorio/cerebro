@@ -1,3 +1,4 @@
+import { askFirstOf as readAskFirst, TOOL_APPROVAL } from '@/lib/policy/toolApproval';
 import { slugify } from '@/lib/slug';
 import { declaredSlug, recordIdentity } from './identity';
 import { AGENT_TYPE, libraryKind } from './library';
@@ -128,6 +129,19 @@ export interface AgentRef {
   /** The effort its runs ask for (M56.5) — `effort:`, read like `model`. */
   effort: string | null;
   /**
+   * Does it ask before every page write (M57.4) — `ask-first:`? Its
+   * confirmable writes (the tool manifest's note writers) wait for the
+   * person's Allow in an attended turn, and are refused in a run nobody
+   * watches. Read by the tool-approval table's `ask_first` cases: anything
+   * but `true` or `false` reads on, so an odd value fails closed. Rust
+   * reads the record again before a run's bearer is minted, so this can
+   * only tighten what the run gets.
+   */
+  askFirst: boolean;
+  /** The warning an odd `ask-first:` value earns on the agent page, or null
+   * when the value is `true`, `false` or absent. */
+  askFirstWarning: string | null;
+  /**
    * What this agent carries between runs (M17.14).
    *
    * ClickUp's three tiers, and only two of them are fields — which is the
@@ -176,18 +190,43 @@ function textOf(value: unknown): string {
  * them, so the tier reads back as its links, `[[target]]` one per line in
  * the order written: less than the file says, never nothing.
  *
- * A read, and only that: nothing writes this text back, which would replace
- * the prose still on disk with the links alone. Agent runs cannot cause the
- * case: mcp.rs refuses a `[[link]]` in the `recent` a run writes (M56.10).
+ * A read, and only that. Written back, this text would replace the prose
+ * still on disk with the links alone, so `linkedTiers` names the tiers that
+ * arrived this way and the Memory tab (`AgentMemoryTab.tsx`) will not save
+ * over one: its corrections box goes read-only for a linked `preferences`.
+ * Agent runs cannot cause the case: mcp.rs refuses a `[[link]]` in the
+ * `recent` a run writes (M56.10).
  */
 function tierOf(entry: Entry, key: string): string {
   const text = textOf(entry.properties[key]);
   if (text !== '') return text;
-  return (entry.relationships[key] ?? [])
-    .map((target) => target.trim())
-    .filter((target) => target !== '')
+  return linksOf(entry, key)
     .map((target) => `[[${target}]]`)
     .join('\n');
+}
+
+function linksOf(entry: Entry, key: string): string[] {
+  return (entry.relationships[key] ?? [])
+    .map((target) => target.trim())
+    .filter((target) => target !== '');
+}
+
+/** Whether a tier's value is a relation's links, not its text (M56.13). */
+function linked(entry: Entry, key: string): boolean {
+  return textOf(entry.properties[key]) === '' && linksOf(entry, key).length > 0;
+}
+
+/**
+ * Which memory tiers `parseMemory` rebuilt from a relation (M56.13): the
+ * record's value holds `[[links]]`, the scan kept only the links, and saving
+ * the rebuilt text would erase every word around them on disk. The Memory
+ * tab reads this and never writes a linked tier.
+ */
+export function linkedTiers(entry: Entry): Record<(typeof MEMORY_TIERS)[number], boolean> {
+  return {
+    recent: tierOf(entry, 'recent') !== '' ? linked(entry, 'recent') : linked(entry, 'memory'),
+    preferences: linked(entry, 'preferences'),
+  };
 }
 
 /** The agent's memory tiers (M17.14) — the one reader prompts and the agent
@@ -200,6 +239,24 @@ export function parseMemory(entry: Entry): AgentMemory {
     recent: tierOf(entry, 'recent') || tierOf(entry, 'memory'),
     preferences: tierOf(entry, 'preferences'),
   };
+}
+
+/** What an Agent record's `ask-first:` says (M57.4): whether it asks first,
+ * and the agent page's warning for a value other than `true` or `false`,
+ * which reads on until the person chooses. */
+export function askFirstOf(entry: Entry): { on: boolean; warning: string | null } {
+  const { on, warn } = readAskFirst(entry.properties, entry.relationships);
+  if (!warn) return { on, warning: null };
+  const key = TOOL_APPROVAL.ask_first.record_key;
+  const related = entry.relationships[key];
+  const value = entry.properties[key] ?? null;
+  const shown =
+    related !== undefined
+      ? related.map((target) => `[[${target}]]`).join(', ')
+      : typeof value === 'string'
+        ? value
+        : JSON.stringify(value);
+  return { on, warning: `${key}: ${shown} — read as on until you choose` };
 }
 
 /** `scope:` frontmatter — a folder, or a list of them. */
@@ -268,6 +325,8 @@ export function agentRef(entry: Entry): AgentRef {
     connectors: parseAllowedTools(entry.properties.connectors),
     model: storedChoice(entry.properties.model),
     effort: storedChoice(entry.properties.effort),
+    askFirst: askFirstOf(entry).on,
+    askFirstWarning: askFirstOf(entry).warning,
     memory: parseMemory(entry),
   };
 }
@@ -289,7 +348,8 @@ export function listAgents(entries: Entry[]): AgentRef[] {
 const MENTION = /(?:^|[\s(])@([A-Za-z0-9][A-Za-z0-9_-]*)/;
 
 /**
- * Who a message is addressed to (M33b.6).
+ * Who a message is addressed to: a chat turn (M33b.6), or a person's comment
+ * in a page's thread (M70.4, `askAgentInThread`).
  *
  * `agent` is null when the vault holds nobody by that name. That is not an
  * error and not silence: the `@name` stays in the message as ordinary text —
@@ -303,7 +363,7 @@ export interface Address {
 }
 
 /**
- * Read the recipient out of a composed message.
+ * Read the recipient out of a composed message or comment.
  *
  * `null` means the message addresses nobody, which is every message that does
  * not contain an `@` — the common case, and the one that must cost nothing.

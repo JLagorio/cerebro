@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('@/lib/ipc', { spy: true });
 
 import { docPagesFor } from '@/engine/docPages';
-import { __resetOpenPages, registerFlush } from '@/editor/openPages';
+import { __resetOpenPages, registerFlush, registerHold } from '@/editor/openPages';
 import * as ipc from '@/lib/ipc';
 import { resetMockFs } from '@/lib/mockIpc';
 import { useNavStore } from '@/stores/navStore';
@@ -84,6 +84,27 @@ describe('addSubPage', () => {
     expect(fs().get('notes/plan/plan.md')).toBe(`${PLAN_BYTES}Typed a moment ago.\n`);
   });
 
+  it('refuses while the page holds a save the flush could not land', async () => {
+    // Open choices (M55.6) keep the page's save held past the flush; once
+    // released it would write the old path, which the rename has emptied.
+    registerFlush(async () => {});
+    registerHold(() => PLAN);
+    const before = new Map(fs());
+    expect(await addSubPage(PLAN, 'Child')).toBeNull();
+    expect(toasts()).toContain(
+      `Couldn't add sub-page: "Plan" has changes waiting on you. Settle them first`,
+    );
+    expect(vi.mocked(ipc.renameNote)).not.toHaveBeenCalled();
+    expect(new Map(fs())).toEqual(before);
+  });
+
+  it('a held save on a page that already has a folder does not stop a child', async () => {
+    fs().set('notes/doc/doc.md', '# Doc\n');
+    await useVaultStore.getState().rescan();
+    registerHold(() => 'notes/doc/doc.md');
+    expect(await addSubPage('notes/doc/doc.md', 'Appendix')).toBe('notes/doc/appendix.md');
+  });
+
   it('refuses beside a same-name folder, toasts, and writes nothing', async () => {
     fs().set('notes/plan/other.md', '# Other\n');
     await useVaultStore.getState().rescan();
@@ -130,6 +151,27 @@ describe('nestPage', () => {
     expect(fs().get('notes/plan/plan.md')).toBe(PLAN_BYTES);
     expect(fs().get('notes/plan/loose.md')).toBe('# Loose\n');
     expect(entryAt('notes/plan/loose.md')).toBeDefined();
+  });
+
+  it('refuses while a page it moves holds a save, even inside a moved folder', async () => {
+    fs().set('notes/doc/doc.md', '# Doc\n');
+    fs().set('notes/doc/child.md', '# Child\n');
+    await useVaultStore.getState().rescan();
+    const before = new Map(fs());
+    const stop = registerHold(() => 'notes/doc/child.md');
+    expect(await nestPage('notes/doc/doc.md', 'notes/loose.md')).toBeNull();
+    expect(toasts().some((m) => m.includes('"Child" has changes waiting on you'))).toBe(true);
+    expect(new Map(fs())).toEqual(before);
+    // The grow move counts too: the target is moved before the source.
+    stop();
+    registerHold(() => 'notes/loose.md');
+    expect(await nestPage('notes/doc/doc.md', 'notes/loose.md')).toBeNull();
+    expect(new Map(fs())).toEqual(before);
+  });
+
+  it('a held save on a page it does not move does not stop it', async () => {
+    registerHold(() => 'notes/elsewhere.md');
+    expect(await nestPage('notes/loose.md', PLAN)).not.toBeNull();
   });
 
   it('refuses a drop into its own subtree and moves nothing', async () => {

@@ -1,0 +1,48 @@
+{
+  "why": "A read limit withdraws the shell under Ask: Bash, the writers and the readers are denied, so only a question asks, and the run keeps acceptEdits.",
+  "input": {
+    "kind": "attended",
+    "shell": "ask",
+    "ask_first": false,
+    "read_scoped": true,
+    "narrowing": null
+  },
+  "expected": {
+    "permission_mode": "acceptEdits",
+    "allowed": [],
+    "disallowed": [
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "NotebookEdit",
+      "Bash",
+      "Read",
+      "Glob",
+      "Grep"
+    ],
+    "matcher": [
+      "AskUserQuestion",
+      "ExitPlanMode"
+    ],
+    "withheld": [],
+    "decisions": {
+      "Write": "deny",
+      "Edit": "deny",
+      "MultiEdit": "deny",
+      "NotebookEdit": "deny",
+      "Bash": "deny",
+      "Read": "deny",
+      "Glob": "deny",
+      "Grep": "deny",
+      "WebFetch": "cli",
+      "WebSearch": "cli",
+      "Task": "cli",
+      "AskUserQuestion": "ask",
+      "ExitPlanMode": "refuse",
+      "mcp__cerebro__create_note": "allow",
+      "mcp__cerebro__update_frontmatter": "allow",
+      "mcp__cerebro__append_to_note": "allow",
+      "mcp__cerebro__edit_note": "allow"
+    }
+  }
+}

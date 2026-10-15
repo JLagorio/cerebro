@@ -71,8 +71,10 @@ export function dashboardNumber(
   }
 
   const field = block.value;
+  // The value a filter reads (M60.1), so a rollup or computed field sums like
+  // a stored one.
   const values = entries
-    .map((e) => e.properties[field])
+    .map((e) => schema.fieldValue(e, field))
     .filter((v) => v !== undefined && v !== null && v !== '');
   const measured = aggregateNumbers(values, block.agg);
   if (measured === null) {

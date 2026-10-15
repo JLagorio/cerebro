@@ -98,12 +98,12 @@ describe('InboxPage', () => {
   // was pressed and about which capture — never the prompt behind it.
   it('asks the Assistant to file it by the same name it wears', async () => {
     const user = userEvent.setup();
-    useUiStore.setState({ agentPendingPrompt: null });
+    useUiStore.setState({ handoffs: [] });
     render(<InboxPage />);
     // The standalone section keeps one Learn button, by the one name.
     expect(screen.getByRole('button', { name: 'Learn from this page' })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Ask the Assistant to file it' }));
-    const pending = useUiStore.getState().agentPendingPrompt;
+    const pending = useUiStore.getState().handoffs.at(-1);
     expect(pending?.label).toBe('Ask the Assistant to file it · Capture a');
     expect(pending?.subject).toBe('inbox/capture-a.md');
     expect(pending?.text).toContain('propose_organize');

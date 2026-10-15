@@ -707,7 +707,13 @@ mod tests {
         deactivate();
         let vault = testutil::temp_vault("shadow-inactive");
         testutil::write(&vault, "items/a.md", "# A\n");
-        vw::save_note(&vault, "items/a.md", "\n# A\n\nEdited.\n").unwrap();
+        vw::save_note(
+            &vault,
+            "items/a.md",
+            "\n# A\n\nEdited.\n",
+            &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
+        )
+        .unwrap();
         assert!(
             !ledger_dir(&vault).exists(),
             "no activation, no ledger — unit tests and browser builds never grow one"
@@ -736,7 +742,13 @@ mod tests {
         let verdict = activate(&config, &vault);
         assert!(matches!(verdict, Verdict::Corrupt { .. }), "{verdict:?}");
         // The write it would have shadowed goes through untouched…
-        vw::save_note(&vault, "items/a.md", "\n# A\n\nStill works.\n").unwrap();
+        vw::save_note(
+            &vault,
+            "items/a.md",
+            "\n# A\n\nStill works.\n",
+            &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
+        )
+        .unwrap();
         // …no event was recorded anywhere…
         assert!(
             read_ledger(&dir).is_err(),
@@ -898,9 +910,9 @@ mod tests {
 
     // The M21 exit criterion: a ledger-enabled vault soaked with every
     // write path, and the chain verifies at the end. (vault.delete's
-    // emission is wired in delete_note but not soaked — its happy path
-    // routes through the OS trash, which the write.rs tests already decline
-    // to pollute; the record() call it makes is the same one soaked here.)
+    // emission is wired in delete_note, which moves into the vault's own
+    // Trash since M60.8, but is not soaked here; the record() call it makes
+    // is the same one soaked here.)
     #[test]
     fn demo_vault_soak_chain_verifies_and_every_kind_flows() {
         let _guard = lock();
@@ -922,12 +934,32 @@ mod tests {
             "soak-note",
             &fm(&[("type", serde_json::json!("Work item"))]),
             "# Soak note\n",
+            &crate::vault::receipt::WriteReceipt::<crate::vault::receipt::Human>::for_test(
+                "human:me", None,
+            ),
         )
         .unwrap();
-        vw::save_note(&vault, &rel, "\n# Soak note\n\nEdited body.\n").unwrap();
-        vw::update_frontmatter(&vault, &rel, &fm(&[("status", serde_json::json!("done"))]))
-            .unwrap();
-        vw::set_note_title(&vault, &rel, "Soaked").unwrap();
+        vw::save_note(
+            &vault,
+            &rel,
+            "\n# Soak note\n\nEdited body.\n",
+            &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
+        )
+        .unwrap();
+        vw::update_frontmatter(
+            &vault,
+            &rel,
+            &fm(&[("status", serde_json::json!("done"))]),
+            &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
+        )
+        .unwrap();
+        vw::set_note_title(
+            &vault,
+            &rel,
+            "Soaked",
+            &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
+        )
+        .unwrap();
         vw::write_concept(
             &vault,
             "knowledge/concepts/soak.md",
@@ -939,6 +971,7 @@ mod tests {
                 ),
             ]),
             "The soak concept.",
+            &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
         )
         .unwrap();
         let viewed = crate::ledger::sha256_hex(
@@ -954,6 +987,7 @@ mod tests {
                 serde_json::json!({"by": "human", "at": "2026-08-07"}),
             )]),
             &viewed,
+            &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
         )
         .unwrap();
         vw::write_source(
@@ -961,13 +995,47 @@ mod tests {
             "sources/soak-src.md",
             &fm(&[("url", serde_json::json!("https://example.com"))]),
             "Cached body.",
+            &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
         )
         .unwrap();
-        vw::append_knowledge_log(&vault, "knowledge/concepts/soak.md", "Soak", false).unwrap();
-        vw::save_collection(&vault, "soak-collection", "name: Soak\n").unwrap();
-        vw::save_list(&vault, "soak-collection", "soak-list", "name: Soak list\n").unwrap();
-        vw::save_view(&vault, "soak-view", "name: Soak view\n", None).unwrap();
-        vw::rename_note(&vault, &rel, "records/soak-renamed.md").unwrap();
+        vw::append_knowledge_log(
+            &vault,
+            "knowledge/concepts/soak.md",
+            "Soak",
+            false,
+            &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
+        )
+        .unwrap();
+        vw::save_collection(
+            &vault,
+            "soak-collection",
+            "name: Soak\n",
+            &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
+        )
+        .unwrap();
+        vw::save_list(
+            &vault,
+            "soak-collection",
+            "soak-list",
+            "name: Soak list\n",
+            &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
+        )
+        .unwrap();
+        vw::save_view(
+            &vault,
+            "soak-view",
+            "name: Soak view\n",
+            None,
+            &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
+        )
+        .unwrap();
+        vw::rename_note(
+            &vault,
+            &rel,
+            "records/soak-renamed.md",
+            &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
+        )
+        .unwrap();
 
         // The soak's point: the chain over everything above VERIFIES.
         // Twelve writes, seven events — the epistemic ones. The governed
@@ -1065,6 +1133,7 @@ mod tests {
             "knowledge/concepts/twice.md",
             &fm(&[("description", serde_json::json!("Still recording."))]),
             "# Twice\n\nStill recording.",
+            &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
         )
         .unwrap();
         assert!(read_ledger(&ledger_dir(&vault)).unwrap().records > before);
@@ -1112,12 +1181,14 @@ mod tests {
                     concept,
                     &fm(&[("description", serde_json::json!("Rewritten."))]),
                     "# Kept\n\nRewritten.",
+                    &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
                 ),
                 vw::write_concept(
                     &vault,
                     "knowledge/concepts/fresh.md",
                     &fm(&[("description", serde_json::json!("New."))]),
                     "# Fresh",
+                    &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
                 ),
                 vw::verify_frontmatter(
                     &vault,
@@ -1127,8 +1198,15 @@ mod tests {
                         serde_json::json!({"by": "human", "at": "2026-09-26"}),
                     )]),
                     "",
+                    &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
                 ),
-                vw::append_knowledge_log(&vault, concept, "Kept", true),
+                vw::append_knowledge_log(
+                    &vault,
+                    concept,
+                    "Kept",
+                    true,
+                    &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
+                ),
             ];
             for refusal in refusals {
                 let err = refusal.expect_err(label);
@@ -1191,6 +1269,7 @@ mod tests {
             "knowledge/concepts/x.md",
             &fm(&[("description", serde_json::json!("X."))]),
             "# X",
+            &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
         )
         .unwrap_err()
         .starts_with(super::super::concepts::LEDGER_WRITER_UNAVAILABLE));

@@ -13,6 +13,11 @@
     },
     { "allowed_tools": ["Bash", "Read", "list_inbox"], "granted": ["list_inbox"] },
     {
+      "allowed_tools": ["mcp__cerebro__list_notes", " Search_Notes "],
+      "granted": ["list_notes", "search_notes"],
+      "why": "list_notes (M59.5) is a base read row a picker offers, held like any other."
+    },
+    {
       "allowed_tools": ["propose_create_belief", "commit_proposals", "open_note"],
       "granted": ["open_note"]
     },
@@ -22,6 +27,11 @@
       "why": "A manifest row that carries the generated prefix by exception (M9.5), held like any other row."
     },
     { "allowed_tools": ["report_window_outcome", "submit_answer"], "granted": [] },
+    {
+      "allowed_tools": ["comment_on_note", "mcp__cerebro__reply_to_comment", " Resolve_Comment "],
+      "granted": ["comment_on_note", "reply_to_comment", "resolve_comment"],
+      "why": "The comment tools (M70.3) are base rows a picker offers, held like any other."
+    },
     { "allowed_tools": ["no_such_tool", "", "mcp__cerebro__"], "granted": [] },
     {
       "allowed_tools": ["\u0085get_note\u3000"],
@@ -37,6 +47,73 @@
       "allowed_tools": ["\u212anowledge_about"],
       "granted": [],
       "why": "The Kelvin sign lowercases to k in Unicode and not in ASCII, so it names nothing."
+    }
+  ],
+  "cli_why": "The CLI's own tools a run holds or may ask for (M57.2), as the tool-approval table plans them (shared/policy/tool-approval.v1.json): `cli` is what its --allowedTools pre-approves and `asks` what an attended run's gate puts to the person. The narrowing is heard by the same name test as the cases above. Replayed by cli_grants_match_the_shared_cases in src-tauri/src/agent/mod.rs and by src/engine/toolGrant.test.ts, whose cliGrant decides whether a prompt may say the run can change files itself.",
+  "cli_cases": [
+    {
+      "shell": "off",
+      "kind": "attended",
+      "read_scoped": false,
+      "allowed_tools": null,
+      "cli": [],
+      "asks": ["AskUserQuestion"]
+    },
+    {
+      "shell": "ask",
+      "kind": "attended",
+      "read_scoped": false,
+      "allowed_tools": null,
+      "cli": [],
+      "asks": ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "AskUserQuestion"]
+    },
+    {
+      "shell": "ask",
+      "kind": "unattended",
+      "read_scoped": false,
+      "allowed_tools": null,
+      "cli": [],
+      "asks": []
+    },
+    {
+      "shell": "on",
+      "kind": "attended",
+      "read_scoped": false,
+      "allowed_tools": null,
+      "cli": ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "Read", "Glob", "Grep"],
+      "asks": ["AskUserQuestion"]
+    },
+    {
+      "shell": "on",
+      "kind": "unattended",
+      "read_scoped": false,
+      "allowed_tools": ["Bash", "get_note"],
+      "cli": ["Bash"],
+      "asks": []
+    },
+    {
+      "shell": "ask",
+      "kind": "attended",
+      "read_scoped": false,
+      "allowed_tools": [" bash "],
+      "cli": [],
+      "asks": ["Bash"]
+    },
+    {
+      "shell": "ask",
+      "kind": "attended",
+      "read_scoped": true,
+      "allowed_tools": null,
+      "cli": [],
+      "asks": ["AskUserQuestion"]
+    },
+    {
+      "shell": "on",
+      "kind": "attended",
+      "read_scoped": false,
+      "allowed_tools": ["READ"],
+      "cli": ["Read"],
+      "asks": []
     }
   ]
 }

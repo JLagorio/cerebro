@@ -8,7 +8,7 @@ import type { ChoiceView, EditorReadyInfo } from './MarkdownEditor';
 import type { LossyCause } from './markdown';
 import { MergeChoices } from './MergeChoices';
 import { NotePathContext } from './notePath';
-import { onExternalWrite, registerFlush } from './openPages';
+import { onExternalWrite, registerFlush, registerHold } from './openPages';
 
 /** Where the body currently stands relative to disk. */
 export type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'failed';
@@ -133,8 +133,9 @@ export function NoteBodyEditor({
   /** What the page last read or saved: the body as read, and its canonical
    *  text, which the editor's serialization is compared against. */
   const base = useRef<{ raw: string; canon: string } | null>(null);
-  /** The entry's content hash this page last heard. */
-  const seenHash = useRef<string | null>(null);
+  /** The entry's content hash this page last heard: undefined until the
+   *  load, null when the load found none. */
+  const seenHash = useRef<string | null | undefined>(undefined);
   // Announced writes to this path still catching up.
   const externalPending = useRef(0);
   const held = useRef<Held | null>(null);
@@ -192,7 +193,7 @@ export function NoteBodyEditor({
     showChoices([]);
     base.current = null;
     ready.current = null;
-    seenHash.current = null;
+    seenHash.current = undefined;
     owed.current = false;
     emitSaveState('idle');
     if (vaultPath === null) return;
@@ -346,6 +347,12 @@ export function NoteBodyEditor({
         base.current = { raw, canon: was.canon };
         return;
       case 'applied':
+        if (result.after !== result.next && !result.dirty) {
+          // A clean page that did not come out as the write: never save it
+          // over the file, take the file whole.
+          remount();
+          return;
+        }
         base.current = { raw, canon: result.next };
         showChoices([]);
         if (result.after === result.next) onBodyLoadedRef.current?.(at.path, text);
@@ -405,10 +412,10 @@ export function NoteBodyEditor({
   // writes are settled by their announcement (below), which knows when the
   // vault has caught up.
   useEffect(() => {
-    if (seenHash.current === null || entryHash === null) {
-      seenHash.current = entryHash;
-      return;
-    }
+    // A null hash is a write in flight (setTitle clears it before it writes):
+    // keep the last one seen, so the hash after it reads as a change. Before
+    // the load, the load reads the hash itself.
+    if (entryHash === null || seenHash.current === undefined) return;
     if (entryHash === seenHash.current) return;
     seenHash.current = entryHash;
     if (externalPending.current === 0) requestReconcile();
@@ -442,6 +449,22 @@ export function NoteBodyEditor({
   // A panel turn lands every open page's pending save before its child
   // starts (useAgentChat), so the agent reads what is on screen.
   useEffect(() => registerFlush(() => flushRef.current?.() ?? Promise.resolve()), []);
+  // What a flush cannot land: a save that waits on a write, a reconcile or a
+  // choice. A page move refuses while this names the file (M55.13), since
+  // the save would release onto the old path.
+  useEffect(
+    () =>
+      registerHold(() =>
+        held.current !== null ||
+        owed.current ||
+        choicesRef.current.length > 0 ||
+        externalPending.current > 0 ||
+        reconciling.current !== null
+          ? pathRef.current
+          : null,
+      ),
+    [],
+  );
 
   // ⌘S / Ctrl+S force-flushes the debounce. The instinctive shortcut was a
   // no-op before, which read as "my work is not being saved".

@@ -13,11 +13,18 @@ const A = 'records/work/a.md';
 const B = 'records/work/b.md';
 const C = 'records/work/c.md';
 
-const deleteNote = vi.fn().mockResolvedValue(undefined);
+const deleteNote = vi.fn(async (_vault: string, path: string) => ({
+  stamp: '20261014T093000Z-a1b2',
+  path,
+  kind: 'file',
+  title: 'B',
+  deletedAt: '2026-10-14T09:30:00Z',
+  pages: 1,
+}));
 const readNote = vi.fn().mockResolvedValue('# A\n\nbody text\n');
 vi.mock('@/lib/ipc', async (orig) => ({
   ...(await orig<typeof import('@/lib/ipc')>()),
-  deleteNote: (...args: unknown[]) => deleteNote(...args),
+  deleteNote: (vault: string, path: string) => deleteNote(vault, path),
   readNote: (...args: unknown[]) => readNote(...args),
 }));
 
@@ -250,10 +257,17 @@ describe('DetailHeaderActions', () => {
 
     expect(screen.getByText('Delete "B"?')).toBeTruthy();
     expect(screen.getByText(/Nothing links to it/)).toBeTruthy();
+    // M60.8: it goes to the vault's own Trash, and Settings brings it back.
+    expect(screen.getByText(/It moves to the Trash\./)).toBeTruthy();
+    expect(screen.getByText('Restore from Settings → Recently deleted for 30 days.')).toBeTruthy();
+    expect(screen.queryByText(/not from the app/)).toBeNull();
     expect(deleteNote).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(deleteNote).toHaveBeenCalledWith('/vault', B));
+    await waitFor(() =>
+      expect(useUiStore.getState().toasts.map((t) => t.message)).toContain('Moved “B” to Trash'),
+    );
   });
 
   // Deleting from a list should leave you in the list.
@@ -315,7 +329,7 @@ describe('DetailHeaderActions', () => {
 
     await waitFor(() =>
       expect(useUiStore.getState().toasts.map((t) => t.message)).toContain(
-        "Couldn't delete this record",
+        "Couldn't move “B” to Trash: locked",
       ),
     );
     expect(useUiStore.getState().detailPath).toBe(B);

@@ -835,6 +835,8 @@ describe('computeChart refuses to draw a misleading chart', () => {
     expect(data.blocked).toBe('no-numbers');
   });
 
+  // M60.1: the Done band holds a row but no estimate. A bar of 0 there would
+  // claim a measured zero, so the band is left out and counted instead.
   it('still charts when only some bands hold numbers', () => {
     const entries = [
       ...vault(),
@@ -851,7 +853,129 @@ describe('computeChart refuses to draw a misleading chart', () => {
       buildSchema(entries),
     );
     expect(data.blocked).toBeNull();
-    expect(data.slices.find((s) => s.label === 'Done')?.value).toBe(0);
+    expect(data.slices.map((s) => s.label)).toEqual(['Todo', 'Doing']);
+    expect(data.unmeasured).toBe(1);
+    expect(data.bands.map((b) => b.label)).toEqual(['Todo', 'Doing']);
+    // The hues stay dense: the skipped band never took one.
+    expect(data.slices.map((s) => s.hue)).toEqual([0, 1]);
+  });
+
+  it('counts no unmeasured band under count, or when every band holds a number', () => {
+    const entries = vault();
+    const schema = buildSchema(entries);
+    expect(computeChart(records(entries), view(), schema).unmeasured).toBe(0);
+    expect(
+      computeChart(records(entries), view({ chart: { agg: 'sum', value: 'estimate' } }), schema)
+        .unmeasured,
+    ).toBe(0);
+  });
+
+  it('a cumulative run carries past an unmeasured band', () => {
+    const entries = [
+      ...vault(),
+      makeEntry({
+        path: 'items/e.md',
+        title: 'E',
+        type: 'Work item',
+        properties: { status: 'doing' },
+      }),
+      makeEntry({
+        path: 'items/f.md',
+        title: 'F',
+        type: 'Work item',
+        properties: { status: 'done', estimate: 4 },
+      }),
+    ];
+    // Doing's only estimate goes, so Doing holds rows and no number.
+    const withoutDoing = entries.map((e) =>
+      e.path === 'items/c.md' ? { ...e, properties: { status: 'doing' } } : e,
+    );
+    const data = computeChart(
+      records(withoutDoing),
+      view({ chart: { agg: 'sum', value: 'estimate', cumulative: true } }),
+      buildSchema(withoutDoing),
+    );
+    expect(data.unmeasured).toBe(1);
+    expect(data.slices.map((s) => [s.label, s.value])).toEqual([
+      ['Todo', 8],
+      ['Done', 12],
+    ]);
+  });
+
+  it('a groupBy part with no number draws no segment', () => {
+    const entries = [
+      ...vault(),
+      makeEntry({
+        path: 'items/e.md',
+        title: 'E',
+        type: 'Work item',
+        properties: { status: 'todo', priority: 'low' },
+      }),
+      makeEntry({
+        path: 'items/g.md',
+        title: 'G',
+        type: 'Work item',
+        properties: { status: 'doing', priority: 'low' },
+      }),
+    ];
+    const data = computeChart(
+      records(entries),
+      view({ chart: { agg: 'sum', value: 'estimate', groupBy: 'priority' } }),
+      buildSchema(entries),
+    );
+    const doing = data.slices.find((s) => s.label === 'Doing');
+    // Doing's low part holds G, which has no estimate: no segment, no 0.
+    expect(doing?.parts?.map((p) => [p.key, p.value])).toEqual([['high', 2]]);
+    const todo = data.slices.find((s) => s.label === 'Todo');
+    expect(todo?.parts?.map((p) => [p.key, p.value])).toEqual([
+      ['high', 3],
+      ['low', 5],
+    ]);
+  });
+
+  it('sums a rollup field per band, through schema.fieldValue', () => {
+    const entries = [
+      ...vault().map((e) =>
+        e.path === 'types/work-item.md'
+          ? {
+              ...e,
+              properties: {
+                ...e.properties,
+                fields: {
+                  ...(e.properties as unknown as { fields: Record<string, unknown> }).fields,
+                  subtasks: { kind: 'relation' },
+                  points: {
+                    kind: 'rollup',
+                    relation: 'subtasks',
+                    property: 'size',
+                    calculate: 'sum',
+                  },
+                },
+              } as unknown as Entry['properties'],
+            }
+          : e,
+      ),
+      makeEntry({ path: 'subs/s1.md', title: 'S1', type: 'Sub', properties: { size: 2 } }),
+      makeEntry({ path: 'subs/s2.md', title: 'S2', type: 'Sub', properties: { size: 5 } }),
+    ].map((e) =>
+      e.path === 'items/a.md'
+        ? { ...e, relationships: { subtasks: ['s1', 's2'] } }
+        : e.path === 'items/c.md'
+          ? { ...e, relationships: { subtasks: ['s1'] } }
+          : e,
+    );
+    const data = computeChart(
+      records(entries),
+      view({ chart: { agg: 'sum', value: 'points' } }),
+      buildSchema(entries),
+    );
+    expect(data.blocked).toBeNull();
+    expect(data.slices.map((s) => [s.label, s.value])).toEqual([
+      ['Todo', 7],
+      ['Doing', 2],
+      ['Done', 0],
+    ]);
+    expect(data.unmeasured).toBe(0);
   });
 });
 
@@ -887,9 +1011,7 @@ describe('niceCeiling', () => {
 
 /**
  * The extraction itself (M16.27): `computeRollup` used to hold this arithmetic
- * inline. These pin that sharing it changed nothing about what a rollup says —
- * including the one asymmetry, where a sum of nothing-numeric reports 0 and
- * the other three report ''.
+ * inline. These pin that sharing it changed nothing about what a rollup says.
  */
 describe('aggregateNumbers', () => {
   it('reduces a list of values, coercing numeric strings', () => {
@@ -941,9 +1063,9 @@ describe('aggregateNumbers', () => {
     const def = { name: 'total', kind: 'rollup' as const, relation: 'results', property: 'score' };
     expect(computeRollup(owner, { ...def, calculate: 'sum' }, entries)).toBe('4');
     expect(computeRollup(owner, { ...def, calculate: 'avg' }, entries)).toBe('4');
-    // Sum of nothing-numeric is '0'; the others are ''. Preserved, not fixed.
+    // M60.1 (CV-05): a sum over prose is blank like the other three, never '0'.
     const noneNumeric = { ...def, property: 'label' };
-    expect(computeRollup(owner, { ...noneNumeric, calculate: 'sum' }, entries)).toBe('0');
+    expect(computeRollup(owner, { ...noneNumeric, calculate: 'sum' }, entries)).toBe('');
     expect(computeRollup(owner, { ...noneNumeric, calculate: 'max' }, entries)).toBe('');
   });
 });

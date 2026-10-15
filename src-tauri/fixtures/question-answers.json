@@ -1,0 +1,1252 @@
+{
+  "format": 1,
+  "cli_version": "2.1.250",
+  "why": "AskUserQuestion's questions and answers (M57.3): what a card can show (parse_cases) and the answers map a person's picks become (answer_cases), each with its expected result or its exact refusal. Rust (src-tauri/src/agent/question.rs) and TS (src/engine/questionForm.ts) replay every case. The join rule is Claude Code 2.1.250's, read from its bundle: a pin bump re-checks this file.",
+  "parse_cases": [
+    {
+      "why": "Two questions, one single-select and one multi-select, read as the card draws them.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which format?",
+            "header": "Format",
+            "options": [
+              {
+                "label": "Markdown",
+                "description": "Headings and lists"
+              },
+              {
+                "label": "Plain text",
+                "description": "No markup"
+              }
+            ],
+            "multiSelect": false
+          },
+          {
+            "question": "Which sections?",
+            "header": "Sections",
+            "options": [
+              {
+                "label": "Summary",
+                "description": ""
+              },
+              {
+                "label": "Risks",
+                "description": ""
+              },
+              {
+                "label": "Next steps",
+                "description": ""
+              }
+            ],
+            "multiSelect": true
+          }
+        ]
+      },
+      "questions": [
+        {
+          "question": "Which format?",
+          "header": "Format",
+          "options": [
+            {
+              "label": "Markdown",
+              "description": "Headings and lists",
+              "preview": null
+            },
+            {
+              "label": "Plain text",
+              "description": "No markup",
+              "preview": null
+            }
+          ],
+          "multiSelect": false
+        },
+        {
+          "question": "Which sections?",
+          "header": "Sections",
+          "options": [
+            {
+              "label": "Summary",
+              "description": "",
+              "preview": null
+            },
+            {
+              "label": "Risks",
+              "description": "",
+              "preview": null
+            },
+            {
+              "label": "Next steps",
+              "description": "",
+              "preview": null
+            }
+          ],
+          "multiSelect": true
+        }
+      ]
+    },
+    {
+      "why": "multiSelect absent reads false; a header over 12 characters is kept; a preview is text; unknown keys, answers and annotations are ignored.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which layout?",
+            "header": "A very long header",
+            "extra": 1,
+            "options": [
+              {
+                "label": "Grid",
+                "description": "",
+                "preview": "<b>grid</b>"
+              },
+              {
+                "label": "List",
+                "icon": "x"
+              }
+            ]
+          }
+        ],
+        "answers": {
+          "Which layout?": "Grid"
+        },
+        "annotations": {},
+        "metadata": {
+          "source": "agent"
+        }
+      },
+      "questions": [
+        {
+          "question": "Which layout?",
+          "header": "A very long header",
+          "options": [
+            {
+              "label": "Grid",
+              "description": "",
+              "preview": "<b>grid</b>"
+            },
+            {
+              "label": "List",
+              "description": "",
+              "preview": null
+            }
+          ],
+          "multiSelect": false
+        }
+      ]
+    },
+    {
+      "why": "A header, description or preview that is not text reads empty or absent, and a multiSelect that is not true reads false.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which one?",
+            "header": 7,
+            "multiSelect": "true",
+            "options": [
+              {
+                "label": "A",
+                "description": null,
+                "preview": 3
+              },
+              {
+                "label": "B"
+              }
+            ]
+          }
+        ]
+      },
+      "questions": [
+        {
+          "question": "Which one?",
+          "header": "",
+          "options": [
+            {
+              "label": "A",
+              "description": "",
+              "preview": null
+            },
+            {
+              "label": "B",
+              "description": "",
+              "preview": null
+            }
+          ],
+          "multiSelect": false
+        }
+      ]
+    },
+    {
+      "why": "No questions at all.",
+      "input": {
+        "questions": []
+      },
+      "refused": "A question set holds 1 to 4 questions; this one holds 0."
+    },
+    {
+      "why": "No questions key.",
+      "input": {},
+      "refused": "A question set holds 1 to 4 questions; this one holds 0."
+    },
+    {
+      "why": "Five questions.",
+      "input": {
+        "questions": [
+          {
+            "question": "Q0?",
+            "header": "",
+            "options": [
+              {
+                "label": "A",
+                "description": ""
+              },
+              {
+                "label": "B",
+                "description": ""
+              }
+            ]
+          },
+          {
+            "question": "Q1?",
+            "header": "",
+            "options": [
+              {
+                "label": "A",
+                "description": ""
+              },
+              {
+                "label": "B",
+                "description": ""
+              }
+            ]
+          },
+          {
+            "question": "Q2?",
+            "header": "",
+            "options": [
+              {
+                "label": "A",
+                "description": ""
+              },
+              {
+                "label": "B",
+                "description": ""
+              }
+            ]
+          },
+          {
+            "question": "Q3?",
+            "header": "",
+            "options": [
+              {
+                "label": "A",
+                "description": ""
+              },
+              {
+                "label": "B",
+                "description": ""
+              }
+            ]
+          },
+          {
+            "question": "Q4?",
+            "header": "",
+            "options": [
+              {
+                "label": "A",
+                "description": ""
+              },
+              {
+                "label": "B",
+                "description": ""
+              }
+            ]
+          }
+        ]
+      },
+      "refused": "A question set holds 1 to 4 questions; this one holds 5."
+    },
+    {
+      "why": "A question with blank text.",
+      "input": {
+        "questions": [
+          {
+            "question": "  ",
+            "header": "",
+            "options": [
+              {
+                "label": "A",
+                "description": ""
+              },
+              {
+                "label": "B",
+                "description": ""
+              }
+            ]
+          }
+        ]
+      },
+      "refused": "A question has no text."
+    },
+    {
+      "why": "Two questions with the same text.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which?",
+            "header": "",
+            "options": [
+              {
+                "label": "A",
+                "description": ""
+              },
+              {
+                "label": "B",
+                "description": ""
+              }
+            ]
+          },
+          {
+            "question": "Which?",
+            "header": "",
+            "options": [
+              {
+                "label": "C",
+                "description": ""
+              },
+              {
+                "label": "D",
+                "description": ""
+              }
+            ]
+          }
+        ]
+      },
+      "refused": "Two questions read \"Which?\"."
+    },
+    {
+      "why": "One option.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which release?",
+            "header": "",
+            "options": [
+              {
+                "label": "1.0",
+                "description": ""
+              }
+            ]
+          }
+        ]
+      },
+      "refused": "\"Which release?\" offers 1 options; a question offers 2 to 4."
+    },
+    {
+      "why": "No options key.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which release?"
+          }
+        ]
+      },
+      "refused": "\"Which release?\" offers 0 options; a question offers 2 to 4."
+    },
+    {
+      "why": "Five options.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which day?",
+            "header": "",
+            "options": [
+              {
+                "label": "Mon",
+                "description": ""
+              },
+              {
+                "label": "Tue",
+                "description": ""
+              },
+              {
+                "label": "Wed",
+                "description": ""
+              },
+              {
+                "label": "Thu",
+                "description": ""
+              },
+              {
+                "label": "Fri",
+                "description": ""
+              }
+            ]
+          }
+        ]
+      },
+      "refused": "\"Which day?\" offers 5 options; a question offers 2 to 4."
+    },
+    {
+      "why": "An option with no label.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which?",
+            "header": "",
+            "options": [
+              {
+                "label": "A",
+                "description": ""
+              },
+              {
+                "description": "no label"
+              }
+            ]
+          }
+        ]
+      },
+      "refused": "\"Which?\" offers an option with no label."
+    },
+    {
+      "why": "The same label twice.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which?",
+            "header": "",
+            "options": [
+              {
+                "label": "A",
+                "description": ""
+              },
+              {
+                "label": "A",
+                "description": ""
+              }
+            ]
+          }
+        ]
+      },
+      "refused": "\"Which?\" offers \"A\" twice."
+    }
+  ],
+  "answer_cases": [
+    {
+      "why": "A pick per question; the multi-select joins with a comma and a space.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which format?",
+            "header": "Format",
+            "options": [
+              {
+                "label": "Markdown",
+                "description": "Headings and lists"
+              },
+              {
+                "label": "Plain text",
+                "description": "No markup"
+              }
+            ],
+            "multiSelect": false
+          },
+          {
+            "question": "Which sections?",
+            "header": "Sections",
+            "options": [
+              {
+                "label": "Summary",
+                "description": ""
+              },
+              {
+                "label": "Risks",
+                "description": ""
+              },
+              {
+                "label": "Next steps",
+                "description": ""
+              }
+            ],
+            "multiSelect": true
+          }
+        ]
+      },
+      "answers": [
+        {
+          "question": "Which format?",
+          "picked": ["Markdown"],
+          "other": null
+        },
+        {
+          "question": "Which sections?",
+          "picked": ["Summary", "Risks"],
+          "other": null
+        }
+      ],
+      "expected": {
+        "Which format?": "Markdown",
+        "Which sections?": "Summary, Risks"
+      }
+    },
+    {
+      "why": "Other is the value, cleaned: control characters become spaces and the ends are trimmed.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which format?",
+            "header": "Format",
+            "options": [
+              {
+                "label": "Markdown",
+                "description": "Headings and lists"
+              },
+              {
+                "label": "Plain text",
+                "description": "No markup"
+              }
+            ],
+            "multiSelect": false
+          },
+          {
+            "question": "Which sections?",
+            "header": "Sections",
+            "options": [
+              {
+                "label": "Summary",
+                "description": ""
+              },
+              {
+                "label": "Risks",
+                "description": ""
+              },
+              {
+                "label": "Next steps",
+                "description": ""
+              }
+            ],
+            "multiSelect": true
+          }
+        ]
+      },
+      "answers": [
+        {
+          "question": "Which format?",
+          "picked": [],
+          "other": "  HTML\u0007please\n"
+        },
+        {
+          "question": "Which sections?",
+          "picked": ["Next steps"],
+          "other": null
+        }
+      ],
+      "expected": {
+        "Which format?": "HTML please",
+        "Which sections?": "Next steps"
+      }
+    },
+    {
+      "why": "On a multi-select question Other follows the picks.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which format?",
+            "header": "Format",
+            "options": [
+              {
+                "label": "Markdown",
+                "description": "Headings and lists"
+              },
+              {
+                "label": "Plain text",
+                "description": "No markup"
+              }
+            ],
+            "multiSelect": false
+          },
+          {
+            "question": "Which sections?",
+            "header": "Sections",
+            "options": [
+              {
+                "label": "Summary",
+                "description": ""
+              },
+              {
+                "label": "Risks",
+                "description": ""
+              },
+              {
+                "label": "Next steps",
+                "description": ""
+              }
+            ],
+            "multiSelect": true
+          }
+        ]
+      },
+      "answers": [
+        {
+          "question": "Which format?",
+          "picked": ["Plain text"],
+          "other": null
+        },
+        {
+          "question": "Which sections?",
+          "picked": ["Risks"],
+          "other": "Owners"
+        }
+      ],
+      "expected": {
+        "Which format?": "Plain text",
+        "Which sections?": "Risks, Owners"
+      }
+    },
+    {
+      "why": "A value holding a comma and a space, or a double quote, joins as its JSON string.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which parts?",
+            "header": "Parts",
+            "options": [
+              {
+                "label": "Plain",
+                "description": ""
+              },
+              {
+                "label": "Summary, then risks",
+                "description": ""
+              },
+              {
+                "label": "The \"short\" one",
+                "description": ""
+              }
+            ],
+            "multiSelect": true
+          }
+        ]
+      },
+      "answers": [
+        {
+          "question": "Which parts?",
+          "picked": ["Plain", "Summary, then risks", "The \"short\" one"],
+          "other": null
+        }
+      ],
+      "expected": {
+        "Which parts?": "Plain, \"Summary, then risks\", \"The \\\"short\\\" one\""
+      }
+    },
+    {
+      "why": "A single-select answer is its label as written, a comma and all.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which plan?",
+            "header": "",
+            "options": [
+              {
+                "label": "Now, then later",
+                "description": ""
+              },
+              {
+                "label": "Later",
+                "description": ""
+              }
+            ]
+          }
+        ]
+      },
+      "answers": [
+        {
+          "question": "Which plan?",
+          "picked": ["Now, then later"],
+          "other": null
+        }
+      ],
+      "expected": {
+        "Which plan?": "Now, then later"
+      }
+    },
+    {
+      "why": "Answers in another order land in the set's order.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which format?",
+            "header": "Format",
+            "options": [
+              {
+                "label": "Markdown",
+                "description": "Headings and lists"
+              },
+              {
+                "label": "Plain text",
+                "description": "No markup"
+              }
+            ],
+            "multiSelect": false
+          },
+          {
+            "question": "Which sections?",
+            "header": "Sections",
+            "options": [
+              {
+                "label": "Summary",
+                "description": ""
+              },
+              {
+                "label": "Risks",
+                "description": ""
+              },
+              {
+                "label": "Next steps",
+                "description": ""
+              }
+            ],
+            "multiSelect": true
+          }
+        ]
+      },
+      "answers": [
+        {
+          "question": "Which sections?",
+          "picked": ["Risks"],
+          "other": null
+        },
+        {
+          "question": "Which format?",
+          "picked": ["Markdown"],
+          "other": null
+        }
+      ],
+      "expected": {
+        "Which format?": "Markdown",
+        "Which sections?": "Risks"
+      }
+    },
+    {
+      "why": "A question nobody answered.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which format?",
+            "header": "Format",
+            "options": [
+              {
+                "label": "Markdown",
+                "description": "Headings and lists"
+              },
+              {
+                "label": "Plain text",
+                "description": "No markup"
+              }
+            ],
+            "multiSelect": false
+          },
+          {
+            "question": "Which sections?",
+            "header": "Sections",
+            "options": [
+              {
+                "label": "Summary",
+                "description": ""
+              },
+              {
+                "label": "Risks",
+                "description": ""
+              },
+              {
+                "label": "Next steps",
+                "description": ""
+              }
+            ],
+            "multiSelect": true
+          }
+        ]
+      },
+      "answers": [
+        {
+          "question": "Which format?",
+          "picked": ["Markdown"],
+          "other": null
+        }
+      ],
+      "refused": "Answer every question: \"Which sections?\" has no answer."
+    },
+    {
+      "why": "An answer with nothing picked and no Other.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which format?",
+            "header": "Format",
+            "options": [
+              {
+                "label": "Markdown",
+                "description": "Headings and lists"
+              },
+              {
+                "label": "Plain text",
+                "description": "No markup"
+              }
+            ],
+            "multiSelect": false
+          },
+          {
+            "question": "Which sections?",
+            "header": "Sections",
+            "options": [
+              {
+                "label": "Summary",
+                "description": ""
+              },
+              {
+                "label": "Risks",
+                "description": ""
+              },
+              {
+                "label": "Next steps",
+                "description": ""
+              }
+            ],
+            "multiSelect": true
+          }
+        ]
+      },
+      "answers": [
+        {
+          "question": "Which format?",
+          "picked": [],
+          "other": null
+        },
+        {
+          "question": "Which sections?",
+          "picked": ["Risks"],
+          "other": null
+        }
+      ],
+      "refused": "Answer every question: \"Which format?\" has no answer."
+    },
+    {
+      "why": "Other chosen with nothing typed is not the same as nothing picked.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which format?",
+            "header": "Format",
+            "options": [
+              {
+                "label": "Markdown",
+                "description": "Headings and lists"
+              },
+              {
+                "label": "Plain text",
+                "description": "No markup"
+              }
+            ],
+            "multiSelect": false
+          },
+          {
+            "question": "Which sections?",
+            "header": "Sections",
+            "options": [
+              {
+                "label": "Summary",
+                "description": ""
+              },
+              {
+                "label": "Risks",
+                "description": ""
+              },
+              {
+                "label": "Next steps",
+                "description": ""
+              }
+            ],
+            "multiSelect": true
+          }
+        ]
+      },
+      "answers": [
+        {
+          "question": "Which format?",
+          "picked": [],
+          "other": " \t "
+        },
+        {
+          "question": "Which sections?",
+          "picked": ["Risks"],
+          "other": null
+        }
+      ],
+      "refused": "Type your answer for \"Which format?\", or pick an option."
+    },
+    {
+      "why": "Two picks on a single-select question.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which format?",
+            "header": "Format",
+            "options": [
+              {
+                "label": "Markdown",
+                "description": "Headings and lists"
+              },
+              {
+                "label": "Plain text",
+                "description": "No markup"
+              }
+            ],
+            "multiSelect": false
+          },
+          {
+            "question": "Which sections?",
+            "header": "Sections",
+            "options": [
+              {
+                "label": "Summary",
+                "description": ""
+              },
+              {
+                "label": "Risks",
+                "description": ""
+              },
+              {
+                "label": "Next steps",
+                "description": ""
+              }
+            ],
+            "multiSelect": true
+          }
+        ]
+      },
+      "answers": [
+        {
+          "question": "Which format?",
+          "picked": ["Markdown", "Plain text"],
+          "other": null
+        },
+        {
+          "question": "Which sections?",
+          "picked": ["Risks"],
+          "other": null
+        }
+      ],
+      "refused": "\"Which format?\" takes one answer."
+    },
+    {
+      "why": "A pick that is not an option.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which format?",
+            "header": "Format",
+            "options": [
+              {
+                "label": "Markdown",
+                "description": "Headings and lists"
+              },
+              {
+                "label": "Plain text",
+                "description": "No markup"
+              }
+            ],
+            "multiSelect": false
+          },
+          {
+            "question": "Which sections?",
+            "header": "Sections",
+            "options": [
+              {
+                "label": "Summary",
+                "description": ""
+              },
+              {
+                "label": "Risks",
+                "description": ""
+              },
+              {
+                "label": "Next steps",
+                "description": ""
+              }
+            ],
+            "multiSelect": true
+          }
+        ]
+      },
+      "answers": [
+        {
+          "question": "Which format?",
+          "picked": ["HTML"],
+          "other": null
+        },
+        {
+          "question": "Which sections?",
+          "picked": ["Risks"],
+          "other": null
+        }
+      ],
+      "refused": "\"HTML\" is not an option of \"Which format?\"."
+    },
+    {
+      "why": "An answer to a question the set does not ask.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which format?",
+            "header": "Format",
+            "options": [
+              {
+                "label": "Markdown",
+                "description": "Headings and lists"
+              },
+              {
+                "label": "Plain text",
+                "description": "No markup"
+              }
+            ],
+            "multiSelect": false
+          },
+          {
+            "question": "Which sections?",
+            "header": "Sections",
+            "options": [
+              {
+                "label": "Summary",
+                "description": ""
+              },
+              {
+                "label": "Risks",
+                "description": ""
+              },
+              {
+                "label": "Next steps",
+                "description": ""
+              }
+            ],
+            "multiSelect": true
+          }
+        ]
+      },
+      "answers": [
+        {
+          "question": "Which format?",
+          "picked": ["Markdown"],
+          "other": null
+        },
+        {
+          "question": "Which sections?",
+          "picked": ["Risks"],
+          "other": null
+        },
+        {
+          "question": "Which colour?",
+          "picked": ["Red"],
+          "other": null
+        }
+      ],
+      "refused": "No question reads \"Which colour?\"."
+    },
+    {
+      "why": "The same label picked twice.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which format?",
+            "header": "Format",
+            "options": [
+              {
+                "label": "Markdown",
+                "description": "Headings and lists"
+              },
+              {
+                "label": "Plain text",
+                "description": "No markup"
+              }
+            ],
+            "multiSelect": false
+          },
+          {
+            "question": "Which sections?",
+            "header": "Sections",
+            "options": [
+              {
+                "label": "Summary",
+                "description": ""
+              },
+              {
+                "label": "Risks",
+                "description": ""
+              },
+              {
+                "label": "Next steps",
+                "description": ""
+              }
+            ],
+            "multiSelect": true
+          }
+        ]
+      },
+      "answers": [
+        {
+          "question": "Which format?",
+          "picked": ["Markdown"],
+          "other": null
+        },
+        {
+          "question": "Which sections?",
+          "picked": ["Risks", "Risks"],
+          "other": null
+        }
+      ],
+      "refused": "\"Risks\" is picked twice for \"Which sections?\"."
+    },
+    {
+      "why": "One question answered twice.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which format?",
+            "header": "Format",
+            "options": [
+              {
+                "label": "Markdown",
+                "description": "Headings and lists"
+              },
+              {
+                "label": "Plain text",
+                "description": "No markup"
+              }
+            ],
+            "multiSelect": false
+          },
+          {
+            "question": "Which sections?",
+            "header": "Sections",
+            "options": [
+              {
+                "label": "Summary",
+                "description": ""
+              },
+              {
+                "label": "Risks",
+                "description": ""
+              },
+              {
+                "label": "Next steps",
+                "description": ""
+              }
+            ],
+            "multiSelect": true
+          }
+        ]
+      },
+      "answers": [
+        {
+          "question": "Which format?",
+          "picked": ["Markdown"],
+          "other": null
+        },
+        {
+          "question": "Which format?",
+          "picked": ["Plain text"],
+          "other": null
+        },
+        {
+          "question": "Which sections?",
+          "picked": ["Risks"],
+          "other": null
+        }
+      ],
+      "refused": "\"Which format?\" is answered twice."
+    },
+    {
+      "why": "Other over 2000 characters, once cleaned.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which format?",
+            "header": "Format",
+            "options": [
+              {
+                "label": "Markdown",
+                "description": "Headings and lists"
+              },
+              {
+                "label": "Plain text",
+                "description": "No markup"
+              }
+            ],
+            "multiSelect": false
+          },
+          {
+            "question": "Which sections?",
+            "header": "Sections",
+            "options": [
+              {
+                "label": "Summary",
+                "description": ""
+              },
+              {
+                "label": "Risks",
+                "description": ""
+              },
+              {
+                "label": "Next steps",
+                "description": ""
+              }
+            ],
+            "multiSelect": true
+          }
+        ]
+      },
+      "answers": [
+        {
+          "question": "Which format?",
+          "picked": [],
+          "other": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "question": "Which sections?",
+          "picked": ["Risks"],
+          "other": null
+        }
+      ],
+      "refused": "Your answer for \"Which format?\" is over 2000 characters."
+    },
+    {
+      "why": "Other at exactly 2000 characters is fine.",
+      "input": {
+        "questions": [
+          {
+            "question": "Which name?",
+            "header": "",
+            "options": [
+              {
+                "label": "A",
+                "description": ""
+              },
+              {
+                "label": "B",
+                "description": ""
+              }
+            ]
+          }
+        ]
+      },
+      "answers": [
+        {
+          "question": "Which name?",
+          "picked": [],
+          "other": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+        }
+      ],
+      "expected": {
+        "Which name?": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+      }
+    }
+  ]
+}

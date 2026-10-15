@@ -82,6 +82,7 @@ describe('engine/ imports only its allowlist', () => {
       "import '@/lib/sha256';",
       "import '@/lib/policy/table';",
       "import '@/lib/policy/tools';",
+      "import '@/lib/policy/toolApproval';",
       "import '@/views/viewKinds';",
       "import '../../shared/policy/staleness.v1.json';",
       "export const t = () => import('./types');",
@@ -95,6 +96,27 @@ describe('engine/ imports only its allowlist', () => {
     expect(await railMessages('src/engine/probe.test.ts', "import '@/stores/vaultStore';")).toEqual(
       [],
     );
+  });
+});
+
+describe('engine imports admit the two scene libraries and no subpath', () => {
+  const ENGINE = 'src/engine/x.ts';
+
+  it.each([
+    "import { getStroke } from 'perfect-freehand';\nexport const g = getStroke;",
+    "import { generateKeyBetween } from 'fractional-indexing';\nexport const k = generateKeyBetween;",
+  ])('passes %s', async (code) => {
+    expect(await railMessages(ENGINE, code)).toEqual([]);
+  });
+
+  it.each([
+    "import 'perfect-freehand/dist/esm/index.mjs';",
+    "import 'fractional-indexing/src/index.js';",
+    "export const p = () => import('perfect-freehand/dist/cjs/index.js');",
+  ])('fails %s', async (code) => {
+    const messages = await railMessages(ENGINE, code);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toContain('perfect-freehand and fractional-indexing');
   });
 });
 

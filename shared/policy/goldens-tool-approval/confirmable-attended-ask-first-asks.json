@@ -1,0 +1,49 @@
+{
+  "why": "A panel turn with an ask-first agent: its four page writers ask, so they leave --allowedTools and join the gate's matcher, and the mode stays acceptEdits, which never approves an MCP tool.",
+  "input": {
+    "kind": "attended",
+    "shell": "off",
+    "ask_first": true,
+    "read_scoped": false,
+    "narrowing": null
+  },
+  "expected": {
+    "permission_mode": "acceptEdits",
+    "allowed": [],
+    "disallowed": [
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "NotebookEdit",
+      "Bash"
+    ],
+    "matcher": [
+      "AskUserQuestion",
+      "mcp__cerebro__create_note",
+      "mcp__cerebro__update_frontmatter",
+      "mcp__cerebro__append_to_note",
+      "mcp__cerebro__edit_note",
+      "ExitPlanMode"
+    ],
+    "withheld": [],
+    "decisions": {
+      "Write": "deny",
+      "Edit": "deny",
+      "MultiEdit": "deny",
+      "NotebookEdit": "deny",
+      "Bash": "deny",
+      "Read": "cli",
+      "Glob": "cli",
+      "Grep": "cli",
+      "WebFetch": "cli",
+      "WebSearch": "cli",
+      "Task": "cli",
+      "AskUserQuestion": "ask",
+      "ExitPlanMode": "refuse",
+      "mcp__cerebro__create_note": "ask",
+      "mcp__cerebro__update_frontmatter": "ask",
+      "mcp__cerebro__append_to_note": "ask",
+      "mcp__cerebro__edit_note": "ask"
+    }
+  }
+}

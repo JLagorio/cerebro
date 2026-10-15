@@ -23,6 +23,7 @@ vi.mock('@/lib/gitIpc', async (importOriginal) => {
 });
 
 import { StatusBar } from '@/app/StatusBar';
+import { APP_VERSION } from '@/lib/appVersion';
 import * as gitIpc from '@/lib/gitIpc';
 import { resetGitState } from '@/git/useGit';
 import { useNavStore } from '@/stores/navStore';
@@ -73,5 +74,12 @@ describe('StatusBar', () => {
     render(<StatusBar />);
     await screen.findByText('1 Changes');
     expect(screen.getByTestId('status-sync').textContent).toBe('Sync');
+  });
+
+  // M59.1: the strip said 2026.7.29 while Settings said 0.1.0.
+  it("shows the app's one version", async () => {
+    render(<StatusBar />);
+    await screen.findByText('1 Changes');
+    expect(screen.getByTitle('Cerebro version').textContent).toBe(APP_VERSION);
   });
 });

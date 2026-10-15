@@ -13,7 +13,8 @@ import { commentSections } from './commentSections';
 import { DocSidePanel } from './DocSidePanel';
 import type { PageCommentsController } from './usePageComments';
 
-/** The side panel's Comments tab (M70.2b): on every page, concepts included. */
+/** The side panel's Comments tab (M70.2b): on every page, concepts included.
+ *  And its Info's last change (M58.1b), on every page with an Info tab. */
 
 const PAGE = 'records/decisions/dec-offline-window-72h.md';
 
@@ -108,5 +109,65 @@ describe('DocSidePanel comments', () => {
     rerender(panel({ kind: 'unavailable', reason: 'it is not valid JSON' }));
     expect(count()).toBeNull();
     expect(screen.getByTestId('doc-panel-tab-comments').textContent).toBe('Comments');
+  });
+});
+
+// M58.4 (D18): History is a side panel tab on every page, after Comments.
+describe('DocSidePanel history', () => {
+  const ids = () =>
+    screen
+      .getAllByTestId(/^doc-panel-tab-/)
+      .map((t) => t.dataset.testid?.replace('doc-panel-tab-', ''));
+
+  it('follows Comments on a page, and shows the page history', async () => {
+    render(panel(null));
+    expect(ids().slice(-2)).toEqual(['comments', 'history']);
+    fireEvent.click(screen.getByTestId('doc-panel-tab-history'));
+    expect(useUiStore.getState().docPanelTab).toBe('history');
+    const history = await screen.findByTestId('git-history');
+    expect(history.dataset.variant).toBe('tab');
+  });
+
+  it("follows Comments on a concept's panel too", () => {
+    // Opened on Comments, so the concept's own Details never renders here.
+    useUiStore.setState({ conceptPanelTab: 'comments' });
+    render(panel(null, {} as Concept));
+    expect(ids().slice(-2)).toEqual(['comments', 'history']);
+    fireEvent.click(screen.getByTestId('doc-panel-tab-history'));
+    expect(useUiStore.getState().conceptPanelTab).toBe('history');
+  });
+});
+
+describe('DocSidePanel last change (M58.1b)', () => {
+  const before = (a: HTMLElement, b: HTMLElement) =>
+    Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  it("leads a page's Info with who last changed it", async () => {
+    useUiStore.setState({ docPanelTab: 'info' });
+    render(panel(null));
+    const last = await screen.findByTestId('last-change');
+    expect(before(last, screen.getByTestId('doc-properties'))).toBe(true);
+    expect((await screen.findByTestId('last-change-line')).textContent).toBe(
+      'Who changed this page was not recorded',
+    );
+  });
+
+  it("leads an agent page's Info too", async () => {
+    const agent = useVaultStore
+      .getState()
+      .entries.find((e) => e.path === 'records/agents/release-scout.md');
+    if (agent === undefined) throw new Error('fixture vault has no release-scout');
+    entry = agent;
+    useUiStore.setState({ docPanelTab: 'info' });
+    render(panel(null));
+    const last = await screen.findByTestId('last-change');
+    expect(before(last, screen.getByTestId('agent-info'))).toBe(true);
+  });
+
+  it('is not on a concept, whose panel has no Info', () => {
+    useUiStore.setState({ docPanelTab: 'info', conceptPanelTab: 'outline' });
+    render(panel(null, {} as Concept));
+    expect(screen.queryByTestId('doc-panel-tab-info')).toBeNull();
+    expect(screen.queryByTestId('last-change')).toBeNull();
   });
 });

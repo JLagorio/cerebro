@@ -33,6 +33,7 @@ import {
   progressRatio,
 } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
+import { couldntMoveToast, movedRecordsToast, movedToast, TRASH_WORDS } from '@/engine/trash';
 import { typeStyle } from '@/engine/typeCatalog';
 import { groupByField, sortBy } from '@/engine/views';
 import type {
@@ -2298,7 +2299,8 @@ export function TableView({
     })();
   }, [checked, toast]);
 
-  /** Delete a set of records. Never throws — it reports and returns, like
+  /** Move a set of records to the vault's Trash (M60.8), one call each until
+   * the batch writer takes them. Never throws — it reports and returns, like
    * every other action that touches the vault. */
   const deleteRecords = useCallback(
     (targets: Entry[]) => {
@@ -2319,14 +2321,12 @@ export function TableView({
         if (failed.length > 0) {
           toast(
             failed.length === 1
-              ? `Couldn't delete "${failed[0]}"`
-              : `Couldn't delete ${failed.length} records`,
+              ? couldntMoveToast(failed[0])
+              : `Couldn't move ${failed.length} records to Trash`,
           );
         } else {
           toast(
-            targets.length === 1
-              ? `Deleted "${targets[0].title}"`
-              : `Deleted ${targets.length} records`,
+            targets.length === 1 ? movedToast(targets[0].title) : movedRecordsToast(targets.length),
           );
         }
         try {
@@ -3128,14 +3128,12 @@ export function TableView({
         onClose={() => setConfirmBulkDelete(false)}
         title={`Delete ${checked.length} ${checked.length === 1 ? 'record' : 'records'}?`}
         width={420}
-        footerNote="Recoverable from git history, not from the app."
+        footerNote={TRASH_WORDS.footer}
         secondaryAction={{ label: 'Cancel', onClick: () => setConfirmBulkDelete(false) }}
         primaryAction={{ label: 'Delete', onClick: () => deleteRecords(checked) }}
       >
         <p className="m-0 text-sm leading-relaxed text-n-600">
-          {checked.length === 1
-            ? 'The file leaves the vault.'
-            : 'The files leave the vault. Links pointing at them will point at nothing.'}
+          {checked.length === 1 ? TRASH_WORDS.body : TRASH_WORDS.bulk}
         </p>
       </Dialog>
       <Dialog
@@ -3143,7 +3141,7 @@ export function TableView({
         onClose={() => setConfirmRow(null)}
         title={`Delete "${confirmRow?.title ?? ''}"?`}
         width={420}
-        footerNote="Recoverable from git history, not from the app."
+        footerNote={TRASH_WORDS.footer}
         secondaryAction={{ label: 'Cancel', onClick: () => setConfirmRow(null) }}
         primaryAction={{
           label: 'Delete',
@@ -3154,7 +3152,7 @@ export function TableView({
           },
         }}
       >
-        <p className="m-0 text-sm leading-relaxed text-n-600">The file leaves the vault.</p>
+        <p className="m-0 text-sm leading-relaxed text-n-600">{TRASH_WORDS.body}</p>
       </Dialog>
     </div>
   );

@@ -4,8 +4,10 @@ import { Icon } from '@/components/ui/Icon';
 import { IconPicker } from '@/components/ui/IconPicker';
 import { Input } from '@/components/ui/Input';
 import { ensureTypeDoc } from '@/app/typeActions';
+import { trashPath } from '@/app/trashActions';
 import type { TypeListing } from '@/engine/typeCatalog';
 import { homeFolderFor } from '@/engine/createRecord';
+import { TRASH_WORDS } from '@/engine/trash';
 import { isReservedTypeName, isSystemType, listTypes } from '@/engine/typeCatalog';
 import { slugify } from '@/lib/slug';
 import { useNavStore } from '@/stores/navStore';
@@ -296,26 +298,19 @@ export function DeleteTypeDialog({
   listing: TypeListing;
   onClose: () => void;
 }) {
-  const toast = useUiStore((s) => s.toast);
   const [submitting, setSubmitting] = useState(false);
 
+  // M60.8: the Type doc goes to the vault's own Trash. trashPath toasts,
+  // rescans and never throws; a refusal keeps the dialog open.
   const remove = async () => {
     if (submitting || listing.docPath === null) return;
     setSubmitting(true);
-    const { vaultPath, rescan } = useVaultStore.getState();
-    try {
-      if (vaultPath !== null) {
-        const ipc = await import('@/lib/ipc');
-        await ipc.deleteNote(vaultPath, listing.docPath);
-      }
-      await rescan();
-    } catch {
-      toast(`Couldn't delete "${listing.name}"`);
+    const item = await trashPath(listing.docPath, listing.name);
+    if (item === null) {
       setSubmitting(false);
       return;
     }
     onClose();
-    toast(`Database "${listing.name}" deleted`);
   };
 
   return (
@@ -330,9 +325,10 @@ export function DeleteTypeDialog({
         disabled: submitting,
       }}
       secondaryAction={{ label: 'Cancel', onClick: onClose }}
+      footerNote={TRASH_WORDS.footer}
     >
       <p className="m-0 text-sm leading-[19px] text-n-700">
-        The database's schema document moves to the trash.{' '}
+        The database's schema document moves to the Trash.{' '}
         {listing.count > 0
           ? `${listing.count} ${listing.count === 1 ? 'record keeps' : 'records keep'} the "${listing.name}" tag but lose its properties and styling.`
           : 'No records use this database.'}

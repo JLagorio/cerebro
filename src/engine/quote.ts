@@ -4,7 +4,10 @@
  *
  * Both replay `src-tauri/fixtures/quote-cases.json`, which pins every message
  * byte for byte (D3). The mock backend's `agentEdit` plans with this, so the
- * browser refuses what the packaged app refuses, in the same words.
+ * browser refuses what the packaged app refuses, in the same words; its
+ * `agentComment` (M70.3) finds and lists an agent's comment quote with the
+ * same finder and lines, filtered by `commentMatches`, which both sides
+ * replay from `src-tauri/fixtures/comment-tools.json`.
  *
  * Offsets here are UTF-16 units and Rust's are bytes, so the cases pin lines
  * and code-point contexts only: the overlapping search steps one code point,
@@ -127,7 +130,8 @@ function resolve(body: string, prefix: string, i: number, edit: QuoteEdit): numb
 /** Every start of `quote` in `body`, as UTF-16 offsets, overlapping ones
  * included: after a match the search goes on one code point later, so `aa` is
  * in `aaa` twice. The one matcher (M70.1): comment anchors filter what it
- * finds (`validMatches` in commentAnchor.ts) and never search on their own.
+ * finds (`validMatches` in commentAnchor.ts, `commentMatches` below for an
+ * agent's quote, M70.3) and never search on their own.
  * An empty quote is in no body: it would match everywhere, and forever. */
 export function occurrencesOf(body: string, quote: string): number[] {
   if (quote === '') return [];
@@ -143,7 +147,7 @@ export function occurrencesOf(body: string, quote: string): number[] {
 
 /** `head`, then one line per match (at most `maxListed`), then the count of
  * the rest. */
-function listed(head: string, body: string, quote: string, found: number[]): string[] {
+export function listed(head: string, body: string, quote: string, found: number[]): string[] {
   const lines = [head];
   found.slice(0, QUOTE_LIMITS.maxListed).forEach((start, k) => {
     lines.push(
@@ -157,7 +161,7 @@ function listed(head: string, body: string, quote: string, found: number[]): str
 }
 
 /** The 1-based line `offset` falls on. */
-function lineAt(text: string, offset: number): number {
+export function lineAt(text: string, offset: number): number {
   let line = 1;
   for (let at = text.indexOf('\n'); at !== -1 && at < offset; at = text.indexOf('\n', at + 1)) {
     line++;
@@ -167,7 +171,7 @@ function lineAt(text: string, offset: number): number {
 
 /** The body around the match `start..end`, counted in code points, with an
  * ellipsis at each end that was cut, JSON-escaped. */
-function context(body: string, start: number, end: number): string {
+export function context(body: string, start: number, end: number): string {
   const before = Array.from(body.slice(0, start)).length;
   const within = Array.from(body.slice(start, end)).length;
   const points = Array.from(body);
@@ -183,4 +187,180 @@ function context(body: string, start: number, end: number): string {
 
 function refused(lines: string[]): QuotePlan {
   return { ok: false, message: [...lines, NOTHING_WRITTEN].join('\n') };
+}
+
+// --- Comment quotes (M70.3) --------------------------------------------------
+//
+// The twin of quote.rs's section. An agent anchors a comment by quoting plain
+// words as get_note prints the body; a quote with markdown is refused and the
+// finder's matches are kept only where the page shows them as text: not
+// inside a fence, not on a `:::` line (a toggle's title excepted), not in a
+// line's marker and not in a link's target.
+
+/** The characters a comment quote may not hold; a context stops at one. */
+const QUOTE_MARKDOWN = new Set(['*', '_', '`', '~', '[', ']', '<', '>', '\\', '|']);
+
+/** The markdown a comment quote holds, named for its refusal, or null. */
+export function quoteMarkdown(quote: string): string | null {
+  for (const c of quote) {
+    if (c === '\n' || c === '\r') return 'a line break';
+    if (c === '`') return 'a backtick';
+    if (QUOTE_MARKDOWN.has(c)) return `\`${c}\``;
+  }
+  return null;
+}
+
+/** The length of the run of `c` that opens `text`. */
+function runOf(text: string, c: string): number {
+  let n = 0;
+  while (text[n] === c) n++;
+  return n;
+}
+
+/** How many spaces and tabs open `text`. */
+function blankRun(text: string): number {
+  let n = 0;
+  while (text[n] === ' ' || text[n] === '\t') n++;
+  return n;
+}
+
+const isBlank = (text: string): boolean => blankRun(text) === text.length;
+
+/** The units of `line` a block marker takes before its text: blockquote
+ * `>`s, then a heading's `#`s, or a bullet or number and a task box. */
+function markerLength(line: string): number {
+  let at = blankRun(line);
+  while (line[at] === '>') {
+    at += 1;
+    at += blankRun(line.slice(at));
+  }
+  const rest = line.slice(at);
+  const spaced = (n: number) => rest.length === n || rest[n] === ' ' || rest[n] === '\t';
+  const hashes = runOf(rest, '#');
+  if (hashes >= 1 && hashes <= 6 && spaced(hashes)) {
+    return at + hashes + blankRun(rest.slice(hashes));
+  }
+  const digits = /^[0-9]*/.exec(rest)?.[0].length ?? 0;
+  let item: number;
+  if ((rest[0] === '-' || rest[0] === '*' || rest[0] === '+') && spaced(1)) {
+    item = 1;
+  } else if (
+    digits >= 1 &&
+    digits <= 9 &&
+    (rest[digits] === '.' || rest[digits] === ')') &&
+    spaced(digits + 1)
+  ) {
+    item = digits + 1;
+  } else {
+    return at;
+  }
+  at += item + blankRun(rest.slice(item));
+  for (const task of ['[ ]', '[x]', '[X]']) {
+    const after = line.slice(at);
+    if (after.startsWith(task) && (after.length === 3 || after[3] === ' ' || after[3] === '\t')) {
+      return at + 3 + blankRun(after.slice(3));
+    }
+  }
+  return at;
+}
+
+/** `from..to` of `body` less every link target in it (`](` to its `)`). */
+function withoutLinkTargets(body: string, from: number, to: number, out: [number, number][]) {
+  let at = from;
+  for (;;) {
+    const open = body.slice(at, to).indexOf('](');
+    if (open === -1) break;
+    const target = at + open + 1;
+    if (target > at) out.push([at, target]);
+    const close = body.slice(target, to).indexOf(')');
+    at = close === -1 ? to : target + close + 1;
+  }
+  if (at < to) out.push([at, to]);
+}
+
+/** The ranges of `body` the page shows as text, in order: each line's own
+ * text, less its marker and its link targets, outside every fence and every
+ * `:::` line but a toggle's title. A line's `\r` is never text. */
+function textRanges(body: string): [number, number][] {
+  const out: [number, number][] = [];
+  let fence: { c: string; n: number } | null = null;
+  let start = 0;
+  for (const raw of body.split('\n')) {
+    const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
+    const from = start;
+    const end = start + line.length;
+    start += raw.length + 1;
+    const indent = runOf(line, ' ');
+    const fenced = line.slice(indent);
+    if (fence !== null) {
+      const closing = runOf(fenced, fence.c);
+      if (indent <= 3 && closing >= fence.n && isBlank(fenced.slice(closing))) fence = null;
+      continue;
+    }
+    if (indent <= 3) {
+      const c = ['`', '~'].find((mark) => runOf(fenced, mark) >= 3);
+      if (c !== undefined) {
+        fence = { c, n: runOf(fenced, c) };
+        continue;
+      }
+    }
+    const directive = line.slice(blankRun(line));
+    if (directive.startsWith(':::')) {
+      const after = directive.slice(runOf(directive, ':'));
+      if (after.startsWith('toggle ')) {
+        const title = after.slice('toggle '.length);
+        withoutLinkTargets(body, end - title.length, end, out);
+      }
+      continue;
+    }
+    withoutLinkTargets(body, from + markerLength(line), end, out);
+  }
+  return out;
+}
+
+const rangeHolding = (
+  ranges: [number, number][],
+  start: number,
+  end: number,
+): [number, number] | undefined => ranges.find(([from, to]) => from <= start && end <= to);
+
+/** Every start of `quote` in `body` that reads as text on the page: the
+ * finder's matches, kept when one text range holds the whole match. A
+ * comment's occurrence counts among these. */
+export function commentMatches(body: string, quote: string): number[] {
+  const ranges = textRanges(body);
+  return occurrencesOf(body, quote).filter(
+    (start) => rangeHolding(ranges, start, start + quote.length) !== undefined,
+  );
+}
+
+/** The context a comment's anchor stores for the match `start..end`, from
+ * its own line: back to the last markdown character or the start of its
+ * text, and on to the next, each cut to `contextChars` code points nearest
+ * the match. */
+export function anchorContext(
+  body: string,
+  start: number,
+  end: number,
+): { before: string; after: string } {
+  const [from, to] = rangeHolding(textRanges(body), start, end) ?? [start, end];
+  let before = body.slice(from, start);
+  for (let i = before.length - 1; i >= 0; i--) {
+    if (QUOTE_MARKDOWN.has(before[i])) {
+      before = before.slice(i + 1);
+      break;
+    }
+  }
+  let after = body.slice(end, to);
+  for (let i = 0; i < after.length; i++) {
+    if (QUOTE_MARKDOWN.has(after[i])) {
+      after = after.slice(0, i);
+      break;
+    }
+  }
+  const points = Array.from(before);
+  return {
+    before: points.slice(Math.max(0, points.length - QUOTE_LIMITS.contextChars)).join(''),
+    after: Array.from(after).slice(0, QUOTE_LIMITS.contextChars).join(''),
+  };
 }

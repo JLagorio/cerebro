@@ -13,8 +13,17 @@ vi.mock('@/lib/gitIpc', async (importOriginal) => {
     gitRemoteStatus: vi.fn(async () => ({ hasRemote: false })),
     gitCommit: vi.fn(async () => null as string | null),
     getVaultPulse: vi.fn(async (): Promise<VaultPulse> => ({ tracked: true, commits: [] })),
-    getFileHistory: vi.fn(async () => [] as GitCommit[]),
+    getFileHistory: vi.fn(async () => [] as FileCommit[]),
     getCommitDiff: vi.fn(async () => ''),
+    getFilePatch: vi.fn(async () => ({ text: '', truncated: false, binary: false })),
+    getFileAtCommit: vi.fn(async (): Promise<FileAt> => ({ kind: 'text', text: '' })),
+    commitRuns: vi.fn(async () => [] as CommitRun[]),
+    restoreNoteVersion: vi.fn(async (): Promise<RestoreResult> => ({
+      unchanged: false,
+      before: null,
+      restored: 'r'.repeat(40),
+      commitError: null,
+    })),
   };
 });
 
@@ -26,17 +35,31 @@ vi.mock('@/lib/ipc', async (importOriginal) => {
 import {
   checkpointMessage,
   resetGitState,
+  restoreVersion,
+  useAutoCheckpoint,
   useBatchCheckpoint,
   useCommitDiff,
+  useCommitRuns,
   useFileHistory,
+  useFilePatch,
+  useFileVersions,
   useGit,
   useVaultPulse,
   withLedgerTrailer,
 } from '@/git/useGit';
 import { ledgerHead } from '@/lib/ipc';
 import * as gitIpc from '@/lib/gitIpc';
+import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
-import type { GitCommit, ModifiedFile, VaultPulse } from '@/engine/git';
+import type {
+  CommitQuery,
+  CommitRun,
+  FileAt,
+  FileCommit,
+  ModifiedFile,
+  RestoreResult,
+  VaultPulse,
+} from '@/engine/git';
 
 const file = (path: string): ModifiedFile => ({ path, status: 'modified', staged: false });
 
@@ -96,6 +119,81 @@ describe('useBatchCheckpoint', () => {
     });
     await waitFor(() => expect(gitIpc.gitCommit).toHaveBeenCalled());
     expect(refresh).not.toHaveBeenCalled();
+  });
+});
+
+// M58.3: a checkpoint never takes a path a live run owns. Rust's commit_all
+// leaves those for the run's own commit, so the message names only the
+// person's files, and a tick with only a run's files changed commits nothing.
+describe('useAutoCheckpoint leaves a live run’s files to the run', () => {
+  const owned = (path: string): ModifiedFile => ({
+    ...file(path),
+    owner: { runId: 'run-1', actor: 'claude-code' },
+  });
+  /** Long enough past the inactive threshold for a tick to commit. */
+  const idle = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(46_000);
+    });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    useVaultStore.setState({ vaultPath: '/v' });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it('names only the files no run owns', async () => {
+    vi.mocked(gitIpc.getModifiedFiles).mockResolvedValue([
+      owned('notes/a.md'),
+      owned('notes/b.md'),
+      file('notes/mine.md'),
+    ]);
+    vi.mocked(gitIpc.gitCommit).mockResolvedValue('abc1234');
+    const committed = vi.fn();
+    renderHook(() => useAutoCheckpoint(true, committed));
+    await idle();
+    expect(gitIpc.gitCommit).toHaveBeenCalled();
+    expect(vi.mocked(gitIpc.gitCommit).mock.calls[0][1]).toBe('Update mine');
+    expect(committed).toHaveBeenCalled();
+  });
+
+  it('commits nothing when only a run’s files changed', async () => {
+    vi.mocked(gitIpc.getModifiedFiles).mockResolvedValue([owned('notes/a.md')]);
+    renderHook(() => useAutoCheckpoint(true, vi.fn()));
+    await idle();
+    expect(gitIpc.getModifiedFiles).toHaveBeenCalled();
+    expect(gitIpc.gitCommit).not.toHaveBeenCalled();
+  });
+});
+
+describe('useFilePatch (M58.3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useVaultStore.setState({ vaultPath: '/v' });
+  });
+  afterEach(cleanup);
+
+  it('asks nothing until a file and a commit are named, then reads once', async () => {
+    const { result, rerender } = renderHook(
+      ({ path, commit }: { path: string | null; commit: string | null }) =>
+        useFilePatch(path, commit),
+      { initialProps: { path: null as string | null, commit: 'abc' as string | null } },
+    );
+    expect(result.current).toEqual({ kind: 'loading' });
+    expect(gitIpc.getFilePatch).not.toHaveBeenCalled();
+    rerender({ path: 'notes/a.md', commit: 'abc' });
+    await waitFor(() => expect(result.current.kind).toBe('ready'));
+    expect(gitIpc.getFilePatch).toHaveBeenCalledExactlyOnceWith('/v', 'notes/a.md', 'abc');
+  });
+
+  it('reads a failed load as unavailable', async () => {
+    vi.mocked(gitIpc.getFilePatch).mockRejectedValueOnce(new Error('bad revision'));
+    const { result } = renderHook(() => useFilePatch('notes/a.md', 'abc'));
+    await waitFor(() => expect(result.current).toEqual({ kind: 'unavailable' }));
   });
 });
 
@@ -217,12 +315,18 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-const commit = (hash: string): GitCommit => ({
+const commit = (hash: string, patch: Partial<FileCommit> = {}): FileCommit => ({
   hash,
   shortHash: hash.slice(0, 7),
   message: `commit ${hash}`,
   author: 'Ana Rios',
   date: 1_753_700_000,
+  parent: null,
+  previousAt: null,
+  pathAt: 'notes/plan.md',
+  previousPath: null,
+  change: 'modified',
+  ...patch,
 });
 
 // M53.15: these hooks caught a failed read and handed back [] — so the History
@@ -263,8 +367,8 @@ describe('history reads tell a failed read from an empty one', () => {
   });
 
   it("goes back to loading on a new path and ignores the old path's late answer", async () => {
-    const forA = deferred<GitCommit[]>();
-    const forB = deferred<GitCommit[]>();
+    const forA = deferred<FileCommit[]>();
+    const forB = deferred<FileCommit[]>();
     vi.mocked(gitIpc.getFileHistory)
       .mockReturnValueOnce(forA.promise)
       .mockReturnValueOnce(forB.promise);
@@ -301,5 +405,118 @@ describe('history reads tell a failed read from an empty one', () => {
     const { result } = renderHook(() => useVaultPulse());
     expect(result.current.pulse.kind).toBe('unavailable');
     expect(gitIpc.getVaultPulse).not.toHaveBeenCalled();
+  });
+});
+
+// M58.4: the attribution read, both sides of a version, and Restore.
+describe('version reads and Restore', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useVaultStore.setState({ vaultPath: '/demo-vault', entries: [] });
+    useUiStore.setState({ toasts: [] });
+  });
+  afterEach(cleanup);
+
+  it('useFileHistory hands back FileCommit rows', async () => {
+    const row = commit('a'.repeat(40), { parent: 'b'.repeat(40), previousPath: 'old.md' });
+    vi.mocked(gitIpc.getFileHistory).mockResolvedValueOnce([row]);
+    const { result } = renderHook(() => useFileHistory('notes/plan.md'));
+    await waitFor(() => expect(result.current).toEqual({ kind: 'ready', data: [row] }));
+  });
+
+  it('useCommitRuns is keyed by what it asks, and goes unavailable on a reject', async () => {
+    const asked: CommitQuery[] = [{ hash: 'a'.repeat(40), path: 'notes/plan.md', since: null }];
+    const { result, rerender } = renderHook(({ q }) => useCommitRuns(q), {
+      initialProps: { q: asked },
+    });
+    await waitFor(() => expect(result.current).toEqual({ kind: 'ready', data: [] }));
+    // The same queries in a fresh array ask nothing again.
+    rerender({ q: asked.map((x) => ({ ...x })) });
+    expect(gitIpc.commitRuns).toHaveBeenCalledTimes(1);
+    expect(gitIpc.commitRuns).toHaveBeenCalledWith('/demo-vault', asked);
+    vi.mocked(gitIpc.commitRuns).mockRejectedValueOnce(new Error('no runtime db'));
+    rerender({ q: [{ hash: 'c'.repeat(40), path: null, since: null }] });
+    await waitFor(() => expect(result.current.kind).toBe('unavailable'));
+    // Nothing to ask is no read, and an empty answer.
+    rerender({ q: [] });
+    await waitFor(() => expect(result.current).toEqual({ kind: 'ready', data: [] }));
+    expect(gitIpc.commitRuns).toHaveBeenCalledTimes(2);
+  });
+
+  it('useFileVersions reads after at pathAt and before at the parent, old name and all', async () => {
+    const renamed = commit('a'.repeat(40), {
+      parent: 'p'.repeat(40),
+      pathAt: 'b.md',
+      previousPath: 'a.md',
+      change: 'renamed',
+    });
+    const { result } = renderHook(() => useFileVersions(renamed));
+    await waitFor(() => expect(result.current.kind).toBe('ready'));
+    expect(gitIpc.getFileAtCommit).toHaveBeenCalledWith('/demo-vault', 'b.md', 'a'.repeat(40));
+    expect(gitIpc.getFileAtCommit).toHaveBeenCalledWith('/demo-vault', 'a.md', 'p'.repeat(40));
+  });
+
+  it('useFileVersions skips the side there is nothing to read on', async () => {
+    const rootCommit = commit('a'.repeat(40), { parent: null });
+    const root = renderHook(() => useFileVersions(rootCommit));
+    await waitFor(() => expect(root.result.current.kind).toBe('ready'));
+    expect(root.result.current).toEqual({
+      kind: 'ready',
+      data: { before: null, after: { kind: 'text', text: '' } },
+    });
+    vi.mocked(gitIpc.getFileAtCommit).mockClear();
+    const addedCommit = commit('b'.repeat(40), { parent: 'p'.repeat(40), change: 'added' });
+    const added = renderHook(() => useFileVersions(addedCommit));
+    await waitFor(() => expect(added.result.current.kind).toBe('ready'));
+    expect(gitIpc.getFileAtCommit).toHaveBeenCalledTimes(1);
+    vi.mocked(gitIpc.getFileAtCommit).mockClear();
+    const deletedCommit = commit('c'.repeat(40), { parent: 'p'.repeat(40), change: 'deleted' });
+    const deleted = renderHook(() => useFileVersions(deletedCommit));
+    await waitFor(() => expect(deleted.result.current.kind).toBe('ready'));
+    expect(deleted.result.current).toMatchObject({ data: { after: null } });
+    expect(gitIpc.getFileAtCommit).toHaveBeenCalledTimes(1);
+    expect(gitIpc.getFileAtCommit).toHaveBeenCalledWith(
+      '/demo-vault',
+      'notes/plan.md',
+      'p'.repeat(40),
+    );
+  });
+
+  it('useFileVersions is unavailable when a read rejects', async () => {
+    vi.mocked(gitIpc.getFileAtCommit).mockRejectedValueOnce(new Error('kept no copy'));
+    const one = commit('a'.repeat(40));
+    const { result } = renderHook(() => useFileVersions(one));
+    await waitFor(() => expect(result.current.kind).toBe('unavailable'));
+  });
+
+  it('restoreVersion toasts what happened, and false on a refusal', async () => {
+    const toasts = () => useUiStore.getState().toasts.map((t) => t.message);
+    expect(await restoreVersion('/demo-vault', 'notes/plan.md', 'a'.repeat(40), 'Plan')).toBe(true);
+    expect(toasts()).toEqual(['Restored Plan. The version it replaced is in History.']);
+    vi.mocked(gitIpc.restoreNoteVersion).mockResolvedValueOnce({
+      unchanged: true,
+      before: null,
+      restored: null,
+      commitError: null,
+    });
+    await restoreVersion('/demo-vault', 'notes/plan.md', 'a'.repeat(40), 'Plan');
+    vi.mocked(gitIpc.restoreNoteVersion).mockResolvedValueOnce({
+      unchanged: false,
+      before: null,
+      restored: null,
+      commitError: 'index.lock exists',
+    });
+    await restoreVersion('/demo-vault', 'notes/plan.md', 'a'.repeat(40), 'Plan');
+    vi.mocked(gitIpc.restoreNoteVersion).mockRejectedValueOnce(
+      new Error("That version is not in this page's history."),
+    );
+    expect(await restoreVersion('/demo-vault', 'notes/plan.md', 'z'.repeat(40), 'Plan')).toBe(
+      false,
+    );
+    expect(toasts().slice(1)).toEqual([
+      'This page already matches that version.',
+      'Restored Plan. History will record it at the next checkpoint.',
+      "Couldn't restore Plan: That version is not in this page's history.",
+    ]);
   });
 });

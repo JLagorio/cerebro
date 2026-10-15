@@ -1925,6 +1925,19 @@ describe('nested children (:::indent)', () => {
     expect(textsOf(blocks)).toEqual([':::indent', 'Child.', ':::']);
     expect(await roundTrip(md)).toBe(md);
   });
+
+  /* An unclosed container rebuilds the page from the blocks that arrived. An
+     indent settled before it must not have left its children inside one of
+     them, or they show twice: once nested, once flat. */
+  it.each([
+    '* Item\n\n:::indent\nMore about the item.\n:::\n\n:::ai{prompt="Q"}\nAn answer with no close.\n',
+    'A parent.\n\n:::indent\nMore about the parent.\n:::\n\n::::columns\n:::column\nNo close.\n',
+    ':::ai{prompt="Q"}\nAbove.\n\n:::indent\nMore about above.\n:::\n\nNo close.\n',
+  ])('keeps an :::indent once when the page holds an unclosed container: %j', async (md) => {
+    const once = await roundTrip(md);
+    expect(once).toBe(md);
+    expect(lossyImportCause(md, once)).toBeNull();
+  });
 });
 
 /*

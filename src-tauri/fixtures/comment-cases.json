@@ -412,6 +412,50 @@
       }
     },
     {
+      "name": "the authors, runs and stamps the agent comment tools write read back (M70.3)",
+      "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"Detect the conflict\",\n        \"occurrence\": 1,\n        \"before\": \"\",\n        \"after\": \", hold both versions\"\n      },\n      \"resolved\": {\n        \"at\": \"2026-10-14T09:15:00Z\",\n        \"by\": \"process:release-scout\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"00000000000000a1\",\n          \"author\": \"claude-code\",\n          \"created\": \"2026-10-14T09:00:00Z\",\n          \"body\": \"Who decides here?\",\n          \"run_id\": \"9f2c41d07be34a5e8c1d2e3f4a5b6c7d\"\n        },\n        {\n          \"id\": \"00000000000000a2\",\n          \"author\": \"agent:m26-ingest\",\n          \"created\": \"2026-10-14T09:05:00Z\",\n          \"body\": \"The crew lead.\",\n          \"run_id\": \"run-ingest-2\"\n        },\n        {\n          \"id\": \"00000000000000a3\",\n          \"author\": \"process:release-scout\",\n          \"created\": \"2026-10-14T09:15:00Z\",\n          \"body\": \"Settled in the plan.\",\n          \"run_id\": \"run-scout-3\"\n        }\n      ]\n    }\n  ]\n}\n",
+      "file": {
+        "format": 1,
+        "threads": [
+          {
+            "anchor": {
+              "quote": "Detect the conflict",
+              "occurrence": 1,
+              "before": "",
+              "after": ", hold both versions"
+            },
+            "resolved": {
+              "at": "2026-10-14T09:15:00Z",
+              "by": "process:release-scout"
+            },
+            "comments": [
+              {
+                "id": "00000000000000a1",
+                "author": "claude-code",
+                "created": "2026-10-14T09:00:00Z",
+                "body": "Who decides here?",
+                "run_id": "9f2c41d07be34a5e8c1d2e3f4a5b6c7d"
+              },
+              {
+                "id": "00000000000000a2",
+                "author": "agent:m26-ingest",
+                "created": "2026-10-14T09:05:00Z",
+                "body": "The crew lead.",
+                "run_id": "run-ingest-2"
+              },
+              {
+                "id": "00000000000000a3",
+                "author": "process:release-scout",
+                "created": "2026-10-14T09:15:00Z",
+                "body": "Settled in the plan.",
+                "run_id": "run-scout-3"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "name": "a body of the wrong kind",
       "text": "{\n  \"format\": 1,\n  \"threads\": [\n    {\n      \"anchor\": {\n        \"quote\": \"after the freeze\",\n        \"occurrence\": 1,\n        \"before\": \"We ship on Thursdays, \",\n        \"after\": \".\"\n      },\n      \"comments\": [\n        {\n          \"id\": \"0000000000000001\",\n          \"author\": \"human:owner\",\n          \"created\": \"2026-10-13T08:00:00Z\",\n          \"body\": 3\n        }\n      ]\n    }\n  ]\n}\n",
       "reason": "it does not match the comments format"

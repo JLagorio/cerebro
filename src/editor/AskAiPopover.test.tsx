@@ -69,7 +69,7 @@ describe('AskAiPopover', () => {
     await ask();
     expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1]).toMatchObject({
       allowedTools: [],
-      shell: false,
+      shell: 'off',
       connectors: false,
     });
   });

@@ -103,6 +103,25 @@ export function mentionAtWordStart(before: string | null): boolean {
   return before === '' || !/[\p{L}\p{M}\p{N}_.+-]/u.test(before);
 }
 
+/** The most words an `@` Create row will make a page of (M55.7). */
+export const MENTION_CREATE_WORDS = 2;
+
+/**
+ * Could the text after an `@` name a page, rather than run on as the rest of
+ * a sentence? Yes for at most `MENTION_CREATE_WORDS` words with no `,` `.`
+ * `;` `:` `!` or `?`, so `@Retro memo` can make a page and
+ * `@dana about the launch plan` cannot.
+ *
+ * BlockNote closes a menu once its query runs four characters past the last
+ * one that had rows. A Create row on every query would keep the `@` menu open
+ * to the end of the line, and the Enter that ends it would make a page named
+ * after the sentence. Past this limit the row goes, so the menu closes.
+ */
+export function mentionNamesPage(query: string): boolean {
+  if (/[,.;:!?]/.test(query)) return false;
+  return query.trim().split(/\s+/).length <= MENTION_CREATE_WORDS;
+}
+
 /** The stem a link names a note by: `notes/launch-notes.md` is `launch-notes`. */
 export function stemOfPath(path: string): string {
   return path.slice(path.lastIndexOf('/') + 1).replace(/\.md$/i, '');

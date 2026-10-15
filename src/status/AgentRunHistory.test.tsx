@@ -131,5 +131,11 @@ describe('AgentRunHistory', () => {
         .map((row) => row.getAttribute('data-code')),
     ).toEqual(['write_outside_scope', 'capability_unavailable']);
     expect(screen.getByTestId('run-detail-model').textContent).toBe('claude-opus-5');
+    // And the one page it wrote (M58.1b).
+    expect(
+      within(screen.getByTestId('run-detail-pages'))
+        .getAllByTestId('run-detail-page')
+        .map((row) => row.getAttribute('data-path')),
+    ).toEqual(['records/risks/risk-scanner-delivery.md']);
   });
 });

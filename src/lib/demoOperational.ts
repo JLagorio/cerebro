@@ -349,6 +349,8 @@ export function demoFleetDetails(): Record<string, FleetRunDetail> {
       model_id: 'claude-opus-5',
       refusals: [],
       refusals_total: 0,
+      // An answer writes no page, and its writes were booked: measured.
+      wrote: { state: 'recorded', writes: [] },
     },
     // Ambient runs are outside M31.6's attended writer, so nothing recorded
     // their cost. "Not recorded" — never $0.
@@ -356,6 +358,7 @@ export function demoFleetDetails(): Record<string, FleetRunDetail> {
     // release-scout's run was refused twice (M56.9): a write outside its
     // scope, and a built-in its grant does not hold. Both are rows recorded
     // with its run id, as Rust's scope check and permission sink write them.
+    // The one page it did write, inside its scope, is booked (M58.1b).
     'run-scout-1': {
       ...unrecorded(find('run-scout-1'), 'claude-opus-5'),
       refusals: [
@@ -375,6 +378,18 @@ export function demoFleetDetails(): Record<string, FleetRunDetail> {
         },
       ],
       refusals_total: 2,
+      wrote: {
+        state: 'recorded',
+        writes: [
+          {
+            kind: 'vault.write',
+            path: 'records/risks/risk-scanner-delivery.md',
+            to: null,
+            at: '2026-07-28T09:17:00.000Z',
+            approved_by: null,
+          },
+        ],
+      },
     },
     'run-ingest-2': unrecorded(find('run-ingest-2'), 'claude-opus-5'),
     // The CLI died before its stream named a model: not recorded.
@@ -386,7 +401,61 @@ export function demoFleetDetails(): Record<string, FleetRunDetail> {
   };
 }
 
-/** A detail with no cost or assembly rows recorded and nothing refused. */
+/**
+ * The row a mock run books when its shell ceiling is Ask and nobody can
+ * answer it (M57.2): the run, and its detail with the one
+ * `capability_unavailable` row under `agent.ask` that Rust's meter writes,
+ * naming the tools it went without. No seeded fleet holds one; a mock run
+ * books it as it starts (`agentIpc.runAgent`).
+ */
+export function withheldRun(fields: {
+  runId: string;
+  actor: string | null;
+  mode: string;
+  lane: string;
+  sessionId: string;
+  at: string;
+  detail: string;
+}): FleetRunDetail {
+  const run: FleetRun = {
+    run_id: fields.runId,
+    actor: fields.actor,
+    vault_id: null,
+    mode: fields.mode,
+    lane: fields.lane,
+    started_at: fields.at,
+    ended_at: null,
+    outcome: 'running',
+    // The browser counts no tokens: unknown, never zero.
+    usage_state: 'unknown',
+    input_tokens: 0,
+    output_tokens: 0,
+    proposals_submitted: null,
+    applied: null,
+    rejected: null,
+    parent_run_id: null,
+    cause: null,
+    cli_session_id: fields.sessionId,
+  };
+  return {
+    ...unrecorded(run, null),
+    refusals: [
+      {
+        code: 'capability_unavailable',
+        surface: 'agent.ask',
+        detail: fields.detail,
+        rule: null,
+        recorded_at: fields.at,
+      },
+    ],
+    refusals_total: 1,
+  };
+}
+
+/** A detail with no cost or assembly rows recorded, nothing refused, and
+ * writes not booked: every demo run but two is from before M58.1 booked
+ * them, and a mock run's writes are logged under its attach id, never under
+ * its fleet row's. */
 function unrecorded(run: FleetRun, model: string | null): FleetRunDetail {
   return {
     run,
@@ -395,6 +464,7 @@ function unrecorded(run: FleetRun, model: string | null): FleetRunDetail {
     model_id: model,
     refusals: [],
     refusals_total: 0,
+    wrote: { state: 'not_recorded' },
   };
 }
 

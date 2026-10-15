@@ -7,9 +7,11 @@ import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { addSubPage, nestPage } from '@/app/pageActions';
+import { trashPath } from '@/app/trashActions';
 import { canHaveSubPages, isFolderNote } from '@/engine/docPages';
+import { TRASH_WORDS } from '@/engine/trash';
 import type { Entry } from '@/engine/types';
-import { createFolder, deleteNote, readNote, renameNote, setNoteTitle } from '@/lib/ipc';
+import { createFolder, readNote, renameNote, setNoteTitle } from '@/lib/ipc';
 import { askedAbout, TEMPLATE_FILL_LABEL } from '@/lib/prompts';
 import { humanizeSlug, slugify } from '@/lib/slug';
 import {
@@ -554,18 +556,14 @@ export function FileTree({
     }
   };
 
+  // M60.8: to the vault's own Trash. trashPath toasts, rescans and never
+  // throws; a refusal keeps the dialog open.
   const submitDelete = async () => {
     if (confirmDelete === null || vaultPath === null || submitting) return;
     setSubmitting(true);
-    try {
-      await deleteNote(vaultPath, confirmDelete.path);
-      await rescan();
-      setConfirmDelete(null);
-    } catch {
-      toast("Couldn't move to Trash");
-    } finally {
-      setSubmitting(false);
-    }
+    const item = await trashPath(confirmDelete.path, confirmDelete.label);
+    setSubmitting(false);
+    if (item !== null) setConfirmDelete(null);
   };
 
   /** The page a row stands for, when it can take sub-pages: a file row's own
@@ -923,11 +921,14 @@ export function FileTree({
             disabled: submitting,
           }}
           secondaryAction={{ label: 'Cancel', onClick: () => setConfirmDelete(null) }}
+          footerNote={TRASH_WORDS.footer}
         >
           <p className="m-0 text-sm text-n-600">
             {confirmDelete.kind === 'file'
-              ? 'The page moves to the system Trash.'
-              : 'The folder and everything inside it move to the system Trash.'}
+              ? TRASH_WORDS.body
+              : confirmDelete.kind === 'doc'
+                ? TRASH_WORDS.doc
+                : TRASH_WORDS.folder}
           </p>
         </Dialog>
       )}

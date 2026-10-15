@@ -1,0 +1,220 @@
+{
+  "about": "M60.8: the vault's own Trash. A delete moves the item to .trash/<stamp>/<path>, its comment sidecar to .trash/<stamp>/.comments/, and writes .trashed.json beside them. A stamp is the UTC second plus four lowercase hex characters. Restore puts both back and refuses to overwrite. A stamp dir with a readable manifest lists when its item is there; one without lists as unreadable when it holds anything but dot-names, and is never restored; a name that is no stamp is never listed or purged. The launch purge moves stamp dirs past keep_days, judged by the stamp, never mtime. Replayed by src-tauri/src/vault/trash.rs and src/lib/mockIpc.test.ts (and src/engine/trash.test.ts for the pure half).",
+  "keep_days": 30,
+  "trash_dir": ".trash",
+  "manifest_name": ".trashed.json",
+  "words": {
+    "not_a_page": "{path} is not a page Cerebro shows, so it can't go to the Trash.",
+    "exists": "{path} already exists, so nothing was restored. Move or rename that page first.",
+    "unreadable": "This Trash item can't be read, so it can't be restored.",
+    "nothing": "Nothing in the Trash at {stamp}."
+  },
+  "stamps": [
+    { "name": "20261014T093000Z-a1b2", "at": "2026-10-14T09:30:00Z" },
+    { "name": "20240229T235959Z-0000", "at": "2024-02-29T23:59:59Z" },
+    { "name": "19991231T000000Z-ffff", "at": "1999-12-31T00:00:00Z" },
+    { "name": "20261014T093000Z-A1B2", "at": null, "why": "the hex is lowercase" },
+    { "name": "20261014T093000Z-a1b", "at": null },
+    { "name": "20261014T093000Z-a1b2c", "at": null },
+    { "name": "20261014T093000-a1b2", "at": null },
+    { "name": "20261014 093000Z-a1b2", "at": null },
+    { "name": "20260230T000000Z-a1b2", "at": null, "why": "February has no 30th" },
+    { "name": "20250229T000000Z-a1b2", "at": null, "why": "2025 is no leap year" },
+    { "name": "20261014T240000Z-a1b2", "at": null },
+    { "name": "20261014T236000Z-a1b2", "at": null },
+    { "name": "20261014T093060Z-a1b2", "at": null },
+    {
+      "name": "\u0662\u0660\u0662\u0666\u0661\u0660\u0661\u0664T093000Z-a1b2",
+      "at": null,
+      "why": "only ASCII digits"
+    },
+    { "name": "notes.md", "at": null, "why": "Obsidian keeps flat files in .trash/" },
+    { "name": "", "at": null }
+  ],
+  "minted": [
+    { "at": "2026-10-14T09:30:00Z", "rng": 41394, "name": "20261014T093000Z-a1b2" },
+    { "at": "2026-01-02T03:04:05Z", "rng": 0, "name": "20260102T030405Z-0000" }
+  ],
+  "manifests": [
+    {
+      "item": {
+        "path": "notes/a.md",
+        "kind": "file",
+        "title": "A",
+        "deleted_at": "2026-10-14T09:30:00Z"
+      },
+      "bytes": "{\n  \"format\": 1,\n  \"path\": \"notes/a.md\",\n  \"kind\": \"file\",\n  \"title\": \"A\",\n  \"deleted_at\": \"2026-10-14T09:30:00Z\"\n}\n"
+    },
+    {
+      "item": {
+        "path": "projects/caf\u00e9",
+        "kind": "folder",
+        "title": "caf\u00e9 \u2014 \"plans\"",
+        "deleted_at": "2026-10-14T09:30:00Z"
+      },
+      "bytes": "{\n  \"format\": 1,\n  \"path\": \"projects/caf\u00e9\",\n  \"kind\": \"folder\",\n  \"title\": \"caf\u00e9 \u2014 \\\"plans\\\"\",\n  \"deleted_at\": \"2026-10-14T09:30:00Z\"\n}\n"
+    }
+  ],
+  "unreadable_manifests": [
+    "not json",
+    "[]",
+    "{\"format\":2,\"path\":\"notes/a.md\",\"kind\":\"file\",\"title\":\"A\",\"deleted_at\":\"2026-10-14T09:30:00Z\"}",
+    "{\"path\":\"notes/a.md\",\"kind\":\"file\",\"title\":\"A\",\"deleted_at\":\"2026-10-14T09:30:00Z\"}",
+    "{\"format\":1,\"path\":\"../a.md\",\"kind\":\"file\",\"title\":\"A\",\"deleted_at\":\"2026-10-14T09:30:00Z\"}",
+    "{\"format\":1,\"path\":\"/etc/a.md\",\"kind\":\"file\",\"title\":\"A\",\"deleted_at\":\"2026-10-14T09:30:00Z\"}",
+    "{\"format\":1,\"path\":\".git/a.md\",\"kind\":\"file\",\"title\":\"A\",\"deleted_at\":\"2026-10-14T09:30:00Z\"}",
+    "{\"format\":1,\"path\":\"notes//a.md\",\"kind\":\"file\",\"title\":\"A\",\"deleted_at\":\"2026-10-14T09:30:00Z\"}",
+    "{\"format\":1,\"path\":\"\",\"kind\":\"file\",\"title\":\"A\",\"deleted_at\":\"2026-10-14T09:30:00Z\"}",
+    "{\"format\":1,\"path\":\"notes/a.md\",\"kind\":\"link\",\"title\":\"A\",\"deleted_at\":\"2026-10-14T09:30:00Z\"}",
+    "{\"format\":1,\"path\":\"notes/a.md\",\"kind\":\"file\",\"deleted_at\":\"2026-10-14T09:30:00Z\"}",
+    "{\"format\":1,\"path\":\"notes/a.md\",\"kind\":\"file\",\"title\":\"A\",\"deleted_at\":5}"
+  ],
+  "purge": [
+    {
+      "stamp": "20260914T093000Z-0001",
+      "now": "2026-10-14T09:30:00Z",
+      "moves": false,
+      "why": "exactly thirty days"
+    },
+    { "stamp": "20260914T093000Z-0001", "now": "2026-10-14T09:30:01Z", "moves": true },
+    {
+      "stamp": "20260915T093000Z-0001",
+      "now": "2026-10-14T09:30:00Z",
+      "moves": false,
+      "why": "twenty-nine days"
+    },
+    { "stamp": "20260901T000000Z-0001", "now": "2026-10-14T09:30:00Z", "moves": true },
+    { "stamp": "20261014T093000Z-0001", "now": "2026-10-14T09:30:00Z", "moves": false }
+  ],
+  "delete": [
+    {
+      "path": ".git/config",
+      "refused": ".git/config is not a page Cerebro shows, so it can't go to the Trash."
+    },
+    {
+      "path": ".trash/20261014T093000Z-a1b2/notes/a.md",
+      "refused": ".trash/20261014T093000Z-a1b2/notes/a.md is not a page Cerebro shows, so it can't go to the Trash."
+    },
+    {
+      "path": ".comments/notes/a.md.json",
+      "refused": ".comments/notes/a.md.json is not a page Cerebro shows, so it can't go to the Trash."
+    },
+    {
+      "path": "notes/.hidden.md",
+      "refused": "notes/.hidden.md is not a page Cerebro shows, so it can't go to the Trash."
+    },
+    {
+      "path": "notes/\u200c.obsidian/a.md",
+      "refused": "notes/\u200c.obsidian/a.md is not a page Cerebro shows, so it can't go to the Trash."
+    },
+    { "path": "notes/missing.md", "refused": "not found: notes/missing.md" },
+    { "path": "notes/a.md", "lands": { "kind": "file", "title": "A", "pages": 1 } },
+    { "path": "notes", "lands": { "kind": "folder", "title": "notes", "pages": 2 } }
+  ],
+  "delete_seed": {
+    "notes/a.md": "---\ntype: Note\n---\n\n# A\n\nBody.\n",
+    "notes/flow.mmd": "graph TD\n",
+    ".git/config": "[core]\n",
+    ".comments/notes/a.md.json": "{\n  \"format\": 1,\n  \"threads\": []\n}\n",
+    "notes/.hidden.md": "# Hidden\n"
+  },
+  "list": {
+    "seed": {
+      ".trash/20261012T080000Z-0001/notes/old.md": "# Old one\n",
+      ".trash/20261012T080000Z-0001/.trashed.json": "{\n  \"format\": 1,\n  \"path\": \"notes/old.md\",\n  \"kind\": \"file\",\n  \"title\": \"Old one\",\n  \"deleted_at\": \"2026-10-12T08:00:00Z\"\n}\n",
+      ".trash/20261014T093000Z-a1b2/projects/p/a.md": "# A\n",
+      ".trash/20261014T093000Z-a1b2/projects/p/deep/b.mmd": "graph TD\n",
+      ".trash/20261014T093000Z-a1b2/projects/p/data.csv": "a,b\n",
+      ".trash/20261014T093000Z-a1b2/.comments/projects/p/a.md.json": "{\n  \"format\": 1,\n  \"threads\": []\n}\n",
+      ".trash/20261014T093000Z-a1b2/.trashed.json": "{\n  \"format\": 1,\n  \"path\": \"projects/p\",\n  \"kind\": \"folder\",\n  \"title\": \"p\",\n  \"deleted_at\": \"2026-10-14T09:30:00Z\"\n}\n",
+      ".trash/20261013T000000Z-beef/stray.md": "# Stray\n",
+      ".trash/20261013T120000Z-0004/kept.md": "# Kept\n",
+      ".trash/20261013T120000Z-0004/.trashed.json": "{\"format\":9}",
+      ".trash/20261011T000000Z-0002/.trashed.json": "{\n  \"format\": 1,\n  \"path\": \"notes/gone.md\",\n  \"kind\": \"file\",\n  \"title\": \"Gone\",\n  \"deleted_at\": \"2026-10-11T00:00:00Z\"\n}\n",
+      ".trash/20261010T000000Z-0003/.comments/notes/x.md.json": "{\n  \"format\": 1,\n  \"threads\": []\n}\n",
+      ".trash/notes.md": "Obsidian's own Trash\n",
+      ".trash/Not a stamp/a.md": "# A\n"
+    },
+    "items": [
+      {
+        "stamp": "20261014T093000Z-a1b2",
+        "path": "projects/p",
+        "kind": "folder",
+        "title": "p",
+        "deletedAt": "2026-10-14T09:30:00Z",
+        "pages": 2
+      },
+      {
+        "stamp": "20261013T120000Z-0004",
+        "path": ".trash/20261013T120000Z-0004",
+        "kind": "unreadable",
+        "title": "",
+        "deletedAt": "2026-10-13T12:00:00Z",
+        "pages": null
+      },
+      {
+        "stamp": "20261013T000000Z-beef",
+        "path": ".trash/20261013T000000Z-beef",
+        "kind": "unreadable",
+        "title": "",
+        "deletedAt": "2026-10-13T00:00:00Z",
+        "pages": null
+      },
+      {
+        "stamp": "20261012T080000Z-0001",
+        "path": "notes/old.md",
+        "kind": "file",
+        "title": "Old one",
+        "deletedAt": "2026-10-12T08:00:00Z",
+        "pages": 1
+      }
+    ]
+  },
+  "restore": [
+    {
+      "stamp": "20261012T080000Z-0001",
+      "restores": "notes/old.md",
+      "why": "the file comes back, and the stamp dir goes"
+    },
+    {
+      "stamp": "20261014T093000Z-a1b2",
+      "restores": "projects/p",
+      "why": "the folder and its sidecar folder come back"
+    },
+    {
+      "stamp": "20261012T080000Z-0001",
+      "occupied": { "notes/old.md": "# Someone else\n" },
+      "refused": "notes/old.md already exists, so nothing was restored. Move or rename that page first."
+    },
+    {
+      "stamp": "20261013T000000Z-beef",
+      "refused": "This Trash item can't be read, so it can't be restored."
+    },
+    {
+      "stamp": "20261013T120000Z-0004",
+      "refused": "This Trash item can't be read, so it can't be restored."
+    },
+    {
+      "stamp": "20261011T000000Z-0002",
+      "refused": "Nothing in the Trash at 20261011T000000Z-0002."
+    },
+    {
+      "stamp": "20261010T000000Z-0003",
+      "refused": "Nothing in the Trash at 20261010T000000Z-0003."
+    },
+    {
+      "stamp": "20990101T000000Z-0000",
+      "refused": "Nothing in the Trash at 20990101T000000Z-0000."
+    },
+    { "stamp": "Not a stamp", "refused": "Nothing in the Trash at Not a stamp." },
+    { "stamp": "../notes", "refused": "Nothing in the Trash at ../notes." },
+    {
+      "stamp": "20261009T000000Z-0005",
+      "occupied": {
+        ".trash/20261009T000000Z-0005/knowledge/a.md": "# A\n",
+        ".trash/20261009T000000Z-0005/.trashed.json": "{\n  \"format\": 1,\n  \"path\": \"knowledge/a.md\",\n  \"kind\": \"file\",\n  \"title\": \"A\",\n  \"deleted_at\": \"2026-10-09T00:00:00Z\"\n}\n"
+      },
+      "refused": "read-only"
+    }
+  ]
+}

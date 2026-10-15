@@ -2,6 +2,7 @@ import { useDrawerFocus } from '@/components/ui/DrawerScrim';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { DocProperties } from '@/detail/DocProperties';
+import { LastChange } from '@/detail/LastChange';
 import { OutlineTab } from '@/editor/DocOutline';
 import type { CerebroEditor } from '@/editor/MarkdownEditor';
 import { agentRef, isAgentEntry } from '@/engine/agents';
@@ -13,6 +14,7 @@ import { typeStyle } from '@/engine/typeCatalog';
 import { ConceptDetailsTab } from '@/knowledge/ConceptDetailsTab';
 import { CommentsTab } from '@/detail/CommentsTab';
 import type { PageCommentsController } from '@/detail/usePageComments';
+import { GitHistoryPanel } from '@/git/GitHistoryPanel';
 import { FileNote } from '@/library/chrome';
 import { PageKnowledge } from '@/knowledge/PageKnowledge';
 import {
@@ -33,6 +35,8 @@ const TABS: { id: DocPanelTab; label: string }[] = [
   { id: 'knowledge', label: 'Knowledge' },
   // M70.2b — the page's threads: on its text, and about the whole page.
   { id: 'comments', label: 'Comments' },
+  // M58.4 (D18) — the page's versions, as prose, with Restore.
+  { id: 'history', label: 'History' },
 ];
 
 /** A concept's panel (M50.1): its provenance first. The review itself is the
@@ -44,6 +48,8 @@ const CONCEPT_TABS: { id: ConceptPanelTab; label: string }[] = [
   // A concept takes comments like any page (M70.2b, Q5): the sidecar sits
   // outside the bundle, and a thread can neither write nor verify it.
   { id: 'comments', label: 'Comments' },
+  // Its versions read like any page's (M58.4); Restore is not offered there.
+  { id: 'history', label: 'History' },
 ];
 
 function LinkRow({ link }: { link: DocLink }) {
@@ -132,9 +138,11 @@ function AgentInfo({ entry }: { entry: Entry }) {
 /**
  * Right-hand doc side panel (M2.x docs polish — Plane's pane pattern): one
  * panel, its tabs in TABS (CONCEPT_TABS on a concept). Outline replaces the
- * old floating TOC; Info hosts the properties editor (on an agent page, a
- * read-only note — M55.12); Links shows resolved connections and backlinks;
- * Comments holds the page's threads (M70.2b).
+ * old floating TOC; Info leads with who last changed the page (M58.1b) and
+ * hosts the properties editor (on an agent page, a read-only note — M55.12);
+ * Links shows resolved connections and backlinks;
+ * Comments holds the page's threads (M70.2b); History lists its versions,
+ * each opening the version lens in place of the editor (M58.4, D18).
  */
 export function DocSidePanel({
   entry,
@@ -193,7 +201,7 @@ export function DocSidePanel({
           : { flex: `0 1 ${DOC_PANEL_WIDTH}px`, minWidth: DOC_PANEL_MIN_WIDTH }
       }
     >
-      {/* Wraps rather than clips: at the panel's floor its tabs are wider
+      {/* Wraps rather than clips: at the panel's floor the tabs can be wider
           than the panel. */}
       <div className="flex flex-none flex-wrap items-center gap-1 border-b border-n-100 px-2 py-1.5">
         {tabs.map((t) => (
@@ -234,14 +242,19 @@ export function DocSidePanel({
           ) : (
             <div data-testid="outline-loading" />
           ))}
-        {tab === 'info' &&
-          (isAgentEntry(entry) ? (
-            <AgentInfo entry={entry} />
-          ) : (
-            <DocProperties entry={entry} schema={schema} />
-          ))}
+        {tab === 'info' && (
+          <>
+            <LastChange entry={entry} />
+            {isAgentEntry(entry) ? (
+              <AgentInfo entry={entry} />
+            ) : (
+              <DocProperties entry={entry} schema={schema} />
+            )}
+          </>
+        )}
         {tab === 'links' && <LinksTab entry={entry} />}
         {tab === 'comments' && comments !== null && <CommentsTab controller={comments} />}
+        {tab === 'history' && <GitHistoryPanel path={entry.path} variant="tab" />}
         {/* The record peek's Knowledge, component for component (M52.3).
             What this note gave Knowledge comes before what Knowledge can give
             the note: every doc is a candidate source, not just the ones that

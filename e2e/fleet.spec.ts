@@ -431,6 +431,48 @@ test("fleet: release-scout's scheduled run says why, on the fleet and on its Run
   await expect(run.getByTestId('run-why')).toHaveText(said);
 });
 
+/** The rendered width of a column, in px. */
+async function widthOf(locator: Locator): Promise<number> {
+  const box = await locator.boundingBox();
+  return box?.width ?? 0;
+}
+
+test('fleet: a long why never squeezes who or when to nothing, at 1100 wide', async ({ page }) => {
+  // Review round 1: an auto-basis why took its whole content width and left
+  // the zero-basis who (Fleet) and start time (Runs tab) at 0px. Text
+  // assertions passed through it; only a measured width catches it.
+  await page.setViewportSize({ width: 1100, height: 800 });
+  const event = {
+    ...RUN,
+    run_id: 'run-event',
+    actor: 'process:release-scout',
+    lane: 'event',
+    cause: {
+      kind: 'event',
+      why: 'a page it watches changed: ask whether the release notes still match the changelog, then file what drifted',
+      subject: 'docs/releases/2026-07.md',
+      detail: 'when a release page changes',
+      due_at: null,
+    },
+  };
+  const section = await openFleet(page, [event]);
+  const row = section.getByTestId('fleet-row');
+  await expect(row.getByTestId('run-why')).toBeVisible();
+  expect(await widthOf(row.getByTestId('fleet-actor'))).toBeGreaterThan(40);
+});
+
+test("fleet: release-scout's Runs tab keeps its start time beside the why, at 1100 wide", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await boot(page);
+  await openAgents(page);
+  await page.getByTestId('agent-row').filter({ hasText: 'Release scout' }).click();
+  const run = page.getByTestId('agent-runs').getByTestId('agent-run');
+  await expect(run.getByTestId('run-why')).toBeVisible();
+  expect(await widthOf(run.getByTestId('agent-run-label'))).toBeGreaterThan(40);
+});
+
 // --- A run's detail explains itself (M56.9) ---------------------------------
 
 test("fleet: release-scout's run explains itself", async ({ page }) => {

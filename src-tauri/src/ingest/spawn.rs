@@ -85,6 +85,8 @@ pub fn runner<'a>(live: &'a Live<'a>) -> impl Runner + 'a {
                 // M53.10: bound to this vault, whatever is opened while it
                 // runs.
                 live.vault,
+                // Cerebro's own construct: no page write asks (M57.4).
+                crate::mcp::WriteAsks::INTERNAL,
             )
         },
         spawn: move |session: &Session| {
@@ -151,12 +153,17 @@ fn request(session: &Session, url: &str) -> AgentRequest {
         system_prompt: None,
         session_id: None,
         model: None,
+        // No shell ceiling (M57.2): an internal run's tool-approval plan
+        // denies every CLI tool whatever the ceiling, so none is sent.
+        shell: None,
         // Every one of these is an absence a missing field would GRANT. See
         // the module note; none of them is a default worth inheriting.
-        shell: Some(false),
         connectors: Some(false),
         connector_names: Some(vec![]),
         attended: Some(false),
+        // Cerebro's own construct, never an agent's: no page write asks
+        // (M57.4), and none is in its grant anyway.
+        ask_first: None,
         mcp_url: Some(url.to_string()),
         mcp_token: Some(session.mcp_token.clone()),
         actor: Some(ACTOR.to_string()),
@@ -177,9 +184,9 @@ fn request(session: &Session, url: &str) -> AgentRequest {
         // Claimed by this driver's own dispatch, never by the request
         // (M34.2.4's lane field is the renderer's path to the same gate).
         lane: None,
-        // Cerebro's own run, on cerebro's own schedule: the CLI's built-in
-        // tools are withdrawn in build_args. Only the three internal spawn
-        // sites ever set this.
+        // Cerebro's own run, on cerebro's own schedule: the tool-approval
+        // table's internal run kind denies every CLI built-in. Only the three
+        // internal spawn sites ever set this.
         internal: true,
     }
 }
@@ -204,7 +211,10 @@ mod tests {
         // Each of these is an absence that a MISSING field would grant, which
         // is why every one is stated rather than left off.
         let request = request(&session(), "http://127.0.0.1:1/mcp");
-        assert_eq!(request.shell, Some(false), "it does not write files");
+        assert_eq!(request.shell, None, "no ceiling reaches it");
+        let plan = crate::policy::tool_approval::plan_for(&request, false);
+        assert!(plan.allowed.is_empty(), "it does not write files");
+        assert_eq!(plan.disallowed, crate::policy::tools::cli_names(|_| true));
         assert_eq!(request.attended, Some(false), "nobody is watching");
         assert_eq!(
             request.connectors,
@@ -282,7 +292,7 @@ mod tests {
 
     #[test]
     fn an_ingest_run_is_marked_as_cerebros_own() {
-        // The marker build_args keys the CLI built-in withdrawal on. Only the
+        // The marker the tool-approval table's internal run kind keys on. Only the
         // three internal spawn sites ever set it.
         assert!(request(&session(), "u").internal);
     }

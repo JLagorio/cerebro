@@ -14,6 +14,7 @@ import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
 import { GitHistoryPanel } from '@/git/GitHistoryPanel';
 import { InlineDiff } from '@/git/InlineDiff';
 import { spliceTitleIntoBlocks } from '@/editor/markdown';
+import { UNTYPED_LABEL } from '@/engine/destinations';
 import { sourceFreshness } from '@/engine/ingest';
 import { resolveLayout } from '@/engine/layout';
 import { typeStyle } from '@/engine/typeCatalog';
@@ -375,10 +376,10 @@ export function DetailPanel({
             says what it is — and the key, the record's own name, not at all. */}
         <span
           data-testid="detail-type"
-          title={entry.type ?? 'Note'}
+          title={entry.type ?? UNTYPED_LABEL}
           className="min-w-0 truncate text-xs font-medium text-n-700"
         >
-          {entry.type ?? 'Note'}
+          {entry.type ?? UNTYPED_LABEL}
         </span>
         {key !== '' && (
           <span className="flex-none whitespace-nowrap [font-family:var(--font-mono)] text-2xs text-n-500">

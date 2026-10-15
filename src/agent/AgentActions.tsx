@@ -1,11 +1,12 @@
 import { useEffect } from 'react';
 import { onUiAction } from '@/agent/agentIpc';
-import type { Selection } from '@/engine/types';
+import { navigateTarget } from '@/engine/destinations';
 import { useOpenPath } from '@/app/useOpenPath';
 import { announceExternalWrites } from '@/editor/openPages';
+import { useCommentsStore } from '@/stores/commentsStore';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
-import { useVaultStore } from '@/stores/vaultStore';
+import { getSchema, useVaultStore } from '@/stores/vaultStore';
 
 /**
  * Bridges the agent's UI tools into the app (M6). Mounted once, renders
@@ -17,17 +18,20 @@ import { useVaultStore } from '@/stores/vaultStore';
  * stored for review, never applied, so the agent's opinion about how to file
  * a capture never becomes a silent write.
  *
- * It also carries what the agent's write tools announce (M53.6). The watcher
- * drops the echo of every write the app makes, the agent's MCP writes
- * included, so this is how the vault, and a page with the written file open,
- * hear about them.
+ * It also carries what the agent's write tools announce (M53.6), and what its
+ * comment tools announce (M70.3). The watcher drops the echo of every write
+ * the app makes, the agent's MCP writes included, so this is how the vault, a
+ * page with the written file open, and a page whose comments an agent
+ * changed hear about them.
  */
 export function AgentActions() {
   const navigate = useNavStore((s) => s.navigate);
   const rescan = useVaultStore((s) => s.rescan);
   const addProposal = useUiStore((s) => s.addProposal);
   const selectInboxPath = useUiStore((s) => s.setInboxSelectedPath);
-  const openPath = useOpenPath();
+  // Every move this bridge makes is the agent's, so none of it lands in the
+  // person's open log (M59.3). A new action that navigates passes byAgent too.
+  const openPath = useOpenPath('navigate', { byAgent: true });
 
   useEffect(() => {
     return onUiAction((action) => {
@@ -35,14 +39,29 @@ export function AgentActions() {
         case 'open_note':
           openPath(action.path);
           break;
-        case 'navigate':
-          navigate(toSelection(action.to, action.id));
+        case 'navigate': {
+          // Rust already refused a word the served enum lacks; what is left
+          // to refuse is a database this vault does not hold. A refusal
+          // toasts and stays put — nothing goes Home by default (M59.1).
+          const { entries } = useVaultStore.getState();
+          const target = navigateTarget(action, entries, getSchema(entries));
+          if ('selection' in target) navigate(target.selection, { byAgent: true });
+          else useUiStore.getState().toast(target.refused);
           break;
+        }
         case 'vault_changed':
           // The pages showing those files hold their saves until the rescan
           // lands, then merge the write in place (NoteBodyEditor, M55.6).
           void announceExternalWrites(action.paths ?? [], rescan);
           break;
+        case 'comments_changed': {
+          // Only the page's sidecar changed: reload its threads if it is
+          // showing them, as the watcher's comments-changed does, and rescan
+          // nothing, since no file the vault lists moved.
+          const comments = useCommentsStore.getState();
+          if (action.path in comments.slots) void comments.load(action.path);
+          break;
+        }
         case 'propose_organize':
           addProposal({
             path: action.path,
@@ -59,27 +78,11 @@ export function AgentActions() {
           selectInboxPath(action.path);
           // The Inbox is where a proposal is actionable, so go there — but
           // only to show it. Accepting is still the user's click.
-          navigate({ kind: 'inbox' });
+          navigate({ kind: 'inbox' }, { byAgent: true });
           break;
       }
     });
   }, [addProposal, navigate, openPath, rescan, selectInboxPath]);
 
   return null;
-}
-
-/** Map the agent's surface name onto a Selection; unknown names go Home. */
-export function toSelection(to: string, id?: string): Selection {
-  switch (to) {
-    case 'inbox':
-      return { kind: 'inbox' };
-    case 'knowledge':
-      return { kind: 'knowledge' };
-    // 'docs' fell out with the surface (M38.3): an agent that says it goes
-    // Home like any other name the shell stopped answering to.
-    case 'list':
-      return id !== undefined ? { kind: 'list', id } : { kind: 'home' };
-    default:
-      return { kind: 'home' };
-  }
 }

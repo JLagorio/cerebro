@@ -1,0 +1,278 @@
+import { useId, useMemo, useState } from 'react';
+import {
+  applyDraftEdits,
+  changedKeys,
+  DRAFT_FIELD,
+  draftRefusal,
+  fieldText,
+  parseDraft,
+  prettyDraft,
+  projectDraftForm,
+  readFieldText,
+  type Draft,
+  type DraftField,
+} from '@/engine/writeDraft';
+
+/**
+ * An ask-first write's draft, editable before Allow (M57.4b): the form
+ * `engine/writeDraft` projects from the tool's input schema. One control per
+ * flat field, labelled by its property name with the schema's description as
+ * its hint and required fields marked, then "Edit as JSON", the whole draft.
+ * Opening the JSON makes the other fields read-only, and while it is open the
+ * JSON is the draft; closing it keeps a JSON object and drops anything else.
+ *
+ * Controlled and without buttons, so the card that holds it owns its
+ * answers: every change reports the input, whether it is valid, and whether
+ * it differs from the asked draft. It checks only what it can check totally
+ * (an object, required keys, declared keys, types); Rust checks the edit
+ * again at the answer and at the write. Everything shows as text, never as
+ * markup.
+ */
+
+/** The form's words (Appendix C, M57.4b). */
+export const DRAFT_COPY = {
+  json: 'Edit as JSON',
+  readOnly: 'These fields are read-only while the JSON is edited.',
+  notObject: 'Not a JSON object',
+  required: 'required',
+  none: '—',
+} as const;
+
+/** Text this long, or holding a line break, edits in a text area. */
+const LONG_TEXT = 80;
+
+export interface DraftChange {
+  input: Draft;
+  valid: boolean;
+  edited: boolean;
+}
+
+interface Props {
+  title: string;
+  schema: unknown;
+  /** The draft as the agent asked it. */
+  draft: Draft;
+  disabled?: boolean;
+  onChange: (change: DraftChange) => void;
+}
+
+interface State {
+  /** What the flat fields edit: the asked draft, or a JSON edit kept. */
+  base: Draft;
+  /** Each touched flat field's text, or its checkbox. */
+  edits: Record<string, string | boolean>;
+  json: { seed: string; text: string } | null;
+}
+
+/** The flat fields' edits as arguments, and whether one of them means
+ * nothing its field takes. */
+function flatEdits(
+  fields: DraftField[],
+  edits: State['edits'],
+): { values: Record<string, unknown>; invalid: boolean } {
+  const values: Record<string, unknown> = {};
+  let invalid = false;
+  for (const field of fields) {
+    if (!Object.hasOwn(edits, field.key)) continue;
+    const edit = edits[field.key];
+    if (typeof edit === 'boolean') {
+      values[field.key] = edit;
+      continue;
+    }
+    const read = readFieldText(field, edit);
+    if (read === 'invalid') invalid = true;
+    else values[field.key] = read.value;
+  }
+  return { values, invalid };
+}
+
+function changeOf(schema: unknown, asked: Draft, state: State, fields: DraftField[]): DraftChange {
+  if (state.json !== null && state.json.text !== state.json.seed) {
+    const parsed = parseDraft(state.json.text);
+    if (parsed === null) return { input: asked, valid: false, edited: true };
+    return {
+      input: parsed,
+      valid: draftRefusal(schema, parsed) === null,
+      edited: changedKeys(asked, parsed).length > 0,
+    };
+  }
+  const { values, invalid } = flatEdits(fields, state.edits);
+  const input = applyDraftEdits(state.base, values);
+  return {
+    input,
+    valid: !invalid && draftRefusal(schema, input) === null,
+    edited: invalid || changedKeys(asked, input).length > 0,
+  };
+}
+
+export function WriteDraftForm({ title, schema, draft, disabled = false, onChange }: Props) {
+  const id = useId();
+  const [state, setState] = useState<State>({ base: draft, edits: {}, json: null });
+  const form = useMemo(
+    () => projectDraftForm(title, schema, state.base),
+    [title, schema, state.base],
+  );
+  const flat = form.fields.filter((field) => field.key !== DRAFT_FIELD);
+  const jsonOpen = state.json !== null;
+  const jsonInvalid = state.json !== null && parseDraft(state.json.text) === null;
+  const locked = disabled || jsonOpen;
+
+  const update = (next: State) => {
+    setState(next);
+    const fields =
+      next.base === state.base ? flat : projectDraftForm(title, schema, next.base).fields;
+    onChange(changeOf(schema, draft, next, fields));
+  };
+
+  const edit = (key: string, value: string | boolean) =>
+    update({ ...state, edits: { ...state.edits, [key]: value } });
+
+  const toggleJson = (open: boolean) => {
+    if (open) {
+      const current = changeOf(schema, draft, state, flat).input;
+      const seed = prettyDraft(current);
+      update({ ...state, json: { seed, text: seed } });
+      return;
+    }
+    const kept = state.json === null ? null : parseDraft(state.json.text);
+    update(kept === null ? { ...state, json: null } : { base: kept, edits: {}, json: null });
+  };
+
+  return (
+    <div data-testid="write-draft-form" className="flex flex-col gap-1.5">
+      {flat.map((field) => {
+        const control = `${id}-${field.key}`;
+        const edited = state.edits[field.key];
+        const text = typeof edited === 'string' ? edited : fieldText(field);
+        const invalid =
+          typeof edited === 'string' && readFieldText(field, edited) === 'invalid'
+            ? true
+            : undefined;
+        const common = {
+          id: control,
+          'data-testid': `write-draft-field-${field.key}`,
+          'data-required': field.required ? 'true' : undefined,
+          'aria-required': field.required || undefined,
+          'aria-invalid': invalid,
+        };
+        const seeded = fieldText(field);
+        return (
+          <div key={field.key} className="flex flex-col gap-0.5">
+            <label
+              htmlFor={control}
+              className="flex items-center gap-1 [font-family:var(--font-mono)] text-2xs text-n-700"
+            >
+              {field.key}
+              {field.required && (
+                <span
+                  data-testid="write-draft-required"
+                  aria-hidden="true"
+                  title={DRAFT_COPY.required}
+                  className="text-cortex-600"
+                >
+                  *
+                </span>
+              )}
+            </label>
+            {field.hint !== null && (
+              <span className="text-2xs text-n-500" data-testid="write-draft-hint">
+                {field.hint}
+              </span>
+            )}
+            {field.kind === 'boolean' ? (
+              <input
+                {...common}
+                type="checkbox"
+                checked={typeof edited === 'boolean' ? edited : field.value === true}
+                disabled={locked}
+                onChange={(e) => edit(field.key, e.target.checked)}
+                className="self-start"
+              />
+            ) : field.kind === 'choice' ? (
+              <select
+                {...common}
+                value={text}
+                disabled={locked}
+                onChange={(e) => edit(field.key, e.target.value)}
+                className="rounded-md border border-n-200 bg-n-0 px-1.5 py-1 text-xs text-n-800"
+              >
+                {(!field.required || field.nullable || text === '') && (
+                  <option value="">{DRAFT_COPY.none}</option>
+                )}
+                {field.options.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            ) : field.kind === 'text' && (seeded.includes('\n') || seeded.length > LONG_TEXT) ? (
+              <textarea
+                {...common}
+                value={text}
+                readOnly={locked}
+                rows={Math.min(8, Math.max(3, seeded.split('\n').length))}
+                onChange={(e) => edit(field.key, e.target.value)}
+                className="resize-y rounded-md border border-n-200 bg-n-0 px-1.5 py-1 [font-family:var(--font-mono)] text-2xs leading-[15px] text-n-800"
+              />
+            ) : (
+              <input
+                {...common}
+                type="text"
+                inputMode={
+                  field.kind === 'integer'
+                    ? 'numeric'
+                    : field.kind === 'number'
+                      ? 'decimal'
+                      : undefined
+                }
+                value={text}
+                readOnly={locked}
+                onChange={(e) => edit(field.key, e.target.value)}
+                className="rounded-md border border-n-200 bg-n-0 px-1.5 py-1 text-xs text-n-800"
+              />
+            )}
+          </div>
+        );
+      })}
+      {jsonOpen && flat.length > 0 && (
+        <div data-testid="write-draft-readonly" className="text-2xs text-n-500">
+          {DRAFT_COPY.readOnly}
+        </div>
+      )}
+      <label className="flex items-center gap-1.5 text-2xs text-n-600">
+        <input
+          type="checkbox"
+          data-testid="write-draft-json-toggle"
+          checked={jsonOpen}
+          disabled={disabled}
+          onChange={(e) => toggleJson(e.target.checked)}
+        />
+        {DRAFT_COPY.json}
+      </label>
+      {state.json !== null && (
+        <>
+          <textarea
+            data-testid="write-draft-json"
+            aria-label={DRAFT_COPY.json}
+            value={state.json.text}
+            readOnly={disabled}
+            rows={8}
+            aria-invalid={jsonInvalid || undefined}
+            onChange={(e) =>
+              update({
+                ...state,
+                json: { seed: state.json?.seed ?? '', text: e.target.value },
+              })
+            }
+            className="resize-y rounded-md border border-n-200 bg-n-0 px-1.5 py-1 [font-family:var(--font-mono)] text-2xs leading-[15px] text-n-800"
+          />
+          {jsonInvalid && (
+            <div data-testid="write-draft-json-invalid" className="text-2xs text-danger-600">
+              {DRAFT_COPY.notObject}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

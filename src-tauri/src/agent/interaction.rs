@@ -22,25 +22,69 @@
 //! argv, so a hook that fails, times out or never runs leaves the call
 //! refused.
 //!
-//! `decide` is the seam's one policy point. Until M57.2 it returns `Argv` in
-//! release builds, so no production run asks; debug builds may name
-//! cerebro tools to ask for in `CEREBRO_ASK_TOOLS` (`ask_override`), a test
-//! seam that can add asks and never allows.
+//! `decide` is the seam's one policy point. Since M57.2 it answers from the
+//! tool-approval table (`policy::tool_approval::host_answer`, CV-04) over the
+//! run's plan, which its seat holds: the shell ceiling's asks become cards,
+//! an ask-first agent's page writes become write cards (M57.4), refusals are
+//! denied with the family's message, and a This conversation grant
+//! (`ConversationGrants`) for the call's exact subject allows it where the
+//! family's card offers one. Debug builds may also name cerebro tools to ask
+//! for in `CEREBRO_ASK_TOOLS` (`ask_override`), a test seam that can add asks
+//! and never allows.
+//!
+//! **A write lands only on a person's Allow** (M57.4, CV-29). The gate's
+//! allow lets an asked page write reach dispatch, and dispatch is the
+//! boundary: `mcp.rs` lets an ask-first write land only by taking a
+//! `WriteApproval` (`take_write_approval`), bound to its vault, Claude Code
+//! session, actor, tool and input, used once, and good for
+//! APPROVAL_MINUTES. Only the answer command records one
+//! (`record_write_approval`, from the `Resume` an Allow of a write card
+//! starts), so a user allow rule or a hook that never runs can make the CLI
+//! call the tool sooner, and the write is still refused.
+//!
+//! **The person may edit the draft before Allow** (M57.4b). The answer
+//! command hands `begin_answer_edited` the edited input, which must fit the
+//! tool's schema (`policy::tools::validate_input`) and pass the caller's
+//! check of the run's stored grant (scopes, tool grant, corpus, and since
+//! M57.4c the write previewed on the bytes on disk); a refusal
+//! leaves the card waiting and records nothing, so an edit never widens the
+//! grant. The approval keeps the asked input's hash, the approved input and
+//! its hash. The resume's gate allows the call with the approved input as
+//! `updatedInput`, and dispatch takes the approval by either hash and runs
+//! the approved input, so the edit lands whether or not Claude Code applies
+//! `updatedInput` on a resumed allow (F5/F8, derived; live run owed).
+//!
+//! **A question returns its answers as the call's input** (M57.3). The
+//! table asks for AskUserQuestion on an attended run with a question card:
+//! the gate parses the call's questions (`super::question`) and refuses a set
+//! no card can show, so no card appears and the model hears why. The
+//! person's answers are checked for membership and counts, then held as the
+//! call's own input with `answers` set, and the resume's gate allows the
+//! call with that input (`updatedInput`), which is how Claude Code hears
+//! them (F9, derived from 2.1.250; live run owed). Don't answer declines,
+//! and the model is told to decide itself.
+//!
+//! This conversation lives here too, in memory only: per vault and Claude
+//! Code session, bounded, forgotten at a vault switch and at quit, and
+//! written only when the person's answer starts its resume
+//! (`finish_answer`).
 //!
 //! The book lives in memory. Quit drops it, and the next send in a thread
 //! whose call was still waiting refuses that call as not answered and runs the
 //! new message (the settle: `open_seat` with the session file's marker,
 //! `super::transcript::pending_deferral`).
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use super::question::{self, Question, QuestionAnswer};
 use super::transcript::PendingDeferral;
 use super::AgentRequest;
+use crate::policy::tool_approval::{self, CardKind, HostAnswer, RunApproval};
 
 /// The gate's tool name on cerebro's loopback server. A hook endpoint, never
 /// a manifest row: `tools/list` never names it (`shared/policy/README.md`).
@@ -50,8 +94,24 @@ pub const GATE_TOOL: &str = "ask_gate";
 /// person's late click after its request ended.
 pub const NO_LONGER_WAITING: &str = "no_longer_waiting";
 
+/// A This conversation answer for a call the table does not ask about
+/// (M57.2), or an answer that does not fit its card (M57.3): an existing
+/// transport code, recorded nowhere.
+pub const MALFORMED_ARGUMENTS: &str = "malformed_arguments";
+
+/// The prompt tool's name on cerebro's loopback server (M57.3): Claude
+/// Code's `--permission-prompt-tool`, which 2.1.250 needs before it offers
+/// AskUserQuestion in `-p` (F9, derived). Like `ask_gate`, a hook endpoint,
+/// never a manifest row. `Interactions::host_prompt` is its answer.
+pub const HOST_TOOL: &str = "ask_host";
+
 /// Every refusal code this module can hand the webview.
-pub const REFUSAL_CODES: &[&str] = &[NO_LONGER_WAITING];
+pub const REFUSAL_CODES: &[&str] = &[NO_LONGER_WAITING, MALFORMED_ARGUMENTS];
+
+/// How many sessions keep This conversation grants, and how many subjects
+/// each keeps; the oldest goes first.
+const GRANT_SESSIONS: usize = 64;
+const GRANT_SUBJECTS: usize = 100;
 
 /// The oldest Claude Code the gate is built against (M54's pin): below it,
 /// or when the version is unknown, a run asks nothing.
@@ -84,6 +144,24 @@ const MAIN_ONLY: &str =
 /// What the webview shows for a late click.
 pub const STALE: &str = "No longer waiting: this request was already answered or cancelled.";
 
+/// What it shows for This conversation on a call no ceiling asks about.
+pub const NOT_REMEMBERED: &str =
+    "This conversation is offered only for a command or file change the shell ceiling asks about.";
+
+/// What it shows for an Allow on a question card (M57.3).
+pub const ANSWER_THE_QUESTION: &str = "A question is answered with its answers.";
+
+/// What it shows for answers sent to a card that asks no question (M57.3).
+pub const NOT_A_QUESTION: &str = "Only a question takes answers.";
+
+/// Book words for an edited draft sent with anything but an Allow of a
+/// write card (M57.4b).
+pub const EDIT_MISFIT: &str = "Only an Allow of a page write carries an edited draft.";
+
+/// What the prompt tool tells the model about a call no person answered
+/// (M57.3), and what `mcp.rs` answers for it when no book exists.
+pub const NOT_PUT: &str = "Cerebro couldn't put this call to the person, so it did not run.";
+
 /// The lock, poisoned or not: no entry is ever left half written.
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
@@ -96,8 +174,9 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 // ---------------------------------------------------------------------------
 
 /// One attended run that can ask: its durable id (the bearer's, M31.2a), its
-/// Claude Code session, its vault, and the request it was started with, so
-/// an answer can resume it on the same grant. The snapshot holds no bearer,
+/// Claude Code session, its vault, the request it was started with, so an
+/// answer can resume it on the same grant, and its tool-approval plan
+/// (M57.2), the one its argv was built from. The snapshot holds no bearer,
 /// no endpoint and no message.
 #[derive(Debug, Clone)]
 pub struct Seat {
@@ -105,6 +184,7 @@ pub struct Seat {
     pub session_id: String,
     pub vault: PathBuf,
     pub snapshot: Arc<AgentRequest>,
+    pub approval: Arc<RunApproval>,
     /// The tool of a deferred call the session left open, which this run
     /// refuses before its new text runs (the settle).
     settle: Option<String>,
@@ -120,9 +200,16 @@ impl Seat {
             run_id: run_id.to_string(),
             session_id: session_id.to_string(),
             vault: vault.to_path_buf(),
+            approval: Arc::new(tool_approval::plan_for(request, true)),
             snapshot: Arc::new(snapshot),
             settle: None,
         }
+    }
+
+    /// The seat with the plan its run's argv was built from (`agent::stream`).
+    pub fn with_approval(mut self, approval: RunApproval) -> Self {
+        self.approval = Arc::new(approval);
+        self
     }
 }
 
@@ -161,6 +248,25 @@ impl GateCall {
             agent_id: text("agent_id"),
         }
     }
+
+    /// The prompt tool's arguments (M57.3, F8 derived): `tool_name`,
+    /// `tool_use_id` and the call's `input` as an object. They name no
+    /// session, so `host_prompt` reads the seat's.
+    pub fn from_prompt_args(args: &serde_json::Map<String, Value>) -> Self {
+        let text = |key: &str| {
+            args.get(key)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        };
+        Self {
+            session_id: String::new(),
+            tool_use_id: text("tool_use_id"),
+            tool_name: text("tool_name"),
+            tool_input: args.get("input").cloned().unwrap_or(Value::Null),
+            agent_id: String::new(),
+        }
+    }
 }
 
 /// What the policy point says about a call.
@@ -168,18 +274,39 @@ impl GateCall {
 pub enum Decision {
     /// No opinion: argv decides.
     Argv,
-    /// Ask the person, with a card of this kind.
-    Ask(Kind),
+    /// Allow: a This conversation grant for this exact subject (M57.2).
+    Allow,
+    /// Ask the person, with a card of this kind; a table ask names its
+    /// family and exact subject (M57.2).
+    Ask {
+        kind: Kind,
+        family: Option<String>,
+        subject: Option<String>,
+    },
     /// Refuse, telling the model why.
     Deny(String),
 }
 
-/// A card's kind. Later parts add kinds to this registry, never a second
-/// path (M57.3 a question, M57.4 a write).
+/// A card's kind: a registry later parts add kinds to, never a second path.
+/// The table names which kind a family's ask draws (M57.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
     Permission,
+    /// An ask-first agent's page write (M57.4).
+    Write,
+    /// AskUserQuestion's questions (M57.3).
+    Question,
+}
+
+impl Kind {
+    fn of(card: Option<CardKind>) -> Self {
+        match card {
+            Some(CardKind::Write) => Kind::Write,
+            Some(CardKind::Question) => Kind::Question,
+            Some(CardKind::Permission) | None => Kind::Permission,
+        }
+    }
 }
 
 /// Why a call no person answered was refused.
@@ -202,13 +329,32 @@ impl CancelReason {
     }
 }
 
+/// How long an Allow holds (M57.2): this call only, or every call in the
+/// conversation with the same family and exact subject.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Remember {
+    #[default]
+    Once,
+    Conversation,
+}
+
 /// A person's answer as the webview sends it. Only `PersonAnswer::from_ipc`
 /// reads it.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WireAnswer {
-    Allow,
-    Deny { message: Option<String> },
+    Allow {
+        #[serde(default)]
+        remember: Remember,
+    },
+    Deny {
+        message: Option<String>,
+    },
+    /// A question card's answers (M57.3), one per question.
+    Answers {
+        answers: Vec<QuestionAnswer>,
+    },
 }
 
 /// A person's answer. It has no `Deserialize` and no public constructor
@@ -216,8 +362,17 @@ pub enum WireAnswer {
 /// (`only_the_answer_command_mints_a_person_answer`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PersonAnswer {
-    Allow,
-    Deny { message: Option<String> },
+    Allow {
+        remember: Remember,
+    },
+    Deny {
+        message: Option<String>,
+    },
+    /// Checked against the card's questions when it is taken
+    /// (`begin_answer`), never here.
+    Answers {
+        answers: Vec<QuestionAnswer>,
+    },
 }
 
 impl PersonAnswer {
@@ -226,7 +381,7 @@ impl PersonAnswer {
     /// characters; an empty one is none.
     pub fn from_ipc(wire: WireAnswer) -> Self {
         match wire {
-            WireAnswer::Allow => Self::Allow,
+            WireAnswer::Allow { remember } => Self::Allow { remember },
             WireAnswer::Deny { message } => Self::Deny {
                 message: message.and_then(|text| {
                     let cleaned: String = text
@@ -239,19 +394,90 @@ impl PersonAnswer {
                     (!cleaned.is_empty()).then_some(cleaned)
                 }),
             },
+            WireAnswer::Answers { answers } => Self::Answers { answers },
         }
     }
 
+    #[cfg(test)]
     fn gate_answer(&self) -> GateAnswer {
-        match self {
-            Self::Allow => GateAnswer::Allow {
+        self.gate_answer_for(Kind::Permission, None, None)
+    }
+
+    /// What the model reads: a deny of a write card says the table's
+    /// `ask_first_declined`, with the person's reason quoted (M57.4), and an
+    /// Allow of an edited one allows with the edited input (M57.4b); a deny
+    /// of another table ask (one with a `family`) says `person_denied`
+    /// (M57.2), any other says DECLINED, and either adds the person's own
+    /// words. A question's answers allow the call with `answered`, its input
+    /// with the answers set (M57.3); a Don't answer says `question_declined`,
+    /// and adds the person's words. An answer of the wrong shape for its
+    /// card, which `begin_answer` never takes, is a decline.
+    fn gate_answer_for(
+        &self,
+        kind: Kind,
+        family: Option<&str>,
+        answered: Option<&Value>,
+    ) -> GateAnswer {
+        let person_denied = || tool_approval::messages().person_denied.as_str();
+        if let (Kind::Write, Self::Deny { message }) = (kind, self) {
+            return GateAnswer::Deny(write_declined(message.as_deref()));
+        }
+        // M57.4b: an Allow of an edited draft hands Claude Code the person's
+        // version; dispatch lands it whichever input the call carries.
+        if let (Kind::Write, Self::Allow { .. }, Some(edited)) = (kind, self, answered) {
+            return GateAnswer::Allow {
+                updated_input: Some(edited.clone()),
+            };
+        }
+        if kind == Kind::Question {
+            let declined = tool_approval::messages().question_declined.as_str();
+            return match (self, answered) {
+                (Self::Answers { .. }, Some(input)) => GateAnswer::Allow {
+                    updated_input: Some(input.clone()),
+                },
+                (
+                    Self::Deny {
+                        message: Some(said),
+                    },
+                    _,
+                ) => GateAnswer::Deny(format!("{declined} They said: {said}")),
+                _ => GateAnswer::Deny(declined.into()),
+            };
+        }
+        match (self, family) {
+            (Self::Answers { .. }, _) => GateAnswer::Deny(DECLINED.into()),
+            (Self::Allow { .. }, _) => GateAnswer::Allow {
                 updated_input: None,
             },
-            Self::Deny { message: None } => GateAnswer::Deny(DECLINED.into()),
-            Self::Deny {
-                message: Some(said),
-            } => GateAnswer::Deny(format!("{DECLINED} They said: {said}")),
+            (Self::Deny { message: None }, None) => GateAnswer::Deny(DECLINED.into()),
+            (
+                Self::Deny {
+                    message: Some(said),
+                },
+                None,
+            ) => GateAnswer::Deny(format!("{DECLINED} They said: {said}")),
+            (Self::Deny { message: None }, Some(_)) => GateAnswer::Deny(person_denied().into()),
+            (
+                Self::Deny {
+                    message: Some(said),
+                },
+                Some(_),
+            ) => GateAnswer::Deny(format!("{} They said: {said}", person_denied())),
         }
+    }
+}
+
+/// What the model reads when the person declines a write (M57.4): the
+/// table's words, and the reason in quotes when they gave one.
+pub fn write_declined(reason: Option<&str>) -> String {
+    let messages = tool_approval::messages();
+    match reason {
+        Some(reason) => format!(
+            "{} {}",
+            messages.ask_first_declined,
+            messages.ask_first_reason.replace("{reason}", reason)
+        ),
+        None => messages.ask_first_declined.clone(),
     }
 }
 
@@ -288,6 +514,28 @@ impl GateAnswer {
     }
 }
 
+/// What the prompt tool answers Claude Code (M57.3): run the call with this
+/// input, or refuse it, telling the model why.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HostPrompt {
+    Allow { updated_input: Value },
+    Deny(String),
+}
+
+impl HostPrompt {
+    /// The JSON Claude Code reads from the prompt tool's text (F8, derived):
+    /// `{"behavior": "allow", "updatedInput": …}`, which replaces the
+    /// call's input, or `{"behavior": "deny", "message": …}`.
+    pub fn prompt_json(&self) -> Value {
+        match self {
+            Self::Allow { updated_input } => {
+                json!({ "behavior": "allow", "updatedInput": updated_input })
+            }
+            Self::Deny(message) => json!({ "behavior": "deny", "message": message }),
+        }
+    }
+}
+
 /// A call waiting for the person, as the panel draws it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct InteractionCard {
@@ -299,6 +547,24 @@ pub struct InteractionCard {
     pub session_id: String,
     /// The manifest's title and the call's target, else the tool's name.
     pub summary: String,
+    /// A table ask's family (M57.2): what the card is titled by, and what a
+    /// This conversation grant covers with the subject. None for any other
+    /// ask, which offers no This conversation.
+    pub family: Option<String>,
+    /// The exact command, path or input the card names (M57.2).
+    pub subject: Option<String>,
+    /// A cerebro tool's manifest title (M57.4): a write card's headline.
+    pub title: Option<String>,
+    /// The note or folder the call is aimed at, when the manifest names its
+    /// argument and the input holds it (M57.4).
+    pub target: Option<String>,
+    /// Who asks (M57.4): the run's actor, `process:<handle>` for an agent;
+    /// None for the plain panel.
+    pub actor: Option<String>,
+    /// A question card's questions (M57.3), parsed; left out of every other
+    /// card, so a permission or write card reads as it did before.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub questions: Option<Vec<Question>>,
     /// The call's input, pretty JSON, cut at 256 KiB.
     pub input: String,
     /// RFC 3339 UTC.
@@ -313,6 +579,94 @@ pub struct Resume {
     pub session_id: String,
     pub vault: PathBuf,
     pub snapshot: AgentRequest,
+    /// An Allow of a write card (M57.4): the approval its resume's write
+    /// takes at dispatch. Only the answer command hands it to
+    /// `record_write_approval`.
+    pub approval: Option<WriteApproval>,
+}
+
+/// A person's Allow of one ask-first write (M57.4): the vault, Claude Code
+/// session and actor it was asked in, the tool, the asked input's
+/// `canonical_hash`, the input the person approved (the asked one, or their
+/// edit of it, M57.4b) with its hash and the keys the edit changed, and
+/// when. It has no public constructor: `begin_answer_edited` builds one for
+/// an Allow of a write card, and the answer command records it
+/// (`only_the_answer_command_mints_an_approval` in mcp.rs).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WriteApproval {
+    entry: String,
+    vault: PathBuf,
+    session_id: String,
+    actor: String,
+    tool: String,
+    asked_hash: String,
+    approved_input: Value,
+    approved_hash: String,
+    edited: Vec<String>,
+    at: chrono::DateTime<chrono::Utc>,
+    /// The run resuming the call, once it started; the approval dies with it.
+    resume_run: Option<String>,
+}
+
+impl WriteApproval {
+    /// The input the person approved (M57.4b).
+    pub fn approved_input(&self) -> &Value {
+        &self.approved_input
+    }
+
+    /// The top-level keys the person's edit changed, sorted; empty when they
+    /// allowed the draft as asked.
+    pub fn edited(&self) -> &[String] {
+        &self.edited
+    }
+}
+
+/// What dispatch runs once it takes an approval (M57.4b): the approved input,
+/// and the keys the person changed, which the tool's result names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApprovedWrite {
+    pub input: Value,
+    pub edited: Vec<String>,
+}
+
+/// The top-level keys whose values differ between `asked` and `approved`,
+/// added and removed ones included, sorted (M57.4b). Values compare by
+/// `canonical_hash`, so key order inside them is no change.
+pub fn changed_keys(asked: &Value, approved: &Value) -> Vec<String> {
+    let empty = serde_json::Map::new();
+    let asked = asked.as_object().unwrap_or(&empty);
+    let approved = approved.as_object().unwrap_or(&empty);
+    let mut keys: Vec<String> = asked
+        .keys()
+        .chain(approved.keys())
+        .filter(|key| asked.get(*key).map(canonical_hash) != approved.get(*key).map(canonical_hash))
+        .cloned()
+        .collect();
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
+/// A JSON value's hash with every object's keys sorted, recursively: the
+/// same input hashes the same however its keys were ordered (M57.4).
+/// serde_json keeps insertion order in this build, so the sort is explicit.
+pub fn canonical_hash(value: &Value) -> String {
+    fn sorted(value: &Value) -> Value {
+        match value {
+            Value::Object(map) => {
+                let mut keys: Vec<&String> = map.keys().collect();
+                keys.sort();
+                let mut out = serde_json::Map::new();
+                for key in keys {
+                    out.insert(key.clone(), sorted(&map[key]));
+                }
+                Value::Object(out)
+            }
+            Value::Array(items) => Value::Array(items.iter().map(sorted).collect()),
+            other => other.clone(),
+        }
+    }
+    crate::ledger::sha256_hex(sorted(value).to_string().as_bytes())
 }
 
 /// A typed refusal the webview words: `{code, message}`.
@@ -327,6 +681,18 @@ impl Refusal {
         Self {
             code: NO_LONGER_WAITING,
             message: STALE.into(),
+        }
+    }
+
+    fn not_remembered() -> Self {
+        Self::malformed(NOT_REMEMBERED)
+    }
+
+    /// An answer that does not fit its card (M57.3), in the words given.
+    fn malformed(message: impl Into<String>) -> Self {
+        Self {
+            code: MALFORMED_ARGUMENTS,
+            message: message.into(),
         }
     }
 }
@@ -379,6 +745,14 @@ struct Entry {
     tool_name: String,
     tool_input: Value,
     summary: String,
+    /// A table ask's family and exact subject (M57.2).
+    family: Option<String>,
+    subject: Option<String>,
+    /// A question card's questions (M57.3), parsed when it registered.
+    questions: Option<Vec<Question>>,
+    /// The input a person's answers make (M57.3): the call's own, with
+    /// `answers` set; what the gate's allow hands Claude Code.
+    answered_input: Option<Value>,
     vault: PathBuf,
     /// The run whose gate registered it, or whose seat settled it.
     run_id: String,
@@ -396,6 +770,7 @@ struct Entry {
 impl Entry {
     fn card(&self) -> InteractionCard {
         let pretty = serde_json::to_string_pretty(&self.tool_input).unwrap_or_default();
+        let (title, target) = title_and_target(&self.tool_name, &self.tool_input);
         InteractionCard {
             id: self.id.clone(),
             kind: self.kind,
@@ -403,6 +778,12 @@ impl Entry {
             tool_id: self.tool_use_id.clone(),
             session_id: self.session_id.clone(),
             summary: self.summary.clone(),
+            family: self.family.clone(),
+            subject: self.subject.clone(),
+            title,
+            target,
+            actor: self.snapshot.as_ref().and_then(|req| req.actor.clone()),
+            questions: self.questions.clone(),
             input: cut_at(pretty, CARD_INPUT_BYTES),
             asked_at: self.asked_at.clone(),
         }
@@ -426,6 +807,72 @@ struct Book {
     seats: std::collections::HashMap<String, Seat>,
     entries: Vec<Entry>,
     seq: u64,
+    grants: ConversationGrants,
+    /// A person's Allows of ask-first writes not yet taken (M57.4).
+    approvals: Vec<WriteApproval>,
+}
+
+/// This conversation (M57.2): per vault and Claude Code session, the exact
+/// (family, subject) pairs a person allowed for the rest of it. Memory only,
+/// so a restart asks again; at most GRANT_SESSIONS sessions of
+/// GRANT_SUBJECTS subjects each, the oldest out; a vault switch drops every
+/// other vault's. Its one writer is `remember_subject`, which only
+/// `finish_answer` calls.
+#[derive(Debug, Default)]
+struct ConversationGrants {
+    /// Oldest session first.
+    sessions: VecDeque<GrantedSession>,
+}
+
+#[derive(Debug)]
+struct GrantedSession {
+    vault: PathBuf,
+    session_id: String,
+    /// Oldest subject first.
+    subjects: VecDeque<(String, String)>,
+}
+
+impl ConversationGrants {
+    fn covers(&self, vault: &Path, session: &str, family: &str, subject: &str) -> bool {
+        self.sessions
+            .iter()
+            .find(|s| s.vault == vault && s.session_id == session)
+            .is_some_and(|s| {
+                s.subjects
+                    .iter()
+                    .any(|(f, sub)| f == family && sub == subject)
+            })
+    }
+
+    fn remember_subject(&mut self, vault: &Path, session: &str, family: &str, subject: &str) {
+        let at = self
+            .sessions
+            .iter()
+            .position(|s| s.vault == vault && s.session_id == session);
+        let mut held = match at.and_then(|at| self.sessions.remove(at)) {
+            Some(held) => held,
+            None => GrantedSession {
+                vault: vault.to_path_buf(),
+                session_id: session.to_string(),
+                subjects: VecDeque::new(),
+            },
+        };
+        held.subjects
+            .retain(|(f, sub)| !(f == family && sub == subject));
+        held.subjects
+            .push_back((family.to_string(), subject.to_string()));
+        while held.subjects.len() > GRANT_SUBJECTS {
+            held.subjects.pop_front();
+        }
+        self.sessions.push_back(held);
+        while self.sessions.len() > GRANT_SESSIONS {
+            self.sessions.pop_front();
+        }
+    }
+
+    fn forget_other_vaults(&mut self, keep: &Path) {
+        self.sessions.retain(|s| s.vault == keep);
+    }
 }
 
 impl Book {
@@ -470,11 +917,12 @@ fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
-/// A card's summary: the manifest's title, and the call's target argument
-/// when the row names one and the input holds it (M54.1); else the name.
-fn summary_of(tool_name: &str, input: &Value) -> String {
+/// A cerebro tool's manifest title, and the call's target argument when the
+/// row names one and the input holds it (M54.1); None for a tool the
+/// manifest has no row for.
+fn title_and_target(tool_name: &str, input: &Value) -> (Option<String>, Option<String>) {
     let Some(row) = crate::policy::tools::row(tool_name) else {
-        return tool_name.to_string();
+        return (None, None);
     };
     let target = row
         .target
@@ -482,10 +930,18 @@ fn summary_of(tool_name: &str, input: &Value) -> String {
         .and_then(|target| target.arg.as_deref())
         .and_then(|arg| input.get(arg))
         .and_then(Value::as_str)
-        .filter(|value| !value.is_empty());
-    match target {
-        Some(target) => format!("{} · {target}", row.title),
-        None => row.title.clone(),
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    (Some(row.title.clone()), target)
+}
+
+/// A card's summary: the manifest's title and the call's target, else the
+/// title alone, else the tool's name.
+fn summary_of(tool_name: &str, input: &Value) -> String {
+    match title_and_target(tool_name, input) {
+        (Some(title), Some(target)) => format!("{title} · {target}"),
+        (Some(title), None) => title,
+        _ => tool_name.to_string(),
     }
 }
 
@@ -493,17 +949,46 @@ fn summary_of(tool_name: &str, input: &Value) -> String {
 // The policy point
 // ---------------------------------------------------------------------------
 
-/// What the seam says about a call (the one policy point; M57.2 replaces this
-/// body with the tool-approval table, CV-04). `asks` is the debug override's
-/// list, empty in a release build, so a release build answers `Argv` for
-/// every call: no production run asks until M57.2. `seat` is the run the
-/// call came from, if any; an ask on a run with no seat is the gate's to
-/// refuse, since nobody is there to answer it.
-pub fn decide(asks: &[String], _seat: Option<&Seat>, call: &GateCall) -> Decision {
-    if asks.iter().any(|name| *name == call.tool_name) {
-        return Decision::Ask(Kind::Permission);
+/// What the seam says about a call (the one policy point). `asks` is the
+/// debug override's list, empty in a release build, and asks first: a test
+/// seam may add asks, never allows. Then the tool-approval table, over the
+/// plan of the run the call came from (`seat`): its asks become cards unless
+/// `granted(family, subject)` holds a This conversation grant for the exact
+/// subject, its refusals and denials carry their message, and everything
+/// else is argv's. An ask draws the card its family's table row names: a
+/// confirmable page write draws a write card (M57.4). A call with no seat
+/// that names a CLI built-in is the gate's to refuse, since nobody is there
+/// to answer it; one that names a cerebro tool is argv's, and dispatch's.
+pub fn decide(
+    asks: &[String],
+    seat: Option<&Seat>,
+    call: &GateCall,
+    granted: impl Fn(&str, &str) -> bool,
+) -> Decision {
+    let unseated_ask = Decision::Ask {
+        kind: Kind::Permission,
+        family: None,
+        subject: None,
+    };
+    if asks.contains(&call.tool_name) {
+        return unseated_ask;
     }
-    Decision::Argv
+    let Some(seat) = seat else {
+        return match crate::policy::tools::cli_tool(&call.tool_name) {
+            Some(_) => unseated_ask,
+            None => Decision::Argv,
+        };
+    };
+    match tool_approval::host_answer(&seat.approval, granted, &call.tool_name, &call.tool_input) {
+        HostAnswer::Pass => Decision::Argv,
+        HostAnswer::Allow => Decision::Allow,
+        HostAnswer::Deny { message } => Decision::Deny(message),
+        HostAnswer::Ask { family, subject } => Decision::Ask {
+            kind: Kind::of(tool_approval::card_of(&family).map(|card| card.kind)),
+            family: Some(family),
+            subject: Some(subject),
+        },
+    }
 }
 
 /// The debug override, pure: the names in `raw` (comma separated), keeping
@@ -684,6 +1169,10 @@ impl Interactions {
                     tool_name: marker.tool_name.clone(),
                     tool_input: Value::Null,
                     summary: marker.tool_name.clone(),
+                    family: None,
+                    subject: None,
+                    questions: None,
+                    answered_input: None,
                     vault: seat.vault.clone(),
                     run_id: seat.run_id.clone(),
                     snapshot: None,
@@ -720,6 +1209,9 @@ impl Interactions {
     pub fn close_seat(&self, run_id: &str) {
         let mut book = lock(&self.book);
         let seat = book.seats.remove(run_id);
+        // M57.4: an approval dies with the run that resumed its call.
+        book.approvals
+            .retain(|a| a.resume_run.as_deref() != Some(run_id));
         book.entries
             .retain(|e| !(e.run_id == run_id && e.state == State::Registered));
         book.entries
@@ -739,23 +1231,30 @@ impl Interactions {
         }
     }
 
-    /// What a seated run's argv and settings take: the asks it holds among
-    /// `granted` (its `--allowedTools`), and its settle tool. Empty for a run
-    /// with no seat, and, with one warn line per process, on a Claude Code
-    /// older than the gate or of unknown version.
+    /// What a seated run's argv and settings take: the debug asks it holds
+    /// among `granted` (its `--allowedTools`), then the tools its plan asks
+    /// for or refuses (M57.2), which no list names, and its settle tool.
+    /// Empty for a run with no seat, and, with one warn line per process, on
+    /// a Claude Code older than the gate or of unknown version.
     pub fn ask_plan(&self, run_id: &str, granted: &[String], version: Option<&str>) -> AskPlan {
         let plan = {
             let book = lock(&self.book);
             let Some(seat) = book.seats.get(run_id) else {
                 return AskPlan::default();
             };
+            let mut asks: Vec<String> = self
+                .asks
+                .iter()
+                .filter(|name| granted.iter().any(|held| held == *name))
+                .cloned()
+                .collect();
+            for name in seat.approval.matcher() {
+                if !asks.contains(&name) {
+                    asks.push(name);
+                }
+            }
             AskPlan {
-                asks: self
-                    .asks
-                    .iter()
-                    .filter(|name| granted.iter().any(|held| held == *name))
-                    .cloned()
-                    .collect(),
+                asks,
                 settle: seat.settle.clone(),
             }
         };
@@ -772,24 +1271,19 @@ impl Interactions {
         AskPlan::default()
     }
 
-    /// Would this seated run ask anything (before the version check)? Lets
-    /// the spawn skip asking the CLI its version for every run that cannot.
-    pub fn wants_gate(&self, run_id: &str, granted: &[String]) -> bool {
-        !self.ask_plan(run_id, granted, Some("999.0.0")).is_empty()
-    }
-
     /// The hook's question (`ask_gate`). In this order: no seat turns an ask
     /// into a refusal; another session's call gets no opinion; a subagent's
     /// call is refused; a known call defers while it waits, repeats the
     /// person's answer once answered, and is refused with its reason once
     /// cancelled; a new call goes to `decide`, and an ask registers it and
-    /// defers. Never allows a call no person answered.
+    /// defers. Never allows a call no person answered, now or earlier in the
+    /// conversation for its exact subject (This conversation, M57.2).
     pub fn gate(&self, run_id: &str, call: &GateCall) -> GateAnswer {
         let mut book = lock(&self.book);
         let Some(seat) = book.seats.get(run_id).cloned() else {
-            return match decide(&self.asks, None, call) {
+            return match decide(&self.asks, None, call, |_, _| false) {
                 Decision::Argv => GateAnswer::NoOpinion,
-                Decision::Ask(_) => GateAnswer::Deny(NOBODY_WATCHING.into()),
+                Decision::Ask { .. } | Decision::Allow => GateAnswer::Deny(NOBODY_WATCHING.into()),
                 Decision::Deny(reason) => GateAnswer::Deny(reason),
             };
         };
@@ -807,7 +1301,11 @@ impl Interactions {
                 State::Registered | State::Waiting => GateAnswer::Defer,
                 State::Answering(answer) | State::Answered(answer) => {
                     entry.consumed = true;
-                    answer.gate_answer()
+                    answer.gate_answer_for(
+                        entry.kind,
+                        entry.family.as_deref(),
+                        entry.answered_input.as_ref(),
+                    )
                 }
                 State::Cancelled(reason) => {
                     entry.consumed = true;
@@ -815,10 +1313,32 @@ impl Interactions {
                 }
             };
         }
-        match decide(&self.asks, Some(&seat), call) {
+        let granted = |family: &str, subject: &str| {
+            book.grants
+                .covers(&seat.vault, &seat.session_id, family, subject)
+        };
+        match decide(&self.asks, Some(&seat), call, granted) {
             Decision::Argv => GateAnswer::NoOpinion,
+            Decision::Allow => GateAnswer::Allow {
+                updated_input: None,
+            },
             Decision::Deny(reason) => GateAnswer::Deny(reason),
-            Decision::Ask(kind) => {
+            Decision::Ask {
+                kind,
+                family,
+                subject,
+            } => {
+                // M57.3: a question set no card can show is refused here, so
+                // nothing registers and the model hears why.
+                let questions = match kind {
+                    Kind::Question => match question::parse_questions(&call.tool_input) {
+                        Ok(set) => Some(set),
+                        Err(reason) => {
+                            return GateAnswer::Deny(tool_approval::question_malformed(&reason))
+                        }
+                    },
+                    Kind::Permission | Kind::Write => None,
+                };
                 let seq = book.next_seq();
                 book.entries.push(Entry {
                     id: mint_id(),
@@ -828,6 +1348,10 @@ impl Interactions {
                     tool_name: call.tool_name.clone(),
                     tool_input: call.tool_input.clone(),
                     summary: summary_of(&call.tool_name, &call.tool_input),
+                    family,
+                    subject,
+                    questions,
+                    answered_input: None,
                     vault: seat.vault.clone(),
                     run_id: run_id.to_string(),
                     snapshot: Some(seat.snapshot.clone()),
@@ -839,6 +1363,59 @@ impl Interactions {
                 });
                 GateAnswer::Defer
             }
+        }
+    }
+
+    /// The prompt tool's answer (M57.3): what Claude Code asks `ask_host`
+    /// when a call reaches its permission prompt instead of the gate. It
+    /// allows only a call this run's seat holds a person's answer for, by
+    /// the call's tool_use id in the seat's session, with the input the
+    /// answer made (the call's own, or a question's with its answers set).
+    /// Everything else is refused: the table's message where it denies or
+    /// refuses, `unlisted` where it would pass, and NOT_PUT where it would
+    /// ask, so a hook that never ran still refuses. Like the gate, it can
+    /// read an answer and never record one.
+    pub fn host_prompt(&self, run_id: &str, call: &GateCall) -> HostPrompt {
+        let mut book = lock(&self.book);
+        let Some(seat) = book.seats.get(run_id).cloned() else {
+            return HostPrompt::Deny(NOBODY_WATCHING.into());
+        };
+        if let Some(entry) = book.find(&seat.session_id, &call.tool_use_id) {
+            if entry.tool_name != call.tool_name {
+                return HostPrompt::Deny(NOT_PUT.into());
+            }
+            return match &entry.state {
+                State::Answering(answer) | State::Answered(answer) => {
+                    entry.consumed = true;
+                    match answer.gate_answer_for(
+                        entry.kind,
+                        entry.family.as_deref(),
+                        entry.answered_input.as_ref(),
+                    ) {
+                        GateAnswer::Allow { updated_input } => HostPrompt::Allow {
+                            updated_input: updated_input.unwrap_or_else(|| call.tool_input.clone()),
+                        },
+                        GateAnswer::Deny(reason) => HostPrompt::Deny(reason),
+                        GateAnswer::NoOpinion | GateAnswer::Defer => {
+                            HostPrompt::Deny(NOT_PUT.into())
+                        }
+                    }
+                }
+                State::Cancelled(reason) => {
+                    entry.consumed = true;
+                    HostPrompt::Deny(reason.model_text().into())
+                }
+                State::Registered | State::Waiting => HostPrompt::Deny(NOT_PUT.into()),
+            };
+        }
+        let call = GateCall {
+            session_id: seat.session_id.clone(),
+            ..call.clone()
+        };
+        match decide(&self.asks, Some(&seat), &call, |_, _| false) {
+            Decision::Deny(reason) => HostPrompt::Deny(reason),
+            Decision::Argv => HostPrompt::Deny(tool_approval::messages().unlisted.clone()),
+            Decision::Ask { .. } | Decision::Allow => HostPrompt::Deny(NOT_PUT.into()),
         }
     }
 
@@ -855,13 +1432,33 @@ impl Interactions {
         Some(entry.card())
     }
 
-    /// Take a person's answer: only from Waiting, in the same vault. What
-    /// comes back is what to resume.
+    /// `begin_answer_edited` with no edited draft.
     pub fn begin_answer(
         &self,
         vault: &Path,
         id: &str,
         answer: PersonAnswer,
+    ) -> Result<Resume, Refusal> {
+        self.begin_answer_edited(vault, id, answer, None, |_, _, _| Ok(()))
+    }
+
+    /// Take a person's answer: only from Waiting, in the same vault; a
+    /// question card only with its answers, which must fit its questions,
+    /// and answers only for a question card (M57.3); and This conversation
+    /// only for a table ask whose card offers it (M57.2, M57.4). An edited
+    /// draft (M57.4b) only with an Allow of a write card, and only once it
+    /// fits the tool's schema (`validate_input`) and `check` admits it under
+    /// the run's stored request: the caller's re-check of scopes, tool grant,
+    /// corpus and the previewed write (M57.4c), which records nothing. A refusal leaves the card waiting.
+    /// What comes back is what to resume, and, for an Allow of a write card,
+    /// the approval the answer command records.
+    pub fn begin_answer_edited(
+        &self,
+        vault: &Path,
+        id: &str,
+        answer: PersonAnswer,
+        edit: Option<Value>,
+        check: impl FnOnce(&AgentRequest, &str, &Value) -> Result<(), Refusal>,
     ) -> Result<Resume, Refusal> {
         let mut book = lock(&self.book);
         let entry = book
@@ -874,28 +1471,107 @@ impl Interactions {
             .snapshot
             .as_ref()
             .ok_or_else(Refusal::no_longer_waiting)?;
+        let answered_input = match (entry.kind, &answer) {
+            (Kind::Question, PersonAnswer::Answers { answers }) => {
+                let set = entry.questions.as_deref().unwrap_or_default();
+                let map = question::answers_for(set, answers).map_err(Refusal::malformed)?;
+                Some(question::updated_input(&entry.tool_input, map))
+            }
+            (Kind::Question, PersonAnswer::Allow { .. }) => {
+                return Err(Refusal::malformed(ANSWER_THE_QUESTION))
+            }
+            (_, PersonAnswer::Answers { .. }) => return Err(Refusal::malformed(NOT_A_QUESTION)),
+            _ => None,
+        };
+        if let Some(edited) = &edit {
+            if entry.kind != Kind::Write || !matches!(answer, PersonAnswer::Allow { .. }) {
+                return Err(Refusal::malformed(EDIT_MISFIT));
+            }
+            crate::policy::tools::validate_input(&entry.tool_name, edited)
+                .map_err(Refusal::malformed)?;
+            check(snapshot, &entry.tool_name, edited)?;
+        }
+        let remembers = matches!(
+            answer,
+            PersonAnswer::Allow {
+                remember: Remember::Conversation
+            }
+        );
+        let offered = entry
+            .family
+            .as_deref()
+            .is_some_and(tool_approval::offers_conversation);
+        if remembers && (!offered || entry.subject.is_none()) {
+            return Err(Refusal::not_remembered());
+        }
+        let approval = (entry.kind == Kind::Write && matches!(answer, PersonAnswer::Allow { .. }))
+            .then(|| {
+                let approved = edit.clone().unwrap_or_else(|| entry.tool_input.clone());
+                WriteApproval {
+                    entry: entry.id.clone(),
+                    vault: entry.vault.clone(),
+                    session_id: entry.session_id.clone(),
+                    actor: crate::mcp::normalize_actor(snapshot.actor.as_deref()).to_string(),
+                    tool: crate::policy::tools::bare_name(&entry.tool_name).to_string(),
+                    asked_hash: canonical_hash(&entry.tool_input),
+                    approved_hash: canonical_hash(&approved),
+                    edited: changed_keys(&entry.tool_input, &approved),
+                    approved_input: approved,
+                    at: chrono::Utc::now(),
+                    resume_run: None,
+                }
+            });
         let resume = Resume {
             id: entry.id.clone(),
             session_id: entry.session_id.clone(),
             vault: entry.vault.clone(),
             snapshot: (**snapshot).clone(),
+            approval,
         };
         entry.state = State::Answering(answer);
+        // M57.4b: the edited draft is what the resume's gate allows with.
+        entry.answered_input = answered_input.or(edit);
         entry.consumed = false;
         entry.resume_run = None;
         Ok(resume)
     }
 
-    /// The resume started under `resume_run`.
+    /// The resume started under `resume_run`. A This conversation answer is
+    /// remembered here, once its resume is under way: the one place a grant
+    /// is written (`only_the_answer_command_remembers`).
     pub fn finish_answer(&self, id: &str, resume_run: &str) {
         let mut book = lock(&self.book);
+        let mut grant = None;
         if let Some(entry) = book.entries.iter_mut().find(|e| e.id == id) {
             if let State::Answering(answer) = entry.state.clone() {
+                if answer
+                    == (PersonAnswer::Allow {
+                        remember: Remember::Conversation,
+                    })
+                {
+                    if let (Some(family), Some(subject)) = (&entry.family, &entry.subject) {
+                        grant = Some((
+                            entry.vault.clone(),
+                            entry.session_id.clone(),
+                            family.clone(),
+                            subject.clone(),
+                        ));
+                    }
+                }
                 entry.state = State::Answered(answer);
                 entry
                     .resume_run
                     .get_or_insert_with(|| resume_run.to_string());
             }
+        }
+        for approval in book.approvals.iter_mut().filter(|a| a.entry == id) {
+            approval
+                .resume_run
+                .get_or_insert_with(|| resume_run.to_string());
+        }
+        if let Some((vault, session, family, subject)) = grant {
+            book.grants
+                .remember_subject(&vault, &session, &family, &subject);
         }
     }
 
@@ -903,9 +1579,12 @@ impl Interactions {
     /// already read the answer.
     pub fn abort_answer(&self, id: &str) {
         let mut book = lock(&self.book);
+        // M57.4: the person answers again, so the Allow goes too.
+        book.approvals.retain(|a| a.entry != id);
         if let Some(entry) = book.entries.iter_mut().find(|e| e.id == id) {
             if matches!(entry.state, State::Answering(_)) && !entry.consumed {
                 entry.state = State::Waiting;
+                entry.answered_input = None;
                 entry.resume_run = None;
             }
         }
@@ -928,9 +1607,11 @@ impl Interactions {
     }
 
     /// A vault switch: every waiting call of another vault is refused as not
-    /// answered. Returns the cards it cancelled.
+    /// answered, and every other vault's This conversation grants are
+    /// forgotten (M57.2). Returns the cards it cancelled.
     pub fn cancel_other_vaults(&self, vault: &Path) -> Vec<String> {
         let mut book = lock(&self.book);
+        book.grants.forget_other_vaults(vault);
         let mut cancelled = Vec::new();
         let mut sessions = Vec::new();
         for entry in book.entries.iter_mut() {
@@ -944,6 +1625,84 @@ impl Interactions {
             book.bound(&session);
         }
         cancelled
+    }
+
+    /// Record a person's Allow of a write (M57.4): the one writer of the
+    /// approvals dispatch takes, called only by the answer command with the
+    /// approval its `begin_answer` built. A second Allow of the same card
+    /// replaces the first.
+    pub fn record_write_approval(&self, approval: WriteApproval) {
+        let mut book = lock(&self.book);
+        book.approvals.retain(|a| a.entry != approval.entry);
+        book.approvals.push(approval);
+    }
+
+    /// Take the approval for this write (M57.4): one recorded in the vault,
+    /// Claude Code session and actor of `grant`'s seat, for this tool, whose
+    /// asked or approved input this call carries (M57.4b: Claude Code may or
+    /// may not apply the person's edit on a resumed allow), at most
+    /// APPROVAL_MINUTES old at `now`. It gives the approved input, which is
+    /// what dispatch runs, and the keys the person changed. Used once: a
+    /// taken approval is gone, and so is every expired one. None with no
+    /// seat, so a run nobody watches has none to take.
+    pub fn take_write_approval_at(
+        &self,
+        grant: &crate::mcp::RunGrant,
+        tool: &str,
+        args: &Value,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Option<ApprovedWrite> {
+        let mut book = lock(&self.book);
+        let limit = chrono::Duration::minutes(tool_approval::APPROVAL_MINUTES);
+        book.approvals.retain(|a| now - a.at <= limit);
+        let seat = book.seats.get(&grant.run_id)?;
+        let session = seat.session_id.clone();
+        let vault = seat.vault.clone();
+        if grant
+            .vault
+            .as_deref()
+            .is_none_or(|bound| super::vault_key(bound) != vault)
+        {
+            return None;
+        }
+        let tool = crate::policy::tools::bare_name(tool).to_string();
+        let hash = canonical_hash(args);
+        let at = book.approvals.iter().position(|a| {
+            a.vault == vault
+                && a.session_id == session
+                && a.actor == grant.actor
+                && a.tool == tool
+                && (a.approved_hash == hash || a.asked_hash == hash)
+        })?;
+        let taken = book.approvals.remove(at);
+        Some(ApprovedWrite {
+            input: taken.approved_input,
+            edited: taken.edited,
+        })
+    }
+
+    /// `take_write_approval_at`, now.
+    pub fn take_write_approval(
+        &self,
+        grant: &crate::mcp::RunGrant,
+        tool: &str,
+        args: &Value,
+    ) -> Option<ApprovedWrite> {
+        self.take_write_approval_at(grant, tool, args, chrono::Utc::now())
+    }
+
+    /// The decision a seated run's plan holds for cerebro tool `tool`
+    /// (M57.4), the plan its argv was built from; None for a run with no
+    /// seat, or a tool the plan does not decide.
+    pub fn planned(&self, run_id: &str, tool: &str) -> Option<tool_approval::Decision> {
+        let book = lock(&self.book);
+        let seat = book.seats.get(run_id)?;
+        let name = format!(
+            "{}{}",
+            super::MCP_PREFIX,
+            crate::policy::tools::bare_name(tool)
+        );
+        seat.approval.decision_of(&name).map(|row| row.decision)
     }
 
     /// The cards waiting in `vault`, oldest first.
@@ -1007,7 +1766,9 @@ mod tests {
     }
 
     fn allow() -> PersonAnswer {
-        PersonAnswer::from_ipc(WireAnswer::Allow)
+        PersonAnswer::from_ipc(WireAnswer::Allow {
+            remember: Remember::Once,
+        })
     }
 
     fn deny(message: &str) -> PersonAnswer {
@@ -1042,7 +1803,7 @@ mod tests {
         // A release build's policy point asks for nothing at all.
         let s = seat("run-1", "s-1", "/v");
         assert_eq!(
-            decide(&[], Some(&s), &call("s-1", "t1", ASKED)),
+            decide(&[], Some(&s), &call("s-1", "t1", ASKED), |_, _| false),
             Decision::Argv
         );
     }
@@ -1331,9 +2092,17 @@ mod tests {
         };
         book.open_seat(seat("run-1", "s-1", "/v"), Some(marker));
         let plan = book.ask_plan("run-1", &[ASKED.into()], Some("2.1.250"));
-        assert_eq!(plan.asks, vec![ASKED.to_string()]);
+        assert_eq!(plan.asks, [ASKED, "AskUserQuestion", "ExitPlanMode"]);
         assert_eq!(plan.settle.as_deref(), Some("mcp__cerebro__edit_note"));
-        assert_eq!(plan.matcher(), vec![ASKED, "mcp__cerebro__edit_note"]);
+        assert_eq!(
+            plan.matcher(),
+            [
+                ASKED,
+                "AskUserQuestion",
+                "ExitPlanMode",
+                "mcp__cerebro__edit_note"
+            ]
+        );
         assert_eq!(
             book.gate("run-1", &call("s-1", "t1", "mcp__cerebro__edit_note")),
             GateAnswer::Deny(NEVER_ANSWERED.into())
@@ -1478,12 +2247,20 @@ mod tests {
             assert!(book.ask_plan("run-1", &granted, old).is_empty(), "{old:?}");
         }
         for new in ["2.1.250 (Claude Code)", "2.2.0", "3.0.0"] {
-            assert_eq!(book.ask_plan("run-1", &granted, Some(new)).asks, granted);
+            assert_eq!(
+                book.ask_plan("run-1", &granted, Some(new)).asks,
+                [ASKED, "AskUserQuestion", "ExitPlanMode"]
+            );
         }
-        assert!(book.wants_gate("run-1", &granted));
-        // A run with no seat, or that holds none of the asks, asks nothing.
+        // A run with no seat asks nothing; one that holds none of the debug
+        // asks still meets the gate for its plan's question ask (M57.3) and
+        // its refusal (M57.2).
         assert!(book.ask_plan("other", &granted, Some("2.1.250")).is_empty());
-        assert!(!book.wants_gate("run-1", &["mcp__cerebro__get_note".into()]));
+        assert_eq!(
+            book.ask_plan("run-1", &["mcp__cerebro__get_note".into()], Some("2.1.250"))
+                .asks,
+            ["AskUserQuestion", "ExitPlanMode"]
+        );
     }
 
     #[test]
@@ -1498,6 +2275,241 @@ mod tests {
         let parsed = GateCall::from_args(bad.as_object().unwrap());
         assert_eq!(parsed.tool_input, Value::Null);
         assert_eq!(parsed.session_id, "");
+    }
+
+    // --- M57.2: the table decides, and This conversation ---------------------
+
+    /// A seat whose run is under the shell ceiling `shell`.
+    fn seat_under(shell: &str, run: &str, session: &str, vault: &str) -> Seat {
+        let mut req = request();
+        req.shell = Some(tool_approval::ShellCeiling::read(&json!(shell)));
+        Seat::new(run, session, Path::new(vault), &req)
+    }
+
+    fn bash(session: &str, id: &str, command: &str) -> GateCall {
+        GateCall {
+            session_id: session.into(),
+            tool_use_id: id.into(),
+            tool_name: "Bash".into(),
+            tool_input: json!({ "command": command, "description": "check" }),
+            agent_id: String::new(),
+        }
+    }
+
+    fn named_call(session: &str, id: &str, tool: &str, input: Value) -> GateCall {
+        GateCall {
+            session_id: session.into(),
+            tool_use_id: id.into(),
+            tool_name: tool.into(),
+            tool_input: input,
+            agent_id: String::new(),
+        }
+    }
+
+    /// Run `run` in `session` asks for `command`, the stream confirms it, and
+    /// the run ends: the card.
+    fn asked(
+        book: &Interactions,
+        run: &str,
+        session: &str,
+        id: &str,
+        command: &str,
+    ) -> InteractionCard {
+        book.open_seat(seat_under("ask", run, session, "/v"), None);
+        assert_eq!(
+            book.gate(run, &bash(session, id, command)),
+            GateAnswer::Defer
+        );
+        let card = book.confirm(session, id).expect("a card");
+        book.close_seat(run);
+        card
+    }
+
+    fn conversation() -> PersonAnswer {
+        PersonAnswer::from_ipc(WireAnswer::Allow {
+            remember: Remember::Conversation,
+        })
+    }
+
+    #[test]
+    fn the_host_answers_from_the_table() {
+        let book = Interactions::with_asks(Vec::new());
+        book.open_seat(seat_under("ask", "run-1", "s-1", "/v"), None);
+        assert_eq!(
+            book.gate("run-1", &bash("s-1", "t1", "git status")),
+            GateAnswer::Defer
+        );
+        let card = book.confirm("s-1", "t1").unwrap();
+        assert_eq!(card.family.as_deref(), Some("shell"));
+        assert_eq!(card.subject.as_deref(), Some("git status"));
+        let plan = tool_approval::table().family("plan").unwrap();
+        assert_eq!(
+            book.gate("run-1", &named_call("s-1", "t2", "ExitPlanMode", json!({}))),
+            GateAnswer::Deny(plan.message.clone().unwrap())
+        );
+        // M57.3: a question asks, and one no card can show is refused.
+        assert_eq!(
+            book.gate(
+                "run-1",
+                &named_call("s-1", "t2", "AskUserQuestion", json!({}))
+            ),
+            GateAnswer::Deny(tool_approval::question_malformed(
+                "A question set holds 1 to 4 questions; this one holds 0."
+            ))
+        );
+        for tool in ["Read", "mcp__cerebro__get_note", "CronCreate"] {
+            assert_eq!(
+                book.gate(
+                    "run-1",
+                    &named_call("s-1", "t3", tool, json!({ "file_path": "a" }))
+                ),
+                GateAnswer::NoOpinion,
+                "{tool}"
+            );
+        }
+        // Under On the shell is pre-approved, so the host has no opinion.
+        book.open_seat(seat_under("on", "run-2", "s-2", "/v"), None);
+        assert_eq!(
+            book.gate("run-2", &bash("s-2", "t1", "ls")),
+            GateAnswer::NoOpinion
+        );
+    }
+
+    #[test]
+    fn a_deny_of_a_table_ask_says_the_person_said_no() {
+        let book = Interactions::with_asks(Vec::new());
+        let card = asked(&book, "run-1", "s-1", "t1", "rm -rf build");
+        let resume = book
+            .begin_answer(Path::new("/v"), &card.id, deny("not now"))
+            .unwrap();
+        book.open_seat(seat_under("ask", "run-2", &resume.session_id, "/v"), None);
+        book.finish_answer(&card.id, "run-2");
+        let person_denied = &tool_approval::messages().person_denied;
+        assert_eq!(
+            book.gate("run-2", &bash("s-1", "t1", "rm -rf build")),
+            GateAnswer::Deny(format!("{person_denied} They said: not now"))
+        );
+    }
+
+    #[test]
+    fn this_conversation_is_per_vault_and_session() {
+        let book = Interactions::with_asks(Vec::new());
+        let card = asked(&book, "run-1", "s-1", "t1", "git status");
+        book.begin_answer(Path::new("/v"), &card.id, conversation())
+            .unwrap();
+        book.open_seat(seat_under("ask", "run-2", "s-1", "/v"), None);
+        book.finish_answer(&card.id, "run-2");
+        // The answered call reads its allow, and the next one like it in
+        // this conversation runs with no card.
+        assert!(matches!(
+            book.gate("run-2", &bash("s-1", "t1", "git status")),
+            GateAnswer::Allow { .. }
+        ));
+        assert!(matches!(
+            book.gate("run-2", &bash("s-1", "t2", "git status")),
+            GateAnswer::Allow { .. }
+        ));
+        // Another command asks.
+        assert_eq!(
+            book.gate("run-2", &bash("s-1", "t3", "git push")),
+            GateAnswer::Defer
+        );
+        // Another session asks, and so does the same session in another vault.
+        book.open_seat(seat_under("ask", "run-3", "s-9", "/v"), None);
+        assert_eq!(
+            book.gate("run-3", &bash("s-9", "t1", "git status")),
+            GateAnswer::Defer
+        );
+        book.open_seat(seat_under("ask", "run-4", "s-1", "/w"), None);
+        assert_eq!(
+            book.gate("run-4", &bash("s-1", "t9", "git status")),
+            GateAnswer::Defer
+        );
+    }
+
+    #[test]
+    fn allow_once_remembers_nothing() {
+        let book = Interactions::with_asks(Vec::new());
+        let card = asked(&book, "run-1", "s-1", "t1", "git status");
+        book.begin_answer(Path::new("/v"), &card.id, allow())
+            .unwrap();
+        book.open_seat(seat_under("ask", "run-2", "s-1", "/v"), None);
+        book.finish_answer(&card.id, "run-2");
+        assert_eq!(
+            book.gate("run-2", &bash("s-1", "t2", "git status")),
+            GateAnswer::Defer
+        );
+    }
+
+    #[test]
+    fn conversation_is_refused_for_a_request_that_does_not_ask() {
+        // A debug-override ask names no family: nothing to remember.
+        let book = book();
+        let card = waiting(&book);
+        assert_eq!(card.family, None);
+        let refused = book
+            .begin_answer(Path::new("/v"), &card.id, conversation())
+            .unwrap_err();
+        assert_eq!(refused.code, MALFORMED_ARGUMENTS);
+        assert_eq!(refused.message, NOT_REMEMBERED);
+        // The card still waits for an answer it can take.
+        assert_eq!(book.pending(Path::new("/v")).len(), 1);
+        assert!(book
+            .begin_answer(Path::new("/v"), &card.id, allow())
+            .is_ok());
+    }
+
+    #[test]
+    fn a_vault_switch_forgets_other_vaults_grants() {
+        let book = Interactions::with_asks(Vec::new());
+        let card = asked(&book, "run-1", "s-1", "t1", "git status");
+        book.begin_answer(Path::new("/v"), &card.id, conversation())
+            .unwrap();
+        book.finish_answer(&card.id, "run-2");
+        assert!(lock(&book.book)
+            .grants
+            .covers(Path::new("/v"), "s-1", "shell", "git status"));
+        book.cancel_other_vaults(Path::new("/v"));
+        assert!(lock(&book.book)
+            .grants
+            .covers(Path::new("/v"), "s-1", "shell", "git status"));
+        book.cancel_other_vaults(Path::new("/w"));
+        assert!(!lock(&book.book)
+            .grants
+            .covers(Path::new("/v"), "s-1", "shell", "git status"));
+    }
+
+    #[test]
+    fn the_grant_store_stays_bounded() {
+        let mut grants = ConversationGrants::default();
+        let vault = Path::new("/v");
+        for n in 0..=GRANT_SESSIONS {
+            grants.remember_subject(vault, &format!("s-{n}"), "shell", "ls");
+        }
+        assert_eq!(grants.sessions.len(), GRANT_SESSIONS);
+        assert!(
+            !grants.covers(vault, "s-0", "shell", "ls"),
+            "the oldest went"
+        );
+        assert!(grants.covers(vault, &format!("s-{GRANT_SESSIONS}"), "shell", "ls"));
+        for n in 0..=GRANT_SUBJECTS {
+            grants.remember_subject(vault, "busy", "shell", &format!("cmd {n}"));
+        }
+        let busy = grants
+            .sessions
+            .iter()
+            .find(|s| s.session_id == "busy")
+            .unwrap();
+        assert_eq!(busy.subjects.len(), GRANT_SUBJECTS);
+        assert!(!grants.covers(vault, "busy", "shell", "cmd 0"));
+        // Remembering one again moves it to the back, never twice.
+        grants.remember_subject(vault, "busy", "shell", "cmd 5");
+        let busy = grants
+            .sessions
+            .iter()
+            .find(|s| s.session_id == "busy")
+            .unwrap();
+        assert_eq!(busy.subjects.len(), GRANT_SUBJECTS);
     }
 
     /// Non-test source of every Rust file under `src/`.
@@ -1540,7 +2552,11 @@ mod tests {
                 _ => assert_eq!(mints, 0, "{name} mints a person's answer"),
             }
             if name != "agent/interaction.rs" {
-                for built in ["PersonAnswer::Allow", "PersonAnswer::Deny"] {
+                for built in [
+                    "PersonAnswer::Allow",
+                    "PersonAnswer::Deny",
+                    "PersonAnswer::Answers",
+                ] {
                     assert!(!body.contains(built), "{name} builds {built}");
                 }
             }
@@ -1555,6 +2571,29 @@ mod tests {
     }
 
     #[test]
+    fn only_the_answer_command_remembers() {
+        let sources = sources();
+        for (name, body) in &sources {
+            let writes = body.matches("remember_subject(").count();
+            match name.as_str() {
+                // Its definition, and its one call, in finish_answer.
+                "agent/interaction.rs" => {
+                    assert_eq!(writes, 2, "one writer, called once");
+                    let call = body.rfind(".remember_subject(").unwrap();
+                    let owner = body[..call].rfind("pub fn ").unwrap();
+                    assert!(body[owner..].starts_with("pub fn finish_answer("));
+                }
+                _ => assert_eq!(writes, 0, "{name} writes a grant"),
+            }
+            let finishes = body.matches(".finish_answer(").count();
+            match name.as_str() {
+                "lib.rs" => assert_eq!(finishes, 1, "only the answer command"),
+                _ => assert_eq!(finishes, 0, "{name} finishes an answer"),
+            }
+        }
+    }
+
+    #[test]
     fn every_interaction_refusal_code_is_declared_operational() {
         let table = crate::policy::table::PolicyTable::load().unwrap();
         for code in REFUSAL_CODES {
@@ -1565,5 +2604,678 @@ mod tests {
             );
             assert!(table.transport_rejections.iter().any(|c| c == code));
         }
+    }
+
+    // --- Questions (M57.3) ---------------------------------------------------
+
+    const QUESTION: &str = "AskUserQuestion";
+
+    fn questions() -> Value {
+        json!({ "questions": [
+            { "question": "Which format?", "header": "Format", "multiSelect": false,
+              "options": [ { "label": "Markdown", "description": "Headings and lists" },
+                           { "label": "Plain text", "description": "No markup" } ] },
+            { "question": "Which sections?", "header": "Sections", "multiSelect": true,
+              "options": [ { "label": "Summary", "description": "" },
+                           { "label": "Risks", "description": "" },
+                           { "label": "Next steps", "description": "", "preview": "<b>x</b>" } ] }
+        ] })
+    }
+
+    fn answers(format: &[&str], sections: &[&str]) -> PersonAnswer {
+        let wire: WireAnswer = serde_json::from_value(json!({
+            "kind": "answers",
+            "answers": [
+                { "question": "Which format?", "picked": format, "other": null },
+                { "question": "Which sections?", "picked": sections }
+            ]
+        }))
+        .unwrap();
+        PersonAnswer::from_ipc(wire)
+    }
+
+    /// A panel run asks its questions, the stream confirms them, and the run
+    /// ends: the question card.
+    fn question_card(book: &Interactions) -> InteractionCard {
+        book.open_seat(seat("run-1", "s-1", "/v"), None);
+        assert_eq!(
+            book.gate("run-1", &named_call("s-1", "t1", QUESTION, questions())),
+            GateAnswer::Defer
+        );
+        let card = book.confirm("s-1", "t1").expect("a question card");
+        book.close_seat("run-1");
+        card
+    }
+
+    /// Answer `card` with `answer`, start its resume as run-2, and read what
+    /// the resumed call's gate says.
+    fn resumed_with(
+        book: &Interactions,
+        card: &InteractionCard,
+        answer: PersonAnswer,
+    ) -> GateAnswer {
+        book.begin_answer(Path::new("/v"), &card.id, answer)
+            .expect("the answer is taken");
+        book.open_seat(seat("run-2", "s-1", "/v"), None);
+        book.finish_answer(&card.id, "run-2");
+        book.gate("run-2", &named_call("s-1", "t1", QUESTION, questions()))
+    }
+
+    #[test]
+    fn a_question_registers_with_its_parsed_set() {
+        let book = Interactions::with_asks(Vec::new());
+        let card = question_card(&book);
+        assert_eq!(card.kind, Kind::Question);
+        assert_eq!(card.family.as_deref(), Some("question"));
+        let set = card.questions.clone().expect("the parsed questions");
+        assert_eq!(set.len(), 2);
+        assert!(set[1].multi_select);
+        assert_eq!(set[1].options[2].preview.as_deref(), Some("<b>x</b>"));
+        let wire = serde_json::to_value(&card).unwrap();
+        assert_eq!(wire["kind"], "question");
+        assert_eq!(wire["questions"][0]["multiSelect"], false);
+        // A permission card carries no questions key at all.
+        let book = Interactions::with_asks(Vec::new());
+        let permission = asked(&book, "run-1", "s-1", "t1", "git status");
+        assert!(serde_json::to_value(&permission)
+            .unwrap()
+            .get("questions")
+            .is_none());
+    }
+
+    #[test]
+    fn a_malformed_question_is_refused_and_never_shown() {
+        let book = Interactions::with_asks(Vec::new());
+        book.open_seat(seat("run-1", "s-1", "/v"), None);
+        let one_option = json!({ "questions": [
+            { "question": "Which release?", "options": [ { "label": "1.4" } ] }
+        ] });
+        let answer = book.gate("run-1", &named_call("s-1", "t1", QUESTION, one_option));
+        assert_eq!(
+            answer,
+            GateAnswer::Deny(
+                "Cerebro couldn't show this question (\"Which release?\" offers 1 options; a \
+                 question offers 2 to 4). Ask again with 1 to 4 questions, each with 2 to 4 \
+                 distinct options."
+                    .into()
+            )
+        );
+        assert!(lock(&book.book).entries.is_empty(), "nothing registered");
+        assert!(book.confirm("s-1", "t1").is_none());
+        assert!(book.pending(Path::new("/v")).is_empty());
+    }
+
+    #[test]
+    fn an_answered_question_allows_with_its_answers() {
+        let book = Interactions::with_asks(Vec::new());
+        let card = question_card(&book);
+        let answer = resumed_with(&book, &card, answers(&["Markdown"], &["Summary", "Risks"]));
+        let GateAnswer::Allow {
+            updated_input: Some(input),
+        } = &answer
+        else {
+            panic!("an allow with the answers: {answer:?}");
+        };
+        assert_eq!(
+            input["answers"],
+            json!({ "Which format?": "Markdown", "Which sections?": "Summary, Risks" })
+        );
+        assert_eq!(
+            serde_json::to_string(&input["questions"]).unwrap(),
+            serde_json::to_string(&questions()["questions"]).unwrap()
+        );
+        assert_eq!(
+            answer.hook_json()["hookSpecificOutput"]["updatedInput"]["answers"]["Which format?"],
+            "Markdown"
+        );
+        // The prompt tool reads the same answer for the same call.
+        let prompt = book.host_prompt(
+            "run-2",
+            &GateCall::from_prompt_args(
+                json!({ "tool_name": QUESTION, "tool_use_id": "t1", "input": questions() })
+                    .as_object()
+                    .unwrap(),
+            ),
+        );
+        assert_eq!(
+            prompt,
+            HostPrompt::Allow {
+                updated_input: input.clone()
+            }
+        );
+        assert_eq!(prompt.prompt_json()["behavior"], "allow");
+    }
+
+    #[test]
+    fn a_wrong_answer_is_malformed_and_the_card_stays() {
+        let book = Interactions::with_asks(Vec::new());
+        let card = question_card(&book);
+        for (answer, words) in [
+            (
+                answers(&["HTML"], &["Risks"]),
+                "\"HTML\" is not an option of \"Which format?\".",
+            ),
+            (
+                answers(&["Markdown"], &[]),
+                "Answer every question: \"Which sections?\" has no answer.",
+            ),
+            (
+                answers(&["Markdown", "Plain text"], &["Risks"]),
+                "\"Which format?\" takes one answer.",
+            ),
+        ] {
+            let refused = book
+                .begin_answer(Path::new("/v"), &card.id, answer)
+                .unwrap_err();
+            assert_eq!(refused.code, MALFORMED_ARGUMENTS);
+            assert_eq!(refused.message, words);
+            assert_eq!(
+                book.pending(Path::new("/v")).len(),
+                1,
+                "the card still waits"
+            );
+        }
+        // Answers to a card that asks no question are refused too.
+        let book = Interactions::with_asks(Vec::new());
+        let permission = asked(&book, "run-1", "s-1", "t1", "git status");
+        let refused = book
+            .begin_answer(
+                Path::new("/v"),
+                &permission.id,
+                answers(&["Markdown"], &["Risks"]),
+            )
+            .unwrap_err();
+        assert_eq!(
+            (refused.code, refused.message.as_str()),
+            (MALFORMED_ARGUMENTS, NOT_A_QUESTION)
+        );
+    }
+
+    #[test]
+    fn declining_tells_the_model_to_decide() {
+        let declined = &tool_approval::messages().question_declined;
+        let book = Interactions::with_asks(Vec::new());
+        let card = question_card(&book);
+        assert_eq!(
+            resumed_with(&book, &card, deny("use your judgement")),
+            GateAnswer::Deny(format!("{declined} They said: use your judgement"))
+        );
+        let book = Interactions::with_asks(Vec::new());
+        let card = question_card(&book);
+        let bare = PersonAnswer::from_ipc(WireAnswer::Deny { message: None });
+        assert_eq!(
+            resumed_with(&book, &card, bare),
+            GateAnswer::Deny(declined.clone())
+        );
+        assert!(declined.starts_with("The person chose not to answer"));
+    }
+
+    #[test]
+    fn plain_allow_does_not_answer_a_question() {
+        let book = Interactions::with_asks(Vec::new());
+        let card = question_card(&book);
+        for answer in [allow(), conversation()] {
+            let refused = book
+                .begin_answer(Path::new("/v"), &card.id, answer)
+                .unwrap_err();
+            assert_eq!(
+                (refused.code, refused.message.as_str()),
+                (MALFORMED_ARGUMENTS, ANSWER_THE_QUESTION)
+            );
+        }
+        assert_eq!(
+            book.pending(Path::new("/v")).len(),
+            1,
+            "the card still waits"
+        );
+    }
+
+    #[test]
+    fn the_prompt_tool_allows_only_a_persons_answer() {
+        let book = Interactions::with_asks(Vec::new());
+        let prompt = |run: &str, tool: &str, id: &str, input: Value| {
+            book.host_prompt(
+                run,
+                &GateCall::from_prompt_args(
+                    json!({ "tool_name": tool, "tool_use_id": id, "input": input })
+                        .as_object()
+                        .unwrap(),
+                ),
+            )
+        };
+        assert_eq!(
+            prompt("nobody", QUESTION, "t1", questions()),
+            HostPrompt::Deny(NOBODY_WATCHING.into())
+        );
+        book.open_seat(seat_under("ask", "run-1", "s-1", "/v"), None);
+        // An ask no person answered, a waiting one, a pass and a refusal.
+        assert_eq!(
+            prompt("run-1", "Bash", "t1", json!({ "command": "ls" })),
+            HostPrompt::Deny(NOT_PUT.into())
+        );
+        book.gate("run-1", &named_call("s-1", "t2", QUESTION, questions()));
+        assert_eq!(
+            prompt("run-1", QUESTION, "t2", questions()),
+            HostPrompt::Deny(NOT_PUT.into())
+        );
+        assert_eq!(
+            prompt("run-1", "Read", "t3", json!({ "file_path": "/etc/hosts" })),
+            HostPrompt::Deny(tool_approval::messages().unlisted.clone())
+        );
+        let plan = tool_approval::table().family("plan").unwrap();
+        assert_eq!(
+            prompt("run-1", "ExitPlanMode", "t4", json!({})),
+            HostPrompt::Deny(plan.message.clone().unwrap())
+        );
+        // The person's Allow of a command runs it as asked.
+        let book = Interactions::with_asks(Vec::new());
+        let card = asked(&book, "run-1", "s-1", "t1", "git status");
+        book.begin_answer(Path::new("/v"), &card.id, allow())
+            .unwrap();
+        book.open_seat(seat_under("ask", "run-2", "s-1", "/v"), None);
+        book.finish_answer(&card.id, "run-2");
+        let input = json!({ "command": "git status", "description": "check" });
+        assert_eq!(
+            book.host_prompt(
+                "run-2",
+                &GateCall::from_prompt_args(
+                    json!({ "tool_name": "Bash", "tool_use_id": "t1", "input": input })
+                        .as_object()
+                        .unwrap()
+                )
+            ),
+            HostPrompt::Allow {
+                updated_input: input.clone()
+            }
+        );
+        assert_eq!(
+            HostPrompt::Deny("no".into()).prompt_json(),
+            json!({ "behavior": "deny", "message": "no" })
+        );
+    }
+
+    // --- Ask-first writes (M57.4) -------------------------------------------
+
+    const CREATE: &str = "mcp__cerebro__create_note";
+
+    fn draft() -> Value {
+        json!({ "folder": "records/risks", "slug": "vendor-delay", "body": "# Vendor delay\n" })
+    }
+
+    fn ask_first_seat(run: &str, session: &str) -> Seat {
+        let mut req = request();
+        req.actor = Some("process:release-scout".into());
+        req.ask_first = Some(true);
+        Seat::new(run, session, Path::new("/v"), &req)
+    }
+
+    fn scout_grant(run: &str) -> crate::mcp::RunGrant {
+        crate::mcp::RunGrant {
+            actor: "process:release-scout".into(),
+            run_id: run.into(),
+            scope: None,
+            read_scope: None,
+            tools: None,
+            chain: vec!["process:release-scout".into()],
+            vault: Some(PathBuf::from("/v")),
+            asks: crate::mcp::WriteAsks {
+                kind: tool_approval::RunKind::Attended,
+                ask_first: true,
+            },
+        }
+    }
+
+    /// An ask-first run asks to create a note, the stream confirms it, the
+    /// run ends, and the person allows it: the approval the answer command
+    /// records, and the resume run seated on the same session.
+    fn allowed_write(book: &Interactions) -> WriteApproval {
+        book.open_seat(ask_first_seat("run-1", "s-1"), None);
+        assert_eq!(
+            book.gate("run-1", &named_call("s-1", "t1", CREATE, draft())),
+            GateAnswer::Defer
+        );
+        let card = book.confirm("s-1", "t1").expect("a write card");
+        assert_eq!(card.kind, Kind::Write);
+        assert_eq!(card.family.as_deref(), Some("confirmable"));
+        assert_eq!(card.title.as_deref(), Some("Create a note"));
+        assert_eq!(card.target.as_deref(), Some("records/risks"));
+        book.close_seat("run-1");
+        let resume = book
+            .begin_answer(Path::new("/v"), &card.id, allow())
+            .unwrap();
+        let approval = resume
+            .approval
+            .expect("an Allow of a write carries an approval");
+        book.record_write_approval(approval.clone());
+        book.open_seat(ask_first_seat("run-2", "s-1"), None);
+        book.finish_answer(&card.id, "run-2");
+        approval
+    }
+
+    #[test]
+    fn an_ask_first_write_draws_a_write_card() {
+        let book = Interactions::with_asks(Vec::new());
+        allowed_write(&book);
+        // The resumed call reads the Allow at the gate.
+        assert_eq!(
+            book.gate("run-2", &named_call("s-1", "t1", CREATE, draft())),
+            GateAnswer::Allow {
+                updated_input: None
+            }
+        );
+        assert_eq!(
+            book.planned("run-2", "create_note"),
+            Some(tool_approval::Decision::Ask)
+        );
+        assert_eq!(book.planned("run-2", "get_note"), None);
+        assert_eq!(book.planned("nobody", "create_note"), None);
+    }
+
+    #[test]
+    fn an_approval_is_single_use() {
+        let book = Interactions::with_asks(Vec::new());
+        allowed_write(&book);
+        let grant = scout_grant("run-2");
+        assert!(book
+            .take_write_approval(&grant, "create_note", &draft())
+            .is_some());
+        assert!(book
+            .take_write_approval(&grant, "create_note", &draft())
+            .is_none());
+    }
+
+    #[test]
+    fn an_approval_is_bound_to_its_tool_input_and_actor() {
+        let book = Interactions::with_asks(Vec::new());
+        allowed_write(&book);
+        let grant = scout_grant("run-2");
+        let mut other = draft();
+        other["slug"] = json!("something-else");
+        assert!(book
+            .take_write_approval(&grant, "create_note", &other)
+            .is_none());
+        assert!(book
+            .take_write_approval(&grant, "append_to_note", &draft())
+            .is_none());
+        let someone = crate::mcp::RunGrant {
+            actor: "process:other".into(),
+            ..scout_grant("run-2")
+        };
+        assert!(book
+            .take_write_approval(&someone, "create_note", &draft())
+            .is_none());
+        let elsewhere = crate::mcp::RunGrant {
+            vault: Some(PathBuf::from("/w")),
+            ..scout_grant("run-2")
+        };
+        assert!(book
+            .take_write_approval(&elsewhere, "create_note", &draft())
+            .is_none());
+        // Another session's run holds no approval for it.
+        book.open_seat(ask_first_seat("run-3", "s-2"), None);
+        assert!(book
+            .take_write_approval(&scout_grant("run-3"), "create_note", &draft())
+            .is_none());
+        // A spelling the name test takes, and keys in another order, match.
+        let reordered = json!({ "body": "# Vendor delay\n", "slug": "vendor-delay", "folder": "records/risks" });
+        assert!(book
+            .take_write_approval(&grant, CREATE, &reordered)
+            .is_some());
+    }
+
+    #[test]
+    fn an_approval_is_refused_after_ten_minutes() {
+        let book = Interactions::with_asks(Vec::new());
+        let approval = allowed_write(&book);
+        let grant = scout_grant("run-2");
+        let late = approval.at
+            + chrono::Duration::minutes(tool_approval::APPROVAL_MINUTES)
+            + chrono::Duration::seconds(1);
+        assert!(book
+            .take_write_approval_at(&grant, "create_note", &draft(), late)
+            .is_none());
+        // Expired is gone, even back in time.
+        assert!(book
+            .take_write_approval_at(&grant, "create_note", &draft(), approval.at)
+            .is_none());
+        let book = Interactions::with_asks(Vec::new());
+        let approval = allowed_write(&book);
+        let in_time = approval.at + chrono::Duration::minutes(tool_approval::APPROVAL_MINUTES);
+        assert!(book
+            .take_write_approval_at(&grant, "create_note", &draft(), in_time)
+            .is_some());
+    }
+
+    #[test]
+    fn an_approval_dies_with_its_resumed_run() {
+        let book = Interactions::with_asks(Vec::new());
+        allowed_write(&book);
+        book.close_seat("run-2");
+        book.open_seat(ask_first_seat("run-2", "s-1"), None);
+        assert!(book
+            .take_write_approval(&scout_grant("run-2"), "create_note", &draft())
+            .is_none());
+    }
+
+    #[test]
+    fn an_aborted_resume_drops_its_approval() {
+        let book = Interactions::with_asks(Vec::new());
+        book.open_seat(ask_first_seat("run-1", "s-1"), None);
+        book.gate("run-1", &named_call("s-1", "t1", CREATE, draft()));
+        let card = book.confirm("s-1", "t1").unwrap();
+        book.close_seat("run-1");
+        let resume = book
+            .begin_answer(Path::new("/v"), &card.id, allow())
+            .unwrap();
+        book.record_write_approval(resume.approval.unwrap());
+        book.abort_answer(&card.id);
+        book.open_seat(ask_first_seat("run-2", "s-1"), None);
+        assert!(book
+            .take_write_approval(&scout_grant("run-2"), "create_note", &draft())
+            .is_none());
+    }
+
+    #[test]
+    fn a_write_card_offers_no_this_conversation_and_a_deny_says_why() {
+        let book = Interactions::with_asks(Vec::new());
+        book.open_seat(ask_first_seat("run-1", "s-1"), None);
+        book.gate("run-1", &named_call("s-1", "t1", CREATE, draft()));
+        let card = book.confirm("s-1", "t1").unwrap();
+        book.close_seat("run-1");
+        assert_eq!(
+            book.begin_answer(Path::new("/v"), &card.id, conversation())
+                .unwrap_err()
+                .code,
+            MALFORMED_ARGUMENTS
+        );
+        let resume = book
+            .begin_answer(Path::new("/v"), &card.id, deny("not yet"))
+            .unwrap();
+        assert!(resume.approval.is_none(), "a Deny mints nothing");
+        book.open_seat(ask_first_seat("run-2", "s-1"), None);
+        book.finish_answer(&card.id, "run-2");
+        assert_eq!(
+            book.gate("run-2", &named_call("s-1", "t1", CREATE, draft())),
+            GateAnswer::Deny(
+                "The person declined this write, so nothing was written. Their reason: \"not yet\""
+                    .into()
+            )
+        );
+        assert_eq!(
+            write_declined(None),
+            "The person declined this write, so nothing was written."
+        );
+    }
+
+    // --- The person edits the draft (M57.4b) --------------------------------
+
+    fn edited_draft() -> Value {
+        json!({ "folder": "records/risks", "slug": "vendor-delay", "body": "# Vendor delay risk\n" })
+    }
+
+    /// An ask-first run asks to create a note and its run ends: the card.
+    fn waiting_write(book: &Interactions) -> InteractionCard {
+        book.open_seat(ask_first_seat("run-1", "s-1"), None);
+        book.gate("run-1", &named_call("s-1", "t1", CREATE, draft()));
+        let card = book.confirm("s-1", "t1").expect("a write card");
+        book.close_seat("run-1");
+        card
+    }
+
+    #[test]
+    fn an_edited_approval_keeps_both_hashes() {
+        let book = Interactions::with_asks(Vec::new());
+        let card = waiting_write(&book);
+        let resume = book
+            .begin_answer_edited(
+                Path::new("/v"),
+                &card.id,
+                allow(),
+                Some(edited_draft()),
+                |req, tool, input| {
+                    assert_eq!(req.actor.as_deref(), Some("process:release-scout"));
+                    assert_eq!(tool, CREATE);
+                    assert_eq!(input, &edited_draft());
+                    Ok(())
+                },
+            )
+            .unwrap();
+        let approval = resume.approval.expect("an approval");
+        assert_eq!(approval.asked_hash, canonical_hash(&draft()));
+        assert_eq!(approval.approved_hash, canonical_hash(&edited_draft()));
+        assert_eq!(approval.approved_input(), &edited_draft());
+        assert_eq!(approval.edited(), ["body"]);
+        book.record_write_approval(approval);
+        book.open_seat(ask_first_seat("run-2", "s-1"), None);
+        book.finish_answer(&card.id, "run-2");
+        // The resume's gate allows with the person's version.
+        assert_eq!(
+            book.gate("run-2", &named_call("s-1", "t1", CREATE, draft())),
+            GateAnswer::Allow {
+                updated_input: Some(edited_draft())
+            }
+        );
+        // A CLI that ignores updatedInput sends the asked draft: it matches,
+        // and what runs is the approved one.
+        let grant = scout_grant("run-2");
+        assert_eq!(
+            book.take_write_approval(&grant, CREATE, &draft()),
+            Some(ApprovedWrite {
+                input: edited_draft(),
+                edited: vec!["body".into()],
+            })
+        );
+        // Used once, whichever hash comes next.
+        assert!(book
+            .take_write_approval(&grant, CREATE, &edited_draft())
+            .is_none());
+    }
+
+    #[test]
+    fn a_cli_that_applies_the_edit_matches_the_approved_hash() {
+        let book = Interactions::with_asks(Vec::new());
+        let card = waiting_write(&book);
+        let resume = book
+            .begin_answer_edited(
+                Path::new("/v"),
+                &card.id,
+                allow(),
+                Some(edited_draft()),
+                |_, _, _| Ok(()),
+            )
+            .unwrap();
+        book.record_write_approval(resume.approval.unwrap());
+        book.open_seat(ask_first_seat("run-2", "s-1"), None);
+        book.finish_answer(&card.id, "run-2");
+        let taken = book
+            .take_write_approval(&scout_grant("run-2"), CREATE, &edited_draft())
+            .expect("the approved hash matches");
+        assert_eq!(taken.input, edited_draft());
+    }
+
+    #[test]
+    fn a_refused_edit_records_nothing_and_the_card_waits() {
+        let book = Interactions::with_asks(Vec::new());
+        let card = waiting_write(&book);
+        let at = Path::new("/v");
+        let unchecked = |_: &AgentRequest, _: &str, _: &Value| -> Result<(), Refusal> {
+            panic!("a misshapen draft never reaches the grant check")
+        };
+        let shape = book
+            .begin_answer_edited(
+                at,
+                &card.id,
+                allow(),
+                Some(json!({ "folder": "x", "body": "# X\n" })),
+                unchecked,
+            )
+            .unwrap_err();
+        assert_eq!(shape.code, MALFORMED_ARGUMENTS);
+        assert_eq!(
+            shape.message,
+            "The edited draft leaves out slug, which this tool requires."
+        );
+        let scoped = book
+            .begin_answer_edited(at, &card.id, allow(), Some(edited_draft()), |_, _, _| {
+                Err(Refusal {
+                    code: "write_outside_scope",
+                    message: "This run is scoped to records/risks and cannot write to notes."
+                        .into(),
+                })
+            })
+            .unwrap_err();
+        assert_eq!(scoped.code, "write_outside_scope");
+        let denied = book
+            .begin_answer_edited(at, &card.id, deny("no"), Some(edited_draft()), |_, _, _| {
+                Ok(())
+            })
+            .unwrap_err();
+        assert_eq!(denied.message, EDIT_MISFIT);
+        // Nothing was taken: the card still waits, and a plain Allow mints an
+        // approval with no edit.
+        assert_eq!(book.pending(at).len(), 1);
+        let resume = book.begin_answer(at, &card.id, allow()).unwrap();
+        let approval = resume.approval.unwrap();
+        assert!(approval.edited().is_empty());
+        assert_eq!(approval.approved_input(), &draft());
+    }
+
+    #[test]
+    fn only_a_write_card_takes_an_edited_draft() {
+        let book = book();
+        let card = waiting(&book);
+        let refused = book
+            .begin_answer_edited(
+                Path::new("/v"),
+                &card.id,
+                allow(),
+                Some(json!({ "path": "notes/inbox.md", "content": "x" })),
+                |_, _, _| Ok(()),
+            )
+            .unwrap_err();
+        assert_eq!(refused.message, EDIT_MISFIT);
+    }
+
+    #[test]
+    fn changed_keys_names_added_removed_and_changed_keys() {
+        let asked = json!({ "a": 1, "b": { "x": 1, "y": 2 }, "c": "same" });
+        let approved = json!({ "b": { "y": 2, "x": 1 }, "c": "same", "d": null, "a": 2 });
+        assert_eq!(changed_keys(&asked, &approved), ["a", "d"]);
+        assert!(changed_keys(&asked, &asked).is_empty());
+        assert_eq!(changed_keys(&asked, &json!({})), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn canonical_hash_ignores_key_order() {
+        let a = json!({ "a": 1, "b": { "x": [1, { "q": true, "p": null }], "y": "z" } });
+        let b = json!({ "b": { "y": "z", "x": [1, { "p": null, "q": true }] }, "a": 1 });
+        assert_eq!(canonical_hash(&a), canonical_hash(&b));
+        // Order inside a list is meaning, and so is every value.
+        let c = json!({ "a": 1, "b": { "x": [{ "q": true, "p": null }, 1], "y": "z" } });
+        assert_ne!(canonical_hash(&a), canonical_hash(&c));
+        assert_ne!(
+            canonical_hash(&json!({ "a": 1 })),
+            canonical_hash(&json!({ "a": 2 }))
+        );
     }
 }

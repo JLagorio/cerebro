@@ -200,19 +200,17 @@ test('agent: shell access is one persisted ceiling in Settings, not a per-chat m
   await expect(page.getByTestId('ai-panel').getByRole('combobox')).toHaveCount(0);
 
   await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Settings' }).click();
-  const shell = page.getByRole('switch', { name: 'Shell access' });
-  // Off by default — shell access is chosen, never inherited.
-  await expect(shell).not.toBeChecked();
-  // The checkbox itself is 0×0 by design; the label is what a user clicks.
-  await page
-    .locator('label.cb-switch')
-    .filter({ has: page.getByRole('switch', { name: 'Shell access' }) })
-    .click();
-  await expect(shell).toBeChecked();
+  // M57.2: a ceiling of three, Off until the person picks another.
+  const ceiling = page.getByRole('tablist', { name: 'Shell access' });
+  await expect(ceiling.getByRole('tab')).toHaveText(['Off', 'Ask', 'On']);
+  await expect(page.getByTestId('shell-off')).toHaveAttribute('aria-selected', 'true');
+  await page.getByTestId('shell-ask').click();
+  await expect(page.getByTestId('shell-ask')).toHaveAttribute('aria-selected', 'true');
 
   await page.reload();
   await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Settings' }).click();
-  await expect(page.getByRole('switch', { name: 'Shell access' })).toBeChecked();
+  await expect(page.getByTestId('shell-ask')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('shell-off')).toHaveAttribute('aria-selected', 'false');
 });
 
 const PROPOSED = 'inbox/warehouse-cutover-thought.md';
@@ -370,7 +368,7 @@ test('agent page: an agent is built from pickers, not from remembered strings', 
   await expect(page.getByTestId('agent-tools-summary')).toContainText('Read-only');
   await toolsEditor.getByRole('button', { name: 'Done' }).click();
   await expect.poll(() => scoutFile(page)).toContain('allowed-tools:');
-  await expect(page.getByTestId('agent-prop-tools')).toContainText('5 granted');
+  await expect(page.getByTestId('agent-prop-tools')).toContainText('6 granted');
 
   // A trigger is clauses, not YAML, and the sentence under it is the same one
   // the library prints — so what will fire it is readable before it ever runs.

@@ -5,6 +5,7 @@ import { ChatInput } from './ChatInput';
 import { useEscapeLayer } from '@/components/ui/Popover';
 import { chipId, type ContextChip } from './contextChips';
 import { makeEntry } from '@/engine/testHelpers';
+import { useOpenLogStore } from '@/stores/openLogStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 afterEach(cleanup);
@@ -316,5 +317,51 @@ describe('ChatInput @ addressing (M33b.6)', () => {
     expect(screen.queryByTestId('attach-menu')).toBeNull();
     fireEvent.keyDown(box(), { key: 'Enter' });
     expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+});
+
+// M59.3 — every menu here ranks through the one name ranker: the match tier
+// first, then your own recent opens within it.
+describe('ChatInput ranking (M59.3)', () => {
+  const labels = (testid: string) =>
+    [...screen.getByTestId(testid).querySelectorAll('button')].map(
+      (b) => b.querySelector('span')?.textContent ?? '',
+    );
+
+  beforeEach(() => {
+    useOpenLogStore.setState({ logs: {}, saved: true });
+  });
+
+  it('[[ ranks the note you opened first within its tier', () => {
+    useVaultStore.setState({
+      vaultPath: '/v',
+      entries: [
+        makeEntry({ path: 'notes/plan-a.md', title: 'Plan a' }),
+        makeEntry({ path: 'notes/plan-b.md', title: 'Plan b' }),
+        makeEntry({ path: 'notes/replan.md', title: 'Replan' }),
+      ],
+    });
+    useOpenLogStore.getState().record('/v', 'notes/plan-b.md');
+    useOpenLogStore.getState().record('/v', 'notes/replan.md');
+    render(<Harness />);
+    fireEvent.change(box(), { target: { value: 'see [[plan' } });
+    expect(labels('wikilink-menu')).toEqual(['Plan b', 'Plan a', 'Replan']);
+  });
+
+  it('calls an untyped note a Page', () => {
+    useVaultStore.setState({ entries: [makeEntry({ path: 'notes/plan.md', title: 'Plan' })] });
+    render(<Harness />);
+    fireEvent.change(box(), { target: { value: '[[pl' } });
+    expect(screen.getByTestId('wikilink-menu').textContent).toContain('Page');
+    expect(screen.getByTestId('wikilink-menu').textContent).not.toContain('Note');
+  });
+
+  it('/ offers a word-boundary skill match after the prefix matches', () => {
+    useVaultStore.setState({
+      entries: [skillEntry('Risk sweep'), skillEntry('Sweep inbox'), skillEntry('Weekly review')],
+    });
+    render(<Harness />);
+    fireEvent.change(box(), { target: { value: '/sweep' } });
+    expect(labels('skill-menu')).toEqual(['/sweep-inbox', '/risk-sweep']);
   });
 });

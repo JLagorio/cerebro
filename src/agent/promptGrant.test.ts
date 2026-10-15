@@ -3,7 +3,14 @@ import SERVER_INSTRUCTIONS from '../../shared/prompt/server-instructions.md?raw'
 import { buildSystemPrompt } from './systemPrompt';
 import { listSkills, skillPrompt } from '@/engine/skills';
 import { makeEntry } from '@/engine/testHelpers';
-import { grantedTools, mentionedTools, type PromptGrant } from '@/engine/toolGrant';
+import {
+  cliGrant,
+  grantedTools,
+  holdsShell,
+  mentionedTools,
+  type PromptGrant,
+} from '@/engine/toolGrant';
+import { SHELL_CEILINGS } from '@/lib/policy/toolApproval';
 import {
   addressedAgentPrompt,
   agentRunPrompt,
@@ -326,5 +333,30 @@ describe('the server instructions', () => {
     // A JS string's length counts UTF-16 units, as the cap does.
     expect(served.length).toBeLessThanOrEqual(2048);
     expect(mentionedTools(SERVER_INSTRUCTIONS)).toEqual([]);
+  });
+});
+
+describe('the ceiling dimension (M57.2)', () => {
+  it('holds the shell exactly where the table pre-approves or asks for it', () => {
+    for (const shell of SHELL_CEILINGS) {
+      for (const attended of [true, false]) {
+        const input = { shell, attended, readScoped: false, narrowing: null };
+        const { cli, asks } = cliGrant(input);
+        expect(holdsShell(input), `${shell} attended=${attended}`).toBe(
+          [...cli, ...asks].includes('Bash'),
+        );
+      }
+    }
+  });
+
+  it('gives an unattended Ask run no shell tool, so its prompts are Off’s', () => {
+    const input = { shell: 'ask' as const, attended: false, readScoped: false, narrowing: null };
+    expect(cliGrant(input)).toEqual({ cli: [], asks: [] });
+    const tools = grantedTools(null);
+    const ask: PromptGrant = { tools, shell: holdsShell(input), attended: false };
+    const off: PromptGrant = { tools, shell: false, attended: false };
+    expect(systemPrompts(ask, true, ['knowledge'])).toEqual(
+      systemPrompts(off, true, ['knowledge']),
+    );
   });
 });

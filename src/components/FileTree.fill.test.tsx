@@ -21,7 +21,7 @@ describe('FileTree template fill', () => {
       expandedFolders: {},
       treeOrder: {},
       toasts: [],
-      agentPendingPrompt: null,
+      handoffs: [],
     });
     await useVaultStore.getState().openVault('/demo-vault');
   });
@@ -38,7 +38,7 @@ describe('FileTree template fill', () => {
     fireEvent.click(screen.getByRole('option', { name: /prd/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
     await waitFor(() => expect(onOpen).toHaveBeenCalledWith(`${ROOT}/sprint-prd.md`));
-    const pending = useUiStore.getState().agentPendingPrompt;
+    const pending = useUiStore.getState().handoffs.at(-1);
     expect(pending?.label).toBe('Fill from the template · Sprint PRD');
     expect(pending?.subject).toBe(`${ROOT}/sprint-prd.md`);
     expect(pending?.text).toContain('was just created from a template');

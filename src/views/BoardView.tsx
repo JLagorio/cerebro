@@ -17,7 +17,7 @@ import { QuickAddInline } from '@/views/QuickAdd';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { FieldChip } from '@/views/FieldChip';
 import { Icon } from '@/components/ui/Icon';
-import { bandValueFor, groupTree } from '@/engine/grouping';
+import { bandValueFor, bandWritable, groupTree } from '@/engine/grouping';
 import { visibleColumns } from '@/engine/views';
 import { bandLevels } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
@@ -25,6 +25,7 @@ import { useVaultStore } from '@/stores/vaultStore';
 import type {
   CardSize,
   Entry,
+  FieldDef,
   FieldKind,
   GroupNode,
   GroupSpec,
@@ -232,11 +233,26 @@ export function handleDragEnd(
   if (source !== undefined && source.path === target.path) return;
 
   const dragged = source?.entries.find((e) => e.path === path);
-  const kindOf = (field: string): FieldKind | undefined =>
-    dragged === undefined ? undefined : args.schema.resolveField(dragged, field).def?.kind;
+  const defOf = (field: string): FieldDef | null =>
+    dragged === undefined ? null : args.schema.resolveField(dragged, field).def;
+  const kindOf = (field: string): FieldKind | undefined => defOf(field)?.kind;
+
+  // A computed or derived band (M60.1) is not the card's to change: a rollup
+  // or a timestamp stores nothing, and a relation with `from` lives on the
+  // linking records. Refused whole, before any patch is built.
+  const columnMoves = source === undefined || source.key !== target.key;
+  const lane = target.lane;
+  const laneMoves = lane !== null && source?.lane?.key !== lane.key;
+  if (
+    (columnMoves && !bandWritable(defOf(args.groupBy))) ||
+    (laneMoves && !bandWritable(defOf(lane.field)))
+  ) {
+    args.toast("Can't move cards grouped by a computed property");
+    return;
+  }
 
   const patch: Record<string, unknown> = {};
-  if (source === undefined || source.key !== target.key) {
+  if (columnMoves) {
     const value = bandValueFor(target.key, kindOf(args.groupBy));
     if (value === undefined) {
       args.toast("Can't move cards grouped by a multi-select field");
@@ -247,8 +263,7 @@ export function handleDragEnd(
   // Sub-grouping: a lane is the SECOND band level, so a card dropped in
   // another lane has changed two values, not one. Writing only the column's
   // left the card visibly snapping back into the lane it came from.
-  const lane = target.lane;
-  if (lane !== null && source?.lane?.key !== lane.key) {
+  if (laneMoves) {
     const value = bandValueFor(lane.key, kindOf(lane.field));
     if (value === undefined) {
       args.toast("Can't move cards grouped by a multi-select field");
@@ -259,9 +274,7 @@ export function handleDragEnd(
   if (Object.keys(patch).length === 0) return;
 
   void args.patchFrontmatter(path, patch);
-  args.toast(
-    `Moved to ${lane !== null && source?.lane?.key !== lane.key ? `${lane.label} · ${target.label}` : target.label}`,
-  );
+  args.toast(`Moved to ${laneMoves ? `${lane.label} · ${target.label}` : target.label}`);
 }
 
 function BoardCard({

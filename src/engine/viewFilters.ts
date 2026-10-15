@@ -7,6 +7,7 @@ import {
   toIsoDate,
 } from './dates';
 import { kindMeta } from './properties';
+import { searchableFields } from './searchable';
 import { FILTER_OPS } from './types';
 import type {
   Entry,
@@ -171,8 +172,8 @@ export function filterFieldDefs<T extends FieldDef>(
 /**
  * The kind a filter should treat `field` as.
  *
- * `type` and `title` are filterable — `fieldValue` resolves them off the entry
- * itself — but no `FieldDef` declares them, and neither does an undeclared
+ * `type` and `title` are filterable — `schema.fieldValue` resolves them off
+ * the entry itself — but no `FieldDef` declares them, and neither does an undeclared
  * frontmatter key. All of them are prose, which is also the safest default: a
  * text field offers the operators that read a string, and reading a number as
  * a string still orders it correctly for the digits it holds.
@@ -321,14 +322,6 @@ export function describeFilterRule(rule: FilterRule, label: string, def?: FieldD
 
 // --- evaluation -------------------------------------------------------------
 
-function fieldValue(entry: Entry, field: string): unknown {
-  if (field in entry.relationships) return entry.relationships[field];
-  if (field in entry.properties) return entry.properties[field];
-  if (field === 'type') return entry.type;
-  if (field === 'title') return entry.title;
-  return undefined;
-}
-
 function isEmptyValue(v: unknown): boolean {
   return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 }
@@ -437,8 +430,11 @@ function matchesLoose(v: unknown, target: unknown): boolean {
   return asList(v).some((x) => compareValues(x, target) === 0);
 }
 
-function evalRule(entry: Entry, rule: FilterRule): boolean {
-  const v = fieldValue(entry, rule.field);
+/** `schema.fieldValue` is the read (M60.1): created and edited time, rollups
+ * and derived relations answer here the way the cell shows them, and the four
+ * virtual fields answer from the entry before any frontmatter key. */
+function evalRule(entry: Entry, rule: FilterRule, schema: Schema): boolean {
+  const v = schema.fieldValue(entry, rule.field);
   const bounds = Array.isArray(rule.value) ? rule.value : [rule.value];
   switch (rule.op) {
     case 'is_empty':
@@ -490,7 +486,7 @@ function isGroup(node: FilterRule | FilterGroup): node is FilterGroup {
 
 export function evaluateFilters(entry: Entry, group: FilterGroup, schema: Schema): boolean {
   const evalNode = (node: FilterRule | FilterGroup): boolean =>
-    isGroup(node) ? evaluateFilters(entry, node, schema) : evalRule(entry, node);
+    isGroup(node) ? evaluateFilters(entry, node, schema) : evalRule(entry, node, schema);
 
   // A half-built rule is SKIPPED, not answered (M16.29). Answering it false
   // empties the view mid-edit; answering it true would make a Match-any group
@@ -516,8 +512,9 @@ export function evaluateFilters(entry: Entry, group: FilterGroup, schema: Schema
  * and persists to YAML, while search is where you are looking right now. It is
  * ephemeral state on the surface, cleared when the tab changes.
  *
- * Every term must match somewhere — title, type, any property value, any
- * relationship target, or the path. Terms are ANDed because a two-word query
+ * Every term must match somewhere — the title, the type, the path, or any
+ * frontmatter text `searchableFields` gives (engine/searchable.ts, the rule
+ * search_notes reads by too, M59.2). Terms are ANDed because a two-word query
  * that ORs its terms returns more rows than either word alone, which reads as
  * the search being broken.
  */
@@ -525,14 +522,7 @@ export function searchEntries(entries: Entry[], query: string): Entry[] {
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (terms.length === 0) return entries;
   return entries.filter((e) => {
-    const haystack = [
-      e.title,
-      e.type ?? '',
-      e.path,
-      ...Object.values(e.properties).flatMap((v) => (Array.isArray(v) ? v : [v])),
-      ...Object.values(e.relationships).flat(),
-    ]
-      .filter((v) => v !== null && v !== undefined)
+    const haystack = [e.title, e.type ?? '', e.path, ...searchableFields(e).map((f) => f.text)]
       .join(' ')
       .toLowerCase();
     return terms.every((t) => haystack.includes(t));

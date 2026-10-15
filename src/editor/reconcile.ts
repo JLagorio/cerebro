@@ -255,7 +255,8 @@ const idOf = (block: AnyBlock): string => block.id as string;
  * Carry out `steps` on one level of the page (`parent`'s children, or the
  * top level), then each updated block's children. Drops go first; each run
  * of inserts goes after the kept or updated block before it, or before the
- * next one at the start of a level; a level that keeps nothing is replaced.
+ * next one at the start of a level; a level that keeps nothing is replaced,
+ * or emptied.
  */
 export function applySteps(
   editor: CerebroEditor,
@@ -266,7 +267,10 @@ export function applySteps(
   const drops = steps.flatMap((step) => (step.kind === 'drop' ? [idOf(step.ref)] : []));
   if (!steps.some((step) => step.kind === 'keep' || step.kind === 'update')) {
     if (parent !== null) {
-      editor.updateBlock(parent, { children: inserts as PartialBlock[] });
+      // `updateBlock` ignores an empty `children`: a level emptied out is
+      // removed block by block.
+      if (inserts.length > 0) editor.updateBlock(parent, { children: inserts as PartialBlock[] });
+      else if (drops.length > 0) editor.removeBlocks(drops);
     } else if (drops.length > 0 || inserts.length > 0) {
       editor.replaceBlocks(
         drops,

@@ -58,7 +58,7 @@ describe('LinkPopover', () => {
       />,
     );
     await userEvent.type(screen.getByLabelText('Link target'), 'atlas');
-    // resolveTarget's folder rule makes "atlas" hit the project; substring
+    // resolveTarget's folder rule makes "atlas" hit the project; ranked
     // matches follow. Pick the retro note.
     await userEvent.click(screen.getByRole('button', { name: 'Link to Atlas retro' }));
     expect(onPick).toHaveBeenCalledWith('notes/atlas-retro.md');
@@ -209,5 +209,37 @@ describe('LinkPopover', () => {
       await userEvent.tab();
       expect(surface.contains(document.activeElement), `after ${i + 1} tabs`).toBe(true);
     }
+  });
+});
+
+// M59.3 — resolveTarget's exact hit first, then the one name ranker.
+describe('LinkPopover ranking', () => {
+  it('keeps the exact hit first and ranks the rest, prefix before mid-word', async () => {
+    const entries = [
+      entry('notes/replan.md', 'Replan the quarter', 'replan.md', 'notes'),
+      entry('notes/plan-b.md', 'Plan b', 'plan-b.md', 'notes'),
+      entry('notes/plan.md', 'Plan', 'plan.md', 'notes'),
+      entry('notes/a-plan.md', 'A plan for June', 'a-plan.md', 'notes'),
+    ];
+    render(
+      <LinkPopover
+        entries={entries}
+        current={null}
+        contested={false}
+        onPick={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    await userEvent.type(screen.getByLabelText('Link target'), 'plan');
+    const offered = screen
+      .getAllByRole('button')
+      .map((b) => b.getAttribute('aria-label') ?? '')
+      .filter((name) => name.startsWith('Link to ') && name !== 'Link to URL');
+    expect(offered).toEqual([
+      'Link to Plan',
+      'Link to Plan b',
+      'Link to A plan for June',
+      'Link to Replan the quarter',
+    ]);
   });
 });

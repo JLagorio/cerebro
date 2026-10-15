@@ -8,6 +8,10 @@ vi.mock('./agentIpc', () => ({
     reason: 'not_recorded',
     retention_days: 30,
   })),
+  // M57.6: deleting a thread ends its turn.
+  stopAgent: vi.fn(async () => true),
+  listInteractions: vi.fn(async () => []),
+  cancelInteraction: vi.fn(async () => true),
 }));
 
 import * as agentIpc from './agentIpc';
@@ -16,13 +20,16 @@ import type { AgentChat } from './useAgentChat';
 import type { AgentStreamEvent, ChatMessage, Conversation, TranscriptRead } from './types';
 import type { Place } from '@/engine/place';
 import { makeEntry } from '@/test/factories';
+import { useReviewNotesStore } from '@/stores/reviewNotesStore';
+import { useUiStore } from '@/stores/uiStore';
 
 afterEach(cleanup);
 
 /**
  * The list around the live transcript (M9.5), and the two ways it used to
- * lose things (M15): the panel is unmounted on close, so anything that only
- * happened while it was mounted happened for the last time on the way out.
+ * lose things (M15): the panel is unmounted on close, so the thread is saved
+ * on the way out, with the turn it left running (M57.6), which the next
+ * mount re-attaches to.
  */
 
 const conversation = (id: string, over: Partial<Conversation> = {}): Conversation => ({
@@ -48,11 +55,14 @@ const stubChat = (over: Partial<AgentChat> = {}): AgentChat => ({
   answer: vi.fn(),
   send: vi.fn(),
   stop: vi.fn(),
+  stopping: false,
+  busy: () => false,
   reset: vi.fn(),
   sessionId: null,
   model: null,
   prLinks: [],
   turnEndedAt: null,
+  live: null,
   restore: vi.fn(),
   ...over,
 });
@@ -415,5 +425,141 @@ describe('useConversations — a conversation’s model and effort (M56.5)', () 
     const chat = stubChat();
     const { result } = renderHook(() => useConversations(chat));
     expect([result.current.active?.model, result.current.active?.effort]).toEqual([null, null]);
+  });
+});
+
+describe('useConversations — a turn outlives its panel (M57.6)', () => {
+  const LIVE = { run: 8, attach: 'run-0008', assistantId: 'a-2' };
+  const S1 = '00000000-0000-4000-8000-0000000000b1';
+  const S2 = '00000000-0000-4000-8000-0000000000b2';
+  const midTurn: ChatMessage[] = [
+    { id: 'a-1', role: 'user', text: 'summarise note-a', tools: [] },
+    { id: 'a-2', role: 'assistant', text: 'half', tools: [], streaming: true, seq: 6 },
+  ];
+  const seed = (...threads: Conversation[]) =>
+    window.localStorage.setItem('cerebro.conversations', JSON.stringify(threads));
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.mocked(agentIpc.stopAgent).mockClear();
+    vi.mocked(agentIpc.cancelInteraction).mockClear();
+    vi.mocked(agentIpc.listInteractions).mockReset();
+    vi.mocked(agentIpc.listInteractions).mockResolvedValue([]);
+    useUiStore.setState({ panelConversation: null });
+  });
+
+  it('a switch saves live with the messages', () => {
+    seed(conversation('c-1'), conversation('c-2'));
+    window.localStorage.setItem('cerebro.activeConversation', 'c-1');
+    const chat = stubChat({ messages: midTurn, streaming: true, live: LIVE });
+    const { result } = renderHook(() => useConversations(chat));
+    act(() => result.current.select('c-2'));
+    const left = stored().find((c) => c.id === 'c-1');
+    expect(left?.live).toEqual(LIVE);
+    expect(left?.messages.map((m) => m.text)).toEqual(['summarise note-a', 'half']);
+    expect(left?.messages[1].seq).toBe(6);
+    expect(vi.mocked(chat.restore).mock.calls.at(-1)?.[0]).toEqual([]);
+  });
+
+  it('saves the skeleton with live as soon as the turn has its run', () => {
+    let chat = stubChat();
+    const { rerender } = renderHook(() => useConversations(chat));
+    chat = stubChat({ messages: midTurn, streaming: true, live: LIVE });
+    rerender();
+    expect(stored()[0].live).toEqual(LIVE);
+    expect(stored()[0].messages).toHaveLength(2);
+  });
+
+  it('the unmount save keeps live and the reply’s seq, not an interrupted mark', () => {
+    const chat = stubChat({ messages: midTurn, streaming: true, sessionId: S1, live: LIVE });
+    const { unmount } = renderHook(() => useConversations(chat));
+    unmount();
+    const saved = stored()[0];
+    expect(saved.live).toEqual(LIVE);
+    expect(saved.messages[1].seq).toBe(6);
+    expect(saved.messages[1].interrupted).toBeUndefined();
+    expect(saved.messages.some((m) => 'streaming' in m)).toBe(false);
+  });
+
+  it('hydrate hands live to restore, and reads no transcript for it', () => {
+    seed(conversation('c-1', { messages: midTurn, sessionId: S1, live: LIVE }));
+    const chat = stubChat();
+    renderHook(() => useConversations(chat, undefined, undefined, '/demo-vault'));
+    const call = vi.mocked(chat.restore).mock.calls.at(-1);
+    expect(call?.[1]).toBe(S1);
+    expect(call?.[3]).toEqual(LIVE);
+    expect(vi.mocked(agentIpc.readCliTranscript)).not.toHaveBeenCalledWith(
+      '/demo-vault',
+      S1,
+      expect.anything(),
+    );
+  });
+
+  it('deleting a thread stops its run and cancels its card, active or not', async () => {
+    vi.mocked(agentIpc.listInteractions).mockResolvedValue([
+      {
+        id: 'e'.repeat(32),
+        kind: 'permission',
+        tool_name: 'Bash',
+        tool_id: 't-1',
+        session_id: S2,
+        summary: 'Bash',
+        input: '{}',
+        asked_at: '2026-10-14T12:00:00.000Z',
+      },
+    ]);
+    seed(
+      conversation('c-1'),
+      conversation('c-2', { messages: midTurn, sessionId: S2, live: LIVE }),
+    );
+    window.localStorage.setItem('cerebro.activeConversation', 'c-1');
+    const chat = stubChat({ live: { run: 3, attach: 'run-0003', assistantId: 'x' } });
+    const { result } = renderHook(() =>
+      useConversations(chat, undefined, undefined, '/demo-vault'),
+    );
+    act(() => result.current.remove('c-2'));
+    expect(vi.mocked(agentIpc.stopAgent)).toHaveBeenCalledExactlyOnceWith(8);
+    await vi.waitFor(() =>
+      expect(vi.mocked(agentIpc.cancelInteraction)).toHaveBeenCalledWith('e'.repeat(32)),
+    );
+    act(() => result.current.remove('c-1'));
+    expect(vi.mocked(agentIpc.stopAgent)).toHaveBeenLastCalledWith(3);
+  });
+
+  it('deleting a thread removes its review notes (M58.5)', () => {
+    seed(conversation('c-1'), conversation('c-2'));
+    window.localStorage.setItem('cerebro.activeConversation', 'c-1');
+    useReviewNotesStore.setState({ notes: [] });
+    const note = {
+      vault: '/demo-vault',
+      runId: null,
+      commit: 'c'.repeat(40),
+      path: 'a.md',
+      side: 'new' as const,
+      start: 1,
+      end: 1,
+      excerpt: '',
+      text: 'Fix.',
+    };
+    useReviewNotesStore.getState().add({ ...note, conversationId: 'c-1' });
+    useReviewNotesStore.getState().add({ ...note, conversationId: 'c-2' });
+    const { result } = renderHook(() =>
+      useConversations(stubChat(), undefined, undefined, '/demo-vault'),
+    );
+    act(() => result.current.remove('c-2'));
+    expect(useReviewNotesStore.getState().notes.map((n) => n.conversationId)).toEqual(['c-1']);
+  });
+
+  it('opens the conversation the run list asked for, on mount and while open', () => {
+    seed(conversation('c-1'), conversation('c-2'), conversation('c-3'));
+    window.localStorage.setItem('cerebro.activeConversation', 'c-1');
+    useUiStore.setState({ panelConversation: 'c-2' });
+    const chat = stubChat();
+    const { result } = renderHook(() => useConversations(chat));
+    expect(result.current.activeId).toBe('c-2');
+    expect(useUiStore.getState().panelConversation).toBeNull();
+    act(() => useUiStore.getState().showConversation('c-3'));
+    expect(result.current.activeId).toBe('c-3');
+    expect(useUiStore.getState().panelConversation).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { create } from 'zustand';
 import * as ipc from '@/lib/ipc';
-import type { ReviewCard, RevertableApplication } from '@/lib/ipc';
+import type { PendingWrite, ReviewCard, RevertableApplication } from '@/lib/ipc';
 import { refusalText } from '@/lib/refusal';
 import { useUiStore } from '@/stores/uiStore';
 
@@ -17,6 +17,11 @@ import { useUiStore } from '@/stores/uiStore';
  * a section owns its read and its failure), and a decision made on either
  * one bumps the version, so both re-read. Nothing is cached — a card is
  * never shown from memory, only from the ledger's latest answer.
+ *
+ * **And the page writes agents queued (M57.4c).** An unattended ask-first
+ * agent's write waits in runtime.db, not the ledger, so Review reads it as
+ * its own feed (`usePendingWrites`) on the same version: its read can fail
+ * on its own, and a failed read is `unavailable`, never none.
  */
 
 /** Bumped by every decision, anywhere; every reader of the queue re-reads. */
@@ -38,35 +43,55 @@ export function bumpPendingCards(): void {
 export type PendingCards =
   { kind: 'loading' } | { kind: 'unavailable' } | { kind: 'ready'; data: ReviewCard[] };
 
-export function usePendingCards(vaultPath: string | null): PendingCards {
+/** One queue's read, in the `Feed<T>` contract. */
+export type QueueFeed<T> =
+  { kind: 'loading' } | { kind: 'unavailable' } | { kind: 'ready'; data: T };
+
+/** `read` for `vaultPath`, re-read whenever a decision bumps the version. */
+function useQueueRead<T>(
+  vaultPath: string | null,
+  read: (vault: string) => Promise<T>,
+): QueueFeed<T> {
   const version = usePendingVersion();
   // Keyed by the vault it answered for, so a vault switch reads as loading
   // rather than showing the last vault's cards for a frame.
-  const [read, setRead] = useState<{ vault: string | null; feed: PendingCards }>({
+  const [held, setHeld] = useState<{ vault: string | null; feed: QueueFeed<T> }>({
     vault: vaultPath,
     feed: { kind: 'loading' },
   });
   useEffect(() => {
     if (vaultPath === null) {
-      setRead({ vault: null, feed: { kind: 'unavailable' } });
+      setHeld({ vault: null, feed: { kind: 'unavailable' } });
       return;
     }
     let live = true;
     void (async () => {
       try {
-        const cards = await ipc.reviewQueue(vaultPath);
-        if (live) setRead({ vault: vaultPath, feed: { kind: 'ready', data: cards } });
+        const data = await read(vaultPath);
+        if (live) setHeld({ vault: vaultPath, feed: { kind: 'ready', data } });
       } catch {
         // A read behind a surface goes quiet (AGENTS.md's store-layer rule);
         // each caller decides what "could not tell" looks like.
-        if (live) setRead({ vault: vaultPath, feed: { kind: 'unavailable' } });
+        if (live) setHeld({ vault: vaultPath, feed: { kind: 'unavailable' } });
       }
     })();
     return () => {
       live = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `read` is one module function per call site; the version is the re-read
   }, [vaultPath, version]);
-  return read.vault === vaultPath ? read.feed : { kind: 'loading' };
+  return held.vault === vaultPath ? held.feed : { kind: 'loading' };
+}
+
+export function usePendingCards(vaultPath: string | null): PendingCards {
+  return useQueueRead(vaultPath, ipc.reviewQueue);
+}
+
+/** The page writes agents queued for Review (M57.4c), oldest first. */
+export type PendingWrites = QueueFeed<PendingWrite[]>;
+
+export function usePendingWrites(vaultPath: string | null): PendingWrites {
+  return useQueueRead(vaultPath, ipc.pendingWrites);
 }
 
 /** Every concept path a card targets, to the cards targeting it. */

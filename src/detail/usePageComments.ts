@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { askAgentInThread } from '@/agent/threadTurn';
 import { CommentHighlights, type CommentThreadAnchor } from '@/editor/commentHighlights';
 import type { CerebroEditor } from '@/editor/MarkdownEditor';
 import type { AnchorResolution, CommentAnchor } from '@/engine/commentAnchor';
 import { visibleThreads, type CommentsFile } from '@/engine/comments';
 import { useCommentsSlot, useCommentsStore, type CommentsSlot } from '@/stores/commentsStore';
 import { useUiStore } from '@/stores/uiStore';
+import { useVaultStore } from '@/stores/vaultStore';
 import { commentSections, type CommentSections } from './commentSections';
 
 /**
@@ -20,7 +22,10 @@ import { commentSections, type CommentSections } from './commentSections';
  *
  * `submitDraft`, `startDiscussion` and `reply` are the only ways a comment is
  * posted, and each answers the new comment's id (null on failure, which the
- * store has already toasted, CV-03). No action here writes the page.
+ * store has already toasted, CV-03). No action here writes the page. Each
+ * successful post asks the agent its text names with `@handle`, once
+ * (M70.4, `askAgentInThread`); nothing else here asks anyone, so loading
+ * threads or hearing they changed never starts a turn.
  */
 
 export const REFUSALS = {
@@ -177,6 +182,13 @@ export function usePageComments(
     highlights?.setPending(null);
   };
 
+  // A person's posted comment, and the agent it names, if any (M70.4).
+  const ask = (thread: string, message: string, text: string) => {
+    const { vaultPath, entries } = useVaultStore.getState();
+    if (path === null || vaultPath === null) return;
+    void askAgentInThread({ vault: vaultPath, page: path, thread, message, text, entries });
+  };
+
   return {
     path,
     slot,
@@ -206,16 +218,25 @@ export function usePageComments(
       if (id !== null) {
         clearDraft();
         focus(id);
+        ask(id, id, body);
       }
       return id;
     },
     async startDiscussion(body) {
       if (path === null) return null;
       const id = await store().startThread(path, null, body);
-      if (id !== null) focus(id);
+      if (id !== null) {
+        focus(id);
+        ask(id, id, body);
+      }
       return id;
     },
-    reply: async (thread, body) => (path === null ? null : store().reply(path, thread, body)),
+    async reply(thread, body) {
+      if (path === null) return null;
+      const id = await store().reply(path, thread, body);
+      if (id !== null) ask(thread, id, body);
+      return id;
+    },
     setResolved: async (thread, resolved) =>
       path === null ? false : store().setResolved(path, thread, resolved),
     deleteComment: async (thread, comment) =>

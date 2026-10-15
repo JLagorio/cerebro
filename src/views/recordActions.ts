@@ -1,4 +1,5 @@
-import { deleteNote, readNote } from '@/lib/ipc';
+import { trashPath } from '@/app/trashActions';
+import { readNote } from '@/lib/ipc';
 import { slugify } from '@/lib/slug';
 import type { Entry } from '@/engine/types';
 
@@ -75,20 +76,9 @@ export async function duplicateRecord(
   }
 }
 
-/** True when the file left the vault. The rescan failing separately is a
- * refresh problem, not a delete that did not happen. */
+/** True when the record moved to the vault's Trash (M60.8). `trashPath`
+ * toasts either way and rescans, so this adds no words of its own. */
 export async function deleteRecord(entry: Entry, deps: RecordActionDeps): Promise<boolean> {
   if (deps.vaultPath === null) return false;
-  try {
-    await deleteNote(deps.vaultPath, entry.path);
-  } catch {
-    deps.toast("Couldn't delete this record");
-    return false;
-  }
-  try {
-    await deps.rescan();
-  } catch {
-    deps.toast("Couldn't refresh vault");
-  }
-  return true;
+  return (await trashPath(entry.path, entry.title)) !== null;
 }

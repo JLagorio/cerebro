@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { makeEntry } from '@/engine/testHelpers';
+import { failNext, resetFaults } from '@/lib/mockFaults';
+import { __seedReview, queueAgentWrite, resetMockFs } from '@/lib/mockIpc';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { KnowledgeNav } from './KnowledgeNav';
@@ -14,7 +16,11 @@ import { KnowledgeNav } from './KnowledgeNav';
  * a subject's knowledge is on its own page now.
  */
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  resetFaults();
+  resetMockFs();
+});
 
 const about = (path: string, targets: string[], properties: Record<string, unknown> = {}) =>
   makeEntry({
@@ -67,5 +73,28 @@ describe('KnowledgeNav (M51.1)', () => {
   it('lights nothing while another surface owns the canvas', () => {
     const { container } = render(<KnowledgeNav current={false} />);
     expect(container.querySelector('[aria-current="page"]')).toBeNull();
+  });
+
+  // M57.4c: the page writes agents queued count on the row too, and a write
+  // queue that could not be read takes the count away rather than saying 0.
+  const reviewRow = (container: HTMLElement) =>
+    container.querySelector('[data-tab="review"]')?.textContent;
+
+  it('counts a queued page write on Review', async () => {
+    __seedReview({ cards: [] });
+    await queueAgentWrite('/vault', {
+      actor: 'process:release-scout',
+      runId: 'run-1',
+      tool: 'create_note',
+      input: { folder: 'records/risks', slug: 'vendor-delay', body: '# Vendor delay\n' },
+    });
+    const { container } = render(<KnowledgeNav nav={{ tab: 'all' }} />);
+    await waitFor(() => expect(reviewRow(container)).toBe('Review3'));
+  });
+
+  it('shows no count when the queued writes could not be read', async () => {
+    failNext('pending_writes');
+    const { container } = render(<KnowledgeNav nav={{ tab: 'all' }} />);
+    await waitFor(() => expect(reviewRow(container)).toBe('Review'));
   });
 });

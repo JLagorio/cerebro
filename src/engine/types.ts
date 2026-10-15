@@ -1049,4 +1049,14 @@ export interface Schema {
    * override (M16.12). */
   statusSourceFor(entry: Entry): 'project' | 'type' | 'default';
   resolveField(e: Entry, field: string): ResolvedField;
+  /**
+   * The value a view reads for `field` (M60.1): what filter, sort, group,
+   * chart and the dashboard number all compare. One pinned order: an entry
+   * fact for `title`, `type`, `createdAt` and `modifiedAt`; otherwise a
+   * declared computed kind (created and edited time, a rollup, a relation or
+   * person with `from`); otherwise the stored relationship targets
+   * (bracket-stripped); otherwise the stored property. Absent is `undefined`,
+   * never 0.
+   */
+  fieldValue(e: Entry, field: string): unknown;
 }

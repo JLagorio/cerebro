@@ -5,9 +5,10 @@ import { IconButton } from '@/components/ui/IconButton';
 import { MenuItem, MenuSeparator, MenuSurface } from '@/components/ui/Menu';
 import { Popover } from '@/components/ui/Popover';
 import { Tooltip } from '@/components/ui/Tooltip';
-import { deleteNote } from '@/lib/ipc';
 import { duplicateRecord } from '@/app/recordActions';
+import { trashPath } from '@/app/trashActions';
 import { dragCeiling, fitWidth } from '@/app/shellLayout';
+import { TRASH_WORDS } from '@/engine/trash';
 import type { Entry } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
 import { DETAIL_WIDTH_DEFAULT, DETAIL_WIDTH_MAX, useUiStore } from '@/stores/uiStore';
@@ -64,7 +65,6 @@ export function DetailHeaderActions({
   besideAssistant?: boolean;
 }) {
   const vaultPath = useVaultStore((s) => s.vaultPath);
-  const rescan = useVaultStore((s) => s.rescan);
   const entries = useVaultStore((s) => s.entries);
   const toast = useUiStore((s) => s.toast);
   const closeDetail = useUiStore((s) => s.closeDetail);
@@ -144,19 +144,11 @@ export function DetailHeaderActions({
       // closes. Without the guard `siblings[-1 + 1]` is `siblings[0]`, and the
       // delete would teleport the user to an unrelated record.
       const next = at === -1 ? null : (siblings[at + 1] ?? siblings[at - 1] ?? null);
-      try {
-        await deleteNote(vaultPath, entry.path);
-      } catch {
-        toast("Couldn't delete this record");
-        return;
-      }
+      // M60.8: to the vault's own Trash. trashPath toasts either way and
+      // rescans; a refusal leaves the record open.
+      if ((await trashPath(entry.path, entry.title)) === null) return;
       if (next === null) closeDetail();
       else openDetail(next);
-      try {
-        await rescan();
-      } catch {
-        toast("Couldn't refresh vault");
-      }
     })();
   };
 
@@ -288,12 +280,12 @@ export function DetailHeaderActions({
           onClose={() => setConfirmDelete(false)}
           title={`Delete "${entry.title}"?`}
           width={420}
-          footerNote="Recoverable from git history, not from the app."
+          footerNote={TRASH_WORDS.footer}
           secondaryAction={{ label: 'Cancel', onClick: () => setConfirmDelete(false) }}
           primaryAction={{ label: 'Delete', onClick: remove }}
         >
           <p className="m-0 text-sm leading-relaxed text-n-600">
-            The file leaves the vault.
+            {TRASH_WORDS.body}
             {links > 0
               ? ` ${links === 1 ? 'One record links' : `${links} records link`} here, and those links will point at nothing.`
               : ' Nothing links to it.'}

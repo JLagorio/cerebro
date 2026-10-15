@@ -5,12 +5,14 @@ import { Icon } from '@/components/ui/Icon';
 import { pageIconOf } from '@/engine/pageChrome';
 import {
   isLinkablePage,
-  linkTargetOf,
+  linkTargetsFor,
   resolvePageRef,
   statusFieldOf,
   type PageRef,
 } from '@/engine/pageCard';
 import type { Entry, Schema } from '@/engine/types';
+import { rankNames } from '@/lib/nameRank';
+import { useRecency } from '@/stores/openLogStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { FieldChip } from '@/views/FieldChip';
 
@@ -63,9 +65,9 @@ export function PageCardView({
   const pick =
     onChange === undefined
       ? undefined
-      : (picked: Entry) => {
+      : (target: string) => {
           setChoosing(false);
-          onChange({ target: linkTargetOf(picked), alias: '' });
+          onChange({ target, alias: '' });
         };
 
   return (
@@ -147,8 +149,10 @@ function ResolvedFace({
 }
 
 /**
- * Pick a page by title or path containment, up to PICKER_LIMIT rows. The
- * shared ranker replaces the containment test in M59.3.
+ * Pick a page by title or path, up to PICKER_LIMIT rows, ranked as the
+ * editor's `[[` page rows are (M59.3): the same texts (title, then path), the
+ * same input order (the vault's) and your own recent opens, so the two list
+ * pages alike. An empty box lists your opened pages first, then A to Z.
  */
 function PagePicker({
   entries,
@@ -156,21 +160,34 @@ function PagePicker({
   onCancel,
 }: {
   entries: Entry[];
-  onPick: (entry: Entry) => void;
+  onPick: (target: string) => void;
   onCancel?: () => void;
 }) {
   const [query, setQuery] = useState('');
-  const pages = useMemo(
-    () => entries.filter(isLinkablePage).sort((a, b) => a.title.localeCompare(b.title)),
-    [entries],
+  const recency = useRecency();
+  // Each page with the name that reaches it; a page no name reaches is left
+  // out, since its card would show another page (`linkTargetsFor`).
+  const pages = useMemo(() => {
+    const targetOf = linkTargetsFor(entries);
+    return entries.filter(isLinkablePage).flatMap((entry) => {
+      const target = targetOf(entry);
+      return target === null ? [] : [{ entry, target }];
+    });
+  }, [entries]);
+  const alphabetical = useMemo(
+    () => [...pages].sort((a, b) => a.entry.title.localeCompare(b.entry.title)),
+    [pages],
   );
-  const q = query.trim().toLowerCase();
-  const matches =
-    q === ''
-      ? pages
-      : pages.filter((e) => e.title.toLowerCase().includes(q) || e.path.toLowerCase().includes(q));
-  const shown = matches.slice(0, PICKER_LIMIT);
-  const more = matches.length - shown.length;
+  const q = query.trim();
+  const { items: shown, total } = rankNames({
+    query: q,
+    items: q === '' ? alphabetical : pages,
+    texts: ({ entry }) => [entry.title, entry.path],
+    path: ({ entry }) => entry.path,
+    recency,
+    limit: PICKER_LIMIT,
+  });
+  const more = total - shown.length;
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center gap-1.5">
@@ -186,7 +203,7 @@ function PagePicker({
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               e.preventDefault();
-              if (shown[0] !== undefined) onPick(shown[0]);
+              if (shown[0] !== undefined) onPick(shown[0].target);
             }
             if (e.key === 'Escape' && onCancel !== undefined) {
               e.preventDefault();
@@ -197,12 +214,12 @@ function PagePicker({
         />
       </div>
       <ul className="m-0 max-h-56 overflow-y-auto p-0">
-        {shown.map((e) => (
+        {shown.map(({ entry: e, target }) => (
           <li key={e.path} className="list-none">
             <button
               type="button"
               data-testid="page-card-option"
-              onClick={() => onPick(e)}
+              onClick={() => onPick(target)}
               className="flex w-full min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-1 text-left text-sm text-n-800 hover:bg-n-50"
             >
               <PageIconGlyph

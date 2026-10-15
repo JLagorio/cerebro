@@ -36,7 +36,10 @@ preemptively.)
 | `goldens-trigger/*.json` | The trigger registry's parity mechanism (M28.0), replayed by `cargo test` and `pnpm test:run` from the same bytes. Each golden is a full `TriggerEvaluation` record (sometimes with its parent) and the outcome both validators must land on: `accepted`, or a refusal named by its CLOSED code — codes are the contract, prose is not. Both suites also assert every refusal code has at least one golden, so a code with no fixture fails the build. Accepted goldens carry ids that genuinely recompute (`sha256(domain\0gate\0scope\0rule_version\0snapshot_hash)`). |
 | `goldens/*.json` | Proposal + preconditions → expected verdict + destiny. Replayed by `cargo test` and `pnpm test:run` from these same files. A fixture may declare `signals` (server-derived escalators), `versions` (`"<class>/<id>": n`, the M22 `state_versions` its expected-version CAS runs against), `ancestry` (the support graph M26.3's preventive walk runs over), and `table` (a FROZEN table to replay against — `"v1"` or `"v2"` — for a refusal the shipped table can no longer produce; M27.4 made every shipped capability available, so `capability_unavailable` lives on against v2 rather than losing its shared fixture). Declaring either state field requires `rust_only: true` — both read reducer state that is out of the mock's scope by declaration, so the TS runner skips the *verdict replay* loudly rather than the directory quietly missing the case. It still asserts the artifact half of every such file: that the op declares the code possible, and that the code declares a destiny. |
 | `concept-types.v1.json` + `.sha256` | The words the agent may type a concept with (M33a.1), and a one-line hint for each. Loaded by `src-tauri/src/knowledge.rs`; the tool manifest's one token, `{{concept_types}}`, renders it into `write_concept`'s type description. Rust-only for now: the read side (`okf.ts`) resolves a concept's type against the vault's own catalog and tolerates unknown values by OKF §4.1, so there is no twin to disagree with. |
-| `tools.v1.json` + `.sha256` | **The tool manifest** (M54.1): one row per hand-written MCP tool in served order — title, kind, idempotence, door, grant axis and target argument, picker summary and toolset, renderer, fold phrases (M56.8), icon, search hint, description and input schema — the facts every generated `propose_<op>` tool shares, the picker's toolsets, and the CLI's own built-ins in argv order. Read by `src-tauri/src/policy/tools.rs`: `mcp.rs` serves `tools/list` from it with annotations, and derives the scope and read targets, the open-page announcements and the read-to-replace guard; `agent/mod.rs` derives the CLI allow and deny lists. TS reads the same file through `src/lib/policy/tools.ts` (M54.2), refusal for refusal, and derives the picker's toolsets, summaries and writes flags, the transcript's icons, write cards, row renderers and read folds (M56.8), the turn checkpoint's trigger and the run log's paths from it. Both sides hash against `tools.v1.sha256`, and both replay `src-tauri/fixtures/tool-cases.json`, its shared case file. |
+| `tools.v1.json` + `.sha256` | **The tool manifest** (M54.1): one row per hand-written MCP tool in served order — title, kind, idempotence, door, grant axis and target argument, picker summary and toolset, renderer, fold phrases (M56.8), icon, whether an ask-first agent's call waits for the person (`confirmable`, M57.4), search hint, description and input schema — the facts every generated `propose_<op>` tool shares, the picker's toolsets, and the CLI's own built-ins in argv order, each with its tool-approval `family` and the input field its card names it by (`subject`, M57.2). Read by `src-tauri/src/policy/tools.rs`: `mcp.rs` serves `tools/list` from it with annotations, and derives the scope and read targets, the open-page announcements and the read-to-replace guard; `tool-approval.v1.json` plans the CLI's built-ins by its family column. TS reads the same file through `src/lib/policy/tools.ts` (M54.2), refusal for refusal, and derives the picker's toolsets, summaries and writes flags, the transcript's icons, write cards, row renderers and read folds (M56.8), the turn checkpoint's trigger and the run log's paths from it. Both sides hash against `tools.v1.sha256`, and both replay `src-tauri/fixtures/tool-cases.json`, its shared case file. navigate's `to` enum is `src/engine/destinations.ts`'s ids plus view, held there by `destinations.test.ts`; Rust refuses any `to` the served enum doesn't list (M59.1). |
+
+| `tool-approval.v1.json` + `.sha256` | **What Claude Code may run** (M57.2): for each tool family of the manifest, in its order, a grid of run kind (attended, unattended, internal) by ceiling (`none`, or the shell's off, ask and on) to one of six decisions, the read scope's overrides, the permission modes, a card (title, kind and the answers it offers) on every family that asks and a message on every family that refuses (a `deny` cell says it too, where the family has one), and the words the model and the person read. Since M57.3 the question family (AskUserQuestion) asks on an attended run with a `question` card and is denied wherever nobody watches. Since M57.4 it also decides an ask-first agent's page writes: the `confirmable` family, whose members are the manifest's confirmable rows, is read by the agent's `ask_first` (yes or no) where the other families read a ceiling, and the `ask_first` block holds the record key and the values a record may hold. Since M57.4c an unattended ask-first write queues for Review (`queue`, the ask-first family's alone) within `queue_limits`. Interpreted by `src-tauri/src/policy/tool_approval.rs` (argv, the init's mode check and the ask gate's `host_answer`) and `src/lib/policy/toolApproval.ts` (the mock, the panel's prompts), refusal for refusal. Both hash against the `.sha256`. |
+| `goldens-tool-approval/*.json` | The table's parity mechanism, replayed by `cargo test` and `pnpm test:run` from the same bytes: one plan golden per run kind × shell ceiling, two read-scoped and two narrowed ones, five ask-first ones (M57.4; the unattended one waits in Review since M57.4c) (each pinning the mode, both lists, the gate's matcher, what is withheld and every tool's decision), and `host-answers.json`, the gate's answer for single calls, beside the two question files (`question-attended-asks.json`, `question-unattended-denied.json`, M57.3). Both suites assert every cell and every host outcome has a golden. |
 
 **Three of these are Rust-only, and that is not an exemption from the house
 rule.** `freshness`, `coverage-fold` and `lanes` are read by no TypeScript
@@ -58,6 +61,7 @@ M69.1's; the twins that predate it (`source-slugs.json`, `note-targets.json`,
 | --- | --- | --- | --- | --- |
 | connector approvals (`src-tauri/fixtures/connector-approvals.json`) | `src-tauri/src/connectors.rs` | `src/engine/connectors.test.ts` | `replays_the_shared_connector_approvals` / `replays the shared connector approvals` | M69.1 |
 | edit_note's quote rules (`src-tauri/fixtures/quote-cases.json`) | `src-tauri/src/vault/quote.rs` | `src/engine/quote.test.ts` | `replays_the_shared_quote_cases` / `replays the shared case` | M55.5 |
+| the agent comment tools' quote filter and words (`src-tauri/fixtures/comment-tools.json`) | `src-tauri/src/comment_tools.rs` | `src/engine/quote.test.ts`, `src/lib/mockIpc.test.ts` | `replays_the_shared_quote_filter`, `replays_the_shared_comment_tool_cases` / `comment quotes (M70.3)`, `replays comment-tools.json` | M70.3 |
 
 **The D3 ruling (owner, 2026-10-12), recorded once here.** Rust may twin a
 TS vault semantic (what a wikilink means, how a quote matches, a filter, a
@@ -94,6 +98,9 @@ cargo test --lib trigger::registry::tests::write_trigger_registry_digest -- --ig
 cargo test --lib knowledge::tests::write_concept_types_digest -- --ignored
 # after an edit to tools.v1.json
 cargo test --lib policy::tools::tests::write_tools_digest -- --ignored
+# after an edit to tool-approval.v1.json (bump artifact_version, set
+# rule_version to tool-approval/<date>, and rewrite the goldens it changes)
+cargo test --lib policy::tool_approval::tests::write_tool_approval_digest -- --ignored
 ```
 
 A new snapshot must also be added to `RESOLVABLE_ARTIFACTS` in
@@ -412,10 +419,9 @@ order and its `cli_tools` in argv order, so neither is sorted.
 ## The tool manifest (M54.1)
 
 - **Order is meaning, so nothing in it is sorted.** `tools` is the order
-  `tools/list` serves, and `cli_tools` the order the argv names them. A shell
-  run's `--allowedTools` and an internal run's `--disallowedTools` took the
-  manifest's order when they moved here and kept their sets; the shell-less
-  deny list, `Write,Edit,MultiEdit,NotebookEdit,Bash`, kept its bytes.
+  `tools/list` serves, and `cli_tools` the order the argv names them, which
+  is the order every tool-approval list keeps; the Off run's deny list,
+  `Write,Edit,MultiEdit,NotebookEdit,Bash`, kept its bytes.
 - **The generated tools stay policy.v3's.** Their names, descriptions and
   schemas are built from the table's agent-facing ops; the `generated` block
   only annotates them, so an op added to the table is still offered the moment
@@ -441,6 +447,15 @@ order and its `cli_tools` in argv order, so neither is sorted.
   with or without `expect_hash`. No new refusal code: the grant's are
   M54.10's, a stale hash is M55.3's `stale_content`, and a quote that does not
   resolve is plain `isError` text like `no note at <path>`.
+- **Door `comment` writes no page, and its rows are reads (M70.3).**
+  comment_on_note, reply_to_comment and resolve_comment write only the page's
+  comment sidecar (`vault/comments.rs`), so the door's `writes` is false: its
+  rows never rescan, checkpoint or log a written path, and they announce the
+  page's comments instead. They sit on the read axis with a note target,
+  because a refusal lists where a quote appears and get_note's thread block
+  quotes the page, so a comment never needs write scope. Both loaders accept
+  the door only with axis read, a note target, kind additive and renderer
+  step, in one refusal's words, and its rows are never `confirmable`.
 - **Picker copy lives here.** Toolset labels and hints and each row's summary
   are the picker's words, and `src/engine/tools.ts` reads them from here
   (M54.2). A copy edit is an artifact edit with a digest regeneration.
@@ -482,20 +497,116 @@ order and its `cli_tools` in argv order, so neither is sorted.
   or a held tool may load early, and
   `agent::tests::only_the_read_core_and_held_tools_load_without_a_search` pins
   the six.
-- **Every CLI row is denied to internal runs.** An internal run executes
-  vault-authored content on cerebro's own schedule, so it holds none of the
-  CLI's own tools; the other flags decide what a user-authored run is denied
-  without shell or under a read limit, and a row a shell grant adds that
-  neither withdraws fails the load.
+- **A CLI row names its family, never its decision (M57.2).** `family`
+  is required and `subject` is null or an input field; what a family may do
+  in a run is `tool-approval.v1.json`'s alone. The three shell columns M54.1
+  kept here (denied without shell, denied when read-scoped, with shell) went
+  to that table's grid and read scope.
 - **`concept_types` is the one token.** A `{{name}}` in a description or
   schema must be declared in `tokens`, and a declared token must be used;
   `mcp.rs` renders each one when it serves the row.
+- **The note writers are the confirmable rows (M57.4).** `confirmable` is
+  true on create_note, update_frontmatter, append_to_note and edit_note: the
+  note door changes the person's own pages. The concept writers are not,
+  because a person already verifies a concept; nor is cache_source, a cache;
+  the generated tools are decided by policy.v3; hand_to and the UI tools write
+  no page. Both loaders refuse it missing, on a door that writes nothing, off
+  the write and read_write axes, and on the generated block.
 - **`ask_gate` is a hook endpoint, not a manifest row (M57.1).** A run's
   PreToolUse hook (`type: mcp_tool`) calls it on the run's own bearer to ask
   whether a call may run, wait or not. `mcp.rs` answers it before every grant
   axis, as hook JSON; `tools/list` never lists it, and nothing counts,
   announces or records it. It can register a wait and read a person's
   answer, never record one, so it has no row here and needs none.
+- **`ask_host` is a hook endpoint too (M57.3).** A seated run names it as
+  Claude Code's `--permission-prompt-tool`, which 2.1.250 needs before it
+  offers AskUserQuestion in `-p`. `mcp.rs` answers it beside `ask_gate`,
+  before every grant axis, and nothing lists, counts, announces or records
+  it. It allows only a call the run's seat holds a person's answer for, with
+  the input that answer made, and denies every other call, so it has no row
+  here either.
+
+## The tool-approval table (M57.2)
+
+- **Six decisions, one carrier each.** `allow` rides `--allowedTools`;
+  `deny` rides `--disallowedTools`; `ask` rides neither list and meets the
+  ask gate, which asks the person on an attended run; `refuse` rides neither
+  list on a run that can ask, where the gate denies it with the family's
+  message, and `--disallowedTools` on every other run, so it is never left
+  to the CLI; `cli` rides neither list, so the CLI's own rule decides (reads
+  inside the vault need no approval, and the rest is refused in `-p`);
+  `queue` (M57.4c) rides neither list, and dispatch holds the write for the
+  person in Review.
+- **A run that cannot ask never asks.** Only `attended` can ask, and only a
+  run with a seat on a Claude Code the gate is built for is planned as one.
+  Elsewhere an ask becomes a deny, its tools are `withheld`, and the meter
+  records them as one `capability_unavailable` row under `agent.ask`; a
+  refusal becomes a deny.
+- **The order of a plan is fixed:** the grid's cell; then `read_scope`, which
+  only ever denies; then a tool the record narrows out becomes deny when it
+  would ask or sits in a `needs_default_mode` family (acceptEdits would
+  approve it), and an allow it narrows out elsewhere is left to the CLI;
+  then what a run that cannot ask does instead.
+- **The mode follows the asks.** Internal runs start in `default`; a run with
+  an ask surviving on a `needs_default_mode` family (file_write, shell)
+  starts in `default`, because acceptEdits would approve those tools with no
+  host; every other run keeps `acceptEdits`. `default` is a hidden alias in
+  2.1.250, so a run that needs it is stopped at its init when the init
+  reports another mode or a version below `min_cli_version`.
+- **Families come from the manifest.** The table declares exactly the
+  manifest's families, in its order of first appearance, then the ask-first
+  family once a row is confirmable; a family holding a
+  writer must sit on the shell ceiling and deny in every off cell; an
+  internal cell only denies or refuses; `unlisted` (a tool neither file
+  names, another server's included) is `cli` or `refuse`.
+- **Card titles and messages are owner-read copy.** A copy edit is an
+  artifact edit with a digest regeneration, in both interpreters at once.
+- **This conversation covers the exact subject.** The host allows an ask only
+  on a person's grant for the same family and the exact subject (the
+  manifest's `subject` field as text, else the input's compact JSON, cut at
+  2000 characters), kept in memory per vault and Claude Code session, and
+  only where the family's card offers it: whether a card offers This
+  conversation is the card's `answers`, policy rather than card code.
+- **Cerebro's own page writers meet the table too (M57.4).** A tool the
+  manifest marks `confirmable` resolves to the family the `ask_first` block
+  names; the table names the family, the manifest names its members, so no
+  tool list is typed here. That family is read by `ask_first` instead of a
+  ceiling: an attended run whose agent asks first asks (a `write` card,
+  Allow once only), an unattended one queues for Review (M57.4c), an
+  internal run is always denied, and an agent that does not ask first is
+  allowed. Only its asks
+  reach argv (they leave `--allowedTools` for the gate); the rest is
+  dispatch's to enforce, so a denied page write stays callable and is
+  refused, and recorded, in Cerebro's words. An ask adds no
+  `needs_default_mode`: acceptEdits never approves an MCP tool.
+- **Unattended ask-first writes wait in Review (M57.4c).** Nobody can answer
+  a run nobody watches, so its page writes `queue`: dispatch previews the
+  write (every check it would make, on the bytes on disk now), then holds it
+  in `runtime.db`'s `pending_writes` for the person to Allow or Reject, and
+  the run's next unattended turn hears what became of it. **Queue is not a
+  refusal**: nothing was refused, a person decides, so it carries no policy
+  code and records no row. Only the ask-first family may queue, and both
+  loaders refuse a `queue` cell anywhere else in the same words; a write the
+  record narrows out is denied, never queued. **`queue_limits`** bound what
+  waits, since nothing expires: `open_per_actor` (20) open writes per agent,
+  so one agent cannot flood Review, and `input_bytes` (256 KiB) of key-sorted
+  draft, the same bound the table's CHECK holds. Past either, the write is
+  refused with one `capability_unavailable` row under `agent.ask_first`.
+- **A question asks only where someone watches (M57.3).** The question
+  family (AskUserQuestion) asks on an attended run with a `question` card,
+  which offers Allow once only: a question is answered, never remembered. It
+  leaves the mode alone, since acceptEdits never answers a question. Every
+  other run denies it in argv, and its `deny` cell carries the family's
+  message, which says nobody is watching. The question card's rules (1 to 4
+  questions, 2 to 4 options each, the answers' membership and counts, and
+  Claude Code's join) are not here: they live in
+  `src-tauri/fixtures/question-answers.json`, replayed by
+  `agent/question.rs` and `src/engine/questionForm.ts`. Previews show as
+  text, never as HTML.
+- **`ask-first:` fails closed.** The `ask_first` cases say how an Agent
+  record's value reads: absent or `false` is off, `true` is on, and anything
+  else, a `[[link]]` relation included (CV-09), is on with a warning on the
+  agent page. Rust's `ask_first_of` and `src/engine/agents.ts` replay them.
 
 ## What is deliberately NOT here yet
 

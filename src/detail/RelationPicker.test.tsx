@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RelationPicker } from '@/detail/RelationPicker';
 import { buildSchema } from '@/engine/schema';
 import { makeEntry } from '@/test/factories';
 import type { Entry } from '@/engine/types';
+import { useOpenLogStore } from '@/stores/openLogStore';
+import { useVaultStore } from '@/stores/vaultStore';
 
 const ENTRIES: Entry[] = [
   makeEntry({ path: 'types/objective.md', title: 'Objective', type: 'Type' }),
@@ -122,5 +124,30 @@ describe('RelationPicker (M11)', () => {
   it('says so when there is nothing left to link', () => {
     setup(['grow-eu', 'cut-churn', 'hire']);
     expect(screen.getByText(/already linked/)).toBeTruthy();
+  });
+});
+
+// M59.3 — ranked by the one name ranker, uncapped.
+describe('RelationPicker ranking (M59.3)', () => {
+  beforeEach(() => {
+    useVaultStore.setState({ vaultPath: '/v' });
+    useOpenLogStore.setState({ logs: {}, saved: true });
+  });
+
+  it('lists a prefix match before a mid-title match', () => {
+    setup();
+    fireEvent.change(screen.getByLabelText('Search records to link'), { target: { value: 'c' } });
+    // 'Cut churn' starts with c; the other two hold one only inside their
+    // paths (records/objectives/…).
+    expect(rowTitles('relation-result-row')[0]).toContain('Cut churn');
+  });
+
+  it('lists your opened targets first on an empty query, then A to Z', () => {
+    useOpenLogStore.getState().record('/v', 'records/objectives/hire.md');
+    setup();
+    const titles = rowTitles('relation-result-row');
+    expect(titles[0]).toContain('Hire two engineers');
+    expect(titles[1]).toContain('Cut churn');
+    expect(titles[2]).toContain('Grow EU revenue');
   });
 });

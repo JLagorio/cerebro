@@ -1,4 +1,13 @@
 import { useEffect, useState } from 'react';
+import {
+  pagesWritten,
+  pageWriteWords,
+  PAGES_NOT_RECORDED,
+  SHELL_NOT_RECORDED,
+  WROTE_NO_PAGES,
+  writtenPath,
+  type RunPageWrites,
+} from '@/engine/attribution';
 import { actorLabel } from '@/engine/authors';
 import { instantText } from '@/engine/whenText';
 import {
@@ -34,7 +43,11 @@ import { RunWhy } from './RunWhy';
  * (M56.7: "why not recorded") and the model (M56.9): `model_id: null` reads
  * "not recorded", never a guess at the default. A run with no Claude Code
  * session says its transcript was not recorded, and one whose session file
- * could not be read says that, never an empty thread (`RunTranscript`).
+ * could not be read says that, never an empty thread (`RunTranscript`). The
+ * pages it wrote (M58.1b) follow its booked writes: a run from before they
+ * were booked reads "Pages written: not recorded", never "Wrote no pages",
+ * and a run whose plan let the shell write adds "Shell changes not
+ * recorded", so it never reads complete.
  *
  * **Refused is measured.** Refusals have been recorded with their run since
  * M54.9, so an empty list reads "No refusal recorded for this run." A code
@@ -102,6 +115,84 @@ function KnowledgeChanged({ runId }: { runId: string }) {
             </li>
           ))}
         </ul>
+      )}
+    </section>
+  );
+}
+
+/**
+ * The pages the run wrote (M58.1b), each opening its page. Knowledge pages
+ * stay in the Knowledge section below, and a comment changes no page. Only a
+ * run whose writes were booked can say it wrote none.
+ */
+function PagesWritten({ wrote }: { wrote: RunPageWrites }) {
+  const entries = useVaultStore((s) => s.entries);
+  const navigate = useNavStore((s) => s.navigate);
+  if (wrote.state === 'not_recorded') {
+    return (
+      <section
+        className="flex flex-col gap-1"
+        data-testid="run-detail-pages"
+        data-state="not_recorded"
+      >
+        <p className="text-2xs text-n-500">{PAGES_NOT_RECORDED}</p>
+      </section>
+    );
+  }
+  const pages = pagesWritten(wrote.writes);
+  return (
+    <section
+      className="flex flex-col gap-1"
+      data-testid="run-detail-pages"
+      data-state={wrote.state}
+    >
+      <h5 className="text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
+        Pages written
+      </h5>
+      {pages.length === 0 ? (
+        <p className="text-2xs text-n-500">{WROTE_NO_PAGES}</p>
+      ) : (
+        <ul className="m-0 flex list-none flex-col gap-px p-0">
+          {pages.map((w) => {
+            const path = writtenPath(w);
+            const title = entries.find((e) => e.path === path)?.title ?? path;
+            return (
+              <li key={path}>
+                {w.kind === 'vault.delete' ? (
+                  <span
+                    data-testid="run-detail-page"
+                    data-path={path}
+                    title={w.at}
+                    className="flex min-w-0 items-center gap-1.5 px-1 py-0.5 text-2xs text-n-600"
+                  >
+                    <span className="min-w-0 truncate">{title}</span>
+                    <span className="flex-none text-n-500">{pageWriteWords(w)}</span>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    data-testid="run-detail-page"
+                    data-path={path}
+                    title={w.at}
+                    onClick={() => navigate({ kind: 'doc', path })}
+                    className="flex w-full min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent px-1 py-0.5 text-left text-2xs hover:bg-n-100"
+                  >
+                    <span className="min-w-0 truncate text-cortex-600">{title}</span>
+                    <span className="flex-none text-n-500">
+                      {pageWriteWords(w)}
+                      {w.approved_by !== null && ' · you allowed it'}
+                    </span>
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {wrote.state === 'partial' && (
+        <p data-testid="run-detail-shell-unrecorded" className="text-2xs text-n-500">
+          {SHELL_NOT_RECORDED}
+        </p>
       )}
     </section>
   );
@@ -332,6 +423,8 @@ export function RunDetailPanel({
       />
 
       <Refused refusals={detail.refusals} total={detail.refusals_total} />
+
+      <PagesWritten wrote={detail.wrote} />
 
       <KnowledgeChanged runId={run.run_id} />
 

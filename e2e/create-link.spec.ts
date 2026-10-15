@@ -7,7 +7,8 @@ import { boot, readMockFile } from './boot';
  * The `[` and `@` menus offered only pages that exist, and BlockNote closes a
  * menu four characters past its last match, so `[[Launch notes` ended as plain
  * text. Each menu now ends on a Create row: it makes the page at the vault
- * root and links the stem the backend wrote. Asserted against the mock disk,
+ * root and links the stem the backend wrote. Under `@` the row names a short
+ * name only, so a sentence still closes the menu. Asserted against the mock disk,
  * and by opening the new page from its chip, which is a page like any other
  * (D18).
  */
@@ -86,4 +87,28 @@ test('@ creates only where a word starts, and a lone [ never does', async ({ pag
   await expect.poll(() => readMockFile(page, PAGE), { timeout: 6_000 }).toContain('Draft');
   const after = await rootFiles(page);
   expect(after.filter((path) => !before.includes(path))).toEqual(['retro-memo.md']);
+});
+
+test('a sentence after @ closes the menu, so Enter starts a line and makes nothing', async ({
+  page,
+}) => {
+  await boot(page);
+  const before = await rootFiles(page);
+  await openSchedule(page);
+  const editor = page.getByTestId('markdown-editor');
+  await editor.getByText('We ship on Thursdays').click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  // `@` offers Create only for a short name: past two words the row goes,
+  // and BlockNote closes a menu that has run four characters without one.
+  await page.keyboard.type('Ask @dana about the launch plan');
+  await expect(page.locator('#bn-suggestion-menu')).toHaveCount(0);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('next line');
+
+  await expect
+    .poll(() => readMockFile(page, PAGE), { timeout: 6_000 })
+    .toContain('Ask @dana about the launch plan\n\nnext line');
+  const after = await rootFiles(page);
+  expect(after.filter((path) => !before.includes(path))).toEqual([]);
 });

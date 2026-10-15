@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { decide, handleRpc, hookAnswer, TOOLS, type ProbeIo } from './probe';
+import { decide, GATE_TOOL, gateAnswer, handleRpc, hookAnswer, TOOLS, type ProbeIo } from './probe';
 
 const PROBE = join(__dirname, 'probe.ts');
 
@@ -139,6 +139,70 @@ describe('decide', () => {
       behavior: 'allow',
       updatedInput: { questions, answers: { 'Which color?': 'Blue', 'Which size?': 'Blue' } },
     });
+  });
+});
+
+describe('gateAnswer (M57.1)', () => {
+  const hook = (answer: Record<string, unknown>) =>
+    JSON.parse((answer as { content: { text: string }[] }).content[0].text) as Record<
+      string,
+      unknown
+    >;
+
+  it('has no opinion for a tool it holds no decision for', () => {
+    expect(hook(gateAnswer({ tool_name: 'mcp__probe__slow_echo' }, {}))).toEqual({});
+    expect(hook(gateAnswer({}, { x: { permissionDecision: 'nonsense' } }))).toEqual({});
+  });
+
+  it('answers defer, allow with an updated input, and deny with a reason', () => {
+    const decisions = {
+      a: { permissionDecision: 'defer' },
+      b: { permissionDecision: 'allow', updatedInput: { text: 'beta' } },
+      c: { permissionDecision: 'deny', permissionDecisionReason: 'not today' },
+    };
+    expect(hook(gateAnswer({ tool_name: 'a' }, decisions))).toEqual({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'defer',
+        permissionDecisionReason: 'The probe gate answers defer.',
+      },
+    });
+    expect(hook(gateAnswer({ tool_name: 'b' }, decisions)).hookSpecificOutput).toMatchObject({
+      permissionDecision: 'allow',
+      updatedInput: { text: 'beta' },
+    });
+    expect(hook(gateAnswer({ tool_name: 'c' }, decisions)).hookSpecificOutput).toMatchObject({
+      permissionDecision: 'deny',
+      permissionDecisionReason: 'not today',
+    });
+  });
+
+  it('fails as a tool when told to', () => {
+    expect(gateAnswer({ tool_name: 'a' }, { a: { isError: true } })).toMatchObject({
+      isError: true,
+    });
+  });
+
+  it('is served and logged, and never listed', async () => {
+    const logged: Record<string, unknown>[] = [];
+    const io: ProbeIo = {
+      decisions: () => ({}),
+      gateDecisions: () => ({ x: { permissionDecision: 'defer' } }),
+      log: (entry) => void logged.push(entry),
+      sleep: async () => undefined,
+    };
+    const listed = await handleRpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, io);
+    expect(JSON.stringify(listed)).not.toContain(`"${GATE_TOOL}"`);
+    const reply = await handleRpc(call(GATE_TOOL, { tool_name: 'x', tool_use_id: 'toolu_1' }), io);
+    expect(JSON.parse(textOf(reply))).toMatchObject({
+      hookSpecificOutput: { permissionDecision: 'defer' },
+    });
+    expect(logged).toEqual([
+      expect.objectContaining({
+        mode: 'gate',
+        arguments: { tool_name: 'x', tool_use_id: 'toolu_1' },
+      }),
+    ]);
   });
 });
 

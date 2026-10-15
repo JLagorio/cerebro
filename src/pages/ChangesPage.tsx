@@ -4,7 +4,9 @@ import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
+import { actorLabel } from '@/engine/authors';
 import type { FileStatus, ModifiedFile } from '@/engine/git';
+import { isKnowledgePath } from '@/engine/okf';
 import { DiffView } from '@/git/DiffView';
 import { checkpointMessage, useGit } from '@/git/useGit';
 import * as git from '@/lib/gitIpc';
@@ -20,6 +22,12 @@ const STATUS_STYLE: Record<FileStatus, { icon: string; color: string; label: str
   conflicted: { icon: 'triangle-alert', color: 'var(--danger-500)', label: 'Conflict' },
 };
 
+/** Why a knowledge/ row offers no Discard: the guard Rust's discard runs
+ * (M58.1, Q2), in its words. Review and Restore are the bundle's paths. */
+const KNOWLEDGE_DISCARD =
+  'knowledge/ is maintained by the AI knowledge base and is read-only here. ' +
+  'Verify the concept, or ask the agent to revise it.';
+
 /**
  * Uncommitted work (M9.4): what has changed, what it changed to, and a way
  * to commit or discard it.
@@ -27,13 +35,21 @@ const STATUS_STYLE: Record<FileStatus, { icon: string; color: string; label: str
  * The conflict banner sits at the top rather than in a dialog: a conflicted
  * vault cannot be committed until it is resolved, so the thing blocking you
  * belongs above the thing it blocks.
+ *
+ * A file a live run is writing (M58.3, Q7) shows "Being written by <actor>"
+ * and offers no Discard: it commits with that run when the run ends, so the
+ * commit here leaves it out, and the message is prefilled from the other
+ * files only. A knowledge/ file offers no Discard either, and says why.
  */
 export function ChangesPage() {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
   const toast = useUiStore((s) => s.toast);
+  const entries = useVaultStore((s) => s.entries);
   const openPath = useOpenPath();
   const { isRepo, modified, conflicts, conflictMode, ready, refresh } = useGit();
+  // What a commit here takes: every change but a live run's (M58.3).
+  const unowned = modified.filter((f) => f.owner == null);
 
   const [selected, setSelected] = useState<string | null>(null);
   const [diff, setDiff] = useState('');
@@ -43,12 +59,12 @@ export function ChangesPage() {
   // Prefill a message that describes the change, so committing costs one
   // click when you have nothing to add.
   useEffect(() => {
-    if (message === '' && modified.length > 0) setMessage(checkpointMessage(modified));
+    if (message === '' && unowned.length > 0) setMessage(checkpointMessage(unowned));
     // `message` is read only to avoid clobbering a hand-typed draft; keyed on
     // it, this would re-fire per keystroke and re-prefill the moment the
     // field is cleared. Prefill belongs to the change set, so it keys on that.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modified.length]);
+  }, [unowned.length]);
 
   useEffect(() => {
     if (selected === null || vaultPath === null) {
@@ -222,6 +238,14 @@ export function ChangesPage() {
               {modified.map((file) => {
                 const style = STATUS_STYLE[file.status];
                 const active = selected === file.path;
+                const writer =
+                  file.owner == null ? null : actorLabel(file.owner.actor, entries).text;
+                const noDiscard =
+                  writer !== null
+                    ? `Being written by ${writer}. It commits with that run when the run ends.`
+                    : isKnowledgePath(file.path)
+                      ? KNOWLEDGE_DISCARD
+                      : null;
                 return (
                   // M15: the row's two actions are revealed by opacity rather
                   // than `display:none`. Hidden they were out of the tab order
@@ -245,6 +269,15 @@ export function ChangesPage() {
                     >
                       {file.path}
                     </button>
+                    {writer !== null && (
+                      <span
+                        data-testid="changed-file-owner"
+                        title={file.owner?.actor}
+                        className="flex-none truncate text-2xs text-n-500"
+                      >
+                        Being written by {writer}
+                      </span>
+                    )}
                     <button
                       type="button"
                       aria-label={`Open ${file.path}`}
@@ -256,8 +289,10 @@ export function ChangesPage() {
                     <button
                       type="button"
                       aria-label={`Discard changes to ${file.path}`}
+                      disabled={noDiscard !== null}
+                      title={noDiscard ?? undefined}
                       onClick={() => void discard(file)}
-                      className="inline-flex flex-none rounded-xs border-0 bg-transparent p-0.5 text-n-400 opacity-0 hover:text-danger-500 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+                      className="inline-flex flex-none rounded-xs border-0 bg-transparent p-0.5 text-n-400 opacity-0 hover:text-danger-500 focus-visible:opacity-100 disabled:cursor-not-allowed disabled:hover:text-n-400 group-hover:opacity-100 group-focus-within:opacity-100"
                     >
                       <Icon name="undo-2" size={11} />
                     </button>
@@ -278,10 +313,12 @@ export function ChangesPage() {
                   variant="primary"
                   size="sm"
                   icon="check"
-                  disabled={busy || message.trim() === '' || conflicts.length > 0}
+                  disabled={
+                    busy || message.trim() === '' || conflicts.length > 0 || unowned.length === 0
+                  }
                   onClick={() => void commit()}
                 >
-                  Commit {modified.length}
+                  Commit {unowned.length}
                 </Button>
               </div>
             </div>

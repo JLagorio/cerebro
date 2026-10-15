@@ -78,6 +78,8 @@ export const FORBIDDEN: readonly Forbidden[] = [
   { what: 'a Linux home path', find: (text) => matches(text, /\/home\//g) },
   { what: 'a macOS temporary folder', find: (text) => matches(text, /\/var\/folders\//g) },
   { what: "macOS's private /var", find: (text) => matches(text, /\/private\/var\//g) },
+  { what: "macOS's private /tmp", find: (text) => matches(text, /\/private\/tmp\//g) },
+  { what: 'a /tmp path', find: (text) => matches(text, /(?<!\/private)\/tmp\//g) },
   { what: 'an email or other @-address', find: (text) => matches(text, /\S*@\S*/g) },
   {
     what: 'a real UUID',

@@ -11,9 +11,11 @@
 // the browser has no watcher to emit. So is the shell's
 // `cerebro://quit-requested` (listenQuitRequested, M55.10), which the mock
 // fires from `window.__cerebroMockQuit`.
+import type { PageAttribution } from '@/engine/attribution';
 import type { CommentAnchor } from '@/engine/commentAnchor';
 import type { CommentsFile } from '@/engine/comments';
 import type { ConnectorStatusRow } from '@/engine/connectors';
+import type { TrashedItem } from '@/engine/trash';
 import type { Entry } from '@/engine/types';
 import { faulted } from './mockFaults';
 import * as mock from './mockIpc';
@@ -67,6 +69,20 @@ export function scanVault(vault: string): Promise<Entry[]> {
 
 export function readNote(vault: string, path: string): Promise<string> {
   return inTauri() ? invokeTauri('read_note', { vault, path }) : mock.readNote(vault, path);
+}
+
+import type { ExcerptPart, VaultHit, VaultSearch } from './mockIpc';
+export type { ExcerptPart, VaultHit, VaultSearch };
+
+/**
+ * ⌘K's page-text search (M59.4): the vault's notes ranked by search.rs over
+ * its cached corpus, the same ranker search_notes uses, up to `limit` hits
+ * (at most 50). The browser mock matches by containment only.
+ */
+export function searchVault(vault: string, query: string, limit: number): Promise<VaultSearch> {
+  return inTauri()
+    ? invokeTauri('search_vault', { vault, query, limit })
+    : mock.searchVault(vault, query, limit);
 }
 
 // --- Page writes (M55.10) ---------------------------------------------------
@@ -309,9 +325,26 @@ export function renameNote(vault: string, from: string, to: string): Promise<voi
     : mock.renameNote(vault, from, to);
 }
 
-/** Move a note or folder to the OS trash (never a hard delete). */
-export function deleteNote(vault: string, path: string): Promise<void> {
+/** Move a note or folder to the vault's own Trash, `.trash/<stamp>/`, with
+ * its comments (M60.8). Resolves the item Settings can restore. */
+export function deleteNote(vault: string, path: string): Promise<TrashedItem> {
   return inTauri() ? invokeTauri('delete_note', { vault, path }) : mock.deleteNote(vault, path);
+}
+
+/** The vault's Trash, newest first (M60.8). Rejects when it can't be read,
+ * which Settings shows as unavailable, never as an empty Trash. */
+export function listTrash(vault: string): Promise<TrashedItem[]> {
+  return inTauri()
+    ? invokeTauri('list_trash', { vault })
+    : faulted('list_trash', () => mock.listTrash(vault));
+}
+
+/** Put one Trash item back where it came from (M60.8). Resolves the path it
+ * restored; refuses rather than overwrite anything. */
+export function restoreFromTrash(vault: string, stamp: string): Promise<string> {
+  return inTauri()
+    ? invokeTauri('restore_from_trash', { vault, stamp })
+    : mock.restoreFromTrash(vault, stamp);
 }
 
 /** All vault directories (for folder trees, including empty folders). */
@@ -586,6 +619,7 @@ import type {
   ReviewCard,
   RevertableApplication,
 } from './mockIpc';
+import type { PendingDecision, PendingWrite } from './mockIpc';
 
 export type { CardLink, CardTarget, ReviewCard, RevertableApplication };
 export type {
@@ -692,6 +726,36 @@ export function revertApplication(
     : mock.revertApplication(vault, proposalId, appliedEventIds, reviewer);
 }
 
+// --- Queued page writes (M57.4c) --------------------------------------------
+
+export type { PendingDecision, PendingWrite };
+
+/** The page writes ask-first agents queued for Review, oldest first. They
+ * live in runtime.db, not the ledger: a read that fails rejects, and Review
+ * says it could not tell rather than showing none. */
+export function pendingWrites(vault: string): Promise<PendingWrite[]> {
+  return inTauri()
+    ? invokeTauri('pending_writes', { vault })
+    : faulted('pending_writes', () => mock.pendingWrites(vault));
+}
+
+/** Allow or Reject one queued write. `input` is the person's edit of the
+ * draft, sent only with Allow; a Reject needs a reason. The answer is typed
+ * and READ at the call site (the proposal-channel carve-out in AGENTS.md):
+ * an edit Cerebro refused keeps the card, and a write another decision got
+ * to first is no error. */
+export function decidePendingWrite(
+  vault: string,
+  pendingId: string,
+  allow: boolean,
+  input: Record<string, unknown> | null,
+  reason: string | null,
+): Promise<PendingDecision> {
+  return inTauri()
+    ? invokeTauri('decide_pending_write', { vault, pendingId, allow, input, reason })
+    : mock.decidePendingWrite(vault, pendingId, allow, input, reason);
+}
+
 // --- The control surface (M25.7) -------------------------------------------
 
 // Same module-graph rule as the review surface: the shapes live in mockIpc so
@@ -770,6 +834,16 @@ export function fleetRuns(filter: FleetFilter = {}): Promise<FleetRun[]> {
     : faulted('fleet_runs', () => mock.fleetRunsPage(filter));
 }
 
+/** Who last changed one page (M58.1b), from runtime.db's write log, read
+ * through a read-only handle. Rust hashes the file itself; a path outside the
+ * vault reads not recorded. A failed read REFUSES, so the page says it could
+ * not tell rather than that nobody changed it. */
+export function pageAttribution(vault: string, path: string): Promise<PageAttribution> {
+  return inTauri()
+    ? invokeTauri('page_attribution', { vault, path })
+    : mock.pageAttribution(vault, path);
+}
+
 /** What one run changed in Knowledge (M50.3): the concepts its proposals
  * named and what became of each. `null` is NOT RECORDED — a vault that keeps
  * no ledger — never "changed nothing", which is `[]`. */
@@ -780,9 +854,9 @@ export function runKnowledgeWrites(vault: string, runId: string): Promise<RunWri
 }
 
 /** One run and whatever the governance tables recorded about it, with the
- * model Claude Code reported answering and the refusals recorded against it
- * (M56.9). An unknown id is refused, so a typo and an unmetered run never
- * look the same. */
+ * model Claude Code reported answering, the refusals recorded against it
+ * (M56.9) and what it wrote (M58.1b). An unknown id is refused, so a typo
+ * and an unmetered run never look the same. */
 export function fleetRunDetail(runId: string): Promise<FleetRunDetail> {
   return inTauri() ? invokeTauri('fleet_run_detail', { runId }) : mock.fleetRunDetail(runId);
 }

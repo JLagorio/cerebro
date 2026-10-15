@@ -259,7 +259,7 @@ describe('ConceptReviewBar (M51.3)', () => {
   });
 
   it('asks to revise a concept that is due nothing, and says so in the bubble (M52.3)', () => {
-    useUiStore.setState({ agentPendingPrompt: null });
+    useUiStore.setState({ handoffs: [] });
     useVaultStore.setState({
       vaultPath: '/vault',
       entries: [concept({ path: OLD, title: 'The offline window' })],
@@ -267,7 +267,7 @@ describe('ConceptReviewBar (M51.3)', () => {
     render(<ConceptReviewBar concept={conceptAt(OLD)} viewedBody="# Body" verifyBlocked={null} />);
     expect(screen.getByRole('button', { name: /^Verify$/ }).className).toContain('cb-btn-primary');
     fireEvent.click(screen.getByTestId('revise-concept'));
-    const pending = useUiStore.getState().agentPendingPrompt;
+    const pending = useUiStore.getState().handoffs.at(-1);
     expect(pending?.label).toBe('Ask to revise · The offline window');
     expect(pending?.subject).toBe(OLD);
     expect(pending?.text.split('\n')[0]).toBe(

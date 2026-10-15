@@ -12,6 +12,15 @@ import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { MISSING_THREAD, REFUSALS, usePageComments } from './usePageComments';
 
+// M70.4: the one IPC a person's @mention reaches, watched rather than run.
+const startThreadTurn = vi.hoisted(() =>
+  vi.fn(async () => ({ runId: 'run-x', placeholder: '00000000000000ff' })),
+);
+vi.mock('@/agent/agentIpc', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/agent/agentIpc')>()),
+  startThreadTurn,
+}));
+
 /**
  * usePageComments against the mock backend and a fake CommentHighlights: the
  * fake records what the hook sends and lets a test play the editor's part
@@ -100,6 +109,7 @@ beforeEach(async () => {
   await useVaultStore.getState().openVault('/demo-vault');
   useCommentsStore.getState().clear();
   useUiStore.setState({ toasts: [] });
+  startThreadTurn.mockClear();
 });
 afterEach(cleanup);
 
@@ -297,5 +307,66 @@ describe('usePageComments', () => {
     expect(toasts()[0]).toMatch(/merge conflict markers/);
     expect(openPanel).not.toHaveBeenCalled();
     expect(fake.setThreads).not.toHaveBeenCalled();
+  });
+
+  // M70.4: a person's post asks the agent it names, once; nothing else does.
+  it("posting '@release-scout check this' asks once with the new comment's id", async () => {
+    const { result } = await mount(editorWith(fakeHighlights()));
+    await ready(result);
+    let id: string | null = null;
+    await act(async () => {
+      id = await result.current.startDiscussion('@release-scout check this');
+    });
+    await waitFor(() => expect(startThreadTurn).toHaveBeenCalledTimes(1));
+    expect(startThreadTurn).toHaveBeenCalledWith('/demo-vault', {
+      page: PAGE,
+      thread: id,
+      message: id,
+      handle: 'release-scout',
+    });
+    // A reply that names the agent asks with the reply's own id.
+    let reply: string | null = null;
+    await act(async () => {
+      reply = await result.current.reply(id ?? '', '@release-scout and this?');
+    });
+    expect(reply).toMatch(/^[0-9a-f]{16}$/);
+    await waitFor(() => expect(startThreadTurn).toHaveBeenCalledTimes(2));
+    expect(startThreadTurn).toHaveBeenLastCalledWith('/demo-vault', {
+      page: PAGE,
+      thread: id,
+      message: reply,
+      handle: 'release-scout',
+    });
+  });
+
+  it('a reply with no mention, and a loaded agent message naming @x, ask nobody', async () => {
+    const seeded: CommentsFile = {
+      format: 1,
+      threads: [
+        {
+          comments: [
+            comment(OPEN),
+            {
+              id: '00000000000000b1',
+              author: 'process:release-scout',
+              created: '2026-10-13T09:05:00Z',
+              body: '@release-scout look again, and @knowledge too',
+            },
+          ],
+        },
+      ],
+    };
+    fs().set(sidecarPathOf(PAGE), serializeComments(seeded));
+    const { result } = await mount(editorWith(fakeHighlights()));
+    await ready(result);
+    await act(async () => {
+      await result.current.reply(OPEN, 'Thanks, that settles it.');
+    });
+    // The reload the post caused, and any comments_changed, ask nobody.
+    await act(async () => {
+      await useCommentsStore.getState().load(PAGE);
+    });
+    await new Promise((done) => setTimeout(done, 20));
+    expect(startThreadTurn).not.toHaveBeenCalled();
   });
 });

@@ -10,11 +10,13 @@
  * by rename: its bytes never change and its stem links keep resolving.
  * Before any move, every open page lands its pending save (M53.6) — the page
  * being moved is usually the one on screen, and a save that landed after the
- * rename would write the old path back.
+ * rename would write the old path back. A page whose save is held (an outside
+ * write, a reconcile or an open choice, M55.6) cannot land it, so a move that
+ * touches that page is refused until it has settled.
  */
 
 import { canHaveSubPages, growPlan, nestPlan, type PageMove } from '@/engine/docPages';
-import { flushOpenPages } from '@/editor/openPages';
+import { flushOpenPages, heldOpenPages } from '@/editor/openPages';
 import { createFolder, renameNote } from '@/lib/ipc';
 import { slugify } from '@/lib/slug';
 import { useNavStore } from '@/stores/navStore';
@@ -27,6 +29,19 @@ const refuse = (reason: string): null => {
   useUiStore.getState().toast(`${FAILED}: ${reason}`);
   return null;
 };
+
+/**
+ * Why `moves` must wait, or null: an open page they move (itself, or inside
+ * a moved folder) still holds a save the flush could not land.
+ */
+function heldBy(moves: PageMove[]): string | null {
+  const held = heldOpenPages().find((path) =>
+    moves.some(({ from }) => path === from || path.startsWith(`${from}/`)),
+  );
+  if (held === undefined) return null;
+  const title = useVaultStore.getState().entries.find((e) => e.path === held)?.title ?? held;
+  return `"${title}" has changes waiting on you. Settle them first`;
+}
 
 /** Rename on disk, then follow the page in history and in Favorites. */
 async function move(vault: string, { from, to }: PageMove): Promise<void> {
@@ -54,6 +69,8 @@ export async function addSubPage(parentPath: string, title: string): Promise<str
     const fresh = useVaultStore.getState();
     const plan = growPlan(parent, fresh.entries, fresh.folders);
     if ('refused' in plan) return refuse(plan.refused);
+    const waiting = plan.move === null ? null : heldBy([plan.move]);
+    if (waiting !== null) return refuse(waiting);
     if (plan.move !== null) {
       await createFolder(vault, plan.folder);
       await move(vault, plan.move);
@@ -89,6 +106,8 @@ export async function nestPage(srcPath: string, targetPath: string): Promise<Pag
     const fresh = useVaultStore.getState();
     const plan = nestPlan(srcPath, target, fresh.entries, fresh.folders);
     if ('refused' in plan) return refuse(plan.refused);
+    const waiting = heldBy(plan.moves);
+    if (waiting !== null) return refuse(waiting);
     const grows = plan.moves.length > 1;
     if (grows) await createFolder(vault, plan.folder);
     for (const step of plan.moves) await move(vault, step);

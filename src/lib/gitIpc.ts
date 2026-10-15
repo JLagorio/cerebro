@@ -8,9 +8,13 @@
  * be untestable outside a packaged build.
  */
 import type {
+  CommitQuery,
+  CommitRun,
   ConflictMode,
+  FileAt,
+  FileCommit,
+  FilePatch,
   GitAuthorIdentity,
-  GitCommit,
   GitProviderStatus,
   GitRemoteStatus,
   GitWorkspaceInfo,
@@ -18,6 +22,7 @@ import type {
   ModifiedFile,
   RemoteResult,
   Resolution,
+  RestoreResult,
   VaultPulse,
 } from '@/engine/git';
 import * as mock from './mockGit';
@@ -57,20 +62,60 @@ export function gitDiscardFile(vault: string, path: string): Promise<void> {
     : mock.gitDiscardFile(vault, path);
 }
 
-export function getFileHistory(vault: string, path: string): Promise<GitCommit[]> {
+/** One page's history, each commit with the path the page had in it (M58.4). */
+export function getFileHistory(vault: string, path: string): Promise<FileCommit[]> {
   return inTauri()
     ? invokeTauri('get_file_history', { vault, path })
     : mock.getFileHistory(vault, path);
+}
+
+/** One file as a commit held it, byte for byte (M58.4). */
+export function getFileAtCommit(vault: string, path: string, commit: string): Promise<FileAt> {
+  return inTauri()
+    ? invokeTauri('get_file_at_commit', { vault, path, commit })
+    : mock.getFileAtCommit(vault, path, commit);
+}
+
+/** Which recorded runs made these commits (M58.4, CV-35): a commit with no
+ *  record is absent from the answer. */
+export function commitRuns(vault: string, commits: CommitQuery[]): Promise<CommitRun[]> {
+  return inTauri()
+    ? invokeTauri('commit_runs', { vault, commits })
+    : mock.commitRuns(vault, commits);
+}
+
+/** Restore a page to one version from its history, as the person (M58.4). */
+export function restoreNoteVersion(
+  vault: string,
+  path: string,
+  commit: string,
+): Promise<RestoreResult> {
+  return inTauri()
+    ? invokeTauri('restore_note_version', { vault, path, commit })
+    : mock.restoreNoteVersion(vault, path, commit);
 }
 
 export function getFileDiff(vault: string, path: string): Promise<string> {
   return inTauri() ? invokeTauri('get_file_diff', { vault, path }) : mock.getFileDiff(vault, path);
 }
 
-export function getFileDiffAtCommit(vault: string, path: string, commit: string): Promise<string> {
+/** What one commit did to one file; `previousPath` reads a rename as one (M58.4). */
+export function getFileDiffAtCommit(
+  vault: string,
+  path: string,
+  commit: string,
+  previousPath: string | null = null,
+): Promise<string> {
   return inTauri()
-    ? invokeTauri('get_file_diff_at_commit', { vault, path, commit })
-    : mock.getFileDiffAtCommit(vault, path, commit);
+    ? invokeTauri('get_file_diff_at_commit', { vault, path, commit, previousPath })
+    : mock.getFileDiffAtCommit(vault, path, commit, previousPath);
+}
+
+/** One file's patch in one commit, capped at 2 MiB (M58.3). */
+export function getFilePatch(vault: string, path: string, commit: string): Promise<FilePatch> {
+  return inTauri()
+    ? invokeTauri('get_file_patch', { vault, path, commit })
+    : mock.getFilePatch(vault, path, commit);
 }
 
 export function getCommitDiff(vault: string, commit: string): Promise<string> {

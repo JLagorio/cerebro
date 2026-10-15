@@ -18,6 +18,8 @@ import {
 } from '@blocknote/core/extensions';
 import { BlockGrip } from './BlockDragLayer';
 import { CommentHighlights } from './commentHighlights';
+import { FindBar } from './FindBar';
+import { FindHighlights } from './findHighlights';
 import { canInsertColumnsAt, COLUMN_COUNTS, newColumnList } from './columnCommands';
 import { codeBlockOptions } from '@blocknote/code-block';
 import { onAgentEvent, runAgent, startedOrThrow } from '@/agent/agentIpc';
@@ -40,12 +42,13 @@ import {
 import { Dropdown } from '@/components/ui/Dropdown';
 import { Icon } from '@/components/ui/Icon';
 import { parseSources } from '@/engine/okf';
-import { isLinkablePage, linkTargetOf } from '@/engine/pageCard';
+import { isLinkablePage, linkTargetsFor } from '@/engine/pageCard';
 import { peopleTypes } from '@/engine/properties';
 import type { Entry } from '@/engine/types';
 import { resolveTarget } from '@/engine/wikilink';
 import { readNote } from '@/lib/ipc';
 import { listTemplates, templateDisplayName, todayIso } from '@/lib/templates';
+import { useRecency } from '@/stores/openLogStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import {
@@ -63,10 +66,12 @@ import { AssigneeChip, CitationChip, DueChip, WikilinkChip } from './chips';
 import { citationTextInput, insertCitation } from './citationInput';
 import { citationChoices, citationIndexOf } from './citations';
 import { buildOutline } from './DocOutline';
+import { distinctTitles, rankSuggestionItems } from './menuRank';
 import {
   charBeforeTrigger,
   creatableTitle,
   mentionAtWordStart,
+  mentionNamesPage,
   readLinkQuery,
   stemOfPath,
   type SectionQuery,
@@ -196,12 +201,25 @@ export function slashMenuItems(
 // M12.1: anything that is content can be linked — docs AND records. Only the
 // schema itself and stationery stay out of the `[[` picker, which offers what
 // the page card's picker offers (`isLinkablePage`, M55.14) and links each page
-// by its stem (`linkTargetOf`).
-const stem = linkTargetOf;
+// by the name that reaches it (`linkTargetsFor`): its stem, unless another
+// page answers to that stem first.
 const isLinkableDoc = isLinkablePage;
 
-/** Case-insensitive title/subtext/alias filter (filterSuggestionItems isn't
- * exported by @blocknote/core 0.46). */
+/**
+ * The page each page row links, so the menus rank it by the person's own
+ * opens (M59.3). Keyed by the row object `docItems`, `sectionItems` and
+ * `personItems` build.
+ */
+const rowPaths = new WeakMap<DefaultReactSuggestionItem, string>();
+const pageRow = (item: DefaultReactSuggestionItem, path: string): DefaultReactSuggestionItem => {
+  rowPaths.set(item, path);
+  return item;
+};
+const rowPathOf = (item: DefaultReactSuggestionItem) => rowPaths.get(item);
+
+/** Case-insensitive title/subtext/alias filter, in the given order, for the
+ * `/` and `[^` menus, whose order is designed or numbered. The `@` menu and
+ * the `[` page rows rank instead (`menuRank.ts`, M59.3). */
 function filterItems(
   items: DefaultReactSuggestionItem[],
   query: string,
@@ -216,26 +234,6 @@ function filterItems(
         (Array.isArray(i.aliases) && i.aliases.some((a) => a.toLowerCase().includes(q))),
     ),
   );
-}
-
-/**
- * One title per menu row (M52.1).
- *
- * BlockNote keys a suggestion row by its TITLE, so two pages with one title —
- * the demo vault's knowledge index and its Knowledge agent — were two rows
- * with one key, and React, reconciling the list as it changed, left one
- * behind. MEASURED: typing `[^` on a concept showed a stale "Knowledge" link
- * row above the sources it offered, and clicking it would have linked a page.
- * A repeat takes an invisible suffix: the rows read the same, and their
- * subtext already tells them apart.
- */
-function distinctTitles(items: DefaultReactSuggestionItem[]): DefaultReactSuggestionItem[] {
-  const seen = new Map<string, number>();
-  return items.map((item) => {
-    const repeats = seen.get(item.title) ?? 0;
-    seen.set(item.title, repeats + 1);
-    return repeats === 0 ? item : { ...item, title: item.title + '\u200B'.repeat(repeats) };
-  });
 }
 
 /** Inline items of a checklist block, split into existing chips and the rest. */
@@ -393,8 +391,10 @@ export type ExternalResult =
   /** It reads as the base: nothing changed. */
   | { kind: 'same' }
   /** It landed. `after` is the page's text now; it equals `next`, the write's
-   *  canonical text, unless unsaved typing was merged in. */
-  | { kind: 'applied'; next: string; after: string }
+   *  canonical text, unless unsaved typing was merged in. `dirty`: the page
+   *  held unsaved typing, so a clean page whose `after` differs is a page
+   *  the apply got wrong. */
+  | { kind: 'applied'; next: string; after: string; dirty: boolean }
   /** It landed except where the page's typing overlaps it; mine stays there. */
   | { kind: 'choices'; next: string; choices: ChoiceView[] }
   /** The editor cannot show it without changing its text; nothing changed. */
@@ -451,8 +451,9 @@ export function MarkdownEditor({
     // M55.14: a lone page link pasted on an empty line becomes a page card;
     // every other paste goes on to the citation half (M52.4).
     pasteHandler: pageLinkPasteHandler,
-    // M70.1: comment highlights, drawn as decorations outside the document.
-    extensions: [CommentHighlights()],
+    // M70.1: comment highlights, and M59.6: find highlights, each drawn as
+    // decorations outside the document.
+    extensions: [CommentHighlights(), FindHighlights()],
   });
   closeLinkMenu.current = () => editor.getExtension(SuggestionMenu)?.closeMenu();
   leaveAnswer.current = (event) => leaveAiAnswer(editor, event);
@@ -463,6 +464,8 @@ export function MarkdownEditor({
   const entries = useVaultStore((s) => s.entries);
   const schema = useSchema();
   const vaultPath = useVaultStore((s) => s.vaultPath);
+  // The person's own opens rank the `@` and `[` page rows (M59.3).
+  const recency = useRecency();
   // Who the @ menu offers. This was `e.type === 'Person'` in three places
   // (M16.13b) — the type-name routing AGENTS.md forbids, and the reason a
   // vault whose people are `Teammate`s had an @ menu with no people in it.
@@ -470,6 +473,8 @@ export function MarkdownEditor({
   // the types every person field points at.
   const peopleSet = useMemo(() => peopleTypes(schema, entries), [schema, entries]);
   const isPerson = useCallback((e: Entry) => e.type !== null && peopleSet.has(e.type), [peopleSet]);
+  // The name each page is linked by; a page no name reaches gets no row.
+  const targetOf = useMemo(() => linkTargetsFor(entries), [entries]);
   const toast = useUiStore((s) => s.toast);
   // The note this body belongs to, for the sources its frontmatter lists — what
   // the `[^` menu offers first (M52.1). Null outside a NoteBodyEditor, where
@@ -607,7 +612,12 @@ export function MarkdownEditor({
     lastSaved.current = plan.next;
     openChoices.current = new Map(plan.choices.map((choice) => [choice.id, choice]));
     if (plan.choices.length > 0) return { kind: 'choices', next: plan.next, choices: openViews() };
-    return { kind: 'applied', next: plan.next, after: blocksToMarkdownNow(editor) };
+    return {
+      kind: 'applied',
+      next: plan.next,
+      after: blocksToMarkdownNow(editor),
+      dirty: plan.dirty,
+    };
   };
 
   const choose: EditorReadyInfo['choose'] = (id, pick) => {
@@ -712,7 +722,7 @@ export function MarkdownEditor({
   // dates on task lines. A pick replaces the trigger text with a chip. When
   // no page answers to the name typed, both menus end on a Create row that
   // makes the page and links it (M55.7); `@` offers it only where a word
-  // starts.
+  // starts, and only for a short name, not a sentence.
 
   const insertChip = (content: {
     type: 'wikilink' | 'assignee' | 'due';
@@ -748,17 +758,26 @@ export function MarkdownEditor({
       // The @ menu already lists people under "People" — repeating them in
       // "Link page" would render duplicate titles (and duplicate React keys).
       .filter((e) => !(opts?.excludePeople === true && isPerson(e)))
-      .map((e) => ({
-        title: e.title,
-        subtext: e.path,
-        group: 'Link page',
-        icon: <Icon name="file-text" size={14} />,
-        onItemClick: () => insertChip({ type: 'wikilink', props: { target: stem(e), alias: '' } }),
-      }));
+      .flatMap((e) => {
+        const target = targetOf(e);
+        if (target === null) return [];
+        return [
+          pageRow(
+            {
+              title: e.title,
+              subtext: e.path,
+              group: 'Link page',
+              icon: <Icon name="file-text" size={14} />,
+              onItemClick: () => insertChip({ type: 'wikilink', props: { target, alias: '' } }),
+            },
+            e.path,
+          ),
+        ];
+      });
 
   /**
    * The `[` menu's rows for a section query (M55.8). With a page half, every
-   * page it matches, each linking `<stem>#<heading>`. With none, after `[[`,
+   * page it matches, each linking `<name>#<heading>` by `targetOf`'s name. With none, after `[[`,
    * one row for this note's own heading, linking `#<heading>`. No Create row:
    * a name with a `#` cannot be a page title (`creatableTitle`).
    */
@@ -778,16 +797,24 @@ export function MarkdownEditor({
         },
       ];
     }
-    const pages = entries.filter(isLinkableDoc).map((e): DefaultReactSuggestionItem => ({
-      title: e.title,
-      subtext: e.path,
-      group: 'Link page',
-      icon: <Icon name="file-text" size={14} />,
-      onItemClick: () =>
-        insertChip({ type: 'wikilink', props: { target: `${stem(e)}${fragment}`, alias: '' } }),
-    }));
-    // Matched on the page half alone, then shown with the heading it links.
-    return filterItems(pages, page).map((item) => ({
+    const pages = entries.filter(isLinkableDoc).flatMap((e): DefaultReactSuggestionItem[] => {
+      const target = targetOf(e, heading);
+      if (target === null) return [];
+      return [
+        pageRow(
+          {
+            title: e.title,
+            subtext: e.path,
+            group: 'Link page',
+            icon: <Icon name="file-text" size={14} />,
+            onItemClick: () => insertChip({ type: 'wikilink', props: { target, alias: '' } }),
+          },
+          e.path,
+        ),
+      ];
+    });
+    // Ranked on the page half alone, then shown with the heading it links.
+    return rankSuggestionItems(pages, page, { recency, pathOf: rowPathOf }).map((item) => ({
       ...item,
       subtext: `${item.subtext}${fragment}`,
     }));
@@ -812,13 +839,22 @@ export function MarkdownEditor({
     }));
 
   const personItems = (): DefaultReactSuggestionItem[] =>
-    entries.filter(isPerson).map((e) => ({
-      title: e.title,
-      subtext: 'Assign',
-      group: 'People',
-      icon: <Icon name="circle-user" size={14} />,
-      onItemClick: () => insertChip({ type: 'assignee', props: { target: stem(e) } }),
-    }));
+    entries.filter(isPerson).flatMap((e) => {
+      const target = targetOf(e);
+      if (target === null) return [];
+      return [
+        pageRow(
+          {
+            title: e.title,
+            subtext: 'Assign',
+            group: 'People',
+            icon: <Icon name="circle-user" size={14} />,
+            onItemClick: () => insertChip({ type: 'assignee', props: { target } }),
+          },
+          e.path,
+        ),
+      ];
+    });
 
   const dueItems = (): DefaultReactSuggestionItem[] =>
     [
@@ -1203,7 +1239,7 @@ export function MarkdownEditor({
                 'You answer a standing question about a document the user is writing. Return only the answer.',
               sessionId: null,
               model: null,
-              shell: false,
+              shell: 'off',
               connectors: false,
               attended: true,
               allowedTools: [],
@@ -1264,6 +1300,13 @@ export function MarkdownEditor({
   // screen at once whenever the record panel is open beside a doc.
   const onEditorKeyDown = (e: React.KeyboardEvent) => {
     if (e.key !== 'k' || !(e.metaKey || e.ctrlKey) || readOnly) return;
+    // The find bar sits inside this host, and the browser reports text
+    // selected in its <input> through window.getSelection(): without this,
+    // ⌘K on a selected query would ask AI to rewrite the query, and Apply
+    // would insert into the bar's React-owned DOM (M59.6).
+    if (e.target instanceof Element && e.target.closest('[data-testid="find-bar"]') !== null) {
+      return;
+    }
     const text = window.getSelection()?.toString() ?? '';
     // Nothing selected is not an error — it is the other feature (a slash
     // menu), and stealing the keystroke to show an empty rewrite would be
@@ -1331,6 +1374,7 @@ export function MarkdownEditor({
       className="cerebro-editor min-h-0 flex-1"
       onKeyDown={onEditorKeyDown}
     >
+      {loaded && <FindBar editor={editor} host={host} readOnly={readOnly} />}
       {loaded && (
         <BlockNoteView
           editor={editor}
@@ -1347,14 +1391,20 @@ export function MarkdownEditor({
           <SuggestionMenuController
             triggerCharacter="@"
             getItems={async (query) => {
-              const rows = filterItems(
+              // Ranked within each group — People, Link page, Due date — and
+              // the groups stay contiguous in that order (M59.3).
+              const rows = rankSuggestionItems(
                 [...personItems(), ...docItems({ excludePeople: true }), ...dueItems()],
                 query,
+                { recency, pathOf: rowPathOf },
               );
               // Create only where a mention starts: `ana@example.com` is an
-              // address, and the `@` in `meet @ 5pm` names nothing.
+              // address, and the `@` in `meet @ 5pm` names nothing. And only
+              // while the query could be a name: past that the row goes, so
+              // the menu closes and Enter ends the line (`mentionNamesPage`).
               const starts =
                 !/^\s/.test(query) &&
+                mentionNamesPage(query) &&
                 mentionAtWordStart(charBeforeTrigger(editor.prosemirrorState, query, '@'));
               return withCreate(rows, starts ? createRow(query, '@') : null);
             }}
@@ -1389,7 +1439,7 @@ export function MarkdownEditor({
                 asked.double && asked.section === null ? createRow(asked.text, '[') : null;
               const rows =
                 asked.section === null
-                  ? filterItems(docItems(), asked.text)
+                  ? rankSuggestionItems(docItems(), asked.text, { recency, pathOf: rowPathOf })
                   : sectionItems(asked.section, asked.double);
               return withCreate(rows, create).map((item) => ({
                 ...item,
@@ -1502,7 +1552,10 @@ export function MarkdownEditor({
                 width="100%"
                 options={[
                   { value: '', label: 'Nobody' },
-                  ...people.map((p) => ({ value: stem(p), label: p.title })),
+                  ...people.flatMap((p) => {
+                    const value = targetOf(p);
+                    return value === null ? [] : [{ value, label: p.title }];
+                  }),
                 ]}
                 value={assignee}
                 onChange={setAssignee}

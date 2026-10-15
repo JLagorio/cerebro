@@ -1316,8 +1316,14 @@ function promoteContainers<T extends PartialBlock>(blocks: T[], lifted: LiftedLi
     }
     const previous = parent[parent.length - 1];
     if (opener.kind === 'indent' && !holdsOwnChildren(previous)) {
+      // Replaced, never mutated: `previous` may be one of the blocks that
+      // arrived, and an unclosed container later on rebuilds the page from
+      // those (see the docblock), which must not find the children in it too.
       const p = previous as { children?: PartialBlock[] };
-      p.children = [...(p.children ?? []), ...frame.children];
+      parent[parent.length - 1] = {
+        ...p,
+        children: [...(p.children ?? []), ...frame.children],
+      } as PartialBlock;
       return;
     }
     parent.push(keptLine(opener.line), ...frame.children, kept(close));

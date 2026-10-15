@@ -1,7 +1,9 @@
 import { useContext, useMemo, useRef, useState } from 'react';
 import type { BlockNoteEditor } from '@blocknote/core';
 import { createReactInlineContentSpec, useEditorState } from '@blocknote/react';
+import { PAGE_PREVIEW_GROUP, PagePreview } from '@/components/PagePreview';
 import { DatePicker } from '@/components/ui/DatePicker';
+import { HoverCard } from '@/components/ui/HoverCard';
 import { Icon } from '@/components/ui/Icon';
 import { useOpenPath } from '@/app/useOpenPath';
 import {
@@ -13,10 +15,11 @@ import {
 } from '@/engine/dates';
 import { parseSources } from '@/engine/okf';
 import { dueBucket } from '@/engine/tasks';
-import { parseLinkTarget, resolveLink, resolveTarget } from '@/engine/wikilink';
+import { resolveTarget } from '@/engine/wikilink';
 import { todayIso } from '@/lib/templates';
 import { typeStyle } from '@/engine/typeCatalog';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
+import { assigneeLabel, wikilinkDest, wikilinkDestLabel } from './chipLabels';
 import { citationIndexOf, citationName, citationNumber, sourceTarget } from './citations';
 import { assigneeText, citationText, dueText, wikilinkText } from './markdown';
 import { NotePathContext } from './notePath';
@@ -31,6 +34,9 @@ import { requestSection } from './sectionLinks';
  *   assignee  `@[[person]]`                      — task assignee
  *   due       `📅 YYYY-MM-DD`                    — task due date
  *   citation  `[^id]` / `[^id]:`                 — footnote reference / definition (M51.5)
+ *
+ * Hovering a wikilink or an assignee previews its page in a card (M59.7):
+ * HoverCard + PagePreview, built from the scan, so a hover reads no file.
  *
  * Each chip's plain-text form lives in markdown.ts, beside the parser that
  * reads it back: that module writes chips to disk as that text, and
@@ -79,69 +85,60 @@ const CHIP_BASE =
  * before it opens the page, so the editor that shows it can land there; a
  * link into this same note only asks, since navigating would rebuild the
  * page for nothing. The target is never rewritten, so the fragment stays on
- * disk.
+ * disk. The label is chipLabels.ts's, the same string find searches (M59.6).
+ * Hovering it previews the page (M59.7); the card's title goes where a click
+ * does.
  */
 function WikilinkRender({ target, alias }: { target: string; alias: string }) {
   const entries = useVaultStore((s) => s.entries);
   const schema = useSchema();
   const open = useOpenPath();
   const notePath = useContext(NotePathContext);
-  const { page, section } = parseLinkTarget(target);
-  const dest = useMemo(() => {
-    if (page === '' && section !== null) {
-      if (notePath === null) return null;
-      const own = entries.find((e) => e.path === notePath);
-      return {
-        path: notePath,
-        title: own?.title ?? notePath.slice(notePath.lastIndexOf('/') + 1).replace(/\.md$/i, ''),
-        type: own?.type ?? null,
-        section,
-      };
-    }
-    // Null section when the whole target names a page by itself (`C# notes`).
-    const link = resolveLink(target, entries);
-    if (link === null) return null;
-    const { path, title, type } = link.entry;
-    return { path, title, type, section: link.section };
-  }, [entries, notePath, page, section, target]);
+  const dest = useMemo(() => wikilinkDest(target, entries, notePath), [entries, notePath, target]);
   const heading = dest?.section ?? null;
-  const label =
-    alias !== ''
-      ? alias
-      : dest === null
-        ? target
-        : heading !== null
-          ? `${dest.title} \u203A ${heading}`
-          : dest.title;
+  const label = wikilinkDestLabel({ target, alias }, dest);
+  const go = () => {
+    if (dest === null) return;
+    if (heading !== null) requestSection(dest.path, heading);
+    if (heading !== null && dest.path === notePath) return;
+    open(dest.path);
+  };
 
   return (
-    <button
-      type="button"
-      data-chip="wikilink"
-      tabIndex={-1}
-      onClick={() => {
-        if (dest === null) return;
-        if (heading !== null) requestSection(dest.path, heading);
-        if (heading !== null && dest.path === notePath) return;
-        open(dest.path);
-      }}
-      className={
-        dest !== null
-          ? `${CHIP_BASE} cursor-pointer border-0 bg-cortex-50 font-medium text-cortex-600 hover:underline`
-          : `${CHIP_BASE} cursor-default border-0 bg-n-50 text-n-500 [text-decoration:underline] [text-decoration-style:dashed] [text-underline-offset:2px]`
-      }
-      title={
-        dest === null
-          ? `No page named "${page === '' ? target : page}"`
-          : heading !== null
-            ? `${dest.path}#${heading}`
-            : dest.path
-      }
+    <HoverCard
+      label="Page preview"
+      group={PAGE_PREVIEW_GROUP}
+      content={({ close }) => (
+        <PagePreview
+          target={target}
+          notePath={notePath}
+          onOpen={() => {
+            close();
+            go();
+          }}
+        />
+      )}
     >
-      {/* M9.6: the target's own type, so a linked Risk reads as a Risk. */}
-      <Icon name={typeStyle(dest?.type ?? null, schema).icon} size={12} />
-      {label}
-    </button>
+      {({ ref, describedBy }) => (
+        <button
+          ref={ref}
+          type="button"
+          data-chip="wikilink"
+          tabIndex={-1}
+          aria-describedby={describedBy}
+          onClick={go}
+          className={
+            dest !== null
+              ? `${CHIP_BASE} cursor-pointer border-0 bg-cortex-50 font-medium text-cortex-600 hover:underline`
+              : `${CHIP_BASE} cursor-default border-0 bg-n-50 text-n-500 [text-decoration:underline] [text-decoration-style:dashed] [text-underline-offset:2px]`
+          }
+        >
+          {/* M9.6: the target's own type, so a linked Risk reads as a Risk. */}
+          <Icon name={typeStyle(dest?.type ?? null, schema).icon} size={12} />
+          {label}
+        </button>
+      )}
+    </HoverCard>
   );
 }
 
@@ -166,21 +163,39 @@ function AssigneeRender({ target }: { target: string }) {
   const entries = useVaultStore((s) => s.entries);
   const open = useOpenPath();
   const resolved = resolveTarget(target, entries);
+  const go = () => {
+    if (resolved !== null) open(resolved.path);
+  };
 
   return (
-    <button
-      type="button"
-      data-chip="assignee"
-      tabIndex={-1}
-      onClick={() => {
-        if (resolved !== null) open(resolved.path);
-      }}
-      className={`${CHIP_BASE} cursor-pointer border border-n-200 bg-n-0 text-n-700 hover:border-n-300 hover:bg-n-50`}
-      title={resolved !== null ? resolved.path : `No person named "${target}"`}
+    <HoverCard
+      label="Page preview"
+      group={PAGE_PREVIEW_GROUP}
+      content={({ close }) => (
+        <PagePreview
+          target={target}
+          onOpen={() => {
+            close();
+            go();
+          }}
+        />
+      )}
     >
-      <Icon name="circle-user" size={12} color="var(--n-500)" />
-      {resolved?.title ?? target}
-    </button>
+      {({ ref, describedBy }) => (
+        <button
+          ref={ref}
+          type="button"
+          data-chip="assignee"
+          tabIndex={-1}
+          aria-describedby={describedBy}
+          onClick={go}
+          className={`${CHIP_BASE} cursor-pointer border border-n-200 bg-n-0 text-n-700 hover:border-n-300 hover:bg-n-50`}
+        >
+          <Icon name="circle-user" size={12} color="var(--n-500)" />
+          {assigneeLabel({ target }, entries)}
+        </button>
+      )}
+    </HoverCard>
   );
 }
 

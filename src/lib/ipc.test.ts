@@ -14,12 +14,14 @@ import {
   canPickFiles,
   deleteComment,
   deleteCommentThread,
+  deleteNote,
   finishQuit,
   importAttachment,
   ingestItemState,
   ledgerHead,
   ledgerStatus,
   listComments,
+  listTrash,
   listenCommentsChanged,
   listenQuitRequested,
   listenVaultChanged,
@@ -28,6 +30,7 @@ import {
   openInDefaultApp,
   pageWriteFailures,
   replyToCommentThread,
+  restoreFromTrash,
   revealInFinder,
   saveNote,
   scanVault,
@@ -440,5 +443,26 @@ describe('quit IPC', () => {
     expect(handler).toHaveBeenCalledWith({ deadlineMs: 700 });
     unlisten();
     expect(listenSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('the vault Trash (M60.8)', () => {
+  it('sends delete_note, list_trash and restore_from_trash their literal payloads inside Tauri', async () => {
+    (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+    await deleteNote('/v', 'notes/a.md');
+    await listTrash('/v');
+    await restoreFromTrash('/v', '20261014T093000Z-a1b2');
+    expect(invokeSpy.mock.calls).toEqual([
+      ['delete_note', { vault: '/v', path: 'notes/a.md' }],
+      ['list_trash', { vault: '/v' }],
+      ['restore_from_trash', { vault: '/v', stamp: '20261014T093000Z-a1b2' }],
+    ]);
+  });
+
+  it('uses the mock Trash in the browser', async () => {
+    const item = await deleteNote('/demo-vault', 'records/decisions/dec-offline-window-72h.md');
+    expect((await listTrash('/demo-vault'))[0]).toEqual(item);
+    expect(await restoreFromTrash('/demo-vault', item.stamp)).toBe(item.path);
+    expect(invokeSpy).not.toHaveBeenCalled();
   });
 });

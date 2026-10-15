@@ -22,14 +22,7 @@ import { bareToolName, toolFacts, type ToolFacts } from '@/lib/policy/tools';
  */
 
 export type ToolStatus =
-  | 'running'
-  | 'done'
-  | 'failed'
-  | 'interrupted'
-  | 'waiting'
-  | 'cancelled'
-  | 'not_run'
-  | 'paused';
+  'running' | 'done' | 'failed' | 'interrupted' | 'waiting' | 'cancelled' | 'not_run' | 'paused';
 
 /** One call, drawn by its own renderer. */
 export interface ToolRow {

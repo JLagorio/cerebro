@@ -18,6 +18,7 @@
 //!   is the whole argument for having git here.
 
 pub mod author;
+pub mod changeset;
 pub mod command;
 pub mod commit;
 pub mod conflict;
@@ -27,6 +28,7 @@ pub mod history;
 pub mod provider;
 pub mod pulse;
 pub mod remote;
+pub mod restore;
 pub mod status;
 pub mod upstream;
 pub mod workspace;
@@ -71,7 +73,9 @@ pub fn clone_repo(url: &str, destination: &str) -> Result<String, String> {
     let parent = dest.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
 
-    match command::run(parent, &["clone", url, destination]) {
+    // Under the clone deadline (M58.3): a host that accepts and never answers
+    // ends as a network error naming it.
+    match command::run_bounded(parent, &["clone", url, destination], command::CLONE_TIMEOUT) {
         Ok(_) => Ok(destination.to_string()),
         Err(f) => Err(remote::classify(&f.stderr).1),
     }

@@ -2,6 +2,7 @@ import { useState, type ReactElement } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { toolIcon, toolLabel } from '@/agent/AiActionCard';
+import { QuestionCard } from '@/agent/QuestionCard';
 import type { WaitingCard } from '@/agent/useAgentChat';
 import type { PersonAnswer } from '@/agent/types';
 
@@ -10,9 +11,10 @@ import type { PersonAnswer } from '@/agent/types';
  * message. Rust's book holds it (`agent::interaction`); the card is only a
  * view of it, and its buttons are the one place an answer starts.
  *
- * Cards are a registry keyed by kind: `permission` now, a question and a
- * write in later parts, each adding a renderer here and never a second path.
- * Whatever the agent put in the call shows as text, never as markup.
+ * Cards are a registry keyed by kind: `permission`, and `question` for
+ * AskUserQuestion (M57.3, `QuestionCard`); a later kind adds a renderer here,
+ * never a second path. Whatever the agent put in the call shows as text,
+ * never as markup.
  */
 
 /** The card's words (Appendix C, M57.1). */
@@ -97,7 +99,13 @@ function PermissionCard({ interaction, onAnswer }: CardProps) {
         >
           {CARD_COPY.allow}
         </Button>
-        <Button variant="secondary" size="sm" testId="interaction-deny" disabled={disabled} onClick={deny}>
+        <Button
+          variant="secondary"
+          size="sm"
+          testId="interaction-deny"
+          disabled={disabled}
+          onClick={deny}
+        >
           {CARD_COPY.deny}
         </Button>
       </div>
@@ -108,6 +116,7 @@ function PermissionCard({ interaction, onAnswer }: CardProps) {
 /** One renderer per card kind Rust's book draws. */
 export const CARD_RENDERERS: Record<string, (props: CardProps) => ReactElement> = {
   permission: PermissionCard,
+  question: QuestionCard,
 };
 
 /** A waiting call's card, by its kind; a kind this build does not know is

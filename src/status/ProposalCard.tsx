@@ -57,9 +57,9 @@ const RISK_COLOR: Record<string, string> = {
  * name wherever it is met: an agent is its record's title and opens it, the
  * attended assistant is the Assistant, a construct is "Background
  * maintenance". The raw stamp stays in the tooltip — it is what the ledger
- * recorded.
+ * recorded. Review's queued page writes name who asked by it too (M57.4c).
  */
-function CardAuthor({ actor }: { actor: string }) {
+export function CardAuthor({ actor }: { actor: string }) {
   const entries = useVaultStore((s) => s.entries);
   const navigate = useNavStore((s) => s.navigate);
   const label = actorLabel(actor, entries);

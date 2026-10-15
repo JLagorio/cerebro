@@ -25,6 +25,7 @@ import { useVaultStore } from '@/stores/vaultStore';
 export function RunList() {
   const runs = useUiStore((s) => s.runs);
   const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
+  const showConversation = useUiStore((s) => s.showConversation);
   const navigate = useNavStore((s) => s.navigate);
   const entries = useVaultStore((s) => s.entries);
   const views = useVaultStore((s) => s.views);
@@ -84,11 +85,15 @@ export function RunList() {
               <button
                 type="button"
                 onClick={() => {
-                  // Back to where it belongs: a chat run to its panel, a
-                  // background job to the note it is reading. Both beat a
-                  // spinner you cannot follow.
-                  if (run.owner === 'chat') setAiPanelOpen(true);
-                  else if (run.path !== null) navigate({ kind: 'doc', path: run.path });
+                  // Back to where it belongs: a chat run to the panel open on
+                  // its own thread (M57.6), which may have been closed or
+                  // switched away from while the run went on; a background
+                  // job to the note it is reading. Both beat a spinner you
+                  // cannot follow.
+                  if (run.owner === 'chat') {
+                    if (run.conversationId !== null) showConversation(run.conversationId);
+                    else setAiPanelOpen(true);
+                  } else if (run.path !== null) navigate({ kind: 'doc', path: run.path });
                   if (run.place !== null) navigate(run.place);
                   setOpen(false);
                 }}

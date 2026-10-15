@@ -12,8 +12,12 @@
 //! and both replay `src-tauri/fixtures/quote-cases.json`, which pins every
 //! message byte for byte (D3: twins held by a shared case file, the `link.rs`
 //! precedent). Offsets here are bytes and the twin's are UTF-16 units, so the
-//! cases pin lines and code-point contexts, never offsets. M70's comment
-//! anchors are the next caller.
+//! cases pin lines and code-point contexts, never offsets.
+//!
+//! `comment_tools.rs` (M70.3) is the second caller: an agent's comment quote
+//! is found by the same finder and listed in the same lines, and
+//! `comment_matches` only filters what it finds down to the page's own text
+//! (`src-tauri/fixtures/comment-tools.json` holds that filter).
 
 /// The most edits one call may carry.
 pub const MAX_EDITS: usize = 100;
@@ -118,7 +122,7 @@ fn resolve(body: &str, prefix: &str, i: usize, edit: &QuoteEdit) -> Result<usize
     if edit.occurrence == Some(0) {
         return Err(vec![format!("Edit {i}: `occurrence` counts from 1.")]);
     }
-    let found = matches(body, &edit.old);
+    let found = occurrences_of(body, &edit.old);
     match (found.len(), edit.occurrence) {
         (0, _) if prefix.contains(edit.old.as_str()) => Err(vec![format!(
             "Edit {i}: the quoted text is in the frontmatter, which edit_note never changes. \
@@ -153,9 +157,14 @@ fn resolve(body: &str, prefix: &str, i: usize, edit: &QuoteEdit) -> Result<usize
 }
 
 /// Every start of `quote` in `body`, overlapping ones included: after a match
-/// the search goes on one code point later, so `aa` is in `aaa` twice.
-fn matches(body: &str, quote: &str) -> Vec<usize> {
+/// the search goes on one code point later, so `aa` is in `aaa` twice. The
+/// one matcher (`occurrencesOf` in the twin). An empty quote is in no body:
+/// it would match everywhere.
+pub fn occurrences_of(body: &str, quote: &str) -> Vec<usize> {
     let mut found = Vec::new();
+    if quote.is_empty() {
+        return found;
+    }
     let mut from = 0;
     while let Some(offset) = body[from..].find(quote) {
         let start = from + offset;
@@ -168,7 +177,7 @@ fn matches(body: &str, quote: &str) -> Vec<usize> {
 
 /// `head`, then one line per match (at most `MAX_LISTED`), then the count of
 /// the rest.
-fn listed(head: String, body: &str, quote: &str, found: &[usize]) -> Vec<String> {
+pub(crate) fn listed(head: String, body: &str, quote: &str, found: &[usize]) -> Vec<String> {
     let mut lines = vec![head];
     for (k, &start) in found.iter().enumerate().take(MAX_LISTED) {
         lines.push(format!(
@@ -185,7 +194,7 @@ fn listed(head: String, body: &str, quote: &str, found: &[usize]) -> Vec<String>
 }
 
 /// The 1-based line `offset` falls on.
-fn line_at(text: &str, offset: usize) -> usize {
+pub(crate) fn line_at(text: &str, offset: usize) -> usize {
     1 + text[..offset].matches('\n').count()
 }
 
@@ -193,7 +202,7 @@ fn line_at(text: &str, offset: usize) -> usize {
 /// `CONTEXT_CHARS` before it, at most `MATCH_CHARS` of it, and up to
 /// `CONTEXT_CHARS` after that, with an ellipsis at each end that was cut,
 /// JSON-escaped so a line break or a tab reads as one.
-fn context(body: &str, start: usize, end: usize) -> String {
+pub(crate) fn context(body: &str, start: usize, end: usize) -> String {
     let before = body[..start].chars().count();
     let within = body[start..end].chars().count();
     let total = before + within + body[end..].chars().count();
@@ -212,6 +221,174 @@ fn context(body: &str, start: usize, end: usize) -> String {
 fn refusal(mut lines: Vec<String>) -> String {
     lines.push(NOTHING_WRITTEN.to_string());
     lines.join("\n")
+}
+
+// --- Comment quotes (M70.3) ----------------------------------------------------
+//
+// An agent anchors a comment by quoting plain words as get_note prints the
+// body, and a person anchors one by selecting what the page reads (M70.1's
+// reader text). The two agree when the quote holds no markdown and every
+// match counted lies in text the page shows, so a quote with markdown is
+// refused and the finder's matches are filtered to the page's own text: not
+// inside a fence, not on a `:::` line (a toggle's title excepted), not in a
+// line's marker and not in a link's target.
+
+/// The characters a comment quote may not hold, because the page does not
+/// show them as typed; a context stops at one as well.
+const QUOTE_MARKDOWN: [char; 10] = ['*', '_', '`', '~', '[', ']', '<', '>', '\\', '|'];
+
+/// The markdown a comment quote holds, named for its refusal, or `None`.
+pub fn quote_markdown(quote: &str) -> Option<String> {
+    quote.chars().find_map(|c| match c {
+        '\n' | '\r' => Some("a line break".to_string()),
+        '`' => Some("a backtick".to_string()),
+        c if QUOTE_MARKDOWN.contains(&c) => Some(format!("`{c}`")),
+        _ => None,
+    })
+}
+
+/// The byte length of the run of `c` that opens `text`.
+fn run_of(text: &str, c: char) -> usize {
+    text.len() - text.trim_start_matches(c).len()
+}
+
+/// How many bytes of spaces and tabs open `text`.
+fn blank_run(text: &str) -> usize {
+    text.len() - text.trim_start_matches([' ', '\t']).len()
+}
+
+/// The bytes of `line` a block marker takes before its text: blockquote
+/// `>`s, then a heading's `#`s, or a bullet or number and a task box.
+fn marker_len(line: &str) -> usize {
+    let mut at = blank_run(line);
+    while line[at..].starts_with('>') {
+        at += 1;
+        at += blank_run(&line[at..]);
+    }
+    let rest = &line[at..];
+    let spaced =
+        |n: usize| rest.len() == n || rest[n..].starts_with(' ') || rest[n..].starts_with('\t');
+    let hashes = run_of(rest, '#');
+    if (1..=6).contains(&hashes) && spaced(hashes) {
+        return at + hashes + blank_run(&rest[hashes..]);
+    }
+    let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+    let item = if rest.starts_with(['-', '*', '+']) && spaced(1) {
+        1
+    } else if (1..=9).contains(&digits)
+        && rest[digits..].starts_with(['.', ')'])
+        && spaced(digits + 1)
+    {
+        digits + 1
+    } else {
+        return at;
+    };
+    at += item + blank_run(&rest[item..]);
+    for task in ["[ ]", "[x]", "[X]"] {
+        let after = &line[at..];
+        if after.starts_with(task) && (after.len() == 3 || after[3..].starts_with([' ', '\t'])) {
+            return at + 3 + blank_run(&after[3..]);
+        }
+    }
+    at
+}
+
+/// `from..to` of `body` less every link target in it (`](` to its `)`).
+fn without_link_targets(body: &str, from: usize, to: usize, out: &mut Vec<(usize, usize)>) {
+    let mut at = from;
+    while let Some(open) = body[at..to].find("](") {
+        let target = at + open + 1;
+        if target > at {
+            out.push((at, target));
+        }
+        at = body[target..to]
+            .find(')')
+            .map_or(to, |close| target + close + 1);
+    }
+    if at < to {
+        out.push((at, to));
+    }
+}
+
+/// The byte ranges of `body` the page shows as text, in order: each line's
+/// own text, less its marker and its link targets, outside every fence and
+/// every `:::` line but a toggle's title. A line's `\r` is never text.
+fn text_ranges(body: &str) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    // The open fence: its character and how long its run was.
+    let mut fence: Option<(char, usize)> = None;
+    let mut start = 0;
+    for raw in body.split('\n') {
+        let line = raw.strip_suffix('\r').unwrap_or(raw);
+        let (from, end) = (start, start + line.len());
+        start += raw.len() + 1;
+        let indent = run_of(line, ' ');
+        let fenced = &line[indent..];
+        if let Some((c, n)) = fence {
+            let closing = run_of(fenced, c);
+            if indent <= 3 && closing >= n && fenced[closing..].trim_matches([' ', '\t']).is_empty()
+            {
+                fence = None;
+            }
+            continue;
+        }
+        if indent <= 3 {
+            if let Some(c) = ['`', '~'].into_iter().find(|c| run_of(fenced, *c) >= 3) {
+                fence = Some((c, run_of(fenced, c)));
+                continue;
+            }
+        }
+        let lead = blank_run(line);
+        let directive = &line[lead..];
+        if directive.starts_with(":::") {
+            let colons = run_of(directive, ':');
+            if let Some(title) = directive[colons..].strip_prefix("toggle ") {
+                without_link_targets(body, end - title.len(), end, &mut out);
+            }
+            continue;
+        }
+        without_link_targets(body, from + marker_len(line), end, &mut out);
+    }
+    out
+}
+
+/// The range of `ranges` holding all of `start..end`, if one does.
+fn range_holding(ranges: &[(usize, usize)], start: usize, end: usize) -> Option<(usize, usize)> {
+    ranges
+        .iter()
+        .copied()
+        .find(|&(from, to)| from <= start && end <= to)
+}
+
+/// Every start of `quote` in `body` that reads as text on the page: the
+/// finder's matches (`occurrences_of`), kept when one text range holds the
+/// whole match. A comment's occurrence counts among these.
+pub fn comment_matches(body: &str, quote: &str) -> Vec<usize> {
+    let ranges = text_ranges(body);
+    occurrences_of(body, quote)
+        .into_iter()
+        .filter(|&start| range_holding(&ranges, start, start + quote.len()).is_some())
+        .collect()
+}
+
+/// The context a comment's anchor stores for the match `start..end`, from its
+/// own line: the text before it back to the last markdown character or the
+/// start of its text, and after it up to the next, each cut to
+/// `CONTEXT_CHARS` code points nearest the match. `start..end` is one of
+/// `comment_matches`'.
+pub fn anchor_context(body: &str, start: usize, end: usize) -> (String, String) {
+    let (from, to) = range_holding(&text_ranges(body), start, end).unwrap_or((start, end));
+    let before = &body[from..start];
+    let before = before
+        .rfind(QUOTE_MARKDOWN)
+        .map_or(before, |at| &before[at + 1..]);
+    let after = &body[end..to];
+    let after = after.find(QUOTE_MARKDOWN).map_or(after, |at| &after[..at]);
+    let skip = before.chars().count().saturating_sub(CONTEXT_CHARS);
+    (
+        before.chars().skip(skip).collect(),
+        after.chars().take(CONTEXT_CHARS).collect(),
+    )
 }
 
 #[cfg(test)]

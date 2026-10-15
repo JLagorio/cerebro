@@ -7,8 +7,9 @@
  * own built-ins are one list. No tool is listed here. What lives in this
  * module is the strict load the Rust loader performs, refusal for refusal and
  * in the same words, and `toolFacts`: what a call writes, how a transcript
- * draws it and folds a run of it (M56.8), its icon and the argument it is
- * aimed by.
+ * draws it and folds a run of it (M56.8), its icon, its title, the argument
+ * it is aimed by, and whether an ask-first agent's call to it waits for the
+ * person's Allow (M57.4).
  *
  * Load is STRICT, as serde's `deny_unknown_fields` is on the Rust side: an
  * unknown field fails, a missing one fails unless the Rust field is an
@@ -75,6 +76,11 @@ const KINDS: readonly Kind[] = ['read_only', 'additive', 'destructive'];
 const AXES: readonly Axis[] = ['write', 'read', 'read_write', 'none'];
 const TARGET_KINDS: readonly TargetKind[] = ['note', 'folder', 'concept', 'source_id', 'bundle'];
 const RENDERERS: readonly Renderer[] = ['step', 'change', 'concept', 'handoff', 'commit'];
+
+/** The door the comment tools go through (M70.3): they write a page's
+ * comment sidecar, never the page, so the door writes nothing, and its rows
+ * are reads of one note (a refusal lists where a quote appears). */
+export const COMMENT_DOOR = 'comment';
 
 /** The door a cerebro tool's own row must go through, for the renderers that
  * draw what that door does. */
@@ -152,6 +158,10 @@ export interface ToolRow {
   /** A lucide icon name. */
   icon: string;
   always_load: boolean;
+  /** Does an ask-first agent's call wait for the person's Allow (M57.4)?
+   * Only a tool that writes the person's pages: a door that writes, on the
+   * write or read_write axis. */
+  confirmable: boolean;
   search_hint: string;
   description: string;
   input_schema: unknown;
@@ -172,17 +182,22 @@ export interface Generated {
   renderer: Renderer;
   icon: string;
   always_load: boolean;
+  /** Always false (M57.4): policy.v3 decides a proposal. */
+  confirmable: boolean;
   search_hint: string;
 }
 
 /** One of the CLI's own built-in tools. */
 export interface CliTool {
   name: string;
+  /** Its tool-approval family (M57.2): the row of
+   * `shared/policy/tool-approval.v1.json` that decides whether it runs, asks
+   * or is refused. Required: a row with none fails the load. */
+  family: string | null;
+  /** The input field a person's card names it by (M57.2): a command, a path,
+   * a URL. Null names it by its whole input. */
+  subject: string | null;
   writes: boolean;
-  denied_without_shell: boolean;
-  denied_when_read_scoped: boolean;
-  /** Granted, with the cerebro tools, to a run that holds shell. */
-  with_shell: boolean;
   renderer: Renderer;
   /** Set only on a reader: what a run of its calls folds under. */
   fold: FoldPhrases | null;
@@ -328,6 +343,7 @@ const GENERATED = struct({
   renderer: oneOf(RENDERERS),
   icon: text,
   always_load: flag,
+  confirmable: flag,
   search_hint: text,
 });
 
@@ -362,6 +378,7 @@ const MANIFEST_SHAPE = struct({
     fold: { option: FOLD },
     icon: text,
     always_load: flag,
+    confirmable: flag,
     search_hint: text,
     description: text,
     input_schema: anyJson,
@@ -370,10 +387,9 @@ const MANIFEST_SHAPE = struct({
   generated: (value) => GENERATED(value, 'generated', ''),
   cli_tools: named('cli tool', 'name', {
     name: text,
+    family: { option: text },
+    subject: { option: text },
     writes: flag,
-    denied_without_shell: flag,
-    denied_when_read_scoped: flag,
-    with_shell: flag,
     renderer: oneOf(RENDERERS),
     fold: { option: FOLD },
     icon: text,
@@ -623,6 +639,7 @@ function checkRow(manifest: ToolsManifest, row: ToolRow): void {
     row.kind === 'read_only' ? null : `a tool whose kind is ${row.kind}`,
     row.renderer,
   );
+  checkCommentDoor(subject, row);
   checkFacts(manifest, subject, {
     toolset: row.toolset,
     kind: row.kind,
@@ -635,6 +652,7 @@ function checkRow(manifest: ToolsManifest, row: ToolRow): void {
     icon: row.icon,
     searchHint: row.search_hint,
   });
+  checkConfirmable(manifest, subject, row);
   if (row.renderer === 'commit' && row.surface !== 'proposals') {
     throw refusal(subject, 'renderer', 'commit needs the proposals surface');
   }
@@ -666,8 +684,41 @@ function checkRow(manifest: ToolsManifest, row: ToolRow): void {
   }
 }
 
+/** Door `comment` holds one shape of row (M70.3): a read of one note, which
+ * posts beside it and draws as a step. Judged before the door's own lists,
+ * so a misplaced row hears this one sentence whatever else it breaks. */
+function checkCommentDoor(subject: string, row: ToolRow): void {
+  const shaped =
+    row.axis === 'read' &&
+    row.target?.kind === 'note' &&
+    row.kind === 'additive' &&
+    row.renderer === 'step';
+  if (row.door === COMMENT_DOOR && !shaped) {
+    throw refusal(
+      subject,
+      'door',
+      'comment takes only axis read, a note target, kind additive and renderer step',
+    );
+  }
+}
+
+/** `confirmable` sits only on a tool that writes the person's pages (M57.4):
+ * a door that writes, and the write or read_write axis. */
+function checkConfirmable(manifest: ToolsManifest, subject: string, row: ToolRow): void {
+  if (!row.confirmable) return;
+  if (manifest.doors.find((door) => door.id === row.door)?.writes !== true) {
+    throw refusal(subject, 'confirmable', `is true on door ${row.door}, which writes nothing`);
+  }
+  if (row.axis !== 'write' && row.axis !== 'read_write') {
+    throw refusal(subject, 'confirmable', `needs the write or read_write axis, not ${row.axis}`);
+  }
+}
+
 function checkGenerated(manifest: ToolsManifest): void {
   const generated = manifest.generated;
+  if (generated.confirmable) {
+    throw refusal('generated', 'confirmable', 'must be false: policy.v3 decides a proposal');
+  }
   if (!fits(generated.title_prefix, TITLE_LIMIT)) {
     throw refusal('generated', 'title_prefix', `must be 1 to ${TITLE_LIMIT} characters`);
   }
@@ -696,22 +747,11 @@ function checkCli(tool: CliTool): void {
       `${tool.renderer} draws a cerebro tool's own door, never a CLI tool`,
     );
   }
-  if (tool.with_shell && !tool.denied_without_shell && !tool.denied_when_read_scoped) {
-    throw refusal(
-      subject,
-      'with_shell',
-      'grants a tool that neither denied_without_shell nor denied_when_read_scoped withdraws',
-    );
+  if (tool.family === null || !SNAKE.test(tool.family)) {
+    throw refusal(subject, 'family', 'must name a tool-approval family, [a-z][a-z_]*');
   }
-  if (tool.denied_without_shell && tool.denied_when_read_scoped) {
-    throw refusal(
-      subject,
-      'denied_when_read_scoped',
-      "is set on a tool denied_without_shell already, so a read-scoped run's one deny list would name it twice",
-    );
-  }
-  if (tool.writes && !tool.denied_without_shell) {
-    throw refusal(subject, 'denied_without_shell', 'must be set on a tool that writes');
+  if (tool.subject !== null && !SNAKE.test(tool.subject)) {
+    throw refusal(subject, 'subject', 'must be null or an input field, [a-z][a-z_]*');
   }
   if (tool.renderer === 'change' && !tool.writes) {
     throw refusal(subject, 'renderer', 'change needs a tool that writes');
@@ -813,6 +853,11 @@ export interface ToolFacts {
   icon: string;
   /** The argument the call is aimed by; generated and CLI tools have none. */
   target: Target | null;
+  /** A hand-written row's title (M57.4: a write card's headline); null for
+   * a generated or CLI tool. */
+  title: string | null;
+  /** Does an ask-first agent's call wait for the person's Allow (M57.4)? */
+  confirmable: boolean;
 }
 
 /**
@@ -833,6 +878,8 @@ export function toolFacts(name: string): ToolFacts | null {
       fold: row.fold,
       icon: row.icon,
       target: row.target,
+      title: row.title,
+      confirmable: row.confirmable,
     };
   }
   const generated = TOOLS.generated;
@@ -844,6 +891,8 @@ export function toolFacts(name: string): ToolFacts | null {
       fold: null,
       icon: generated.icon,
       target: null,
+      title: null,
+      confirmable: false,
     };
   }
   const cli = CLI_TOOLS.get(bare);
@@ -855,7 +904,30 @@ export function toolFacts(name: string): ToolFacts | null {
       fold: cli.fold,
       icon: cli.icon,
       target: null,
+      title: null,
+      confirmable: false,
     };
   }
   return null;
+}
+
+/**
+ * Does `name` name a confirmable tool (M57.4)? Spelled any way the one name
+ * test takes (tools.rs's `confirmable`): trimmed, ignoring ASCII case, and
+ * with or without the `mcp__<server>__` prefix.
+ */
+export function isConfirmable(name: string): boolean {
+  const bare = bareToolName(name.trim().toLowerCase());
+  return ROWS.get(bare)?.confirmable === true;
+}
+
+/**
+ * The input schema of the hand-written tool `name` names, in either spelling,
+ * as the manifest holds it (M57.4b): what a write card's draft form is
+ * projected from. Null for a generated or CLI tool, or a name the manifest
+ * does not know. A confirmable row's schema holds no `{{token}}`, so it reads
+ * as served.
+ */
+export function toolSchema(name: string): unknown {
+  return ROWS.get(bareToolName(name.trim()))?.input_schema ?? null;
 }

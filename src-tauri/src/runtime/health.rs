@@ -8,7 +8,8 @@
 //! 1. **Reasoning-runtime health.** The CLI hit its quota. Evidence exists
 //!    and cannot currently be processed. Nothing about the world changed;
 //!    what changed is our ability to look at it. → `runtime_health`, plus a
-//!    window backoff and "N items unprocessed".
+//!    backoff that ends at the reset Claude Code reported (or, without one,
+//!    with the quota window) and "N items unprocessed".
 //! 2. **Source health.** A connector stopped answering. Reality may be
 //!    changing unobserved. → `source_connection` / `source_health`, and past
 //!    a threshold a portable `coverage.gap`.
@@ -28,8 +29,14 @@ use crate::ledger::schema::Dimension;
 
 /// The CLI's quota window. Backoff is keyed to it rather than to a duration,
 /// so two failures inside one window do not stack into a longer pause than
-/// the provider actually imposes.
+/// the provider actually imposes. A backoff with no reported reset lasts this
+/// long; one with a reset ends there (M56.14).
 pub const QUOTA_WINDOW_HOURS: i64 = 5;
+
+/// The furthest a reported reset may park ambient work (M56.14). The longest
+/// limit Claude Code names is weekly, so eight days covers it with a day to
+/// spare, and a garbled `resetsAt` cannot pause the runtime for good.
+pub const QUOTA_RESET_CEILING_DAYS: i64 = 8;
 
 /// How long a source may be blind before its blindness becomes epistemic.
 ///
@@ -135,37 +142,78 @@ pub fn quota_window_key(now: DateTime<Utc>) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuotaOutcome {
     pub window_key: String,
+    /// When the backoff ends, as stored: the latest end any failure in this
+    /// window asked for.
     pub until: String,
     /// Items returned to `pending` by the finalization that preceded this —
     /// the "N unprocessed" a banner names.
     pub unprocessed: i64,
 }
 
-/// Record a quota death: window-keyed backoff for every lane, degraded
-/// runtime health, and the count of work now waiting.
-///
-/// The backoff is GLOBAL (`vault_id IS NULL`) because the quota belongs to
-/// the subscription, not to a folder. A second vault would otherwise walk
-/// straight into the same wall and spend the retry.
+/// When a quota backoff that starts at `now` ends (M56.14): at the reset
+/// Claude Code reported, held to [`QUOTA_RESET_CEILING_DAYS`]; else, and for
+/// a reset that is not after `now`, one [`QUOTA_WINDOW_HOURS`] window. A past
+/// reset would end the pause at once and walk the next run into the same
+/// wall, so it is read as no reset at all.
+pub fn quota_backoff_end(
+    now: DateTime<Utc>,
+    reported_reset: Option<DateTime<Utc>>,
+) -> DateTime<Utc> {
+    match reported_reset {
+        Some(reset) if reset > now => reset.min(now + Duration::days(QUOTA_RESET_CEILING_DAYS)),
+        _ => now + Duration::hours(QUOTA_WINDOW_HOURS),
+    }
+}
+
+/// Record a quota death with no reported reset: a backoff of one window.
 pub fn record_quota_failure(
     conn: &Connection,
     store_uuid: &str,
     detail: &str,
     now: DateTime<Utc>,
 ) -> Result<QuotaOutcome, String> {
+    record_quota_failure_until_reset(conn, store_uuid, detail, now, None)
+}
+
+/// Record a quota death: window-keyed backoff for every lane, ending where
+/// [`quota_backoff_end`] says, degraded runtime health, and the count of
+/// work now waiting.
+///
+/// The backoff is GLOBAL (`vault_id IS NULL`) because the quota belongs to
+/// the subscription, not to a folder. A second vault would otherwise walk
+/// straight into the same wall and spend the retry. A second failure in the
+/// same window keeps the later end, so a run that died without a reset
+/// cannot shorten the pause a weekly limit's reset set.
+pub fn record_quota_failure_until_reset(
+    conn: &Connection,
+    store_uuid: &str,
+    detail: &str,
+    now: DateTime<Utc>,
+    reported_reset: Option<DateTime<Utc>>,
+) -> Result<QuotaOutcome, String> {
     let window_key = quota_window_key(now);
-    let until = stamp(now + Duration::hours(QUOTA_WINDOW_HOURS));
+    let until = stamp(quota_backoff_end(now, reported_reset));
     let lanes = super::settings::lanes_by_priority(conn)?;
     for lane in &lanes {
         conn.execute(
             "INSERT INTO backoff (vault_id, lane, until, reason, quota_window_key) \
              VALUES (NULL, ?1, ?2, 'quota', ?3) \
              ON CONFLICT (lane, quota_window_key) WHERE vault_id IS NULL \
-             DO UPDATE SET until = excluded.until",
+             DO UPDATE SET until = max(backoff.until, excluded.until)",
             rusqlite::params![lane, until, window_key],
         )
         .map_err(|e| format!("backoff: {e}"))?;
     }
+    // What the rows now hold, which a reset seen earlier in this window may
+    // have set later than this failure's own end.
+    let until: String = conn
+        .query_row(
+            "SELECT coalesce(max(until), ?2) FROM backoff \
+             WHERE vault_id IS NULL AND quota_window_key = ?1",
+            rusqlite::params![window_key, until],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("backoff: {e}"))?;
     set_runtime_health(
         conn,
         COMPONENT_CLI,
@@ -535,6 +583,65 @@ mod tests {
         assert_eq!(rows, 14);
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_reported_reset_ends_the_backoff_and_the_outcome_reports_the_stored_end() {
+        // M56.14: a weekly limit pauses until its reset, not five hours at a
+        // time, and the rows and the outcome say the same instant.
+        let (dir, conn, _) = fixture("health-reset");
+        let now = at("2026-08-09T10:00:00Z");
+        let reset = at("2026-08-12T10:00:00Z");
+        let outcome =
+            record_quota_failure_until_reset(&conn, "store", "weekly limit", now, Some(reset))
+                .unwrap();
+        assert_eq!(outcome.until, "2026-08-12T10:00:00.000Z");
+        let stored: Vec<String> = {
+            let mut statement = conn
+                .prepare("SELECT DISTINCT until FROM backoff WHERE vault_id IS NULL")
+                .unwrap();
+            let rows = statement.query_map([], |row| row.get(0)).unwrap();
+            rows.collect::<Result<_, _>>().unwrap()
+        };
+        assert_eq!(stored, vec![outcome.until.clone()], "every lane, one end");
+
+        // A failure later in the same window that reported no reset keeps
+        // the reset's end: it cannot shorten the pause to five hours.
+        let again =
+            record_quota_failure(&conn, "store", "limit", at("2026-08-09T11:00:00Z")).unwrap();
+        assert_eq!(again.until, "2026-08-12T10:00:00.000Z", "the stored end");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_past_or_absurd_reset_is_clamped() {
+        let now = at("2026-08-09T10:00:00Z");
+        assert_eq!(
+            quota_backoff_end(now, None),
+            at("2026-08-09T15:00:00Z"),
+            "no reset keeps the window"
+        );
+        assert_eq!(
+            quota_backoff_end(now, Some(at("2026-08-09T09:00:00Z"))),
+            at("2026-08-09T15:00:00Z"),
+            "a reset already past is no reset"
+        );
+        assert_eq!(
+            quota_backoff_end(now, Some(now)),
+            at("2026-08-09T15:00:00Z"),
+            "nor is one at this instant"
+        );
+        assert_eq!(
+            quota_backoff_end(now, Some(at("2026-08-09T11:00:00Z"))),
+            at("2026-08-09T11:00:00Z"),
+            "a reset inside the window ends it early"
+        );
+        assert_eq!(
+            quota_backoff_end(now, Some(at("2031-01-01T00:00:00Z"))),
+            at("2026-08-17T10:00:00Z"),
+            "a reset years out is held to the ceiling"
+        );
     }
 
     #[test]

@@ -35,14 +35,16 @@ export function RunWhy({
 }) {
   const text = runWhyText(cause, startedAt);
   // The row truncates; the whole sentence, and the subject it was started
-  // about, are a hover away.
+  // about, are a hover away. `flex-1` (a zero basis) splits the leftover
+  // width evenly with the row's other `flex-1` column — who, or when — so a
+  // long why can never squeeze that column to nothing.
   const subject = cause?.subject ?? null;
   return (
     <span
       data-testid="run-why"
       data-kind={cause?.kind}
       title={subject === null ? text : `${text} — ${subject}`}
-      className="min-w-0 truncate text-2xs text-n-500"
+      className="min-w-0 flex-1 truncate text-2xs text-n-500"
     >
       {text}
     </span>

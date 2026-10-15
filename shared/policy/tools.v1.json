@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "artifact_version": 4,
+  "artifact_version": 10,
   "rule_version": "tools/2026-10-14",
   "server": "cerebro",
   "tokens": {
@@ -92,6 +92,16 @@
       "axes": [
         "none"
       ]
+    },
+    {
+      "id": "comment",
+      "writes": false,
+      "kinds": [
+        "additive"
+      ],
+      "axes": [
+        "read"
+      ]
     }
   ],
   "toolsets": [
@@ -104,6 +114,11 @@
       "id": "write",
       "label": "Write to the vault",
       "hint": "Creates and edits notes — inside whatever scope is set below."
+    },
+    {
+      "id": "comment",
+      "label": "Comment on pages",
+      "hint": "Start, answer and resolve comment threads beside a page. The page itself never changes."
     },
     {
       "id": "knowledge",
@@ -158,6 +173,7 @@
       },
       "icon": "compass",
       "always_load": true,
+      "confirmable": false,
       "search_hint": "vault overview types counts inbox",
       "description": "Orient yourself: what this app is, the vault's types and collections, note counts, and how many captures are waiting in the Inbox. Call this first.",
       "input_schema": {
@@ -170,7 +186,7 @@
       "name": "search_notes",
       "surface": "base",
       "title": "Search notes",
-      "summary": "Search titles, bodies and frontmatter",
+      "summary": "Keyword search over titles, properties and text",
       "toolset": "read",
       "kind": "read_only",
       "idempotent": true,
@@ -186,27 +202,93 @@
       },
       "icon": "search",
       "always_load": true,
+      "confirmable": false,
       "search_hint": "find notes by text",
-      "description": "Full-text search over note titles, bodies, and frontmatter. Returns paths with matching excerpts.",
+      "description": "Keyword search over the notes this run may read: titles, types, frontmatter values (description, status, tags and other properties, and the pages a property links to) and body text. It is not semantic search: it matches whole words, ignoring case, with no stemming (risk and risks differ), so search for words the note itself would contain, and search for a person and a topic separately rather than in one long question. Pass in: name to match titles only, or in: content to match everything except titles. A note must contain every informative word somewhere; when none contains them all, the answer says so and returns the closest matches. Put a phrase in double quotes, as in \"release checklist\", and notes containing that exact phrase rank first. At most 50 distinct words are searched and each is cut to 80 characters; the answer says when either cap applied. Results come best first, up to limit, and the answer says how many more matched but are not shown. Each hit gives the path, title, type and labels (a knowledge concept's review state, lifecycle and replacement; a template; an Inbox capture; a note past its stale_after date), then the matching line, cut to about 240 characters, with its line number in the note's body, or the frontmatter field that matched. Notes outside this run's read scope are never searched, and the answer counts them.",
       "input_schema": {
         "type": "object",
         "properties": {
           "query": {
             "type": "string",
-            "description": "Text to search for"
+            "description": "Words to find. Put a phrase in double quotes to rank notes holding it first."
           },
           "type": {
             "type": "string",
-            "description": "Optional: only notes with this frontmatter type"
+            "description": "Only notes of this type, ignoring case. An unknown type is refused with the types in use."
           },
           "limit": {
             "type": "number",
-            "description": "Max results (default 20)"
+            "description": "Max results (default 20, at most 100)."
+          },
+          "in": {
+            "type": "string",
+            "enum": [
+              "name",
+              "content",
+              "all"
+            ],
+            "description": "Where to match: name (titles only), content (everything except titles) or all (the default)."
           }
         },
         "required": [
           "query"
         ]
+      }
+    },
+    {
+      "name": "list_notes",
+      "surface": "base",
+      "title": "List notes",
+      "summary": "Browse notes by type, folder or date",
+      "toolset": "read",
+      "kind": "read_only",
+      "idempotent": true,
+      "open_world": false,
+      "door": "none",
+      "axis": "read",
+      "target": null,
+      "exempt": null,
+      "renderer": "step",
+      "fold": {
+        "one": "listed notes",
+        "many": "listed notes {n} times"
+      },
+      "icon": "list-filter",
+      "always_load": false,
+      "confirmable": false,
+      "search_hint": "list notes by type folder or date",
+      "description": "Browse the notes this run may read without a search term: filter by type, by folder (subfolders included) or by when a note's file last changed, and sort the result. Use it for questions like \"what changed this week\", \"list the Risk records\" or \"what is in this folder\"; to find notes by the words they contain, use keyword search instead. Each line gives the path, title, type, labels (a knowledge concept's review state and replacement, a template, an Inbox capture, a note past its stale_after date) and a time. modified is when the file last changed on this disk, which any save, sync or checkout moves; created is when the file first appeared on this disk, which a copy or clone resets. modified_since takes a date such as 2026-10-01, read as 00:00 UTC, or an RFC 3339 time. sort is modified (the default) or created, newest first, or title or path, A to Z. Up to limit notes are listed (default 50, at most 200), and the answer says how many more matched. An unknown type is refused with the types in use. Notes outside this run's read scope are never listed, and the answer counts them.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Only notes of this type, ignoring case. An unknown type is refused with the types in use."
+          },
+          "folder": {
+            "type": "string",
+            "description": "Only notes in this vault-relative folder and its subfolders, such as records/risks."
+          },
+          "modified_since": {
+            "type": "string",
+            "description": "Only notes whose file changed at or after this time: a date such as 2026-10-01 (00:00 UTC) or an RFC 3339 time."
+          },
+          "sort": {
+            "type": "string",
+            "enum": [
+              "modified",
+              "created",
+              "title",
+              "path"
+            ],
+            "description": "modified (default) or created, newest first; title or path, A to Z."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max notes (default 50, at most 200)."
+          }
+        },
+        "required": []
       }
     },
     {
@@ -232,8 +314,9 @@
       },
       "icon": "file-text",
       "always_load": true,
+      "confirmable": false,
       "search_hint": "read one note in full",
-      "description": "Read one note in full: frontmatter and body. For knowledge/ concepts the derived trust tier is included. The Hash line names the note's exact bytes: pass it as expect_hash to update_frontmatter, append_to_note or edit_note, and the write lands only if the note is unchanged since this read.",
+      "description": "Read one note in full: frontmatter and body. For knowledge/ concepts the derived trust tier is included. The Hash line names the note's exact bytes: pass it as expect_hash to update_frontmatter, append_to_note or edit_note, and the write lands only if the note is unchanged since this read. Its header also lists the note's open comment threads with their ids, for reply_to_comment and resolve_comment.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -270,6 +353,7 @@
       },
       "icon": "library",
       "always_load": true,
+      "confirmable": false,
       "search_hint": "what knowledge says about an entity",
       "description": "What the knowledge/ bundle already knows about one entity — the same read the app shows beside a record. Call it before answering a question about something the vault holds, so you build on what the base has already worked out instead of rediscovering it. Reports each concept's description, type, lifecycle, whether a human has verified it, whether it is due a recheck, what replaced it, and what it disagrees with. Reading only: nothing here writes. An entity nobody has written about comes back empty and says so — that is an answer, not a failure.",
       "input_schema": {
@@ -306,6 +390,7 @@
       "fold": null,
       "icon": "flag",
       "always_load": true,
+      "confirmable": false,
       "search_hint": "report an ingest window verdict",
       "description": "Background ingest only: report what you concluded about this run's change-window, once, at the end. `material` requires that you actually proposed something; `undetermined` names one blocked_reason. Say which of the four dimensions you evaluated.",
       "input_schema": {
@@ -385,6 +470,7 @@
       "fold": null,
       "icon": "send",
       "always_load": true,
+      "confirmable": false,
       "search_hint": "submit a synthesis answer",
       "description": "Attended synthesis only: submit the nine-part answer to the question this run was given, once. It is checked against the working-memory manifest the app assembled — every ref must name an item that manifest held, and the intended use must come back unchanged. A refusal names what to fix.",
       "input_schema": {
@@ -420,6 +506,7 @@
       },
       "icon": "inbox",
       "always_load": false,
+      "confirmable": false,
       "search_hint": "inbox captures waiting to be filed",
       "description": "Captures waiting to be organized: untyped notes the user has not yet filed.",
       "input_schema": {
@@ -445,6 +532,7 @@
       "fold": null,
       "icon": "forward",
       "always_load": false,
+      "confirmable": false,
       "search_hint": "start another agent with a task",
       "description": "Start a run of another agent with a task. Fire-and-forget: the callee runs under its OWN scope and tools (calling never lends yours), writes to the vault, and cannot reply here — read its output from the vault, or say where the user can. Two hops then it stops; a cycle refuses; a paused agent cannot be called.",
       "input_schema": {
@@ -485,6 +573,7 @@
       "fold": null,
       "icon": "file-plus",
       "always_load": false,
+      "confirmable": true,
       "search_hint": "create a new note",
       "description": "Create a note. Use for ordinary vault content, not knowledge concepts (use write_concept for those).",
       "input_schema": {
@@ -534,6 +623,7 @@
       "fold": null,
       "icon": "list",
       "always_load": false,
+      "confirmable": true,
       "search_hint": "set or remove note properties",
       "description": "Patch a note's frontmatter. Keys set to null are removed; untouched keys and key order are preserved. Pass the hash from get_note's Hash line as expect_hash: if the note changed since you read it, the write is refused as stale_content, nothing is written, and you should read it again.",
       "input_schema": {
@@ -577,6 +667,7 @@
       "fold": null,
       "icon": "file-pen",
       "always_load": false,
+      "confirmable": true,
       "search_hint": "add text to the end of a note",
       "description": "Append markdown to the end of an existing note's body. Pass the hash from get_note's Hash line as expect_hash: if the note changed since you read it, the write is refused as stale_content, nothing is written, and you should read it again.",
       "input_schema": {
@@ -619,6 +710,7 @@
       "fold": null,
       "icon": "replace",
       "always_load": false,
+      "confirmable": true,
       "search_hint": "replace quoted text in a note",
       "description": "Change text that is already in a note, in place. Each edit replaces one passage: put the passage in `old`, quoted exactly as get_note shows the note's body (same spacing, line breaks and markdown), and the markdown that replaces it in `new`; an empty `new` deletes the passage. If `old` appears more than once, nothing is written and the reply lists each appearance with its line: pass `occurrence` (counting from 1) or quote a longer passage. Every edit is matched against the note as it is now, they all land together or none do, and nothing you did not quote changes. Lines that start with `:::` and fences named `cerebro-…` hold page blocks; keep each one whole. The frontmatter is not edited here; use update_frontmatter. Pass the hash from get_note's `Hash:` line as `expect_hash`: if the note changed since you read it, nothing is written and you should read it again. knowledge/ concepts, `type: Type` docs and `type: Agent` records are refused, and the run needs read access to the note as well as write access.",
       "input_schema": {
@@ -664,6 +756,146 @@
       }
     },
     {
+      "name": "comment_on_note",
+      "surface": "base",
+      "title": "Comment on a note",
+      "summary": "Comment on a note or a quoted passage",
+      "toolset": "comment",
+      "kind": "additive",
+      "idempotent": false,
+      "open_world": false,
+      "door": "comment",
+      "axis": "read",
+      "target": {
+        "arg": "path",
+        "kind": "note"
+      },
+      "exempt": null,
+      "renderer": "step",
+      "fold": null,
+      "icon": "message-square-plus",
+      "always_load": false,
+      "confirmable": false,
+      "search_hint": "comment on a note or a quoted passage",
+      "description": "Post a comment on a note without changing the note itself. Use it when the person asked you to review, question or flag something in a note, or when your standing instructions say to; do not comment unprompted. Pass `quote` to anchor the comment to a passage: plain words from one line, exactly as get_note shows them, with no markdown inside (no `**`, backticks or link brackets); for a formatted passage, quote a part that has none. If the quote appears more than once, nothing is posted and the reply lists each appearance with its line: pass `occurrence` (counting from 1) or quote a longer passage. Leave `quote` out to comment on the whole page. `text` is the comment, in markdown, at most 8000 characters. Each call starts its own thread; to answer one that exists, use reply_to_comment, and get_note lists a note's open threads with their ids. The person sees comments beside the page, and the note's file never changes. The run needs read access to the note.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Vault-relative path of the note, as get_note takes it."
+          },
+          "quote": {
+            "type": "string",
+            "description": "Plain words from one line of the body, exactly as get_note shows them. Leave it out to comment on the whole page."
+          },
+          "occurrence": {
+            "type": "integer",
+            "description": "Which appearance of `quote` is meant, counting from 1, when it appears more than once."
+          },
+          "text": {
+            "type": "string",
+            "description": "The comment, in markdown, at most 8000 characters."
+          }
+        },
+        "required": [
+          "path",
+          "text"
+        ]
+      }
+    },
+    {
+      "name": "reply_to_comment",
+      "surface": "base",
+      "title": "Reply to a comment",
+      "summary": "Reply in an open comment thread",
+      "toolset": "comment",
+      "kind": "additive",
+      "idempotent": false,
+      "open_world": false,
+      "door": "comment",
+      "axis": "read",
+      "target": {
+        "arg": "path",
+        "kind": "note"
+      },
+      "exempt": null,
+      "renderer": "step",
+      "fold": null,
+      "icon": "message-square-reply",
+      "always_load": false,
+      "confirmable": false,
+      "search_hint": "reply in a comment thread on a note",
+      "description": "Reply in a comment thread that is already open on a note. `thread` is the id get_note prints beside each open thread, and `text` is your reply, in markdown, at most 8000 characters. The reply is posted under your name at the end of that thread; the note's file never changes. A resolved or deleted thread refuses the reply: start a new comment with comment_on_note if your point is new. The run needs read access to the note.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Vault-relative path of the note."
+          },
+          "thread": {
+            "type": "string",
+            "description": "The thread's id, as get_note lists it."
+          },
+          "text": {
+            "type": "string",
+            "description": "Your reply, in markdown, at most 8000 characters."
+          }
+        },
+        "required": [
+          "path",
+          "thread",
+          "text"
+        ]
+      }
+    },
+    {
+      "name": "resolve_comment",
+      "surface": "base",
+      "title": "Resolve a comment thread",
+      "summary": "Resolve a comment thread, with an optional closing note",
+      "toolset": "comment",
+      "kind": "additive",
+      "idempotent": false,
+      "open_world": false,
+      "door": "comment",
+      "axis": "read",
+      "target": {
+        "arg": "path",
+        "kind": "note"
+      },
+      "exempt": null,
+      "renderer": "step",
+      "fold": null,
+      "icon": "circle-check",
+      "always_load": false,
+      "confirmable": false,
+      "search_hint": "resolve a comment thread on a note",
+      "description": "Mark an open comment thread on a note resolved, once what it raised has been dealt with. `thread` is the id get_note prints beside it. Pass `text` to post a closing reply in the same step, saying what was done (markdown, at most 8000 characters). Resolve threads you were asked to handle or that you started; the person can reopen any thread, and the page shows who resolved it. The note's file never changes. The run needs read access to the note.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Vault-relative path of the note."
+          },
+          "thread": {
+            "type": "string",
+            "description": "The thread's id, as get_note lists it."
+          },
+          "text": {
+            "type": "string",
+            "description": "A closing reply saying what was done, in markdown, at most 8000 characters."
+          }
+        },
+        "required": [
+          "path",
+          "thread"
+        ]
+      }
+    },
+    {
       "name": "write_concept",
       "surface": "base",
       "title": "Write a concept",
@@ -683,6 +915,7 @@
       "fold": null,
       "icon": "brain",
       "always_load": false,
+      "confirmable": false,
       "search_hint": "record a knowledge concept",
       "description": "Create or replace a concept in the knowledge/ bundle (Open Knowledge Format). You maintain this bundle; the user only verifies it. Always record where a claim came from in `sources`. Never write `verified` — that is the human's stamp, and claiming it would defeat the review model. If the body says one thing replaced, narrowed or disagrees with another, say it in `supersedes`/`refines`/`contradicts` as well: prose is for the reader, the fields are what lets anything answer 'is this still true'. Only assert a relation whose target you read in this run.",
       "input_schema": {
@@ -786,6 +1019,7 @@
       "fold": null,
       "icon": "calendar-check",
       "always_load": false,
+      "confirmable": false,
       "search_hint": "mark a concept still true",
       "description": "Record that a concept you rechecked STILL HOLDS, and when to check it next. Moves `stale_after` and nothing else — no rewrite, no new timestamp, no log entry. Use this, not write_concept, for the 'still true' verdict; use write_concept only when the content itself changes. Refused for a concept a person has verified: say what you found in your reply instead. On a concept a machine confirmed, or a heavily referenced one, the stamp waits for a person's approval.",
       "input_schema": {
@@ -826,6 +1060,7 @@
       "fold": null,
       "icon": "download",
       "always_load": false,
+      "confirmable": false,
       "search_hint": "save fetched external material",
       "description": "Write down external material you just fetched — a Jira ticket, a Confluence page, a web page — as a local working doc under sources/. ALWAYS call this after fetching through a connector. The point is that the next question about the same thing reads a file instead of spending another round trip, so the copy has to exist locally before the conversation moves on. Check with search_notes whether a copy already exists before fetching at all.",
       "input_schema": {
@@ -883,6 +1118,7 @@
       "fold": null,
       "icon": "wand-sparkles",
       "always_load": false,
+      "confirmable": false,
       "search_hint": "suggest how to file a capture",
       "description": "Propose how to file an Inbox capture. This does NOT write — it shows the user an accept/reject card. Use it instead of editing a capture directly.",
       "input_schema": {
@@ -935,6 +1171,7 @@
       "fold": null,
       "icon": "eye",
       "always_load": false,
+      "confirmable": false,
       "search_hint": "show a note to the user",
       "description": "Open a note in the cerebro UI so the user sees what you are talking about.",
       "input_schema": {
@@ -966,18 +1203,37 @@
       "fold": null,
       "icon": "compass",
       "always_load": false,
+      "confirmable": false,
       "search_hint": "move the app to a surface",
-      "description": "Move the cerebro UI to a surface: home, inbox, knowledge, or a saved view.",
+      "description": "Move the cerebro UI so the user sees what you are talking about. `to` is one of the app's places, or view to open a database: name it in `database`, and pick a saved view with `view` (else its first). Changes nothing on disk.",
       "input_schema": {
         "type": "object",
         "properties": {
           "to": {
             "type": "string",
-            "description": "home | inbox | knowledge | view"
+            "enum": [
+              "inbox",
+              "home",
+              "my_work",
+              "studio",
+              "history",
+              "library",
+              "work",
+              "knowledge",
+              "agents",
+              "changes",
+              "settings",
+              "view"
+            ],
+            "description": "Where to go: a place the sidebar names, or view for a database."
           },
-          "id": {
+          "database": {
             "type": "string",
-            "description": "View id, when to = view"
+            "description": "With to = view: the database's name, the type its records carry (e.g. Decision)."
+          },
+          "view": {
+            "type": "string",
+            "description": "With to = view: one of that database's saved views, by id or name. Omit it for the first view."
           }
         },
         "required": [
@@ -1002,6 +1258,7 @@
       "fold": null,
       "icon": "check-check",
       "always_load": false,
+      "confirmable": false,
       "search_hint": "apply this run's proposals",
       "description": "Close this run's proposal set and decide it as one atomic batch. Nothing you proposed has been applied before this call. Returns each proposal's outcome: applied, queued for a person, or rejected with the rule that refused it.",
       "input_schema": {
@@ -1034,65 +1291,60 @@
     "renderer": "step",
     "icon": "git-pull-request-arrow",
     "always_load": false,
+    "confirmable": false,
     "search_hint": "propose a knowledge change"
   },
   "cli_tools": [
     {
       "name": "Write",
+      "family": "file_write",
+      "subject": "file_path",
       "writes": true,
-      "denied_without_shell": true,
-      "denied_when_read_scoped": false,
-      "with_shell": true,
       "renderer": "change",
       "fold": null,
       "icon": "pencil"
     },
     {
       "name": "Edit",
+      "family": "file_write",
+      "subject": "file_path",
       "writes": true,
-      "denied_without_shell": true,
-      "denied_when_read_scoped": false,
-      "with_shell": true,
       "renderer": "change",
       "fold": null,
       "icon": "file-pen"
     },
     {
       "name": "MultiEdit",
+      "family": "file_write",
+      "subject": "file_path",
       "writes": true,
-      "denied_without_shell": true,
-      "denied_when_read_scoped": false,
-      "with_shell": false,
       "renderer": "change",
       "fold": null,
       "icon": "file-pen"
     },
     {
       "name": "NotebookEdit",
+      "family": "file_write",
+      "subject": "notebook_path",
       "writes": true,
-      "denied_without_shell": true,
-      "denied_when_read_scoped": false,
-      "with_shell": false,
       "renderer": "change",
       "fold": null,
       "icon": "notebook-pen"
     },
     {
       "name": "Bash",
+      "family": "shell",
+      "subject": "command",
       "writes": false,
-      "denied_without_shell": true,
-      "denied_when_read_scoped": false,
-      "with_shell": true,
       "renderer": "step",
       "fold": null,
       "icon": "terminal"
     },
     {
       "name": "Read",
+      "family": "file_read",
+      "subject": "file_path",
       "writes": false,
-      "denied_without_shell": false,
-      "denied_when_read_scoped": true,
-      "with_shell": true,
       "renderer": "step",
       "fold": {
         "one": "read a file",
@@ -1102,10 +1354,9 @@
     },
     {
       "name": "Glob",
+      "family": "file_read",
+      "subject": "pattern",
       "writes": false,
-      "denied_without_shell": false,
-      "denied_when_read_scoped": true,
-      "with_shell": true,
       "renderer": "step",
       "fold": {
         "one": "listed files",
@@ -1115,10 +1366,9 @@
     },
     {
       "name": "Grep",
+      "family": "file_read",
+      "subject": "pattern",
       "writes": false,
-      "denied_without_shell": false,
-      "denied_when_read_scoped": true,
-      "with_shell": true,
       "renderer": "step",
       "fold": {
         "one": "searched files",
@@ -1128,33 +1378,48 @@
     },
     {
       "name": "WebFetch",
+      "family": "web",
+      "subject": "url",
       "writes": false,
-      "denied_without_shell": false,
-      "denied_when_read_scoped": false,
-      "with_shell": false,
       "renderer": "step",
       "fold": null,
       "icon": "globe"
     },
     {
       "name": "WebSearch",
+      "family": "web",
+      "subject": "query",
       "writes": false,
-      "denied_without_shell": false,
-      "denied_when_read_scoped": false,
-      "with_shell": false,
       "renderer": "step",
       "fold": null,
       "icon": "globe"
     },
     {
       "name": "Task",
+      "family": "delegate",
+      "subject": "description",
       "writes": false,
-      "denied_without_shell": false,
-      "denied_when_read_scoped": false,
-      "with_shell": false,
       "renderer": "step",
       "fold": null,
       "icon": "bot"
+    },
+    {
+      "name": "AskUserQuestion",
+      "family": "question",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "message-circle-question-mark"
+    },
+    {
+      "name": "ExitPlanMode",
+      "family": "plan",
+      "subject": null,
+      "writes": false,
+      "renderer": "step",
+      "fold": null,
+      "icon": "clipboard-check"
     }
   ]
 }

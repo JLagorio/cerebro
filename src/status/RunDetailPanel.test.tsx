@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PageWrite } from '@/engine/attribution';
 import { makeEntry } from '@/engine/testHelpers';
 import type { FleetRefusal, FleetRun, FleetRunDetail } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
@@ -71,6 +72,18 @@ function detail(over: Partial<FleetRunDetail> = {}): FleetRunDetail {
     model_id: 'claude-opus-5',
     refusals: [],
     refusals_total: 0,
+    wrote: { state: 'not_recorded' },
+    ...over,
+  };
+}
+
+function wrote(over: Partial<PageWrite> = {}): PageWrite {
+  return {
+    kind: 'vault.write',
+    path: 'records/risks/risk-scanner-delivery.md',
+    to: null,
+    at: '2026-07-28T09:17:00.000Z',
+    approved_by: null,
     ...over,
   };
 }
@@ -184,6 +197,69 @@ describe('RunDetailPanel', () => {
     expect(screen.getByTestId('run-transcript-state').textContent).toBe(
       'Transcript not recorded for this run.',
     );
+  });
+
+  it('names the pages the run wrote, each opening its page, and leaves Knowledge out', () => {
+    const page = makeEntry({
+      path: 'records/risks/risk-scanner-delivery.md',
+      filename: 'risk-scanner-delivery.md',
+      folder: 'records/risks',
+      title: 'Scanner delivery',
+    });
+    useVaultStore.setState({ entries: [page] });
+    show(
+      detail({
+        wrote: {
+          state: 'recorded',
+          writes: [
+            wrote(),
+            wrote({ path: 'knowledge/systems/pick-queue-drain.md' }),
+            wrote({ kind: 'vault.create', path: 'records/risks/new.md', approved_by: 'human:me' }),
+          ],
+        },
+      }),
+    );
+    const pages = screen.getByTestId('run-detail-pages');
+    const rows = within(pages).getAllByTestId('run-detail-page');
+    expect(rows.map((r) => [r.dataset.path, r.textContent])).toEqual([
+      ['records/risks/risk-scanner-delivery.md', 'Scanner deliverychanged'],
+      ['records/risks/new.md', 'records/risks/new.mdcreated · you allowed it'],
+    ]);
+    expect(within(pages).queryByTestId('run-detail-shell-unrecorded')).toBeNull();
+    fireEvent.click(rows[0]);
+    expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: page.path });
+  });
+
+  it('a booked run that wrote nothing says it wrote no pages', () => {
+    show(detail({ wrote: { state: 'recorded', writes: [] } }));
+    expect(screen.getByTestId('run-detail-pages').textContent).toContain('Wrote no pages');
+  });
+
+  it('a run that wrote only Knowledge pages wrote no pages here', () => {
+    show(
+      detail({
+        wrote: { state: 'recorded', writes: [wrote({ path: 'knowledge/systems/x.md' })] },
+      }),
+    );
+    const pages = screen.getByTestId('run-detail-pages');
+    expect(within(pages).queryByTestId('run-detail-page')).toBeNull();
+    expect(pages.textContent).toContain('Wrote no pages');
+  });
+
+  it('a run whose shell could write never reads complete', () => {
+    show(detail({ wrote: { state: 'partial', writes: [] } }));
+    const pages = screen.getByTestId('run-detail-pages');
+    expect(pages.textContent).toContain('Wrote no pages');
+    expect(within(pages).getByTestId('run-detail-shell-unrecorded').textContent).toBe(
+      'Shell changes not recorded',
+    );
+  });
+
+  it('a run from before writes were booked reads not recorded, never wrote nothing', () => {
+    show(detail());
+    const pages = screen.getByTestId('run-detail-pages');
+    expect(pages.textContent).toBe('Pages written: not recorded');
+    expect(pages.textContent).not.toContain('Wrote no pages');
   });
 
   it('still never says $0', () => {

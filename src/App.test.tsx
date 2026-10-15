@@ -415,16 +415,18 @@ describe('App boot flow', () => {
       const assistant = screen.getByTestId('ai-panel');
       for (const width of [1150, 1000, 1300, 1000, 1150]) {
         resizeTo(width);
-        // The same node: unmounting it is what kills the run mid-answer.
+        // The same node: a remount would detach it from its turn and read
+        // the thread back, which a resize has no business costing (M57.6).
         expect(screen.getByTestId('ai-panel')).toBe(assistant);
       }
       expect(screen.getAllByTestId('ai-panel')).toHaveLength(1);
     });
 
     it('a vault switch remounts the assistant, so no turn outlives its vault (M53.10)', async () => {
-      // The one remount the frame allows, and on purpose: unmounting the
-      // assistant ends its turn, and a turn asked in one vault has no
-      // business answering in the next.
+      // The one remount the frame allows, and on purpose: Rust ends the old
+      // vault's runs as the new one opens, and a panel keyed by the vault
+      // lets go of them, so a turn asked in one vault never answers in the
+      // next.
       render(<App />);
       await screen.findByRole('navigation', { name: 'Sidebar' });
       act(() => useUiStore.getState().setAiPanelOpen(true));
@@ -495,8 +497,9 @@ describe('App boot flow', () => {
       act(() => useUiStore.getState().openDetail(BET));
       // The record takes the visible slot, because something just asked for it
       // to be seen. The assistant is STILL MOUNTED inside the parking box —
-      // unmounting it is what killed the run mid-answer, and a narrow window
-      // must not be a way back into that bug.
+      // unmounting it once killed the run mid-answer (M17.2), and even now
+      // that a turn outlives its panel (M57.6), a narrow window must not
+      // detach a turn someone is watching.
       const parked = await screen.findByTestId('ai-panel-frame');
       expect(parked.dataset.parked).toBe('true');
       expect(parked.querySelector('[data-testid="ai-panel"]')).not.toBeNull();

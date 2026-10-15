@@ -409,9 +409,8 @@ const CATALOG_BUDGET = 1_400;
  * feature is noise in every conversation.
  *
  * How to reach a skill names a tool, so it follows the run's grant (M54.7):
- * reading one's note is offered only to a run that holds get_note, and
- * searching for the unlisted ones only to a run that holds search_notes. A
- * run that holds both reads what every run read before.
+ * reading one's note is offered only to a run that holds get_note, and the
+ * way to the unlisted ones is the first of `OVERFLOW` the run holds.
  */
 export function skillIndex(skills: SkillRef[], grant: PromptGrant): string | null {
   if (skills.length === 0) return null;
@@ -440,8 +439,26 @@ export function skillIndex(skills: SkillRef[], grant: PromptGrant): string | nul
     // set, and the agent will tell the user a skill does not exist.
     (omitted > 0
       ? ` ${omitted} more ${omitted === 1 ? 'skill is' : 'skills are'} defined but not listed here${
-          holds(grant, 'search_notes') ? ' — search_notes for type Skill to find them.' : '.'
+          OVERFLOW.find((way) => holds(grant, ...way.uses))?.text ?? '.'
         }`
       : '')
   );
 }
+
+/** One ending of the catalogue's line about the skills it did not list,
+ * with the tools it names (M54.7's fragment shape). */
+interface OverflowEnding {
+  uses: readonly string[];
+  text: string;
+}
+
+/**
+ * The ways to the unlisted skills, best first (M59.5): list_notes lists every
+ * Skill with no query, search_notes needs one, and a run holding neither is
+ * told only that they exist. The last names no tool, so it always applies.
+ */
+const OVERFLOW: readonly OverflowEnding[] = [
+  { uses: ['list_notes'], text: ' — call list_notes with type Skill to see them all.' },
+  { uses: ['search_notes'], text: ' — search_notes for type Skill to find them.' },
+  { uses: [], text: '.' },
+];

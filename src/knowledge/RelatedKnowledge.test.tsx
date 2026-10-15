@@ -49,7 +49,7 @@ const CONCEPT = entry('knowledge/risks/thermal-margin.md', 'Thermal margin unpro
 
 beforeEach(() => {
   useVaultStore.setState({ entries: [RECORD, CONCEPT] });
-  useUiStore.setState({ agentPendingPrompt: null, aiPanelOpen: false });
+  useUiStore.setState({ handoffs: [], aiPanelOpen: false });
 });
 
 afterEach(cleanup);
@@ -59,7 +59,7 @@ describe('asking the base from the work', () => {
     render(<RelatedKnowledge entry={RECORD} />);
     fireEvent.click(screen.getByRole('button', { name: ASK }));
 
-    const pending = useUiStore.getState().agentPendingPrompt;
+    const pending = useUiStore.getState().handoffs.at(-1);
     expect(pending?.text).toContain('knowledge_about');
     expect(pending?.text).toContain('records/reqs/rq-84b.md');
     // The record travels as the SUBJECT too (M17.6) — a context chip, so the
@@ -82,7 +82,7 @@ describe('asking the base from the work', () => {
     // M8's tone rule. A surface that opened the assistant on render would be
     // a notification wearing a section's clothes.
     render(<RelatedKnowledge entry={RECORD} />);
-    expect(useUiStore.getState().agentPendingPrompt).toBe(null);
+    expect(useUiStore.getState().handoffs).toEqual([]);
     expect(useUiStore.getState().aiPanelOpen).toBe(false);
   });
 
@@ -92,13 +92,11 @@ describe('asking the base from the work', () => {
     // the one that reaches concepts this list cannot.
     render(<RelatedKnowledge entry={RECORD} askPrompt="what am I missing" />);
     fireEvent.click(screen.getByRole('button', { name: "What's missing?" }));
-    expect(useUiStore.getState().agentPendingPrompt?.text).toBe('what am I missing');
-    expect(useUiStore.getState().agentPendingPrompt?.label).toBe(
-      "What's missing? · RQ-84B Kestrel",
-    );
+    expect(useUiStore.getState().handoffs.at(-1)?.text).toBe('what am I missing');
+    expect(useUiStore.getState().handoffs.at(-1)?.label).toBe("What's missing? · RQ-84B Kestrel");
 
     fireEvent.click(screen.getByRole('button', { name: ASK }));
-    expect(useUiStore.getState().agentPendingPrompt?.text).toContain('knowledge_about');
+    expect(useUiStore.getState().handoffs.at(-1)?.text).toContain('knowledge_about');
   });
 });
 

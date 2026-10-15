@@ -1,3 +1,4 @@
+import { destination } from '@/engine/destinations';
 import { folderLabel } from '@/engine/okf';
 import type { CollectionFile, Entry, ListFile, Selection } from '@/engine/types';
 
@@ -155,6 +156,10 @@ function stem(path: string): string {
  * Resolved against the vault when it can be, and degraded to the path's own
  * name when it cannot: a thread anchored to a List that has since been deleted
  * still has to render, and "roadmap" is a better answer than blank.
+ *
+ * A destination says its label from `engine/destinations.ts` (M59.1), so the
+ * thread chip, the switcher and the window title say what the nav says:
+ * History, not Pulse, and Work, not Workspace.
  */
 export function placeLabel(
   place: Place,
@@ -162,43 +167,29 @@ export function placeLabel(
 ): string {
   const { entries = [], views = [], collections = [] } = lookup;
   switch (place.kind) {
-    case 'home':
-      return 'Home';
-    case 'inbox':
-      return 'Inbox';
-    case 'mywork':
-      return 'My work';
-    case 'changes':
-      return 'Changes';
-    case 'pulse':
-      return 'Pulse';
-    case 'library':
-      return 'Library';
-    // M30 — one place, not one per file. `placeOf` already strips `root` and
-    // `path` through its default, which is the doctrine above applied
-    // unchanged: the open file is a lens, exactly like the open record.
-    case 'workspace':
-      return 'Workspace';
-    case 'studio':
-      return place.project === undefined ? 'Studio' : `Studio / ${stem(place.project)}`;
-    case 'agents':
+    case 'studio': {
+      const studio = destination('studio').label;
+      return place.project === undefined ? studio : `${studio} / ${stem(place.project)}`;
+    }
+    case 'agents': {
       // The label strips the `process:` prefix — it is provenance plumbing,
       // and the label is the part a person reads.
+      const agents = destination('agents').label;
       return place.actor === undefined
-        ? 'Agents'
-        : `Agents / ${place.actor.replace(/^process:/, '')}`;
-    case 'settings':
-      return 'Settings';
+        ? agents
+        : `${agents} / ${place.actor.replace(/^process:/, '')}`;
+    }
     case 'knowledge': {
       // Said the way the page itself says it (M51.5): the folder as its
       // heading reads, the subject by its title. The raw key was a path —
       // `knowledge/projects/phoenix-warehouse-rollout.md` — in a chip.
+      const knowledge = destination('knowledge').label;
       const nav = place.nav;
-      if (nav?.tab === 'section') return `Knowledge / ${folderLabel(nav.folder)}`;
+      if (nav?.tab === 'section') return `${knowledge} / ${folderLabel(nav.folder)}`;
       if (nav?.tab === 'entity') {
-        return `Knowledge / ${entries.find((e) => e.path === nav.key)?.title ?? nav.key}`;
+        return `${knowledge} / ${entries.find((e) => e.path === nav.key)?.title ?? nav.key}`;
       }
-      return 'Knowledge';
+      return knowledge;
     }
     case 'doc':
     case 'diagram':
@@ -216,7 +207,22 @@ export function placeLabel(
     }
     case 'type':
       return place.name;
+    // M30 — one place, not one per file. `placeOf` already strips
+    // workspace's `root` and `path` through its default, which is the
+    // doctrine above applied unchanged: the open file is a lens, exactly like
+    // the open record.
+    default:
+      return destination(place.kind).label;
   }
+}
+
+/** The app's name: the window title's tail, and the whole title at the vault
+ * chooser (index.html's `<title>`). */
+export const APP_NAME = 'Cerebro';
+
+/** The window title for a place's label (M59.1): `History — Cerebro`. */
+export function windowTitle(label: string): string {
+  return `${label} — ${APP_NAME}`;
 }
 
 /**

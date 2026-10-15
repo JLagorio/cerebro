@@ -61,30 +61,23 @@ pub fn probe(ws: &GitWorkspaceInfo) -> CredentialReadiness {
     // instead of hanging. NEUTRAL cwd — see the module doc; the repo's own
     // credential.helper must never run.
     let neutral = std::env::temp_dir();
-    let mut child = match command::git_at(&neutral)
-        .args(["credential", "fill"])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-    {
-        Ok(c) => c,
-        Err(_) => return CredentialReadiness::Unknown,
-    };
-    use std::io::Write;
-    if let Some(stdin) = child.stdin.as_mut() {
-        let _ = write!(stdin, "url={url}\n\n");
-    }
-    match child.wait_with_output() {
-        Ok(out) if out.status.success() => {
-            let text = String::from_utf8_lossy(&out.stdout);
+    // Under the network deadline (M58.3): a helper that hangs (a keychain
+    // dialog nobody sees, a helper waiting on a network) ends as no helper.
+    let input = format!("url={url}\n\n");
+    match command::run_bounded_with_input(
+        &neutral,
+        &["credential", "fill"],
+        Some(input.as_bytes()),
+        command::NETWORK_TIMEOUT,
+    ) {
+        Ok(text) => {
             if text.lines().any(|l| l.starts_with("password=")) {
                 CredentialReadiness::Ready
             } else {
                 CredentialReadiness::NoHelper
             }
         }
-        _ => CredentialReadiness::NoHelper,
+        Err(_) => CredentialReadiness::NoHelper,
     }
 }
 

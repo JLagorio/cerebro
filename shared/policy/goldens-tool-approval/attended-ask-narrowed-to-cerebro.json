@@ -1,0 +1,47 @@
+{
+  "why": "A record that narrows its tools to cerebro's: the writers, the shell and the question tool it leaves out are denied in argv, so none can ask and acceptEdits cannot approve them.",
+  "input": {
+    "kind": "attended",
+    "shell": "ask",
+    "ask_first": false,
+    "read_scoped": false,
+    "narrowing": [
+      "get_note"
+    ]
+  },
+  "expected": {
+    "permission_mode": "acceptEdits",
+    "allowed": [],
+    "disallowed": [
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "NotebookEdit",
+      "Bash",
+      "AskUserQuestion"
+    ],
+    "matcher": [
+      "ExitPlanMode"
+    ],
+    "withheld": [],
+    "decisions": {
+      "Write": "deny",
+      "Edit": "deny",
+      "MultiEdit": "deny",
+      "NotebookEdit": "deny",
+      "Bash": "deny",
+      "Read": "cli",
+      "Glob": "cli",
+      "Grep": "cli",
+      "WebFetch": "cli",
+      "WebSearch": "cli",
+      "Task": "cli",
+      "AskUserQuestion": "deny",
+      "ExitPlanMode": "refuse",
+      "mcp__cerebro__create_note": "cli",
+      "mcp__cerebro__update_frontmatter": "cli",
+      "mcp__cerebro__append_to_note": "cli",
+      "mcp__cerebro__edit_note": "cli"
+    }
+  }
+}

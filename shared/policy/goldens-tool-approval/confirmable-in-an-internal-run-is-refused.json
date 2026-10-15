@@ -1,0 +1,50 @@
+{
+  "why": "One of Cerebro's own constructs: no page write is confirmable there, ask-first or not.",
+  "input": {
+    "kind": "internal",
+    "shell": "off",
+    "ask_first": true,
+    "read_scoped": false,
+    "narrowing": null
+  },
+  "expected": {
+    "permission_mode": "default",
+    "allowed": [],
+    "disallowed": [
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "NotebookEdit",
+      "Bash",
+      "Read",
+      "Glob",
+      "Grep",
+      "WebFetch",
+      "WebSearch",
+      "Task",
+      "AskUserQuestion",
+      "ExitPlanMode"
+    ],
+    "matcher": [],
+    "withheld": [],
+    "decisions": {
+      "Write": "deny",
+      "Edit": "deny",
+      "MultiEdit": "deny",
+      "NotebookEdit": "deny",
+      "Bash": "deny",
+      "Read": "deny",
+      "Glob": "deny",
+      "Grep": "deny",
+      "WebFetch": "deny",
+      "WebSearch": "deny",
+      "Task": "deny",
+      "AskUserQuestion": "deny",
+      "ExitPlanMode": "deny",
+      "mcp__cerebro__create_note": "deny",
+      "mcp__cerebro__update_frontmatter": "deny",
+      "mcp__cerebro__append_to_note": "deny",
+      "mcp__cerebro__edit_note": "deny"
+    }
+  }
+}

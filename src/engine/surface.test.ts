@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { DESTINATIONS } from './destinations';
 import { resolveSurface, sortEntries } from './surface';
 import { buildSchema } from './schema';
 import { makeEntry } from './testHelpers';
 import type { FilterGroup, ListFile, Presentation } from './types';
+import { bigEpic, computedVault, emptyEpic, smallEpic } from '@/test/computedVault';
 
 // M19.1: no columns and no bands. Both name fields, and nothing is known
 // about the source of a surface that resolved to no view at all.
@@ -333,5 +335,42 @@ describe('sortEntries — multi-key', () => {
   it('an empty chain preserves input order', () => {
     const entries = [item('b.md', 'low', undefined), item('a.md', 'high', undefined)];
     expect(sortEntries(entries, [], schema).map((e) => e.path)).toEqual(['b.md', 'a.md']);
+  });
+});
+
+// M60.1: sort reads `schema.fieldValue`, the read a filter makes.
+describe('sortEntries — computed values (M60.1)', () => {
+  const schema = buildSchema(computedVault());
+  const epics = [bigEpic, smallEpic, emptyEpic];
+  const order = (field: string, dir: 'asc' | 'desc' = 'asc') =>
+    sortEntries(epics, [{ field, dir }], schema).map((e) => e.title);
+
+  it('sorts a count rollup as a number: 10 after 9', () => {
+    expect(order('task_count')).toEqual(['Empty', 'Small', 'Big']);
+    expect(order('task_count', 'desc')).toEqual(['Big', 'Small', 'Empty']);
+  });
+
+  it('sorts an absent rollup sum last, like any empty value', () => {
+    expect(order('points')).toEqual(['Big', 'Small', 'Empty']);
+    expect(order('points', 'desc')).toEqual(['Small', 'Big', 'Empty']);
+  });
+
+  it('sorts by edited time along modifiedAt, declared or virtual', () => {
+    expect(order('edited')).toEqual(['Empty', 'Small', 'Big']);
+    expect(order('modifiedAt')).toEqual(['Empty', 'Small', 'Big']);
+  });
+
+  it('sorts by title along the page title, as before', () => {
+    // Big's frontmatter says `title: Zeta`; the page title still wins.
+    expect(order('title')).toEqual(['Big', 'Empty', 'Small']);
+  });
+});
+
+describe('resolveSurface — destination titles (M59.1)', () => {
+  it("titles every destination with the table's label", () => {
+    const schema = buildSchema([]);
+    for (const d of DESTINATIONS) {
+      expect(resolveSurface(d.selection, [], schema, []).title, d.kind).toBe(d.label);
+    }
   });
 });

@@ -40,7 +40,14 @@ let patches: { path: string; patch: Record<string, unknown> }[];
 beforeEach(() => {
   patches = [];
   vi.mocked(saveCollection).mockClear();
-  vi.mocked(deleteNote).mockReset().mockResolvedValue(undefined);
+  vi.mocked(deleteNote).mockReset().mockResolvedValue({
+    stamp: '20261014T093000Z-a1b2',
+    path: 'delivery/collection.yml',
+    kind: 'file',
+    title: 'collection.yml',
+    deletedAt: '2026-10-14T09:30:00Z',
+    pages: 0,
+  });
   vi.mocked(listCollections).mockReset().mockResolvedValue([]);
   useUiStore.setState({ toast: vi.fn() });
   useVaultStore.setState({

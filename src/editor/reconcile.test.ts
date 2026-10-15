@@ -293,3 +293,62 @@ describe('a page with unsaved typing', () => {
     expect(again.choices[0].theirsPreview).toBe('Second, again.');
   });
 });
+
+/**
+ * A level the write empties out (M55 review): `updateBlock` ignores an empty
+ * `children`, so the apply has to remove such a level block by block, or the
+ * page keeps what the write deleted and the next save writes it back.
+ */
+describe('a write that empties a level', () => {
+  /** `md` as the page would serialize it, through an editor of its own. */
+  const canon = (md: string): string => {
+    const other = BlockNoteEditor.create({ schema: cerebroSchema }) as CerebroEditor;
+    other.replaceBlocks(other.document, markdownToBlocksNow(other, md));
+    return blocksToMarkdownNow(other);
+  };
+
+  const COLUMNS = (right: string[]) =>
+    [
+      ':::columns',
+      '::::column',
+      'Left side.',
+      '::::',
+      '::::column',
+      ...right,
+      '::::',
+      ':::',
+      '',
+    ].join('\n');
+
+  const cases: { name: string; from: string; to: string }[] = [
+    { name: 'deletes a lone sub-item', from: '- a\n  - b\n- c\n', to: '- a\n- c\n' },
+    { name: 'flattens a list level', from: '- a\n  - b\n    - c\n', to: '- a\n  - c\n' },
+    {
+      name: 'empties a toggle',
+      from: ':::toggle Details\nHidden inside.\n:::\n\nOutro.\n',
+      to: ':::toggle Details\n:::\n\nOutro.\n',
+    },
+    {
+      name: 'empties a column',
+      from: COLUMNS(['Right one.', '', 'Right two.']),
+      to: COLUMNS([]),
+    },
+  ];
+
+  for (const { name, from, to } of cases) {
+    it(`${name} on a clean page`, () => {
+      const base = load(from);
+      const plan = apply(to, base);
+      expect(plan.kind).toBe('plan');
+      expect(blocksToMarkdownNow(editor)).toBe(canon(to));
+    });
+
+    it(`${name} on a page with typing elsewhere`, () => {
+      const base = load(`Typed here.\n\n${from}`);
+      typeInto(idOfText('Typed here.'), 'Typed by me.');
+      const plan = apply(`Typed here.\n\n${to}`, base);
+      expect(plan.kind === 'plan' && plan.choices).toEqual([]);
+      expect(blocksToMarkdownNow(editor)).toBe(canon(`Typed by me.\n\n${to}`));
+    });
+  }
+});

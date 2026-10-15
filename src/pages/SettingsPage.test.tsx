@@ -16,6 +16,7 @@ vi.mock('@/agent/agentIpc', async (importOriginal) => {
       version: '2.1.250 (Claude Code)',
       path: '/opt/claude/bin/claude',
     })),
+    claudeUserSettings: vi.fn(async () => ({ state: 'browser' })),
   };
 });
 
@@ -39,6 +40,26 @@ describe('SettingsPage', () => {
     render(<SettingsPage />);
     expect(screen.getByText('/demo-vault')).toBeTruthy();
     expect(screen.getByText('0.1.0')).toBeTruthy();
+  });
+
+  // M59.3 — the open log is a Settings section, after Workflow.
+  it('renders Recently opened after Workflow', () => {
+    render(<SettingsPage />);
+    const section = screen.getByTestId('settings-recently-opened');
+    expect(section.querySelector('h2')?.textContent).toBe('Recently opened');
+    const headings = [...document.querySelectorAll('h2')].map((h) => h.textContent);
+    expect(headings.indexOf('Recently opened')).toBe(headings.indexOf('Workflow') + 1);
+  });
+
+  // M60.8 — the vault's Trash is a Settings section, right after Vault.
+  it('renders Recently deleted after Vault', async () => {
+    resetMockFs();
+    render(<SettingsPage />);
+    const section = screen.getByTestId('settings-trash');
+    expect(section.querySelector('h2')?.textContent).toBe('Recently deleted');
+    const headings = [...document.querySelectorAll('h2')].map((h) => h.textContent);
+    expect(headings.indexOf('Recently deleted')).toBe(headings.indexOf('Vault') + 1);
+    expect(await screen.findByTestId('trash-empty')).toBeTruthy();
   });
 
   it('re-picks and opens a new vault from the change vault button', async () => {
@@ -107,6 +128,96 @@ describe('SettingsPage', () => {
     expect(page.className).toContain('flex-1');
   });
 
+  // M57.2: Shell access is a ceiling of three, with the person's own Claude
+  // Code rules counted beside it.
+  describe('shell access', () => {
+    beforeEach(() => {
+      useUiStore.setState({ agentShell: 'off' });
+      window.localStorage.removeItem('cerebro.agentShell');
+    });
+
+    it('offers Off, Ask and On, with one hint per value, and keeps Ask', async () => {
+      const user = userEvent.setup();
+      render(<SettingsPage />);
+      const hint = () => screen.getByTestId('shell-hint').textContent;
+      expect(hint()).toBe(
+        "Cerebro's tools only. The assistant can't run commands or edit files directly.",
+      );
+      await user.click(screen.getByTestId('shell-ask'));
+      expect(useUiStore.getState().agentShell).toBe('ask');
+      expect(window.localStorage.getItem('cerebro.agentShell')).toBe('ask');
+      expect(hint()).toContain('A card in the conversation names each command or file change');
+      expect(hint()).toContain("Scheduled agents can't ask");
+      await user.click(screen.getByTestId('shell-on'));
+      expect(hint()).toContain('without asking');
+      expect(useUiStore.getState().agentShell).toBe('on');
+    });
+
+    const disclosure = async (settings: unknown) => {
+      vi.mocked(agentIpc.claudeUserSettings).mockResolvedValue(settings as never);
+      render(<SettingsPage />);
+      await vi.waitFor(() => expect(screen.getByTestId('shell-user-rules')).toBeTruthy());
+      return screen.getByTestId('shell-user-rules').textContent ?? '';
+    };
+    const managed = "Settings your organization manages can act too, and Cerebro can't see them.";
+
+    it('counts the rules and hook events it read, and never promises every command asks', async () => {
+      const text = await disclosure({
+        state: 'read',
+        path: '/h/.claude/settings.json',
+        allow: 201,
+        ask: 2,
+        deny: 3,
+        hook_events: ['PreToolUse', 'Stop'],
+      });
+      expect(text).toBe(
+        `Your own Claude Code settings act before Cerebro asks: 201 allow rules, and hooks on 2 events (PreToolUse, Stop). A command they allow runs without a card. ${managed}`,
+      );
+    });
+
+    it('says a read file holds none', async () => {
+      const text = await disclosure({
+        state: 'read',
+        path: '/h/.claude/settings.json',
+        allow: 0,
+        ask: 0,
+        deny: 4,
+        hook_events: [],
+      });
+      expect(text).toBe(`Your Claude Code settings hold no allow rules or hooks. ${managed}`);
+    });
+
+    it('says where it looked when there is no file', async () => {
+      const text = await disclosure({ state: 'absent', path: '/h/.claude/settings.json' });
+      expect(text).toBe(`No Claude Code settings file at /h/.claude/settings.json. ${managed}`);
+    });
+
+    it('says it could not read them, never that there are none', async () => {
+      const text = await disclosure({
+        state: 'unreadable',
+        path: '/h/.claude/settings.json',
+        detail: 'Permission denied',
+      });
+      expect(text).toBe(
+        "Couldn't read /h/.claude/settings.json, so Cerebro can't tell which commands your own rules allow without a card.",
+      );
+      expect(screen.getByTestId('shell-user-rules').getAttribute('data-state')).toBe('unreadable');
+    });
+
+    it('says the browser has none to read', async () => {
+      expect(await disclosure({ state: 'browser' })).toBe('Desktop app only.');
+    });
+
+    it('reads them again when the window comes back', async () => {
+      vi.mocked(agentIpc.claudeUserSettings).mockClear();
+      vi.mocked(agentIpc.claudeUserSettings).mockResolvedValue({ state: 'browser' });
+      render(<SettingsPage />);
+      await vi.waitFor(() => expect(agentIpc.claudeUserSettings).toHaveBeenCalledTimes(1));
+      window.dispatchEvent(new Event('focus'));
+      await vi.waitFor(() => expect(agentIpc.claudeUserSettings).toHaveBeenCalledTimes(2));
+    });
+  });
+
   // M56.4: the row a not-signed-in card's Open Settings lands on.
   describe('the Claude Code row', () => {
     const status = () => screen.getByTestId('settings-claude-code-status');
@@ -124,7 +235,7 @@ describe('SettingsPage', () => {
       // It comes before every other row of the section.
       expect(section?.querySelector('[data-testid="settings-claude-code"]')).toBe(row);
       expect(
-        row.compareDocumentPosition(screen.getByRole('switch', { name: 'Shell access' })) &
+        row.compareDocumentPosition(screen.getByTestId('shell-off')) &
           Node.DOCUMENT_POSITION_FOLLOWING,
       ).toBeTruthy();
     });

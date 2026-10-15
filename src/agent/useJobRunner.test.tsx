@@ -51,7 +51,7 @@ vi.mock('@/lib/ipc', async (importOriginal) => {
 
 import * as agentIpc from './agentIpc';
 import { buildSystemPrompt } from './systemPrompt';
-import { useJobRunner } from './useJobRunner';
+import { pausedByHook, useJobRunner } from './useJobRunner';
 import { makeEntry } from '@/engine/testHelpers';
 import { describeTrigger, parseTriggers } from '@/engine/triggers';
 import { mentionedTools } from '@/engine/toolGrant';
@@ -215,7 +215,7 @@ describe('useJobRunner stream ownership', () => {
       learnAttempts: {},
       skillRuns: {},
       runs: [],
-      agentShellAccess: false,
+      agentShell: 'off',
       agentConnectors: false,
       stdioApprovals: {},
     });
@@ -352,7 +352,7 @@ describe('useJobRunner scheduled runs', () => {
       learnAttempts: {},
       skillRuns: {},
       runs: [],
-      agentShellAccess: false,
+      agentShell: 'off',
       agentConnectors: false,
       stdioApprovals: {},
     });
@@ -467,9 +467,10 @@ describe('useJobRunner scheduled runs', () => {
 
 /**
  * Shell for unattended runs (PR #5 security review): background jobs execute
- * vault-authored content, so the Settings toggle — the assistant's grant,
- * made for attended turns — is only a ceiling here. The one path to shell on
- * a schedule is an Agent record declaring `tools: shell` inside that ceiling.
+ * vault-authored content, so the Settings shell ceiling is only a ceiling
+ * here. The one path to the shell on a schedule is an Agent record declaring
+ * `tools: shell` inside that ceiling, and under Ask nobody can answer, so the
+ * table withholds it (M57.2).
  */
 describe('useJobRunner shell gating', () => {
   const agentRecord = (path: string, title: string, tools?: string) =>
@@ -501,7 +502,7 @@ describe('useJobRunner shell gating', () => {
       learnAttempts: {},
       skillRuns: {},
       runs: [],
-      agentShellAccess: true, // the ceiling is OPEN in every case below
+      agentShell: 'on', // the ceiling is OPEN in every case below
       agentConnectors: false,
       stdioApprovals: {},
     });
@@ -512,7 +513,7 @@ describe('useJobRunner shell gating', () => {
     vi.useRealTimers();
   });
 
-  it('a scheduled skill never inherits the Settings shell toggle', async () => {
+  it('a scheduled skill never inherits the Settings shell ceiling', async () => {
     useVaultStore.setState({
       entries: [
         makeEntry({
@@ -528,7 +529,7 @@ describe('useJobRunner shell gating', () => {
     renderHook(() => useJobRunner());
     await startJob();
     expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1]).toMatchObject({ shell: false });
+    expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1]).toMatchObject({ shell: 'off' });
   });
 
   it('hands an agent its record body with the system prompt, never the message (M34.1.4)', async () => {
@@ -568,6 +569,28 @@ describe('useJobRunner shell gating', () => {
     expect([due.getHours(), due.getMinutes()]).toEqual([9, 0]);
   });
 
+  it('logs a run a hook outside Cerebro paused as failed, and says so (M57.1)', async () => {
+    // Nobody watches a job, so a call a hook held is never answered: the run
+    // stopped there, Rust booked it failed and requeued its items, and the
+    // log says why rather than calling it done.
+    useRunLogStore.getState().clear();
+    useVaultStore.setState({
+      entries: [agentRecord('records/agents/scout.md', 'Scout')],
+    });
+    renderHook(() => useJobRunner());
+    await startJob();
+    act(() =>
+      handlers.forEach((h) =>
+        h({ run: JOB_RUN, kind: 'ToolDeferred', tool_id: 't-1', tool_name: 'Bash' }),
+      ),
+    );
+    act(() => handlers.forEach((h) => h({ run: JOB_RUN, kind: 'Done' })));
+    const [entry] = useRunLogStore.getState().entries;
+    expect(entry.status).toBe('failed');
+    expect(entry.error).toBe(pausedByHook('Bash'));
+    expect(entry.error).toContain('paused by a hook outside Cerebro');
+  });
+
   it('logs a run that died before it started — could not tell is not found nothing (M34.2)', async () => {
     // An unreadable record used to end in pure silence: no run row, no log
     // entry, indistinguishable from "nothing was due". The absence of a row
@@ -605,8 +628,32 @@ describe('useJobRunner shell gating', () => {
 
     const calls = vi.mocked(agentIpc.runAgent).mock.calls;
     expect(calls).toHaveLength(2);
-    expect(calls[0][1]).toMatchObject({ shell: true });
-    expect(calls[1][1]).toMatchObject({ shell: false });
+    expect(calls[0][1]).toMatchObject({ shell: 'on' });
+    expect(calls[1][1]).toMatchObject({ shell: 'off' });
+  });
+
+  it('sends a shell-declaring agent the Ask ceiling unattended, and every other job off (M57.2)', async () => {
+    vi.mocked(buildSystemPrompt).mockClear();
+    useUiStore.setState({ agentShell: 'ask' });
+    useVaultStore.setState({
+      entries: [
+        agentRecord('records/agents/a-armed.md', 'Armed', 'shell'),
+        agentRecord('records/agents/b-plain.md', 'Plain'),
+      ],
+    });
+    renderHook(() => useJobRunner());
+
+    await startJob();
+    act(() => handlers.forEach((h) => h({ run: JOB_RUN, kind: 'Done' })));
+    await startJob();
+
+    const calls = vi.mocked(agentIpc.runAgent).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0][1]).toMatchObject({ shell: 'ask', attended: false });
+    expect(calls[1][1]).toMatchObject({ shell: 'off', attended: false });
+    // Nobody can answer it, so its prompts never say it can change files.
+    const grant = vi.mocked(buildSystemPrompt).mock.calls[0][1].grant;
+    expect(grant?.shell).toBe(false);
   });
 
   it('a background run is never attended, so the legacy MCP fallback stays closed', async () => {
@@ -673,7 +720,7 @@ describe('useJobRunner composes each job for its grant', () => {
       learnAttempts: {},
       skillRuns: {},
       runs: [],
-      agentShellAccess: true,
+      agentShell: 'on',
       agentConnectors: false,
       stdioApprovals: {},
     });
@@ -725,7 +772,7 @@ describe('useJobRunner composes each job for its grant', () => {
       entries: [scheduled('Agent', { tools: 'shell', 'read-scope': ['sources/'] })],
     });
     const { grant, options } = await runOne();
-    expect(options.shell).toBe(true);
+    expect(options.shell).toBe('on');
     expect(grant.shell).toBe(false);
   });
 
@@ -768,6 +815,21 @@ describe('useJobRunner composes each job for its grant', () => {
     });
     const { options } = await runOne();
     expect(options).toMatchObject({ model: 'sonnet', effort: 'high' });
+  });
+
+  it('passes an agent run its record’s ask-first (M57.4)', async () => {
+    useVaultStore.setState({ entries: [scheduled('Agent', { 'ask-first': true })] });
+    expect((await runOne()).options).toMatchObject({ askFirst: true, attended: false });
+  });
+
+  it('reads an odd ask-first on, and none as off (M57.4)', async () => {
+    useVaultStore.setState({ entries: [scheduled('Agent', { 'ask-first': 'please' })] });
+    expect((await runOne()).options.askFirst).toBe(true);
+  });
+
+  it('sends ask-first false for a record that writes without asking (M57.4)', async () => {
+    useVaultStore.setState({ entries: [scheduled('Agent', {})] });
+    expect((await runOne()).options.askFirst).toBe(false);
   });
 
   it('runs a record that names neither at Claude Code’s default (M56.5)', async () => {
@@ -840,7 +902,7 @@ describe('useJobRunner durable ledgers', () => {
       skillRuns: {},
       triggerRuns: {},
       runs: [],
-      agentShellAccess: false,
+      agentShell: 'off',
       agentConnectors: false,
       stdioApprovals: {},
     });
@@ -1024,7 +1086,7 @@ describe('useJobRunner while the vault is not recording', () => {
       skillRuns: {},
       triggerRuns: {},
       runs: [],
-      agentShellAccess: false,
+      agentShell: 'off',
       agentConnectors: false,
       stdioApprovals: {},
     });
@@ -1215,7 +1277,7 @@ describe('useJobRunner event runs beside a schedule (AUTOMATION-2)', () => {
       skillRuns: {},
       triggerRuns: {},
       runs: [],
-      agentShellAccess: false,
+      agentShell: 'off',
       agentConnectors: false,
       stdioApprovals: {},
     });
@@ -1481,7 +1543,7 @@ describe('useJobRunner in a trigger-only vault (AUTOMATION-2)', () => {
       skillRuns: {},
       triggerRuns: {},
       runs: [],
-      agentShellAccess: false,
+      agentShell: 'off',
       agentConnectors: false,
       stdioApprovals: {},
     });
@@ -1609,7 +1671,7 @@ describe('useJobRunner across a vault switch (AUTOMATION-2b)', () => {
       skillRuns: {},
       triggerRuns: {},
       runs: [],
-      agentShellAccess: false,
+      agentShell: 'off',
       agentConnectors: false,
       stdioApprovals: {},
     });

@@ -2,6 +2,7 @@ pub mod agent;
 pub mod app_config;
 pub mod assembly;
 pub mod attention;
+mod comment_tools;
 pub mod conflict;
 pub mod connectors;
 pub mod convergence;
@@ -40,10 +41,11 @@ use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
 use vault::entry::Entry;
+use vault::receipt::WriteReceipt;
 use vault::watcher::WatcherState;
 use vault::write::{CollectionYaml, ViewYaml};
 
-fn config_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn config_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app_config::app_dir(app)
 }
 
@@ -104,7 +106,10 @@ fn scan_vault(vault: String) -> Result<Vec<Entry>, String> {
     // M21.1 janitor: reap atomic-write temps abandoned by a crash. Here in
     // the command rather than inside scan::scan_vault so bare library scans
     // (tests, MCP-forced rescans) stay read-only.
-    vault::write::clean_orphan_temps(Path::new(&vault));
+    vault::write::clean_orphan_temps(
+        Path::new(&vault),
+        &WriteReceipt::system(vault::receipt::SystemWriter::OrphanTemps),
+    );
     vault::scan::scan_vault(Path::new(&vault))
 }
 
@@ -113,24 +118,43 @@ fn read_note(vault: String, path: String) -> Result<String, String> {
     vault::write::read_note(Path::new(&vault), &path)
 }
 
+/// ⌘K's page-text search (M59.4): `search::vault_search` over the vault's
+/// cached corpus, up to `limit` hits (50 when absent). Ungated: the webview
+/// can already read every note.
+#[tauri::command(async)]
+fn search_vault(
+    vault: String,
+    query: String,
+    limit: Option<u32>,
+) -> Result<search::VaultSearch, String> {
+    let limit = limit.map_or(search::VAULT_SEARCH_MAX, |l| l as usize);
+    search::vault_search(Path::new(&vault), &query, limit)
+}
+
 // The write commands below are the HUMAN path — every one of them is
-// reachable from the UI, so each guards the knowledge/ bundle (M5). The
-// agent's MCP tools have their own, narrower boundary (M17.1): they reach
-// the bundle through the two server-stamped tools alone, `write_concept` and
-// `recheck_concept` (M49.7). See mcp.rs.
+// reachable from the UI, so each mints its receipt from the knowledge/
+// bundle's guard (M5, M58.1): a Human receipt from `guard_human_write` or
+// `guard_human_move`, save_view's included, or a ConceptDoor receipt from
+// the bundle's own doors. Either stamps `human:me`. The agent's MCP tools
+// have their own, narrower boundary (M17.1): they reach the bundle through
+// the two server-stamped tools alone, `write_concept` and `recheck_concept`
+// (M49.7). See mcp.rs.
 #[tauri::command(async)]
 fn save_note(vault: String, path: String, body: String) -> Result<(), String> {
     // The M23.7 capture valve: an in-app body edit to a knowledge
     // projection is CAPTURED (an editorial override, or the unique
     // extracted-text correction), not refused. The old refusal survives
     // only where no writer is active or the edit cannot be represented.
-    if knowledge::is_knowledge_path(&path) {
-        if let Some(result) = ledger::capture::capture_body_edit(Path::new(&vault), &path, &body) {
+    if let Some(cleared) = knowledge::concept_door(knowledge::HumanConcept::Capture(&path)) {
+        let by = WriteReceipt::ipc(cleared);
+        if let Some(result) =
+            ledger::capture::capture_body_edit(Path::new(&vault), &path, &body, &by)
+        {
             return result;
         }
-        knowledge::guard_human_write(&path)?;
     }
-    vault::write::save_note(Path::new(&vault), &path, &body)
+    let by = WriteReceipt::ipc(knowledge::guard_human_write(&path)?);
+    vault::write::save_note(Path::new(&vault), &path, &body, &by)
 }
 
 #[tauri::command(async)]
@@ -147,15 +171,16 @@ fn update_frontmatter(
     // The answer is the hash of the bytes written (M55.2), which the store
     // puts on its optimistic entry. A captured write answers None: the
     // projection is the ledger's to write, and the next scan reads its hash.
-    if knowledge::is_knowledge_path(&path) {
+    if let Some(cleared) = knowledge::concept_door(knowledge::HumanConcept::Capture(&path)) {
+        let by = WriteReceipt::ipc(cleared);
         if let Some(result) =
-            ledger::capture::capture_frontmatter_patch(Path::new(&vault), &path, &patch)
+            ledger::capture::capture_frontmatter_patch(Path::new(&vault), &path, &patch, &by)
         {
             return result.map(|()| None);
         }
-        knowledge::guard_human_write(&path)?;
     }
-    vault::write::update_frontmatter(Path::new(&vault), &path, &patch).map(Some)
+    let by = WriteReceipt::ipc(knowledge::guard_human_write(&path)?);
+    vault::write::update_frontmatter(Path::new(&vault), &path, &patch, &by).map(Some)
 }
 
 /// The M24.9 review surface. Every read rebuilds from the ledger — nothing
@@ -173,7 +198,8 @@ fn revertable_applications(
 }
 
 /// Approve or reject one card. A rejection needs a reason; the set resolves
-/// the moment its last member has a decision.
+/// the moment its last member has a decision. The files a resolved set
+/// projected are recorded as yours (M58.1), whoever the wire names.
 #[tauri::command(async)]
 fn decide_proposal(
     vault: String,
@@ -183,6 +209,7 @@ fn decide_proposal(
     reason: Option<String>,
 ) -> Result<Option<String>, String> {
     let vault = Path::new(&vault);
+    let by = review_receipt();
     ledger::shadow::with_writer(vault, |writer| {
         policy::review::decide(
             writer,
@@ -192,9 +219,23 @@ fn decide_proposal(
             &reviewer,
             reason.as_deref(),
         )
-        .map(|outcome| outcome.map(|o| o.transition.as_str().to_string()))
+        .map(|outcome| {
+            outcome.map(|o| {
+                vault::write::record_projected(vault, &o.projected, &by);
+                o.transition.as_str().to_string()
+            })
+        })
     })
     .unwrap_or_else(|| Err("no active ledger writer for this vault".to_string()))
+}
+
+/// A Review decision's receipt (M58.1): `human:me`, from the bundle's
+/// Review door, never the reviewer string the webview sends.
+fn review_receipt() -> WriteReceipt<vault::receipt::ConceptDoor> {
+    WriteReceipt::ipc(
+        knowledge::concept_door(knowledge::HumanConcept::Review)
+            .expect("the Review door is always open"),
+    )
 }
 
 /// Undo an applied change by appending a NEW forward mutation. The caller
@@ -207,9 +248,14 @@ fn revert_application(
     reviewer: String,
 ) -> Result<String, String> {
     let vault = Path::new(&vault);
+    let by = review_receipt();
     ledger::shadow::with_writer(vault, |writer| {
-        policy::review::revert(writer, vault, &proposal_id, &applied_event_ids, &reviewer)
-            .map(|outcome| outcome.transition.as_str().to_string())
+        policy::review::revert(writer, vault, &proposal_id, &applied_event_ids, &reviewer).map(
+            |outcome| {
+                vault::write::record_projected(vault, &outcome.projected, &by);
+                outcome.transition.as_str().to_string()
+            },
+        )
     })
     .unwrap_or_else(|| Err("no active ledger writer for this vault".to_string()))
 }
@@ -277,8 +323,8 @@ fn fleet_runs(
 }
 
 /// One run, with whatever the governance tables recorded about it (M33.2),
-/// the model Claude Code reported answering, and the refusals recorded
-/// against it (M56.9).
+/// the model Claude Code reported answering, the refusals recorded against
+/// it (M56.9), and what it wrote in the vault (M58.1b).
 ///
 /// An id nothing knows is an error rather than an empty detail: a typo and a
 /// run that recorded nothing must not look the same.
@@ -315,6 +361,58 @@ fn fleet_run_transcript(
         key.runs_in_session,
         chrono::Utc::now(),
     ))
+}
+
+/// Who last changed one page (M58.1b), read from runtime.db's `vault_writes`
+/// through a read-only handle. The path resolves to where it lands, the
+/// spelling every row is stored under; a path that lands outside the vault
+/// reads as not recorded, and its bytes are never read. The file's hash is
+/// taken here, from disk, never from the caller.
+#[tauri::command(async)]
+fn page_attribution(
+    app: tauri::AppHandle,
+    vault: String,
+    path: String,
+) -> Result<runtime::write_log::Attribution, String> {
+    page_attribution_in(&config_dir(&app)?, Path::new(&vault), &path)
+}
+
+/// `page_attribution` against the runtime database in `config`.
+fn page_attribution_in(
+    config: &Path,
+    vault: &Path,
+    path: &str,
+) -> Result<runtime::write_log::Attribution, String> {
+    let Some(landed) = vault::write::landing_path(vault, path) else {
+        return Ok(runtime::write_log::Attribution::NotRecorded);
+    };
+    let bytes = std::fs::read(vault.join(&landed)).map_err(|e| format!("reading {landed}: {e}"))?;
+    let ro = runtime::ReadOnly::open(config)?;
+    runtime::write_log::page_attribution(
+        &ro,
+        &runtime::scope::derive_vault_id(vault),
+        &landed,
+        &ledger::sha256_hex(&bytes),
+    )
+}
+
+/// Which recorded runs made these commits in this vault (M58.4, CV-35), read
+/// from runtime.db's `run_commits` through a read-only handle: the one
+/// record History names an agent from. A commit with no row is absent from
+/// the answer and reads "unattributed"; a database that will not open is an
+/// error, which reads "attribution unknown", never "unattributed".
+#[tauri::command(async)]
+fn commit_runs(
+    app: tauri::AppHandle,
+    vault: String,
+    commits: Vec<runtime::fleet::CommitQuery>,
+) -> Result<Vec<runtime::fleet::CommitRun>, String> {
+    let ro = runtime::ReadOnly::open(&config_dir(&app)?)?;
+    runtime::fleet::commit_runs(
+        &ro,
+        &runtime::scope::derive_vault_id(Path::new(&vault)),
+        &commits,
+    )
 }
 
 /// What one run changed in Knowledge (M50.3): the concepts its proposals
@@ -1034,11 +1132,11 @@ fn verify_concept(
     patch: serde_json::Map<String, serde_json::Value>,
     viewed_body_hash: String,
 ) -> Result<(), String> {
-    knowledge::guard_verify(&path, &patch)?;
+    let by = WriteReceipt::ipc(knowledge::guard_verify(&path, &patch)?);
     // A field revision plus its attestation through the ledger writer
     // (M23.4); refused, not written, when no writer is active (M49.1) or
     // when the body on disk is not the one the person read (M49.3).
-    vault::write::verify_frontmatter(Path::new(&vault), &path, &patch, &viewed_body_hash)
+    vault::write::verify_frontmatter(Path::new(&vault), &path, &patch, &viewed_body_hash, &by)
 }
 
 /// The M23.5 capture boundary: a structured in-app edit to a knowledge
@@ -1048,7 +1146,17 @@ fn verify_concept(
 /// without an active ledger writer cannot capture — the error names it.
 #[tauri::command(async)]
 fn capture_concept_edit(vault: String, request: serde_json::Value) -> Result<(), String> {
-    ledger::capture::capture_from_json(Path::new(&vault), &request).unwrap_or_else(|| {
+    // Only a bundle path opens the capture door (M58.1); anything else is no
+    // projection to capture, whatever its shape.
+    let path = request
+        .get("path")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let Some(cleared) = knowledge::concept_door(knowledge::HumanConcept::Capture(path)) else {
+        return Err(ledger::capture::NOT_A_PROJECTION.to_string());
+    };
+    let by = WriteReceipt::ipc(cleared);
+    ledger::capture::capture_from_json(Path::new(&vault), &request, &by).unwrap_or_else(|| {
         Err(
             "no active ledger writer for this vault — capture is unavailable (see ledger_status)"
                 .to_string(),
@@ -1064,14 +1172,14 @@ fn create_note(
     frontmatter: serde_json::Map<String, serde_json::Value>,
     body: String,
 ) -> Result<String, String> {
-    knowledge::guard_human_write(&folder)?;
-    vault::write::create_note(Path::new(&vault), &folder, &slug, &frontmatter, &body)
+    let by = WriteReceipt::ipc(knowledge::guard_human_write(&folder)?);
+    vault::write::create_note(Path::new(&vault), &folder, &slug, &frontmatter, &body, &by)
 }
 
 #[tauri::command(async)]
 fn set_note_title(vault: String, path: String, title: String) -> Result<(), String> {
-    knowledge::guard_human_write(&path)?;
-    vault::write::set_note_title(Path::new(&vault), &path, &title)
+    let by = WriteReceipt::ipc(knowledge::guard_human_write(&path)?);
+    vault::write::set_note_title(Path::new(&vault), &path, &title, &by)
 }
 
 #[tauri::command(async)]
@@ -1086,7 +1194,14 @@ fn save_view(
     yaml: String,
     folder: Option<String>,
 ) -> Result<(), String> {
-    vault::write::save_view(Path::new(&vault), &id, &yaml, folder.as_deref())
+    // The bundle guard on the file it writes (M58.1): this was the one write
+    // command without one.
+    let target = match &folder {
+        Some(folder) => format!("{folder}/views/{id}.yml"),
+        None => format!("views/{id}.yml"),
+    };
+    let by = WriteReceipt::ipc(knowledge::guard_human_write(&target)?);
+    vault::write::save_view(Path::new(&vault), &id, &yaml, folder.as_deref(), &by)
 }
 
 #[tauri::command(async)]
@@ -1096,36 +1211,56 @@ fn list_collections(vault: String) -> Result<Vec<CollectionYaml>, String> {
 
 #[tauri::command(async)]
 fn save_collection(vault: String, folder: String, yaml: String) -> Result<(), String> {
-    knowledge::guard_human_write(&folder)?;
-    vault::write::save_collection(Path::new(&vault), &folder, &yaml)
+    let by = WriteReceipt::ipc(knowledge::guard_human_write(&folder)?);
+    vault::write::save_collection(Path::new(&vault), &folder, &yaml, &by)
 }
 
 #[tauri::command(async)]
 fn save_list(vault: String, folder: String, id: String, yaml: String) -> Result<(), String> {
-    knowledge::guard_human_write(&folder)?;
-    vault::write::save_list(Path::new(&vault), &folder, &id, &yaml)
+    let by = WriteReceipt::ipc(knowledge::guard_human_write(&folder)?);
+    vault::write::save_list(Path::new(&vault), &folder, &id, &yaml, &by)
 }
 
 #[tauri::command(async)]
 fn create_folder(vault: String, path: String) -> Result<(), String> {
-    knowledge::guard_human_write(&path)?;
-    vault::write::create_folder(Path::new(&vault), &path)
+    let by = WriteReceipt::ipc(knowledge::guard_human_write(&path)?);
+    vault::write::create_folder(Path::new(&vault), &path, &by)
 }
 
 #[tauri::command(async)]
 fn rename_note(vault: String, from: String, to: String) -> Result<(), String> {
-    knowledge::guard_human_move(&from, &to)?;
-    vault::write::rename_note(Path::new(&vault), &from, &to)
+    let by = WriteReceipt::ipc(knowledge::guard_human_move(&from, &to)?);
+    vault::write::rename_note(Path::new(&vault), &from, &to, &by)?;
+    // M70.4: a thread turn's answer follows its page (or the folder holding
+    // it) to where the rename put it.
+    agent::thread_turn::page_moved(Path::new(&vault), &from, &to);
+    Ok(())
 }
 
 #[tauri::command(async)]
-fn delete_note(vault: String, path: String) -> Result<(), String> {
+fn delete_note(vault: String, path: String) -> Result<vault::trash::TrashedItem, String> {
     // The one write command that never had this guard (M17.1). Read-only
     // that a delete can empty is not read-only: every other door into the
     // bundle was shut while this one let a concept — and its provenance —
-    // be thrown away outright.
-    knowledge::guard_human_write(&path)?;
-    vault::write::delete_note(Path::new(&vault), &path)
+    // be thrown away outright. M60.8: the page goes to the vault's own
+    // Trash, `.trash/<stamp>/`, and Settings can bring it back.
+    let by = WriteReceipt::ipc(knowledge::guard_human_write(&path)?);
+    vault::write::delete_note(Path::new(&vault), &path, &by)
+}
+
+/// The vault's Trash, newest first (M60.8). Read-only.
+#[tauri::command(async)]
+fn list_trash(vault: String) -> Result<Vec<vault::trash::TrashedItem>, String> {
+    vault::trash::list_trash(Path::new(&vault))
+}
+
+/// Restore one Trash item to the path it came from (M60.8), guarded on that
+/// path as any write is: a manifest that names knowledge/ refuses here.
+#[tauri::command(async)]
+fn restore_from_trash(vault: String, stamp: String) -> Result<String, String> {
+    let target = vault::trash::restore_target(Path::new(&vault), &stamp)?;
+    let by = WriteReceipt::ipc(knowledge::guard_human_write(&target)?);
+    vault::trash::restore_from_trash(Path::new(&vault), &stamp, &by)
 }
 
 // --- Page comments (M70.2) -------------------------------------------------
@@ -1223,6 +1358,28 @@ fn delete_comment_thread(
     )
 }
 
+/// M70.4 — a person's comment names an agent with `@handle`: run one turn of
+/// that agent, bound to the page and thread, and post its answer there.
+/// Rust builds the run from the agent's record; the request names only the
+/// page, the thread, the comment and the handle. A refusal is the error, and
+/// writes nothing.
+#[tauri::command(async)]
+fn start_thread_turn(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, agent::AgentState>,
+    mcp_state: tauri::State<'_, mcp::McpState>,
+    vault: String,
+    request: agent::thread_turn::ThreadTurnRequest,
+) -> Result<agent::thread_turn::ThreadTurnStarted, String> {
+    agent::thread_turn::start(
+        &app,
+        state.inner(),
+        mcp_state.inner(),
+        Path::new(&vault),
+        request,
+    )
+}
+
 #[tauri::command(async)]
 fn list_folders(vault: String) -> Result<Vec<String>, String> {
     vault::scan::list_folders(Path::new(&vault))
@@ -1254,20 +1411,22 @@ async fn pick_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
 }
 
 /// Copy a picked file into the vault's `attachments/` folder; returns its
-/// vault-relative path. No knowledge guard: the destination is fixed inside
-/// `import_attachment` and can never be `knowledge/`.
+/// vault-relative path. The destination is fixed inside `import_attachment`,
+/// so its receipt is minted from the guard on that folder (M58.1).
 #[tauri::command(async)]
 fn import_attachment(vault: String, source: String) -> Result<String, String> {
-    vault::write::import_attachment(Path::new(&vault), &source)
+    let by = WriteReceipt::ipc(knowledge::guard_human_write(vault::write::ATTACHMENTS_DIR)?);
+    vault::write::import_attachment(Path::new(&vault), &source, &by)
 }
 
 /// Write a raw text file (`.mmd` only) into the vault; returns the actual
-/// path after `-2` stem dedupe (M29.22). The extension allowlist and the
-/// knowledge guard live in write.rs beside the dedupe, where they are
-/// unit-tested — this command stays thin on purpose.
+/// path after `-2` stem dedupe (M29.22). The knowledge guard mints the
+/// receipt here (M58.1); the extension allowlist lives in write.rs beside
+/// the dedupe, where it is unit-tested.
 #[tauri::command(async)]
 fn write_text_file(vault: String, path: String, content: String) -> Result<String, String> {
-    vault::write::write_text_file(Path::new(&vault), &path, &content)
+    let by = WriteReceipt::ipc(knowledge::guard_human_write(&path)?);
+    vault::write::write_text_file(Path::new(&vault), &path, &content, &by)
 }
 
 /// Save PNG bytes wherever the user points the native dialog (M29.4).
@@ -1409,9 +1568,11 @@ pub(crate) fn start_handoff_run(
     let run_id = ledger::new_run_id();
     let durable = run_id.clone();
     // M56.7 — a hand-off records its caller, and its message opens with the
-    // WHY block that names the caller as data.
+    // WHY block that names the caller as data. M57.4c: after it, what became
+    // of the writes this agent queued for Review, told once.
     let cause = runtime::cause::RunCause::handoff(&caller.actor);
-    request.message = runtime::cause::with_preamble(&request.message, &cause, chrono::Utc::now());
+    let (message, told) = with_outcomes(&request.message, &request, vault);
+    request.message = runtime::cause::with_preamble(&message, Some(&cause), chrono::Utc::now());
     request.mcp_token = Some(mcp_state.handoff_token(
         &actor,
         request.scope.clone(),
@@ -1419,6 +1580,8 @@ pub(crate) fn start_handoff_run(
         request.allowed_tools.clone(),
         run_id.clone(),
         caller,
+        // M57.4: the callee's own record, read by `hand_to`.
+        request.ask_first == Some(true),
     )?);
     let meter = agent::meter::Meter {
         data_dir: dir.clone(),
@@ -1443,7 +1606,10 @@ pub(crate) fn start_handoff_run(
         Some(meter),
         None,
     )
-    .map(|_run| durable)
+    .map(|_run| {
+        report_outcomes(&told, &durable);
+        durable
+    })
 }
 
 /// What starting a run answers (M34.2.4): a handle, or a typed deferral.
@@ -1483,19 +1649,21 @@ fn run_agent(
     // person's grant, and they exist to rewrite `knowledge/` — which they
     // may do only through the server-stamped write_concept and
     // recheck_concept. Never shell, whatever the Settings
-    // toggle or the job says, so the built-in writers stay denied.
+    // ceiling or the job says, so the built-in writers stay denied.
     if matches!(request.lane.as_deref(), Some("stale" | "schema")) {
-        request.shell = Some(false);
+        request.shell = Some(agent::ShellCeiling::Off);
     }
     // M25.2: attended chat is METERED and never gated. The run is recorded
     // with its tokens; no reservation, no lease, and no ceiling can refuse it.
     let scope = runtime::open_vault(Path::new(&vault));
     // M33b.5 — the ONE gate an agent-attributed run does pass, and it is not a
     // budget question. Every frontend path that starts a CLI child funnels
-    // here (the job runner's schedules and triggers, and a thread addressing an
-    // agent by name), so this is where a per-agent pause has to be enforced;
-    // enforcing it in whichever surface remembered to check would be enforcing
-    // it nowhere. Before the token is minted and long before a child is
+    // here (the job runner's schedules and triggers, and the panel addressing
+    // an agent by name), so this is where a per-agent pause has to be
+    // enforced; enforcing it in whichever surface remembered to check would be
+    // enforcing it nowhere. The one other door, `start_thread_turn` (M70.4, a
+    // person's @mention in a comment thread), checks the same pause before
+    // it writes or mints anything. Before the token is minted and long before a child is
     // spawned: a refused run must leave no run token behind for the CLI to
     // present.
     //
@@ -1634,12 +1802,23 @@ fn spawn_requested_run(
     // narrowing was always advice; this is the boundary behind it. M53.10:
     // and so does the vault, so a run's tool calls stay in the vault it was
     // started in, whatever is opened while it runs.
-    // The WHY block opens an unattended run's message (M56.7). An attended
+    // The WHY block opens an unattended run's message (M56.7), and says
+    // nobody is watching, even when no cause was named (M57.3). An attended
     // turn's cause has none, so what a person typed goes to the CLI as typed.
-    if let Some(cause) = cause.as_ref() {
-        request.message =
-            runtime::cause::with_preamble(&request.message, cause, chrono::Utc::now());
-    }
+    // M57.4c: an unattended agent run hears, after the WHY block, what became
+    // of the writes it queued for Review; a run with none decided keeps its
+    // message byte for byte, and an attended turn hears nothing.
+    let (message, told) = with_outcomes(&request.message, &request, vault);
+    request.message = runtime::cause::with_preamble(&message, cause.as_ref(), chrono::Utc::now());
+    // M57.4: whether the agent asks before its page writes, read from its
+    // own record here as well as from the request, so a renderer that leaves
+    // it out cannot drop it. The plan, the seat's snapshot (an answer's
+    // resume) and the bearer all read the same value.
+    request.ask_first = Some(mcp::effective_ask_first(
+        vault,
+        request.actor.as_deref(),
+        request.ask_first,
+    ));
     request.mcp_token = Some(mcp_state.run_token(
         request.actor.as_deref(),
         request.scope.clone(),
@@ -1647,6 +1826,7 @@ fn spawn_requested_run(
         grant_tools(&request),
         run_id.clone(),
         vault,
+        mcp::WriteAsks::of(&request),
     )?);
     let meter = agent::meter::Meter {
         data_dir: dir.clone(),
@@ -1686,11 +1866,114 @@ fn spawn_requested_run(
         // event stream, and the person is watching it.
         None,
     )
-    .map(|spawned| RunHandle {
-        run: spawned.run,
-        run_id: durable,
-        session_id: spawned.session_id,
+    .map(|spawned| {
+        report_outcomes(&told, &durable);
+        RunHandle {
+            run: spawned.run,
+            run_id: durable,
+            session_id: spawned.session_id,
+        }
     })
+}
+
+/// M57.4c — `message` with what became of the writes `request`'s agent
+/// queued for Review in `vault` (`pending_writes::outcome_block`) before it,
+/// and the ids it told. Only an unattended or handed-off run of a `process:`
+/// agent hears it; an attended turn, one of Cerebro's own constructs, and a
+/// run with nothing decided get `message` as it was. With no runtime
+/// database nothing is told, and nothing is lost: the rows wait for a run
+/// that can read them.
+fn with_outcomes(
+    message: &str,
+    request: &agent::AgentRequest,
+    vault: &Path,
+) -> (String, Vec<String>) {
+    let actor = match request.actor.as_deref() {
+        Some(actor)
+            if actor.starts_with("process:")
+                && request.attended != Some(true)
+                && !request.internal =>
+        {
+            actor
+        }
+        _ => return (message.to_string(), Vec::new()),
+    };
+    let vault_id = runtime::scope::derive_vault_id(vault);
+    let told = runtime::sink::with_sink(|conn| {
+        runtime::pending_writes::take_outcomes(conn, &vault_id, actor, &process_started_at())
+    });
+    let outcomes = match told {
+        Some(Ok(outcomes)) => outcomes,
+        Some(Err(detail)) => {
+            log::warn!("pending_writes: could not read outcomes for {actor}: {detail}");
+            return (message.to_string(), Vec::new());
+        }
+        None => return (message.to_string(), Vec::new()),
+    };
+    match runtime::pending_writes::outcome_block(&outcomes) {
+        Some(block) => (
+            format!("{block}\n\n{message}"),
+            outcomes
+                .rows
+                .into_iter()
+                .map(|row| row.pending_id)
+                .collect(),
+        ),
+        None => (message.to_string(), Vec::new()),
+    }
+}
+
+/// Mark what `with_outcomes` told as heard by `run_id`, once its run started,
+/// so the next run is not told again.
+fn report_outcomes(told: &[String], run_id: &str) {
+    if told.is_empty() {
+        return;
+    }
+    let marked =
+        runtime::sink::with_sink(|conn| runtime::pending_writes::mark_reported(conn, told, run_id));
+    if let Some(Err(detail)) = marked {
+        log::warn!("pending_writes: could not mark outcomes reported: {detail}");
+    }
+}
+
+/// M57.4c — the page writes waiting in Review for `vault`, oldest first,
+/// each with its draft as JSON. An apply a previous process left unfinished
+/// is swept to interrupted first. The vault's id is derived, not registered,
+/// so the read registers nothing. A runtime database that cannot be read is
+/// an error, which Review shows as unavailable, never as an empty queue.
+#[tauri::command(async)]
+fn pending_writes(vault: String) -> Result<Vec<runtime::pending_writes::PendingRow>, String> {
+    let vault_id = runtime::scope::derive_vault_id(Path::new(&vault));
+    runtime::sink::with_sink(|conn| {
+        runtime::pending_writes::list_open(conn, &vault_id, &process_started_at())
+    })
+    .unwrap_or_else(|| Err("Cerebro's runtime database is unavailable".to_string()))
+}
+
+/// M57.4c — Review's Allow or Reject of one queued write (`mcp::decide_pending`):
+/// the typed decision, read at the call site. `input` is the person's edit
+/// of the draft, sent only with Allow; `reason` is required with Reject. A
+/// write that lands is announced to the open pages, as an agent's write is.
+#[tauri::command(async)]
+fn decide_pending_write(
+    app: tauri::AppHandle,
+    vault: String,
+    pending_id: String,
+    allow: bool,
+    input: Option<serde_json::Value>,
+    reason: Option<String>,
+) -> Result<mcp::PendingDecision, String> {
+    use tauri::Emitter;
+    mcp::decide_pending(
+        Path::new(&vault),
+        &pending_id,
+        allow,
+        input,
+        reason.as_deref(),
+        |change| {
+            let _ = app.emit(mcp::UI_ACTION_EVENT, change);
+        },
+    )
 }
 
 /// Empty string = the vault has no connectors.json (a real state Settings
@@ -1736,6 +2019,20 @@ fn stop_agent(state: tauri::State<'_, agent::AgentState>, run: u64) -> Result<bo
     state.stop(run)
 }
 
+/// What a run said after the cursor `after` (M57.6), for a panel that
+/// re-attaches: held, a gap the journal's cap left, or unknown. `run_id` is
+/// the durable id, so a run number reused after a restart never answers for
+/// another run. Memory only: nothing here reads or writes the disk.
+#[tauri::command(async)]
+fn agent_events_since(
+    state: tauri::State<'_, agent::AgentState>,
+    run: u64,
+    run_id: String,
+    after: u64,
+) -> agent::journal::EventsSince {
+    state.events_since(run, &run_id, after)
+}
+
 /// Stop everything, reporting what was stopped. The manual door: Rust already
 /// stops every run on quit (`RunEvent::Exit`) and the old vault's runs on a
 /// vault switch (`start_watcher`), so nothing has to call this for either.
@@ -1764,6 +2061,11 @@ enum AnswerResult {
 /// call's hook reads the answer. The resume passes the same pause gate any
 /// run of that actor does, and is recorded as attended (M56.7). A resume
 /// that cannot start puts the card back and says why.
+///
+/// `updated_input` is the person's edit of a write card's draft (M57.4b),
+/// sent only with Allow. The book checks its shape, then `mcp::edit_refusal`
+/// judges it under the grant the resume will run with (`answer_grant`); a
+/// refusal comes back to the card, which keeps waiting, and records nothing.
 #[tauri::command(async)]
 fn answer_interaction(
     app: tauri::AppHandle,
@@ -1772,13 +2074,25 @@ fn answer_interaction(
     vault: String,
     id: String,
     answer: agent::interaction::WireAnswer,
+    updated_input: Option<serde_json::Value>,
 ) -> Result<AnswerResult, String> {
     let book = state.interactions();
     let answer = agent::interaction::PersonAnswer::from_ipc(answer);
-    let resume = match book.begin_answer(&agent::vault_key(Path::new(&vault)), &id, answer) {
+    let check = |request: &agent::AgentRequest, tool: &str, input: &serde_json::Value| {
+        let at = Path::new(&vault);
+        mcp::edit_refusal(at, &answer_grant(at, request), tool, input)
+    };
+    let key = agent::vault_key(Path::new(&vault));
+    let resume = match book.begin_answer_edited(&key, &id, answer, updated_input, check) {
         Ok(resume) => resume,
         Err(refused) => return Ok(AnswerResult::Refused { refused }),
     };
+    // M57.4: an Allow of a write card is the one way an approval is minted,
+    // recorded before the resume starts so its write finds it at dispatch,
+    // and dropped again if the resume never starts (`abort_answer`).
+    if let Some(approval) = resume.approval.clone() {
+        book.record_write_approval(approval);
+    }
     let started: Result<RunHandle, String> = (|| {
         let vault_path = resume.vault.as_path();
         let scope = runtime::open_vault(vault_path);
@@ -1821,6 +2135,23 @@ fn answer_interaction(
     }
 }
 
+/// The grant an answer's resume runs under (M57.4b): the bearer
+/// `spawn_requested_run` mints from the same stored request, short of its
+/// run id, which only recording reads and an answer's check never records.
+fn answer_grant(vault: &Path, request: &agent::AgentRequest) -> mcp::RunGrant {
+    let actor = mcp::normalize_actor(request.actor.as_deref()).to_string();
+    mcp::RunGrant {
+        chain: vec![actor.clone()],
+        actor,
+        run_id: String::new(),
+        scope: request.scope.clone(),
+        read_scope: request.read_scope.clone(),
+        tools: grant_tools(request),
+        vault: Some(vault.to_path_buf()),
+        asks: mcp::WriteAsks::of(request),
+    }
+}
+
 /// Cancel a waiting call (M57.1): the panel's Stop or New conversation with
 /// a card open. The call is refused as stopped when its thread goes on.
 /// False when it was no longer waiting, which is not an error.
@@ -1841,6 +2172,15 @@ fn list_interactions(
     state
         .interactions()
         .pending(&agent::vault_key(Path::new(&vault)))
+}
+
+/// The person's own Claude Code settings, counted (M57.2): how many allow,
+/// ask and deny rules and which hook events their settings file holds, so
+/// Settings can say they act before Cerebro asks. Never a rule's text.
+/// `vault` resolves a relative `CLAUDE_CONFIG_DIR`, as the CLI's cwd does.
+#[tauri::command(async)]
+fn claude_user_settings(vault: Option<String>) -> agent::user_settings::UserSettings {
+    agent::user_settings::for_vault(Path::new(vault.as_deref().unwrap_or("/")))
 }
 
 /// The ledger chain head for git checkpoint trailers (M21.7) — a join key
@@ -1895,6 +2235,9 @@ fn start_watcher(
         // a previous process left `running` has no finisher left; the cutoff
         // is this process's start, so a run it opened is never touched.
         agent::meter::recover_orphaned(&dir, process_started());
+        // M70.4: a comment thread's pending answer whose run this process
+        // does not hold reads failed, "didn't finish"; a live one is kept.
+        agent::thread_turn::settle_orphans(&vault_path);
         // M25.1: one database serves every vault, so an opening vault
         // registers itself before anything writes a row that has to say
         // which folder it belongs to. Failing here is degraded, not fatal,
@@ -1903,6 +2246,20 @@ fn start_watcher(
         if let Some(scope) = runtime::open_vault(&vault_path) {
             runtime::sessions::track(&scope);
         }
+        // M60.8: Trash items past their days move to the OS Trash, on a
+        // thread of their own so the open never waits on the Finder.
+        let purged = vault_path.clone();
+        let by = WriteReceipt::system(vault::receipt::SystemWriter::TrashPurge);
+        std::thread::spawn(move || {
+            let report = vault::trash::purge_expired_to_os_trash(&purged, &by);
+            if report.moved + report.kept > 0 {
+                log::info!(
+                    "trash: {} old items moved to the OS Trash, {} kept",
+                    report.moved,
+                    report.kept
+                );
+            }
+        });
         // M26.4i: the ambient ingest supervisor. It reads its own switch,
         // which defaults OFF — starting the loop is not the same as
         // enabling the work, and nothing here turns it on.
@@ -1917,6 +2274,12 @@ fn start_watcher(
 fn process_started() -> chrono::DateTime<chrono::Utc> {
     static STARTED: std::sync::OnceLock<chrono::DateTime<chrono::Utc>> = std::sync::OnceLock::new();
     *STARTED.get_or_init(chrono::Utc::now)
+}
+
+/// `process_started` in `runtime::now_utc`'s spelling, so it compares with
+/// the runtime database's stored times (M57.4c's sweep).
+fn process_started_at() -> String {
+    process_started().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1947,6 +2310,7 @@ pub fn run() {
             set_panel_agent,
             scan_vault,
             read_note,
+            search_vault,
             save_note,
             update_frontmatter,
             verify_concept,
@@ -1961,6 +2325,8 @@ pub fn run() {
             fleet_run_detail,
             fleet_run_transcript,
             run_knowledge_writes,
+            page_attribution,
+            commit_runs,
             fleet_actor_summary,
             fleet_actor_summaries,
             job_ledger_read,
@@ -1996,12 +2362,15 @@ pub fn run() {
             create_folder,
             rename_note,
             delete_note,
+            list_trash,
+            restore_from_trash,
             list_comments,
             start_comment_thread,
             reply_to_comment_thread,
             set_comment_thread_resolved,
             delete_comment,
             delete_comment_thread,
+            start_thread_turn,
             list_folders,
             pick_files,
             import_attachment,
@@ -2020,10 +2389,14 @@ pub fn run() {
             read_cli_transcript,
             run_agent,
             stop_agent,
+            agent_events_since,
             stop_all_agents,
             answer_interaction,
             cancel_interaction,
             list_interactions,
+            pending_writes,
+            decide_pending_write,
+            claude_user_settings,
             diagnostics::log_frontend,
             // M9.4 — git tracking. Every command resolves the workspace
             // first, so a vault nested in a larger repo scopes correctly.
@@ -2036,6 +2409,9 @@ pub fn run() {
             git_commands::get_file_history,
             git_commands::get_file_diff,
             git_commands::get_file_diff_at_commit,
+            git_commands::get_file_at_commit,
+            git_commands::restore_note_version,
+            git_commands::get_file_patch,
             git_commands::get_commit_diff,
             git_commands::get_vault_pulse,
             git_commands::get_last_commit_info,
@@ -2113,6 +2489,7 @@ mod tests {
             connectors: None,
             connector_names: None,
             attended: None,
+            ask_first: None,
             mcp_url: None,
             mcp_token: None,
             actor: None,
@@ -2126,6 +2503,154 @@ mod tests {
             effort: None,
             internal: false,
         }
+    }
+
+    /// M57.4c: a database with one decided write of release-scout's in
+    /// `vault`, and the request its next scheduled run makes.
+    fn decided_write(label: &str) -> (std::path::PathBuf, std::path::PathBuf, agent::AgentRequest) {
+        let config = vault::testutil::temp_vault(&format!("{label}-config"));
+        let vault = vault::testutil::temp_vault(label);
+        runtime::sink::arm(&config).unwrap();
+        runtime::sink::with_sink(|conn| {
+            let vault_id = runtime::scope::register(conn, &vault).unwrap();
+            let input = serde_json::json!({ "folder": "records/risks", "slug": "vendor-delay" });
+            let queued = runtime::pending_writes::queue(
+                conn,
+                &runtime::pending_writes::Queue {
+                    vault_id: &vault_id,
+                    run_id: "run-0",
+                    actor: "process:release-scout",
+                    tool: "create_note",
+                    target: "records/risks/vendor-delay.md",
+                    target_hash: None,
+                    input: &input,
+                    grant: &serde_json::json!({}),
+                    limits: policy::tool_approval::queue_limits(),
+                },
+            )
+            .unwrap();
+            runtime::pending_writes::reject(conn, &vault_id, &queued.id, "not yet", "human:me")
+                .unwrap();
+        })
+        .unwrap();
+        let mut request = panel_style_request();
+        request.actor = Some("process:release-scout".into());
+        request.attended = Some(false);
+        (config, vault, request)
+    }
+
+    #[test]
+    fn page_attribution_refuses_a_path_outside_the_vault() {
+        let config = vault::testutil::temp_vault("lib-attribution-config");
+        let vault = vault::testutil::temp_vault("lib-attribution");
+        std::fs::create_dir_all(vault.join("notes")).unwrap();
+        std::fs::write(vault.join("notes/a.md"), "# A\n").unwrap();
+        let conn = runtime::open(&config).unwrap();
+        let vault_id = runtime::scope::register(&conn, &vault).unwrap();
+        let hash = ledger::sha256_hex(b"# A\n");
+        runtime::vault_writes::record_at(
+            &conn,
+            &vault_id,
+            &runtime::vault_writes::WriteRow {
+                kind: "vault.write",
+                path: "notes/a.md",
+                to: None,
+                content_hash: Some(&hash),
+                actor: Some(vault::receipt::HUMAN_ACTOR),
+                run_id: None,
+                approved_by: None,
+            },
+            chrono::Utc::now(),
+        )
+        .unwrap();
+        let outside = config.join("outside.md");
+        std::fs::write(&outside, "# A\n").unwrap();
+        for path in ["../outside.md", outside.to_str().unwrap()] {
+            assert_eq!(
+                page_attribution_in(&config, &vault, path).unwrap(),
+                runtime::write_log::Attribution::NotRecorded,
+                "{path} is no page of this vault"
+            );
+        }
+        // The same command reads an inside page, under its landing spelling.
+        let runtime::write_log::Attribution::Recorded(last) =
+            page_attribution_in(&config, &vault, "./notes/a.md").unwrap()
+        else {
+            panic!("an editor save is recorded");
+        };
+        assert_eq!(last.actor.as_deref(), Some(vault::receipt::HUMAN_ACTOR));
+        std::fs::write(vault.join("notes/a.md"), "# Changed elsewhere\n").unwrap();
+        assert!(matches!(
+            page_attribution_in(&config, &vault, "notes/a.md").unwrap(),
+            runtime::write_log::Attribution::Unattributed(_)
+        ));
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&config);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn the_next_run_hears_its_decided_writes_once() {
+        let _lock = runtime::sink::test_lock();
+        let (config, vault, request) = decided_write("lib-outcomes-once");
+        let (first, told) = with_outcomes("Do the sweep.", &request, &vault);
+        assert!(first.starts_with("WHAT HAPPENED TO WRITES YOU QUEUED FOR REVIEW:\n"));
+        assert!(
+            first.contains("rejected by the person: \"not yet\"."),
+            "{first}"
+        );
+        assert!(first.ends_with("\n\nDo the sweep."));
+        assert_eq!(told.len(), 1);
+        // It follows the WHY block, as the run's message is built.
+        let built = runtime::cause::with_preamble(&first, None, chrono::Utc::now());
+        assert!(built.starts_with(runtime::cause::NOBODY_WATCHING_PREAMBLE));
+        assert!(built.contains("assumed.\n\nWHAT HAPPENED TO WRITES"));
+        report_outcomes(&told, "run-1");
+        let (second, told) = with_outcomes("Do the sweep.", &request, &vault);
+        assert_eq!(second, "Do the sweep.", "told once");
+        assert!(told.is_empty());
+        runtime::sink::disarm();
+        let _ = std::fs::remove_dir_all(&vault);
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn a_run_with_nothing_decided_keeps_its_message() {
+        let _lock = runtime::sink::test_lock();
+        let (config, vault, mut request) = decided_write("lib-outcomes-none");
+        request.actor = Some("process:librarian".into());
+        let message = "Line one.\n\n  Line two, spaced.  ";
+        assert_eq!(
+            with_outcomes(message, &request, &vault),
+            (message.to_string(), Vec::new()),
+            "byte-identical"
+        );
+        runtime::sink::disarm();
+        assert_eq!(
+            with_outcomes(message, &request, &vault).0,
+            message,
+            "and with no runtime database"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn attended_turns_carry_no_outcome_block() {
+        let _lock = runtime::sink::test_lock();
+        let (config, vault, mut request) = decided_write("lib-outcomes-attended");
+        request.attended = Some(true);
+        assert_eq!(with_outcomes("hi", &request, &vault).0, "hi");
+        // Nor do Cerebro's own constructs.
+        request.attended = Some(false);
+        request.internal = true;
+        assert_eq!(with_outcomes("hi", &request, &vault).0, "hi");
+        // The decided write still waits to be told to a run that can hear it.
+        request.internal = false;
+        assert!(with_outcomes("hi", &request, &vault).0.contains("not yet"));
+        runtime::sink::disarm();
+        let _ = std::fs::remove_dir_all(&vault);
+        let _ = std::fs::remove_dir_all(&config);
     }
 
     #[test]
@@ -2291,10 +2816,13 @@ mod tests {
                 "rename_note in",
                 rename_note(v.clone(), "records/x.md".into(), format!("{kelvin}/x.md")),
             ),
-            ("delete_note", delete_note(v.clone(), concept.clone())),
+            (
+                "delete_note",
+                delete_note(v.clone(), concept.clone()).map(drop),
+            ),
             (
                 "delete_note, the folder",
-                delete_note(v.clone(), kelvin.into()),
+                delete_note(v.clone(), kelvin.into()).map(drop),
             ),
             (
                 "create_folder",
@@ -2320,5 +2848,243 @@ mod tests {
         }
         assert_eq!(snapshot(), before, "every byte and folder where it was");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// This vault's rows in `vault_writes`: kind, path, to, actor, run.
+    type DoorRow = (
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    );
+
+    fn door_rows(dir: &std::path::Path) -> Vec<DoorRow> {
+        let vault_id = runtime::scope::derive_vault_id(dir);
+        runtime::sink::with_sink(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT kind, path, to_path, actor, run_id FROM vault_writes \
+                     WHERE vault_id = ?1 ORDER BY rowid",
+                )
+                .unwrap();
+            stmt.query_map([&vault_id], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+        })
+        .unwrap()
+    }
+
+    /// One IPC door of src-tauri/fixtures/write-doors.json, called the way the
+    /// webview calls it.
+    fn call_door(
+        door: &str,
+        v: &str,
+        args: &serde_json::Value,
+        source: &std::path::Path,
+    ) -> Result<(), String> {
+        let text = |key: &str| args[key].as_str().unwrap_or_default().to_string();
+        let map = |key: &str| args[key].as_object().cloned().unwrap_or_default();
+        let v = v.to_string();
+        match door {
+            "save_note" => save_note(v, text("path"), text("body")),
+            "update_frontmatter" => update_frontmatter(v, text("path"), map("patch")).map(drop),
+            "set_note_title" => set_note_title(v, text("path"), text("title")),
+            "create_note" => create_note(
+                v,
+                text("folder"),
+                text("slug"),
+                map("frontmatter"),
+                text("body"),
+            )
+            .map(drop),
+            "save_view" => save_view(
+                v,
+                text("id"),
+                text("yaml"),
+                args["folder"].as_str().map(str::to_string),
+            ),
+            "save_collection" => save_collection(v, text("folder"), text("yaml")),
+            "save_list" => save_list(v, text("folder"), text("id"), text("yaml")),
+            "create_folder" => create_folder(v, text("path")),
+            "rename_note" => rename_note(v, text("from"), text("to")),
+            "delete_note" => delete_note(v, text("path")).map(drop),
+            "restore_from_trash" => restore_from_trash(v, text("stamp")).map(drop),
+            "write_text_file" => write_text_file(v, text("path"), text("content")).map(drop),
+            "import_attachment" => {
+                let named = text("source").replace("/SOURCE/", "");
+                import_attachment(v, source.join(named).to_string_lossy().to_string()).map(drop)
+            }
+            "verify_concept" => {
+                verify_concept(v, text("path"), map("patch"), text("viewed_body_hash"))
+            }
+            "capture_concept_edit" => capture_concept_edit(v, args["request"].clone()),
+            // M58.4: no runtime database, so a page no run wrote.
+            "restore_note_version" => {
+                git_commands::restore_note_version_in(&v, &text("path"), &text("commit"), None)
+                    .map(drop)
+            }
+            other => panic!("no IPC door called {other}"),
+        }
+    }
+
+    // M58.1 (CV-33): each IPC door refuses what the shared table says it
+    // refuses, in its words, or records exactly its one row, stamped human:me
+    // with no run. The mock replays the same table.
+    #[test]
+    fn write_doors_replay_the_shared_cases() {
+        let table: serde_json::Value =
+            serde_json::from_str(include_str!("../fixtures/write-doors.json")).unwrap();
+        let human = table["human_actor"].as_str().unwrap();
+        assert_eq!(human, vault::receipt::HUMAN_ACTOR);
+        let _sink = runtime::sink::test_lock();
+        let config = vault::testutil::temp_vault("write-doors-config");
+        runtime::sink::arm(&config).unwrap();
+        let source = vault::testutil::temp_vault("write-doors-source");
+        std::fs::write(source.join("door-case.pdf"), b"%PDF-1.4").unwrap();
+        for case in table["ipc"].as_array().unwrap() {
+            let dir = vault::testutil::temp_vault("write-doors");
+            for (rel, bytes) in case["seed"].as_object().into_iter().flatten() {
+                vault::testutil::write(&dir, rel, bytes.as_str().unwrap());
+            }
+            let door = case["door"].as_str().unwrap();
+            let outcome = call_door(door, &dir.to_string_lossy(), &case["args"], &source);
+            match case["refused"].as_str() {
+                Some(fragment) => {
+                    let err = outcome.expect_err(&format!("{case} must refuse"));
+                    assert!(err.contains(fragment), "{case}: {err}");
+                    assert_eq!(
+                        door_rows(&dir),
+                        Vec::<DoorRow>::new(),
+                        "{case}: a refusal records nothing"
+                    );
+                }
+                None => {
+                    outcome.unwrap_or_else(|e| panic!("{case} must land: {e}"));
+                    let expected: Vec<DoorRow> = match &case["records"] {
+                        serde_json::Value::Null => Vec::new(),
+                        row => vec![(
+                            row["kind"].as_str().unwrap().to_string(),
+                            row["path"].as_str().unwrap().to_string(),
+                            row["to"].as_str().map(str::to_string),
+                            Some(human.to_string()),
+                            None,
+                        )],
+                    };
+                    assert_eq!(door_rows(&dir), expected, "{case}");
+                }
+            }
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+        runtime::sink::disarm();
+        for dir in [&config, &source] {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    // M60.8: a Trash manifest naming knowledge/ is guarded like any write
+    // into the bundle, and the item stays in the Trash.
+    #[test]
+    fn restore_from_trash_refuses_a_knowledge_target() {
+        let dir = vault::testutil::temp_vault("restore-trash-bundle");
+        let stamp = "20261014T093000Z-a1b2";
+        vault::testutil::write(
+            &dir,
+            &format!(".trash/{stamp}/knowledge/concepts/a.md"),
+            "# A\n",
+        );
+        vault::testutil::write(
+            &dir,
+            &format!(".trash/{stamp}/.trashed.json"),
+            "{\"format\":1,\"path\":\"knowledge/concepts/a.md\",\"kind\":\"file\",\
+             \"title\":\"A\",\"deleted_at\":\"2026-10-14T09:30:00Z\"}",
+        );
+        let v = dir.to_string_lossy().to_string();
+        let err = restore_from_trash(v.clone(), stamp.into()).unwrap_err();
+        assert!(err.contains("read-only"), "{err}");
+        assert!(!dir.join("knowledge").exists(), "nothing was restored");
+        assert_eq!(list_trash(v).unwrap().len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // M58.1: save_view was the one write command with no bundle guard.
+    #[test]
+    fn save_view_refuses_the_bundle() {
+        let dir = vault::testutil::temp_vault("save-view-bundle");
+        let v = dir.to_string_lossy().to_string();
+        let err = save_view(
+            v.clone(),
+            "x".into(),
+            "name: X\n".into(),
+            Some("knowledge".into()),
+        )
+        .unwrap_err();
+        assert!(err.contains("read-only"), "{err}");
+        assert!(!dir.join("knowledge").exists(), "nothing was written");
+        save_view(v, "x".into(), "name: X\n".into(), Some("records".into())).unwrap();
+        assert!(dir.join("records/views/x.yml").is_file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // M58.1: a Review decision that applies a set records the files it
+    // projected as yours, whatever reviewer the webview names.
+    #[test]
+    fn a_review_decision_records_its_projections_as_you() {
+        use policy::commit::tests_support::{seed_belief, submit, update_op, P1, RUN};
+        let _sink = runtime::sink::test_lock();
+        let config = vault::testutil::temp_vault("review-recorded-config");
+        let dir = vault::testutil::temp_vault("review-recorded");
+        let _shadow = ledger::shadow::testing::activated(&dir);
+        runtime::sink::arm(&config).unwrap();
+        ledger::shadow::with_writer(&dir, |writer| {
+            let belief = seed_belief(writer, "seed");
+            let state = ledger::concepts::current_state(writer, &dir).unwrap();
+            let projection = ledger::reduce::project_belief(&state, &belief).unwrap();
+            ledger::manifest::write_projection(&dir, "knowledge/seed.md", &projection).unwrap();
+            submit(
+                writer,
+                P1,
+                update_op(&belief, "x"),
+                &belief,
+                policy::table::Risk::High,
+            );
+            let table = policy::table::PolicyTable::load().unwrap();
+            let queued =
+                policy::commit::commit_proposals(&table, writer, &dir, RUN, &[P1.to_string()])
+                    .unwrap();
+            assert_eq!(
+                queued.transition,
+                policy::commit::TransitionCode::InitialQueue
+            );
+            assert!(queued.projected.is_empty(), "a queued set projects nothing");
+        })
+        .unwrap();
+        let decided = decide_proposal(
+            dir.to_string_lossy().to_string(),
+            P1.to_string(),
+            true,
+            "human:someone-else".into(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(decided.as_deref(), Some("apply"));
+        assert_eq!(
+            door_rows(&dir),
+            vec![(
+                "vault.write".to_string(),
+                "knowledge/seed.md".to_string(),
+                None,
+                Some(vault::receipt::HUMAN_ACTOR.to_string()),
+                None
+            )]
+        );
+        runtime::sink::disarm();
+        ledger::shadow::deactivate();
+        for d in [&dir, &config] {
+            let _ = std::fs::remove_dir_all(d);
+        }
     }
 }

@@ -5,7 +5,7 @@
   "recorded": "derived",
   "derived_from": [
     "--help on --effort",
-    "the 2.1.250 bundle (thinking and signature deltas)",
+    "the 2.1.250 bundle (thinking and signature deltas, and the system/thinking_tokens estimate written beside each thinking delta)",
     "the 2.1.250 bundle (stream_event, assistant and result schemas)",
     "real/spike-not-signed-in (the 2.1.250 init and session-file framing)"
   ],

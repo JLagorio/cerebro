@@ -9,6 +9,7 @@ import { resetMockFs } from '@/lib/mockIpc';
 import { parseFlowchart } from '@/mermaid/flowchart/model';
 import { isManualLayout } from '@/mermaid/flowchart/views';
 import { makeEntry } from '@/test/factories';
+import { useOpenLogStore } from '@/stores/openLogStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { WhiteboardView } from './WhiteboardView';
@@ -525,8 +526,8 @@ describe('WhiteboardView', () => {
      *
      * MEASURED before this: 25 options, ArrowDown moved nothing,
      * aria-activedescendant null, and every row's computed background was
-     * rgba(0, 0, 0, 0) — while Enter DID place a record. ⌘K, whose scorer this
-     * reuses, has always highlighted its rows.
+     * rgba(0, 0, 0, 0) — while Enter DID place a record. ⌘K, whose ranker this
+     * shares, has always highlighted its rows.
      */
     it('the arrows mark a row, and Enter takes the marked one', async () => {
       fs().set(MAP, 'flowchart TD\n');
@@ -570,9 +571,9 @@ describe('WhiteboardView', () => {
     });
 
     it('a record KEY finds it, exactly as ⌘K does', async () => {
-      // QuickOpen scores max(title, key) and every work item in the vault has
-      // a key — so scoring the title alone made `lnc-3` a hit in ⌘K and a
-      // dead end here (M29.47 review).
+      // QuickOpen ranks title and key, and every work item in the vault has a
+      // key — so matching the title alone made `lnc-3` a hit in ⌘K and a dead
+      // end here (M29.47 review).
       fs().set(MAP, 'flowchart TD\n');
       const keyed = makeEntry({
         path: 'delivery/checkout.md',
@@ -589,6 +590,37 @@ describe('WhiteboardView', () => {
       expect(options[0].textContent).toContain('Land the new checkout');
       // …and the row says WHY it matched.
       expect(options[0].textContent).toContain('LNC-3');
+    });
+
+    // M59.3 — the picker ranks through the one name ranker ⌘K uses.
+    it("'fld7' still finds FLD-7, at the prefix tier", async () => {
+      fs().set(MAP, 'flowchart TD\n');
+      const keyed = makeEntry({
+        path: 'delivery/flags.md',
+        title: 'Wire the flags',
+        type: 'Task',
+        properties: { key: 'FLD-7' },
+      });
+      const mid = makeEntry({ path: 'delivery/mid.md', title: 'Notes on fld7 rollout' });
+      mount([shipV2, mid, keyed]);
+      await screen.findByTestId('fake-editor');
+      await userEvent.click(screen.getByTestId('whiteboard-add-record'));
+      await userEvent.type(screen.getByLabelText('Find a record'), 'fld7');
+      const options = screen.getAllByTestId('whiteboard-add-option');
+      expect(options.map((o) => o.textContent?.includes('Wire the flags'))).toEqual([true, false]);
+    });
+
+    it('an opened record leads the empty box', async () => {
+      fs().set(MAP, 'flowchart TD\n');
+      useOpenLogStore.setState({ logs: {}, saved: true });
+      useOpenLogStore.getState().record('/demo-vault', 'delivery/beta.md');
+      mount([shipV2, makeEntry({ path: 'delivery/beta.md', title: 'Beta program' })]);
+      await screen.findByTestId('fake-editor');
+      await userEvent.click(screen.getByTestId('whiteboard-add-record'));
+      const options = screen.getAllByTestId('whiteboard-add-option');
+      expect(options[0].textContent).toContain('Beta program');
+      expect(options[1].textContent).toContain('Ship v2');
+      useOpenLogStore.setState({ logs: {}, saved: true });
     });
 
     it('Enter takes the top offer once something is typed, and nothing before', async () => {

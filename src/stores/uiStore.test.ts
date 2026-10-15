@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { asThemeMode, useUiStore } from './uiStore';
 import * as ipc from '@/lib/ipc';
 import { resetMockFs } from '@/lib/mockIpc';
+import { useVaultStore } from './vaultStore';
 
 function reset() {
   useUiStore.setState({
@@ -66,22 +67,46 @@ describe('uiStore', () => {
   // M52.3 — a surface's ask carries the words its bubble shows. The prompt
   // is pages long; the label is what the person pressed.
   it('askAgent opens the panel with the prompt, its subject and its label', () => {
+    useUiStore.setState({ aiPanelOpen: false, handoffs: [] });
     useUiStore
       .getState()
       .askAgent('Revise the knowledge concept at …', 'knowledge/a.md', 'Ask to revise · A');
     expect(useUiStore.getState().aiPanelOpen).toBe(true);
-    expect(useUiStore.getState().agentPendingPrompt).toEqual({
+    expect(useUiStore.getState().handoffs.at(-1)).toMatchObject({
       text: 'Revise the knowledge concept at …',
       subject: 'knowledge/a.md',
       label: 'Ask to revise · A',
     });
     // Typed words are their own label.
     useUiStore.getState().askAgent('why is onboarding stalling');
-    expect(useUiStore.getState().agentPendingPrompt).toEqual({
+    expect(useUiStore.getState().handoffs.at(-1)).toMatchObject({
       text: 'why is onboarding stalling',
       subject: null,
       label: null,
     });
+  });
+
+  // M57.5 — a list, so a second ask never overwrites the first.
+  it('askAgent appends handoffs in order, and two asks keep both', () => {
+    useUiStore.setState({ aiPanelOpen: false, handoffs: [] });
+    useUiStore.getState().askAgent('first', 'a.md', 'First · A');
+    useUiStore.getState().askAgent('second', 'b.md', null);
+    const { handoffs, aiPanelOpen } = useUiStore.getState();
+    expect(aiPanelOpen).toBe(true);
+    expect(handoffs.map((h) => h.text)).toEqual(['first', 'second']);
+    expect(new Set(handoffs.map((h) => h.id)).size).toBe(2);
+  });
+
+  it('markHandoffAttached clears the subject; takeHandoff removes the handoff', () => {
+    useUiStore.setState({ handoffs: [] });
+    useUiStore.getState().askAgent('first', 'a.md', 'First · A');
+    useUiStore.getState().askAgent('second', 'b.md', null);
+    const [head, next] = useUiStore.getState().handoffs;
+    useUiStore.getState().markHandoffAttached(head.id);
+    expect(useUiStore.getState().handoffs[0]).toEqual({ ...head, subject: null });
+    expect(useUiStore.getState().handoffs[1]).toEqual(next);
+    useUiStore.getState().takeHandoff(head.id);
+    expect(useUiStore.getState().handoffs).toEqual([next]);
   });
 
   // M56.4: a failure card's Open Settings names the row to bring into view.
@@ -159,6 +184,55 @@ describe('uiStore', () => {
       expect(fresh.getState().isCollapsed('list:delivery', 'doing')).toBe(true);
       expect(fresh.getState().isCollapsed('list:delivery', 'todo')).toBe(false);
       expect(fresh.getState().collapsed.junk).toBeUndefined();
+    });
+  });
+
+  /**
+   * M57.2. Shell access is a ceiling of three, off, ask or on, stored under
+   * `cerebro.agentShell`. The boolean M8.1 stored migrates once ('true' is
+   * on), and setting the ceiling drops it, so an older build reads off.
+   */
+  describe('shell ceiling', () => {
+    const fresh = async () => {
+      vi.resetModules();
+      return (await import('./uiStore')).useUiStore.getState();
+    };
+
+    beforeEach(() => {
+      window.localStorage.removeItem('cerebro.agentShell');
+      window.localStorage.removeItem('cerebro.agentShellAccess');
+    });
+
+    it('defaults to off', async () => {
+      expect((await fresh()).agentShell).toBe('off');
+    });
+
+    it("migrates the old boolean: 'true' is on, 'false' off", async () => {
+      window.localStorage.setItem('cerebro.agentShellAccess', 'true');
+      expect((await fresh()).agentShell).toBe('on');
+      window.localStorage.setItem('cerebro.agentShellAccess', 'false');
+      expect((await fresh()).agentShell).toBe('off');
+    });
+
+    it('keeps ask, and reads anything unknown as off', async () => {
+      window.localStorage.setItem('cerebro.agentShell', 'ask');
+      expect((await fresh()).agentShell).toBe('ask');
+      for (const garbage of ['ASK', 'true', '{"on":1}', '']) {
+        window.localStorage.setItem('cerebro.agentShell', garbage);
+        expect((await fresh()).agentShell, garbage).toBe('off');
+      }
+      // A stored ceiling wins over the old boolean.
+      window.localStorage.setItem('cerebro.agentShell', 'off');
+      window.localStorage.setItem('cerebro.agentShellAccess', 'true');
+      expect((await fresh()).agentShell).toBe('off');
+    });
+
+    it('writes the new key and drops the old one', async () => {
+      window.localStorage.setItem('cerebro.agentShellAccess', 'true');
+      const state = await fresh();
+      state.setAgentShell('ask');
+      expect(window.localStorage.getItem('cerebro.agentShell')).toBe('ask');
+      expect(window.localStorage.getItem('cerebro.agentShellAccess')).toBeNull();
     });
   });
 
@@ -254,6 +328,24 @@ describe('uiStore', () => {
     it("a concept's panel takes comments too", () => {
       useUiStore.getState().setConceptPanelTab('comments');
       expect(useUiStore.getState().conceptPanelTab).toBe('comments');
+      useUiStore.getState().setConceptPanelTab('details');
+    });
+
+    // M58.4 (D18): History is a side panel tab on every page.
+    it('stores history and restores it on the next launch', async () => {
+      useUiStore.getState().setDocPanelTab('history');
+      expect(window.localStorage.getItem('cerebro.docPanelTab')).toBe('history');
+      vi.resetModules();
+      const fresh = (await import('./uiStore')).useUiStore;
+      expect(fresh.getState().docPanelTab).toBe('history');
+      window.localStorage.setItem('cerebro.docPanelTab', 'versions');
+      vi.resetModules();
+      expect((await import('./uiStore')).useUiStore.getState().docPanelTab).toBe('outline');
+    });
+
+    it("a concept's panel shows its history too", () => {
+      useUiStore.getState().setConceptPanelTab('history');
+      expect(useUiStore.getState().conceptPanelTab).toBe('history');
       useUiStore.getState().setConceptPanelTab('details');
     });
   });
@@ -443,7 +535,7 @@ describe('forgetJobRecord', () => {
 describe('panel agent binding', () => {
   beforeEach(() => {
     resetMockFs();
-    useUiStore.setState({ panelAgents: {}, toasts: [] });
+    useUiStore.setState({ panelAgents: {}, panelAgentsUnreadable: {}, toasts: [] });
   });
 
   it('loads per vault: null is unbound, a handle is bound', async () => {
@@ -469,12 +561,79 @@ describe('panel agent binding', () => {
     expect(useUiStore.getState().panelAgents['/demo-vault']).toBe('scout');
   });
 
-  it('a failed read toasts and leaves state as it was', async () => {
+  it('a failed read toasts, keeps the binding it had and marks the vault unreadable', async () => {
     const spy = vi.spyOn(ipc, 'getPanelAgent').mockRejectedValueOnce(new Error('disk gone'));
     useUiStore.setState({ panelAgents: { '/demo-vault': 'scout' } });
     await useUiStore.getState().loadPanelAgent('/demo-vault');
     expect(useUiStore.getState().panelAgents).toEqual({ '/demo-vault': 'scout' });
+    expect(useUiStore.getState().panelAgentsUnreadable).toEqual({ '/demo-vault': true });
     expect(useUiStore.getState().toasts).toHaveLength(1);
     spy.mockRestore();
+  });
+
+  it('a good read or a set clears the unreadable mark, and only that vault’s', async () => {
+    useUiStore.setState({ panelAgentsUnreadable: { '/demo-vault': true, '/other': true } });
+    await useUiStore.getState().loadPanelAgent('/demo-vault');
+    expect(useUiStore.getState().panelAgentsUnreadable).toEqual({ '/other': true });
+    expect(await useUiStore.getState().setPanelAgent('/other', null)).toBe(true);
+    expect(useUiStore.getState().panelAgentsUnreadable).toEqual({});
+  });
+
+  it('opening a vault reads its binding before any panel mounts', async () => {
+    await ipc.setPanelAgent('/demo-vault', 'release-scout');
+    void useVaultStore.getState().openVault('/demo-vault');
+    await vi.waitFor(() =>
+      expect(useUiStore.getState().panelAgents['/demo-vault']).toBe('release-scout'),
+    );
+  });
+});
+
+describe('the thread a detached run belongs to (M57.6)', () => {
+  beforeEach(() => {
+    useUiStore.setState({ aiPanelOpen: false, panelConversation: null, runs: [] });
+  });
+
+  it('showConversation opens the panel and names the thread', () => {
+    useUiStore.getState().showConversation('c-1');
+    expect(useUiStore.getState().aiPanelOpen).toBe(true);
+    expect(useUiStore.getState().panelConversation).toBe('c-1');
+  });
+
+  it('takePanelConversation hands it over once and clears it', () => {
+    useUiStore.getState().showConversation('c-1');
+    expect(useUiStore.getState().takePanelConversation()).toBe('c-1');
+    expect(useUiStore.getState().panelConversation).toBeNull();
+    expect(useUiStore.getState().takePanelConversation()).toBeNull();
+  });
+
+  it('attachChild records the attach key with the child', () => {
+    useUiStore.getState().startRun({
+      id: 'r-1',
+      owner: 'chat',
+      label: 'question',
+      place: null,
+      path: null,
+      conversationId: 'c-1',
+      run: null,
+      startedAt: 0,
+    });
+    useUiStore.getState().attachChild('r-1', 8, 'run-0008');
+    expect(useUiStore.getState().runs[0]).toMatchObject({ run: 8, attach: 'run-0008' });
+    useUiStore.getState().attachChild('r-1', 9);
+    expect(useUiStore.getState().runs[0]).toMatchObject({ run: 9, attach: 'run-0008' });
+  });
+
+  it('openDiff keeps a turn diff’s review, and closeDiff clears it (M58.5)', () => {
+    const review = { conversationId: 'c-1', runId: 'run-7' };
+    useUiStore.getState().openDiff('notes/a.md', 'a'.repeat(40), review);
+    expect(useUiStore.getState().diffView).toEqual({
+      path: 'notes/a.md',
+      commit: 'a'.repeat(40),
+      review,
+    });
+    useUiStore.getState().closeDiff();
+    expect(useUiStore.getState().diffView).toBeNull();
+    useUiStore.getState().openDiff('notes/a.md');
+    expect(useUiStore.getState().diffView).toEqual({ path: 'notes/a.md', commit: null });
   });
 });

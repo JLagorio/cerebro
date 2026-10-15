@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useContentSearch } from '@/app/useContentSearch';
 import { useOpenPath } from '@/app/useOpenPath';
 import { Dialog } from '@/components/ui/Dialog';
 import { PageIconGlyph } from '@/components/PageIcon';
 import { Input } from '@/components/ui/Input';
+import { UNTYPED_LABEL, visibleDestinations } from '@/engine/destinations';
 import { libraryIcon, libraryKind, libraryLabel } from '@/engine/library';
 import { pageIconOf, type PageIcon } from '@/engine/pageChrome';
 import { listTypes, typeStyle } from '@/engine/typeCatalog';
+import type { VaultHit } from '@/lib/ipc';
+import { rankNames } from '@/lib/nameRank';
 import { askAssistantLabel } from '@/lib/prompts';
-import { quickOpenScore } from '@/lib/quickOpenScore';
 import { useNavStore } from '@/stores/navStore';
+import { pruneOpenLogToSnapshot, useOpenLogStore, useRecency } from '@/stores/openLogStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import type { Entry, Selection } from '@/engine/types';
@@ -39,19 +43,53 @@ interface Target {
   kindLabel: string;
   /** Text the query is matched against, beyond the label. */
   alias: string;
+  /** The page it opens, for the open log's ranking (M59.3); notes only. */
+  path?: string;
   run: () => void;
+}
+
+/** How many logged pages the empty palette lists under Recent (M59.3). */
+const RECENT_ROWS = 8;
+const MAX_MATCHES = 12;
+/** How many page-text hits show under In pages before "All N matches". */
+const CONTENT_ROWS = 5;
+
+/** A row, and the group it is drawn under: Recent and Go to on an empty
+ * query; the names, then In pages (its hits, and the row that expands them)
+ * on a typed one. */
+interface Row {
+  key: string;
+  target: Target;
+  group: 'recent' | 'go' | 'match' | 'pages' | 'all';
+  /** A page-text hit (M59.4), drawn with its excerpt. */
+  hit?: VaultHit;
 }
 
 export function QuickOpen() {
   const visible = useUiStore((s) => s.quickOpenVisible);
   const setQuickOpen = useUiStore((s) => s.setQuickOpen);
   const askAgent = useUiStore((s) => s.askAgent);
+  const inboxEnabled = useUiStore((s) => s.inboxEnabled);
   const entries = useVaultStore((s) => s.entries);
   const views = useVaultStore((s) => s.views);
   const schema = useSchema();
   const navigate = useNavStore((s) => s.navigate);
+  const vaultPath = useVaultStore((s) => s.vaultPath);
+  const openLog = useOpenLogStore((s) => (vaultPath === null ? undefined : s.logs[vaultPath]));
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
+  // The query the highlight was last reset for (M59.4): it resets when the
+  // query changes, never when rows arrive.
+  const [highlightedFor, setHighlightedFor] = useState(query);
+  // The query "All N matches" was chosen for: the expansion lasts until the
+  // query changes.
+  const [expandedFor, setExpandedFor] = useState<string | null>(null);
+  // Page text under the names (M59.4), once typing pauses.
+  const content = useContentSearch(vaultPath, query, visible);
+  // The moment the palette opened: one clock for the whole visit, so the
+  // order does not shift under the keyboard while you type.
+  const [openedAt, setOpenedAt] = useState(() => Date.now());
+  const recency = useRecency(openedAt);
 
   // useCallback because `close` sits in the results memo's deps (M42.5).
   const close = useCallback(() => setQuickOpen(false), [setQuickOpen]);
@@ -78,7 +116,7 @@ export function QuickOpen() {
       // note in the one list where telling them apart matters most.
       const kind = libraryKind(e);
       // M29.21: a .mmd entry is a standalone diagram — the generic page glyph
-      // and "Note" would hide the one thing worth knowing about it here.
+      // and "Page" would hide the one thing worth knowing about it here.
       const diagram = e.path.endsWith('.mmd');
       return {
         id: `note:${e.path}`,
@@ -88,8 +126,13 @@ export function QuickOpen() {
         pageIcon: diagram ? null : pageIconOf(e),
         hint: key,
         meta: '',
-        kindLabel: diagram ? 'Diagram' : kind === null ? (e.type ?? 'Note') : libraryLabel(kind),
+        kindLabel: diagram
+          ? 'Diagram'
+          : kind === null
+            ? (e.type ?? UNTYPED_LABEL)
+            : libraryLabel(kind),
         alias: key,
+        path: e.path,
         run: () => openEntry(e),
       };
     });
@@ -116,94 +159,66 @@ export function QuickOpen() {
       color: t.color,
       hint: '',
       meta: `${t.count} ${t.count === 1 ? 'record' : 'records'}`,
-      kindLabel: 'Type',
+      // The label a type wears everywhere a person reads it (M39).
+      kindLabel: 'Database',
       alias: '',
       run: () => go({ kind: 'type', name: t.name }),
     }));
 
-    // Destinations that are surfaces rather than records. Aliases carry the
-    // words people actually reach for — "history" for Pulse, "git" for both.
-    const places: { id: string; label: string; icon: string; alias: string; sel: Selection }[] = [
-      { id: 'go:home', label: 'Home', icon: 'house', alias: 'my tasks', sel: { kind: 'home' } },
-      {
-        id: 'go:inbox',
-        label: 'Inbox',
-        icon: 'inbox',
-        alias: 'capture queue',
-        sel: { kind: 'inbox' },
-      },
-      // 'go:docs' fell out with the surface (M38.3) — pages are reached by
-      // NAME here, which is what this palette is for.
-      {
-        id: 'go:knowledge',
-        label: 'Knowledge',
-        icon: 'brain',
-        alias: 'knowledge concepts base',
-        sel: { kind: 'knowledge' },
-      },
-      {
-        id: 'go:changes',
-        label: 'Changes',
-        icon: 'file-diff',
-        alias: 'git uncommitted diff',
-        sel: { kind: 'changes' },
-      },
-      {
-        id: 'go:pulse',
-        label: 'Pulse',
-        icon: 'activity',
-        alias: 'git history commits',
-        sel: { kind: 'pulse' },
-      },
-      // M18: the library had no destination here at all — reachable only by
-      // finding its nav row, which is the exact problem the library was
-      // built to fix one level down. Its shelves are aliases rather than three
-      // rows, because "skills" and "agents" are what people type.
-      {
-        id: 'go:library',
-        label: 'Library',
-        icon: 'blocks',
-        alias: 'skills agents templates automations',
-        sel: { kind: 'library' },
-      },
-      {
-        id: 'go:settings',
-        label: 'Settings',
-        icon: 'settings',
-        alias: 'preferences',
-        sel: { kind: 'settings' },
-      },
-    ];
-    const surfaces: Target[] = places.map((s) => ({
-      id: s.id,
-      label: s.label,
-      icon: s.icon,
+    // The places, from engine/destinations.ts (M59.1): the same rows, words
+    // and order the nav has, Inbox only with its workflow. Pages are reached
+    // by name here, and by their text under In pages (M59.4).
+    const surfaces: Target[] = visibleDestinations({ inboxEnabled }).map((d) => ({
+      id: `go:${d.id}`,
+      label: d.label,
+      icon: d.icon,
       color: null,
       hint: '',
       meta: '',
       kindLabel: 'Go to',
-      alias: s.alias,
-      run: () => go(s.sel),
+      alias: d.aliases,
+      run: () => go(d.selection),
     }));
 
     return [...noteTargets, ...viewTargets, ...typeTargets, ...surfaces];
     // `go`/`openEntry` are navigation closures reborn each render; depending
     // on them would rebuild every target per keystroke for the same behavior.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entries, views, schema]);
+  }, [entries, views, schema, inboxEnabled]);
 
-  // On an empty query the panel used to restate the placeholder verbatim and
-  // offer nothing to press. The places — Home, Inbox, Docs… — are already
-  // targets, so showing them costs nothing and makes ↑↓/↵ work on open.
+  // An empty query lists Recent — your own last opens that still exist, in
+  // log order — then the places in table order (M59.3), so ↑↓/↵ work on open
+  // and Enter goes back to the page you were just on.
   const places = useMemo(() => targets.filter((t) => t.kindLabel === 'Go to'), [targets]);
+  const recent = useMemo(() => {
+    const byPath = new Map(targets.filter((t) => t.path !== undefined).map((t) => [t.path, t]));
+    const rows: Target[] = [];
+    for (const record of openLog ?? []) {
+      const target = byPath.get(record.path);
+      if (target !== undefined) rows.push(target);
+      if (rows.length === RECENT_ROWS) break;
+    }
+    return rows;
+  }, [targets, openLog]);
 
-  const results = useMemo(() => {
+  const results = useMemo<Row[]>(() => {
     const q = query.trim();
-    if (q === '') return places.map((target) => ({ target, score: 0 }));
+    if (q === '') {
+      return [
+        ...recent.map((target) => ({
+          key: `recent:${target.id}`,
+          target,
+          group: 'recent' as const,
+        })),
+        ...places.map((target) => ({ key: target.id, target, group: 'go' as const })),
+      ];
+    }
     // The DS ask-bar contract (M42.5): one synapse-tinted "ask" row at the
     // top — a row, not a mode. It hands the typed words to the assistant
     // panel, which is the one chat there is.
-    const ask: { target: Target; score: number } = {
+    const ask: Row = {
+      key: 'ask:assistant',
+      group: 'match',
       target: {
         id: 'ask:assistant',
         label: askAssistantLabel(q),
@@ -218,35 +233,96 @@ export function QuickOpen() {
           askAgent(q);
         },
       },
-      score: 0,
     };
-    return [
+    // One ranker for every name picker (M59.3): the match tier first, then
+    // your own recent opens within it.
+    const matches = rankNames({
+      query: q,
+      items: targets,
+      texts: (t) => [t.label, t.alias],
+      path: (t) => t.path,
+      recency,
+      limit: MAX_MATCHES,
+    }).items;
+    const names: Row[] = [
       ask,
-      ...targets
-        .map((t) => ({
-          target: t,
-          score: Math.max(quickOpenScore(q, t.label), quickOpenScore(q, t.alias)),
-        }))
-        .filter((r) => r.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 12),
+      ...matches.map((target) => ({ key: target.id, target, group: 'match' as const })),
     ];
-  }, [targets, places, query, askAgent, close]);
+    // In pages (M59.4): page text below the names, from the content search.
+    // Five hits, then "All N matches", which expands in place to every hit
+    // returned (Q7: there is no search page to hand off to).
+    if (content.status !== 'ready') return names;
+    const { hits, total, capped } = content.result;
+    const expanded = expandedFor === query;
+    const shown = expanded ? hits : hits.slice(0, CONTENT_ROWS);
+    const pages: Row[] = shown.map((hit) => ({
+      key: `page:${hit.path}`,
+      group: 'pages',
+      hit,
+      target: {
+        id: `page:${hit.path}`,
+        label: hit.title,
+        icon: 'file-text',
+        color: null,
+        hint: '',
+        meta: hit.path,
+        kindLabel: 'In pages',
+        alias: '',
+        path: hit.path,
+        run: () => {
+          close();
+          openPath(hit.path);
+        },
+      },
+    }));
+    if (!expanded && total > shown.length) {
+      const part = capped > 0 ? ` · ${capped} long pages searched in part` : '';
+      pages.push({
+        key: 'all-matches',
+        group: 'all',
+        target: {
+          id: 'all-matches',
+          label: `All ${total} matches${part}`,
+          icon: 'list',
+          color: null,
+          hint: '',
+          meta: '',
+          kindLabel: '',
+          alias: '',
+          run: () => setExpandedFor(query),
+        },
+      });
+    }
+    return [...names, ...pages];
+    // `openPath` is a navigation closure reborn each render, as `go` is above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targets, places, recent, recency, query, askAgent, close, content, expandedFor]);
 
-  useEffect(() => {
-    // The ask row is pinned, not preferred: with matches on screen the
-    // default highlight is the best MATCH, so Enter keeps meaning "open the
-    // thing I named" and asking is one ↑ away. With nothing else to offer,
-    // the ask row takes the highlight — Enter on a query nothing matches is
-    // exactly the moment to hand the words to the assistant.
+  // The highlight resets when the query changes, and only then (M59.4): set
+  // here during render, so rows that arrive later (the page text) never move
+  // a highlight the person set. The ask row is pinned, not preferred: with
+  // matches on screen the default highlight is the best MATCH, so Enter keeps
+  // meaning "open the thing I named" and asking is one ↑ away. With nothing
+  // else to offer, the ask row takes the highlight — Enter on a query nothing
+  // matches is exactly the moment to hand the words to the assistant.
+  if (highlightedFor !== query) {
+    setHighlightedFor(query);
     setActiveIndex(query.trim() === '' ? 0 : Math.min(1, results.length - 1));
-  }, [query, results]);
+  }
+  // Rows can shrink under the highlight; it clamps to the last one.
+  const active = Math.min(activeIndex, Math.max(results.length - 1, 0));
 
   useEffect(() => {
     if (!visible) {
       setQuery('');
       setActiveIndex(0);
+      return;
     }
+    setOpenedAt(Date.now());
+    // A deleted page leaves the log here, and only on a ready snapshot of
+    // this vault: FileTree's moves rescan before they remap, so pruning on
+    // every scan would drop the history the remap still needs.
+    pruneOpenLogToSnapshot();
   }, [visible]);
 
   if (!visible) return null;
@@ -263,19 +339,19 @@ export function QuickOpen() {
         autoFocus
         testId="quick-open-input"
         icon="search"
-        placeholder="Search notes, lists, types, and places…"
+        placeholder="Search pages, databases, and places…"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'ArrowDown') {
             e.preventDefault();
-            setActiveIndex((i) => Math.min(i + 1, Math.max(results.length - 1, 0)));
+            setActiveIndex(Math.min(active + 1, Math.max(results.length - 1, 0)));
           }
           if (e.key === 'ArrowUp') {
             e.preventDefault();
-            setActiveIndex((i) => Math.max(i - 1, 0));
+            setActiveIndex(Math.max(active - 1, 0));
           }
-          if (e.key === 'Enter' && results[activeIndex]) results[activeIndex].target.run();
+          if (e.key === 'Enter' && results[active]) results[active].target.run();
           if (e.key === 'Escape') {
             // stopPropagation, or this closes TWO layers (M29.53). React
             // flushes a discrete-event state update synchronously, so this
@@ -291,67 +367,156 @@ export function QuickOpen() {
         }}
         width="100%"
       />
-      {query.trim() === '' && results.length > 0 && (
-        <div className="mt-2.5 px-2.5 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--text-meta)]">
-          Go to
-        </div>
-      )}
       <div
         role="listbox"
         aria-label="Quick open results"
         className="mt-1.5 max-h-[380px] overflow-y-auto"
       >
-        {results.map((r, i) => (
-          <button
-            key={r.target.id}
-            type="button"
-            // The ask row is an OFFER, not a result: it repeats whatever was
-            // typed, so a spec (or anything else) picking "the result whose
-            // text is X" must never land on it.
-            data-testid={r.target.id === 'ask:assistant' ? 'quick-open-ask' : 'quick-open-result'}
-            role="option"
-            aria-selected={i === activeIndex}
-            onClick={() => r.target.run()}
-            onMouseEnter={() => setActiveIndex(i)}
-            className="flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left"
-            style={{ background: i === activeIndex ? 'var(--n-50)' : 'transparent' }}
-          >
-            <span
-              className="inline-flex flex-none"
-              style={{ color: r.target.color ?? 'var(--n-500)' }}
-            >
-              <PageIconGlyph
-                icon={r.target.pageIcon ?? null}
-                fallback={{ name: r.target.icon }}
-                size={14}
-              />
-            </span>
-            <span className="min-w-0 flex-1 truncate text-sm text-n-900">{r.target.label}</span>
-            {/* The record's key: a mono chip, because it is an identifier you
-                might have typed. Distinct from the kind label, which used to
-                sit beside it in the identical style and read as one phrase. */}
-            {r.target.hint !== '' && (
-              <span className="flex-none rounded-xs bg-n-100 px-1 py-px [font-family:var(--font-mono)] text-2xs text-[var(--text-meta)]">
-                {r.target.hint}
-              </span>
-            )}
-            {r.target.meta !== '' && (
-              <span className="max-w-[40%] flex-none truncate text-2xs text-[var(--text-meta)]">
-                {r.target.meta}
-              </span>
-            )}
-            {/* Fixed column so the category aligns down the whole list. */}
-            <span className="w-[84px] flex-none truncate text-right text-2xs text-[var(--text-meta)]">
-              {r.target.kindLabel}
-            </span>
-          </button>
-        ))}
-        {query.trim() !== '' && results.length === 0 && (
-          <div className="px-3 py-4 text-xs text-[var(--text-meta)]">
-            No matches. Try a different term.
-          </div>
-        )}
+        {query.trim() === ''
+          ? (['recent', 'go'] as const).map((group) => {
+              const rows = results.flatMap((r, i) => (r.group === group ? [{ r, i }] : []));
+              if (rows.length === 0) return null;
+              const label = group === 'recent' ? 'Recent' : 'Go to';
+              return (
+                <div key={group} role="group" aria-label={label} data-section={group}>
+                  <div
+                    aria-hidden
+                    className="mt-1 px-2.5 pb-1 pt-1.5 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--text-meta)]"
+                  >
+                    {label}
+                  </div>
+                  {rows.map(({ r, i }) => renderRow(r, i))}
+                </div>
+              );
+            })
+          : renderTyped()}
       </div>
     </Dialog>
   );
+
+  /** A typed query's rows: the names, then In pages (M59.4). */
+  function renderTyped() {
+    const pages = results.flatMap((r, i) =>
+      r.group === 'pages' || r.group === 'all' ? [{ r, i }] : [],
+    );
+    const ready = content.status === 'ready' ? content.result : null;
+    const unshown = ready === null ? 0 : ready.total - ready.hits.length;
+    return (
+      <>
+        {results.map((r, i) => (r.group === 'match' ? renderRow(r, i) : null))}
+        {content.status === 'unavailable' && (
+          // A failed read is never "no matches" (CV-05): the names above
+          // were found, and the page text was not searched.
+          <p data-testid="section-unavailable" className="m-0 px-2.5 py-2 text-2xs text-n-500">
+            Page text couldn't be searched. Names above are complete.
+          </p>
+        )}
+        {ready !== null && pages.length > 0 && (
+          <div role="group" aria-label="In pages" data-section="pages">
+            <div
+              aria-hidden
+              className="mt-1 px-2.5 pb-1 pt-1.5 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--text-meta)]"
+            >
+              {ready.widened ? 'In pages · closest matches' : 'In pages'}
+            </div>
+            {pages.map(({ r, i }) => (r.hit ? renderContentRow(r, r.hit, i) : renderRow(r, i)))}
+            {expandedFor === query && unshown > 0 && (
+              <p className="m-0 px-2.5 py-1.5 text-2xs text-[var(--text-meta)]">
+                {unshown} more not shown — add a word to narrow it
+              </p>
+            )}
+          </div>
+        )}
+      </>
+    );
+  }
+
+  /** A page-text hit: its title and path, then its excerpt with the query
+   * marked. Parts are drawn as text, never as HTML. */
+  function renderContentRow(r: Row, hit: VaultHit, i: number) {
+    return (
+      <button
+        key={r.key}
+        type="button"
+        data-testid="quick-open-content-result"
+        role="option"
+        aria-selected={i === active}
+        onClick={() => r.target.run()}
+        onMouseEnter={() => setActiveIndex(i)}
+        className="flex w-full flex-col gap-0.5 rounded-md px-2.5 py-1.5 text-left"
+        style={{ background: i === active ? 'var(--n-50)' : 'transparent' }}
+      >
+        <span className="flex w-full min-w-0 items-baseline gap-2">
+          <span className="min-w-0 flex-none truncate text-sm text-n-900">{hit.title}</span>
+          <span className="min-w-0 flex-1 truncate text-2xs text-[var(--text-meta)]">
+            {hit.path}
+          </span>
+        </span>
+        {hit.parts.length > 0 && (
+          <span className="line-clamp-2 w-full text-xs text-n-600">
+            {hit.parts.map((part, k) =>
+              part.mark ? (
+                <mark key={k} className="rounded-xs bg-[var(--synapse-100)] text-[inherit]">
+                  {part.text}
+                </mark>
+              ) : (
+                <span key={k}>{part.text}</span>
+              ),
+            )}
+          </span>
+        )}
+      </button>
+    );
+  }
+
+  function renderRow(r: Row, i: number) {
+    return (
+      <button
+        key={r.key}
+        type="button"
+        // The ask row is an OFFER, not a result: it repeats whatever was
+        // typed, so a spec (or anything else) picking "the result whose
+        // text is X" must never land on it. Nor is "All N matches" (M59.4).
+        data-testid={
+          r.target.id === 'ask:assistant'
+            ? 'quick-open-ask'
+            : r.group === 'all'
+              ? 'quick-open-all-matches'
+              : 'quick-open-result'
+        }
+        role="option"
+        aria-selected={i === active}
+        onClick={() => r.target.run()}
+        onMouseEnter={() => setActiveIndex(i)}
+        className="flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left"
+        style={{ background: i === active ? 'var(--n-50)' : 'transparent' }}
+      >
+        <span className="inline-flex flex-none" style={{ color: r.target.color ?? 'var(--n-500)' }}>
+          <PageIconGlyph
+            icon={r.target.pageIcon ?? null}
+            fallback={{ name: r.target.icon }}
+            size={14}
+          />
+        </span>
+        <span className="min-w-0 flex-1 truncate text-sm text-n-900">{r.target.label}</span>
+        {/* The record's key: a mono chip, because it is an identifier you
+                might have typed. Distinct from the kind label, which used to
+                sit beside it in the identical style and read as one phrase. */}
+        {r.target.hint !== '' && (
+          <span className="flex-none rounded-xs bg-n-100 px-1 py-px [font-family:var(--font-mono)] text-2xs text-[var(--text-meta)]">
+            {r.target.hint}
+          </span>
+        )}
+        {r.target.meta !== '' && (
+          <span className="max-w-[40%] flex-none truncate text-2xs text-[var(--text-meta)]">
+            {r.target.meta}
+          </span>
+        )}
+        {/* Fixed column so the category aligns down the whole list. */}
+        <span className="w-[84px] flex-none truncate text-right text-2xs text-[var(--text-meta)]">
+          {r.target.kindLabel}
+        </span>
+      </button>
+    );
+  }
 }

@@ -149,3 +149,24 @@ test('a card naming no page shows so, and keeps its pointer through a save', asy
     .poll(() => readMockFile(page, SEEDED), { timeout: 6_000 })
     .toBe(seeded.replace('Notes.', 'Notes. More.'));
 });
+
+test('a card picked among pages sharing a stem shows and opens the one picked', async ({
+  page,
+}) => {
+  await boot(page);
+  // Four projects hold a meetings/kickoff.md, and `[[kickoff]]` reaches only
+  // the first: the picker writes this one by its title instead.
+  const title = 'Offline sync hardening kickoff';
+  await openPage(page, 'Run the onboarding webinar as office hours instead');
+  await insertCard(page, 'offline sync hardening kick', title);
+  const card = cardFor(page, title);
+  await expect(card.getByTestId('page-card-title')).toHaveText(title);
+  await expect
+    .poll(() => readMockFile(page, HOST), { timeout: 6_000 })
+    .toContain(`\`\`\`cerebro-page\n[[${title}]]\n\`\`\``);
+  // A Meeting is a record: Open lands on its row, with this one's panel open.
+  await card.getByRole('button', { name: 'Open' }).click();
+  await expect(page.getByRole('textbox', { name: 'Title', exact: true })).toHaveValue(title, {
+    timeout: 10_000,
+  });
+});

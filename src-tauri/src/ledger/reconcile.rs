@@ -2395,9 +2395,14 @@ mod tests {
 
         let file = std::fs::read_to_string(vault.join(rel)).unwrap();
         let (_, body) = file.split_once("\n---\n").unwrap();
-        crate::ledger::capture::capture_body_edit(&vault, rel, &format!("{body}\nTyped here.\n"))
-            .unwrap()
-            .unwrap();
+        crate::ledger::capture::capture_body_edit(
+            &vault,
+            rel,
+            &format!("{body}\nTyped here.\n"),
+            &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(
             actor_of_last_override(&vault),
             crate::ledger::capture::OWNER_ACTOR
@@ -2435,17 +2440,27 @@ mod tests {
             "supersedes".into(),
             serde_json::json!(["[[sync-error-rate]]"]),
         );
-        crate::ledger::capture::capture_frontmatter_patch(&vault, replacement, &patch)
-            .unwrap()
-            .unwrap();
+        crate::ledger::capture::capture_frontmatter_patch(
+            &vault,
+            replacement,
+            &patch,
+            &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
+        )
+        .unwrap()
+        .unwrap();
         assert!(pair(&state_now()), "the owner typed it");
 
         // Undo it, then have the same line arrive from another editor.
         let mut clear = serde_json::Map::new();
         clear.insert("supersedes".into(), serde_json::Value::Null);
-        crate::ledger::capture::capture_frontmatter_patch(&vault, replacement, &clear)
-            .unwrap()
-            .unwrap();
+        crate::ledger::capture::capture_frontmatter_patch(
+            &vault,
+            replacement,
+            &clear,
+            &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
+        )
+        .unwrap()
+        .unwrap();
         assert!(!pair(&state_now()));
         let typed = std::fs::read_to_string(vault.join(replacement)).unwrap();
         assert_ne!(typed, before);

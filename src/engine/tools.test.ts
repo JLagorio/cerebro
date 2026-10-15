@@ -140,6 +140,22 @@ describe('the picker reads the tool manifest (M54.2)', () => {
   });
 });
 
+describe('the read toolset (M59.5)', () => {
+  it('is the six readers, list_notes after search_notes, none writing', () => {
+    const read = TOOLSETS.find((s) => s.id === 'read');
+    expect(read?.label).toBe('Read the vault');
+    expect(read?.tools.map((t) => t.name)).toEqual([
+      'get_vault_context',
+      'search_notes',
+      'list_notes',
+      'get_note',
+      'knowledge_about',
+      'list_inbox',
+    ]);
+    expect(read?.tools.some((t) => t.writes)).toBe(false);
+  });
+});
+
 describe('the write toolset', () => {
   it('is create_note, update_frontmatter, append_to_note and edit_note, in that order, all writing', () => {
     const write = TOOLSETS.find((s) => s.id === 'write');
@@ -150,6 +166,26 @@ describe('the write toolset', () => {
       'edit_note',
     ]);
     expect(write?.tools.every((t) => t.writes)).toBe(true);
+  });
+});
+
+describe('the comment toolset (M70.3)', () => {
+  it('sits right after write and holds the three comment tools in order, writing nothing', () => {
+    const ids = TOOLSETS.map((s) => s.id);
+    expect(ids.indexOf('comment')).toBe(ids.indexOf('write') + 1);
+    const comment = TOOLSETS.find((s) => s.id === 'comment');
+    expect(comment?.label).toBe('Comment on pages');
+    expect(comment?.tools.map((t) => t.name)).toEqual([
+      'comment_on_note',
+      'reply_to_comment',
+      'resolve_comment',
+    ]);
+    // A comment changes no page: no rescan, no checkpoint, no written path.
+    expect(comment?.tools.some((t) => t.writes)).toBe(false);
+    for (const name of ['comment_on_note', 'mcp__cerebro__reply_to_comment', 'resolve_comment']) {
+      expect(isWriteTool(name), name).toBe(false);
+      expect(showsAsChange(name), name).toBe(false);
+    }
   });
 });
 

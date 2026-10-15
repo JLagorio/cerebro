@@ -40,9 +40,11 @@ file and a README disagree, the README wins and this file gets fixed.
   `cargo test` line in `.husky/pre-push`. Never `--skip kill`: it also skips
   the tests named for skills.
 - Add or adjust goldens in `shared/policy/goldens/`,
-  `shared/policy/goldens-critical/` or `shared/policy/goldens-trigger/`. Both
-  suites replay the same files, and a new critical trigger or trigger-registry
-  refusal code fails the build until its vectors exist.
+  `shared/policy/goldens-critical/`, `shared/policy/goldens-trigger/` or
+  `shared/policy/goldens-tool-approval/`. Both suites replay the same files,
+  and a new critical trigger, trigger-registry refusal code or tool-approval
+  cell fails the build until its vectors exist. A `tools.v1.json` edit that
+  moves a CLI row's family changes the tool-approval goldens too.
 - An artifact with no digest (`links.v1.json`, `staleness.v1.json`) carries
   `cases` that both readers replay; new behaviour gets a new case.
 - Verify with `pnpm test:run src/lib/policy src/lib/attention src/lib/trigger`

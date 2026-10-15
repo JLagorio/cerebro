@@ -48,7 +48,7 @@ export function PageIconGlyph({
       <span
         role="img"
         aria-label={icon.text}
-        data-page-icon="emoji"
+        data-icon-kind="emoji"
         className={className}
         style={{
           display: 'inline-flex',
@@ -69,7 +69,7 @@ export function PageIconGlyph({
     return (
       <span
         title={icon.path}
-        data-page-icon="file"
+        data-icon-kind="file"
         className={className}
         style={{ display: 'inline-flex', flex: 'none' }}
       >

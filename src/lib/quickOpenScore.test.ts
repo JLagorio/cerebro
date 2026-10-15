@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { quickOpenScore } from './quickOpenScore';
+import { quickOpenScore, quickOpenTier } from './quickOpenScore';
 
 describe('quickOpenScore', () => {
   it('returns 0 when there is no match', () => {
@@ -36,7 +36,7 @@ describe('quickOpenScore', () => {
     expect(quickOpenScore('fld-7', 'FLD-7')).toBeGreaterThan(0);
     expect(quickOpenScore('fld7', 'FLD-7')).toBeGreaterThan(0);
     expect(quickOpenScore('fld', 'FLD-7')).toBeGreaterThan(0);
-    expect(quickOpenScore('7', 'FLD-7')).toBeGreaterThan(0); // substring
+    expect(quickOpenScore('7', 'FLD-7')).toBeGreaterThan(0); // after the hyphen: a word boundary
   });
 
   it('does not apply hyphen-less matching to non-key candidates', () => {
@@ -47,6 +47,33 @@ describe('quickOpenScore', () => {
   it('breaks ties deterministically by shorter candidate', () => {
     expect(quickOpenScore('doc', 'Docs')).toBeGreaterThan(
       quickOpenScore('doc', 'Documentation hub'),
+    );
+  });
+});
+
+// M59.3: the tier alone, the step nameRank ranks by before the open log.
+describe('quickOpenTier', () => {
+  it.each([
+    ['fli', 'Flight deck', 3],
+    ['FLI', 'flight deck', 3],
+    ['fli', 'Board flight', 2],
+    ['deck', 'flight-deck', 2],
+    ['deck', 'notes/deck.md', 2],
+    ['light', 'Flight deck', 1],
+    ['fld7', 'FLD-7', 3],
+    ['fld-7', 'FLD-7', 3],
+    ['7', 'FLD-7', 2],
+    ['ab', 'A Better World', 0],
+    ['a world', 'A Better World', 0],
+    ['', 'Flight deck', 0],
+    ['a', '', 0],
+  ] as const)('%j in %j is tier %i', (query, candidate, tier) => {
+    expect(quickOpenTier(query, candidate)).toBe(tier);
+  });
+
+  it('is the score divided back out', () => {
+    expect(Math.floor((quickOpenScore('fli', 'Board flight') + 999) / 1000)).toBe(
+      quickOpenTier('fli', 'Board flight'),
     );
   });
 });

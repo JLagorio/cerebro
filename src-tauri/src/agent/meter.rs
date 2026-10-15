@@ -112,13 +112,21 @@ pub struct Meter {
 /// The run-completion signal `agent::stream` never had. Before this, the only
 /// thing that knew a run was over was the reader thread, and the only thing it
 /// did about it was emit a UI event — so a Rust caller that wanted to spend
-/// one run and then act on the result had no way to wait for it.
+/// one run and then act on the result had no way to wait for it. It also
+/// carries what the run said last (M70.4), so a waiter can post the reply: a
+/// thread turn's answer is its run's Result text.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunEnd {
     pub outcome: RunOutcome,
     /// `None` means the run ended without saying what it spent. It is not
     /// zero — M25 treats missing usage as an unknown day, never a free one.
     pub usage: Option<Usage>,
+    /// The run's final reply: its terminal Result's text, when not empty
+    /// (`agent::ReplyCollector`).
+    pub answer: Option<String>,
+    /// What went wrong, in a sentence, when the run said: a failure notice's
+    /// title, else its error's message, cut.
+    pub failure: Option<String>,
 }
 
 /// What the stream said, accumulated as it is read.
@@ -141,6 +149,10 @@ pub struct Tally {
     /// The run died for want of quota, as the fold typed it (M56.4,
     /// `super::failure`): set by the reader, never from the result's words.
     quota: bool,
+    /// The run's typed failure fields, read by the same classifier the fold
+    /// uses, for the one fact the fold's verdict does not carry: when the
+    /// limit resets (M56.14, `quota_resets_at`).
+    failures: super::failure::Failures,
     unknown_fields: Vec<String>,
     /// The stream kinds this build has no row for (M56.2, `super::kinds`),
     /// once each, in the order they first came.
@@ -154,6 +166,9 @@ pub struct Tally {
     /// terminal `result`'s.
     init_session: Option<String>,
     result_session: Option<String>,
+    /// The CLI tools the run's plan would have asked for and nobody could
+    /// answer, so it ran without them (M57.2), in the manifest's order.
+    withheld: Vec<String>,
 }
 
 impl Tally {
@@ -183,6 +198,7 @@ impl Tally {
                 self.unclassified.push(kind);
             }
         }
+        self.failures.observe(event);
         if let Some(turn) = RunFacts::from_assistant(event) {
             self.facts.merge(turn);
         }
@@ -213,6 +229,19 @@ impl Tally {
         self.quota = quota;
     }
 
+    /// When the limit that killed a quota run resets, as Claude Code
+    /// reported it (M56.14): the usage-limit notice's `resets_at`. `None` for
+    /// a run that did not die of quota, and for a throttle or an empty
+    /// balance, which name no reset (Q10), so their backoff keeps the window.
+    pub(crate) fn quota_resets_at(&self) -> Option<DateTime<Utc>> {
+        if !self.quota {
+            return None;
+        }
+        let notice = self.failures.notice(None)?;
+        let at = DateTime::parse_from_rfc3339(notice.resets_at.as_deref()?).ok()?;
+        Some(at.with_timezone(&Utc))
+    }
+
     /// The Claude Code session this run ran as, as its stream named it:
     /// init's, else the result's. `None` when neither line arrived or named
     /// one.
@@ -233,6 +262,16 @@ impl Tally {
     /// error event already told the person why.
     pub(crate) fn refuse_init(&mut self) {
         self.init_refused = true;
+    }
+
+    /// Record the tools the run went without because nobody could answer
+    /// its asks (M57.2, `RunApproval::withheld`).
+    pub fn withhold(&mut self, tools: &[String]) {
+        for tool in tools {
+            if !self.withheld.contains(tool) {
+                self.withheld.push(tool.clone());
+            }
+        }
     }
 
     /// The tool of the call a hook deferred, when the run ended suspended on
@@ -368,11 +407,15 @@ pub(crate) const USAGE_SURFACE: &str = "agent.usage";
 pub(crate) const STREAM_SURFACE: &str = "agent.stream";
 /// The surface of an unattended run's row for a call a hook deferred (M57.1).
 pub(crate) const DEFERRED_SURFACE: &str = "agent.deferred";
+/// The surface of a run's row for the tools its shell ceiling would have
+/// asked for when nobody could answer (M57.2).
+pub(crate) const ASK_SURFACE: &str = "agent.ask";
 /// How many unclassified kinds one row names; the rest are counted.
 const UNCLASSIFIED_NAMED: usize = 20;
 
 /// One `capability_unavailable` row under `surface`, with the run's id: what
-/// this build met in a run's stream and could not read. Never fails a run.
+/// this build met in a run's stream and could not read, or a capability the
+/// run went without (M57.2). Never fails a run.
 fn record_unread(conn: &rusqlite::Connection, meter: &Meter, surface: &str, detail: &str) {
     let refusal = crate::policy::table::PolicyTable::load()
         .ok()
@@ -432,6 +475,16 @@ pub fn finish(meter: &Meter, tally: &Tally, aborted: bool, cancelled: bool, now:
         }
         record_unread(&conn, meter, STREAM_SURFACE, &detail);
     }
+    // M57.2 (Q7): a run under Ask that nobody watches went without the
+    // tools it would have asked for, and says which, once, in every mode.
+    if !tally.withheld.is_empty() {
+        let detail = format!(
+            "{} {}",
+            crate::policy::tool_approval::messages().withheld,
+            tally.withheld.join(", ")
+        );
+        record_unread(&conn, meter, ASK_SURFACE, &detail);
+    }
     // M57.1 (Q1): nobody can answer an unattended run's deferred call, and
     // only a hook outside Cerebro defers one, so the run says so once.
     if let (Mode::Ambient, Some(tool)) = (meter.mode, tally.deferred()) {
@@ -458,13 +511,14 @@ pub fn finish(meter: &Meter, tally: &Tally, aborted: bool, cancelled: bool, now:
             meter.started_at,
             now,
         ),
-        Mode::Ambient => dispatch::finalize(
+        Mode::Ambient => dispatch::finalize_until_reset(
             &conn,
             &meter.run_id,
             outcome,
             counted,
             Some(&tally.facts),
             items_for(outcome),
+            tally.quota_resets_at(),
             now,
         ),
     };
@@ -649,6 +703,34 @@ mod tests {
         // A refused first request spends nothing, and says so: reported, not
         // unknown.
         assert!(usage.is_some(), "a quota death still reports its usage");
+    }
+
+    #[test]
+    fn a_quota_death_names_the_reset_its_limit_reported() {
+        // M56.14: the weekly limit in the hand-built stream resets at
+        // 2026-01-01T00:00:00Z, and that instant reaches finalize.
+        let tally = tally_of(&usage_limit_stream());
+        assert_eq!(
+            tally.quota_resets_at(),
+            DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
+                .ok()
+                .map(|at| at.with_timezone(&Utc))
+        );
+        // A throttle names no reset, so its backoff keeps the window (Q10).
+        let throttled = tally_of(&[
+            api_error_reply("rate_limit"),
+            result(json!({ "output_tokens": 0 }), true, "x"),
+        ]);
+        assert_eq!(throttled.ended(false, false).0, RunOutcome::QuotaFailed);
+        assert_eq!(throttled.quota_resets_at(), None);
+        // A run that did not die of quota has no reset to honour, whatever
+        // limit events it saw on the way.
+        let fine = tally_of(&[
+            json!({ "type": "rate_limit_event", "rate_limit_info": { "status": "allowed",
+                "resetsAt": 1767225600, "rateLimitType": "five_hour" } }),
+            result(json!({ "output_tokens": 5 }), false, "done"),
+        ]);
+        assert_eq!(fine.quota_resets_at(), None);
     }
 
     #[test]
@@ -1496,6 +1578,78 @@ mod tests {
     }
 
     #[test]
+    fn an_ambient_weekly_limit_backs_off_until_the_reset_it_reported() {
+        // M56.14 at the meter: the stream's weekly limit resets at
+        // 2026-01-01T00:00:00Z, three days after this run, and the backoff
+        // finalize writes ends there rather than five hours on.
+        let dir = crate::vault::testutil::temp_vault("meter-quota-reset");
+        let _lock = crate::runtime::status::test_lock();
+        crate::runtime::status::clear();
+        let conn = crate::runtime::open(&dir).unwrap();
+        let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
+        let started = DateTime::parse_from_rfc3339("2025-12-29T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let dispatch::Dispatched::Started(lease) = dispatch::claim(
+            &conn,
+            &vault,
+            "store",
+            "scheduled",
+            crate::runtime::budget::Reservation {
+                total_tokens: 20_000,
+                output_tokens: 4_000,
+            },
+            &[],
+            Some("process:scout"),
+            None,
+            started,
+        )
+        .unwrap() else {
+            panic!("an empty item list must still reach the gate and claim");
+        };
+        drop(conn);
+
+        finish(
+            &Meter {
+                data_dir: dir.clone(),
+                run_id: lease.run_id.clone(),
+                mode: Mode::Ambient,
+                vault_id: Some(vault.clone()),
+                store_uuid: Some("store".into()),
+                started_at: started,
+                elapsed_limit_seconds: Some(lease.elapsed_limit_seconds),
+                actor: None,
+                parent_run_id: None,
+                cause: None,
+            },
+            &tally_of(&usage_limit_stream()),
+            false,
+            false,
+            started + chrono::Duration::minutes(1),
+        );
+
+        let conn = crate::runtime::open_existing(&dir).unwrap();
+        let outcome: String = conn
+            .query_row(
+                "SELECT outcome FROM runs WHERE run_id = ?1",
+                [&lease.run_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(outcome, "quota_failed");
+        let ends: Vec<String> = conn
+            .prepare("SELECT DISTINCT until FROM backoff WHERE reason = 'quota'")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(ends, ["2026-01-01T00:00:00.000Z"]);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_supervised_run_is_left_for_its_supervisor_to_finalize() {
         // The route decides where the items land, not whether the CLI exited
         // cleanly: a window that ran and concluded "nothing material"
@@ -1899,6 +2053,83 @@ mod tests {
             booked_outcome(Mode::Supervised, &tally, RunOutcome::Succeeded),
             RunOutcome::Succeeded
         );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- M57.2: the asks nobody could answer ---------------------------------
+
+    fn attended_meter(dir: &std::path::Path, vault: &str, run_id: &str) -> Meter {
+        Meter {
+            data_dir: dir.to_path_buf(),
+            run_id: run_id.into(),
+            mode: Mode::Attended,
+            vault_id: Some(vault.to_string()),
+            store_uuid: Some("store".into()),
+            started_at: Utc::now(),
+            elapsed_limit_seconds: None,
+            actor: None,
+            parent_run_id: None,
+            cause: None,
+        }
+    }
+
+    #[test]
+    fn an_unattended_ask_records_one_withheld_row() {
+        let dir = crate::vault::testutil::temp_vault("meter-withheld");
+        let _lock = crate::runtime::status::test_lock();
+        crate::runtime::status::clear();
+        let conn = crate::runtime::open(&dir).unwrap();
+        let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
+        drop(conn);
+        let approval =
+            crate::policy::tool_approval::plan(&crate::policy::tool_approval::ApprovalInput {
+                kind: crate::policy::tool_approval::RunKind::Unattended,
+                shell: crate::policy::tool_approval::ShellCeiling::Ask,
+                ask_first: false,
+                read_scoped: false,
+                narrowing: None,
+            });
+        let mut tally = tally_of(&[]);
+        tally.withhold(&approval.withheld);
+        tally.withhold(&approval.withheld);
+        let meter = attended_meter(&dir, &vault, "withheld-run");
+        finish(&meter, &tally, false, false, Utc::now());
+        let conn = crate::runtime::open_existing(&dir).unwrap();
+        let rows = rows_under(&conn, ASK_SURFACE);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].0, "capability_unavailable");
+        assert_eq!(
+            rows[0].1,
+            format!(
+                "{} Write, Edit, MultiEdit, NotebookEdit, Bash",
+                crate::policy::tool_approval::messages().withheld
+            )
+        );
+        assert_eq!(rows[0].2, "withheld-run");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn nothing_withheld_records_nothing() {
+        let dir = crate::vault::testutil::temp_vault("meter-withheld-none");
+        let _lock = crate::runtime::status::test_lock();
+        crate::runtime::status::clear();
+        let conn = crate::runtime::open(&dir).unwrap();
+        let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
+        drop(conn);
+        let mut tally = tally_of(&[]);
+        tally.withhold(&[]);
+        finish(
+            &attended_meter(&dir, &vault, "nothing-withheld"),
+            &tally,
+            false,
+            false,
+            Utc::now(),
+        );
+        let conn = crate::runtime::open_existing(&dir).unwrap();
+        assert!(rows_under(&conn, ASK_SURFACE).is_empty());
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
     }

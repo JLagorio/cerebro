@@ -5,11 +5,7 @@
     "synthetic": "hand-shaped from Claude Code 2.1.250's shapes (M57.1), not recorded; the defer-gate record commit replaces it",
     "cwd": "/vault",
     "session_id": "00000000-0000-4000-8000-000000000057",
-    "tools": [
-      "Read",
-      "mcp__cerebro__get_note",
-      "mcp__cerebro__append_to_note"
-    ],
+    "tools": ["Read", "mcp__cerebro__get_note", "mcp__cerebro__append_to_note"],
     "mcp_servers": [
       {
         "name": "cerebro",

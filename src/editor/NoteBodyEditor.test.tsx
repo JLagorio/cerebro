@@ -317,6 +317,28 @@ describe('NoteBodyEditor when the file changes underneath it', () => {
     expect(fs().get(PAGE)).toContain('status: done');
   });
 
+  // M55 review: setTitle clears the hash before it rewrites the H1, so the
+  // page hears h1 → null → h2. The hash after the null is a change, not a new
+  // baseline, or the page keeps the old title and its next save reverts it.
+  it('takes a rename that cleared the hash on its way, and a later save keeps it', async () => {
+    const tracked = await renderTracking(20);
+    const before = blockWith(tracked.seen[0], 'Test page').id;
+    await act(async () => {
+      expect(await useVaultStore.getState().setTitle(PAGE, 'Renamed page')).toBe(true);
+    });
+    expect(useVaultStore.getState().entries[0].hash).toBeNull();
+    expect(fs().get(PAGE)).toContain('# Renamed page');
+    // The rescan (stubbed here) brings the new bytes' hash.
+    act(() => hashed('h2'));
+    await waitFor(() => expect(textOf(tracked.seen[0])).toContain('# Renamed page'));
+    expect(tracked.seen).toHaveLength(1);
+    expect(blockWith(tracked.seen[0], 'Renamed page').id).toBe(before);
+    await typeOver(tracked.seen[0], 'Second line.', 'Second, typed by me.');
+    await waitFor(() => expect(fs().get(PAGE)).toContain('Second, typed by me.'), DISK_ROUND_TRIP);
+    expect(fs().get(PAGE)).toContain('# Renamed page');
+    expect(fs().get(PAGE)).not.toContain('# Test page');
+  });
+
   it('never re-applies its own save', async () => {
     const tracked = await renderTracking(20);
     await typeOver(tracked.seen[0], 'Second line.', 'Second, typed by me.');

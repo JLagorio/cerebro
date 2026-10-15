@@ -4,6 +4,10 @@
 //! disables prompting. That turns "hangs forever waiting on a TTY that does
 //! not exist" into a fast failure — and `classify` below is the other half:
 //! a suppressed prompt without classification is just an unexplained error.
+//! Each also runs under `command::NETWORK_TIMEOUT` (M58.3), so a remote that
+//! accepts and never answers ends as a network error naming the deadline.
+//! pull and pull_ff write the index, so they hold the repository's lock
+//! (`commit::repo_lock`).
 
 use serde::Serialize;
 
@@ -85,6 +89,20 @@ pub fn classify(stderr: &str) -> (RemoteOutcome, String) {
             RemoteOutcome::AuthError,
             "Git could not authenticate with the remote. Check your credential helper or SSH key."
                 .to_string(),
+        );
+    }
+    // M58.3: Cerebro's own deadline names itself, so the person reads how
+    // long it waited rather than a bare "could not reach".
+    if let Some(deadline) = stderr
+        .lines()
+        .find(|line| line.trim().starts_with("operation timed out after "))
+    {
+        return (
+            RemoteOutcome::NetworkError,
+            format!(
+                "Could not reach the remote: {}. Check your connection.",
+                deadline.trim()
+            ),
         );
     }
     if lower.contains("could not resolve host")
@@ -189,9 +207,11 @@ pub fn pull(ws: &GitWorkspaceInfo) -> RemoteResult {
         return RemoteResult::plain(RemoteOutcome::NoRemote, "No remote is configured.");
     }
     let dir = ws.dir();
+    let lock = super::commit::repo_lock(&dir);
+    let _held = super::commit::hold(&lock);
     let before = command::run_str(&dir, &["rev-parse", "HEAD"]).unwrap_or_default();
 
-    match command::run(&dir, &["pull", "--ff-only"]) {
+    match command::run_bounded(&dir, &["pull", "--ff-only"], command::NETWORK_TIMEOUT) {
         Ok(out) => {
             let after = command::run_str(&dir, &["rev-parse", "HEAD"]).unwrap_or_default();
             if before.trim() == after.trim() {
@@ -220,7 +240,11 @@ pub fn pull(ws: &GitWorkspaceInfo) -> RemoteResult {
                 .contains("not possible to fast-forward")
                 || failure.stderr.to_lowercase().contains("diverging");
             if diverged {
-                return match command::run(&dir, &["pull", "--no-rebase"]) {
+                return match command::run_bounded(
+                    &dir,
+                    &["pull", "--no-rebase"],
+                    command::NETWORK_TIMEOUT,
+                ) {
                     Ok(out) => RemoteResult {
                         status: RemoteOutcome::Updated,
                         message: out.trim().to_string(),
@@ -261,7 +285,7 @@ pub fn fetch(ws: &GitWorkspaceInfo) -> RemoteResult {
     if !has_remote(ws) {
         return RemoteResult::plain(RemoteOutcome::NoRemote, "No remote configured");
     }
-    match command::run(&ws.dir(), &["fetch", "origin"]) {
+    match command::run_bounded(&ws.dir(), &["fetch", "origin"], command::NETWORK_TIMEOUT) {
         Ok(_) => RemoteResult::plain(RemoteOutcome::Updated, "Fetched"),
         Err(failure) => {
             let (status, message) = classify(&failure.stderr);
@@ -287,7 +311,14 @@ pub fn pull_ff(ws: &GitWorkspaceInfo) -> RemoteResult {
     if !has_remote(ws) {
         return RemoteResult::plain(RemoteOutcome::NoRemote, "No remote configured");
     }
-    match command::run(&ws.dir(), &["pull", "--ff-only", "origin"]) {
+    let dir = ws.dir();
+    let lock = super::commit::repo_lock(&dir);
+    let _held = super::commit::hold(&lock);
+    match command::run_bounded(
+        &dir,
+        &["pull", "--ff-only", "origin"],
+        command::NETWORK_TIMEOUT,
+    ) {
         Ok(out) => {
             if out.contains("Already up to date") {
                 RemoteResult::plain(RemoteOutcome::UpToDate, "Already up to date")
@@ -341,7 +372,7 @@ pub fn push(ws: &GitWorkspaceInfo) -> RemoteResult {
         vec!["push", "-u", "origin", status.branch.as_str()]
     };
 
-    match command::run(&dir, &args) {
+    match command::run_bounded(&dir, &args, command::NETWORK_TIMEOUT) {
         Ok(out) => RemoteResult::plain(RemoteOutcome::Ok, out.trim().to_string()),
         Err(failure) => {
             let (status, message) = classify(&failure.stderr);
@@ -504,6 +535,34 @@ mod tests {
             classify("fatal: unable to access: Could not resolve host: github.com").0,
             RemoteOutcome::NetworkError
         );
+    }
+
+    /// A fetch Cerebro's deadline ended (M58.3) reads as a network error,
+    /// and its words say how long it waited. The failure is a real one: a
+    /// bounded fetch against a remote that accepts and never answers, on a
+    /// two-second deadline rather than the two-minute one.
+    #[test]
+    fn a_timed_out_fetch_reads_as_a_network_error() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let open: Vec<_> = listener.incoming().take(4).flatten().collect();
+            std::thread::sleep(std::time::Duration::from_secs(8));
+            drop(open);
+        });
+        let dir = crate::vault::testutil::temp_vault("m58-timed-out-fetch");
+        crate::git::commit::init_repo(&dir).unwrap();
+        let url = format!("http://127.0.0.1:{port}/r.git");
+        let failure =
+            command::run_bounded(&dir, &["fetch", &url], std::time::Duration::from_secs(2))
+                .expect_err("a remote that never answers cannot succeed");
+        let (status, message) = classify(&failure.stderr);
+        assert_eq!(status, RemoteOutcome::NetworkError);
+        assert_eq!(
+            message,
+            "Could not reach the remote: operation timed out after 2 s. Check your connection."
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

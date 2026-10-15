@@ -1,8 +1,17 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { MOCK_FAILURES, runMockAgent } from './mockAgent';
+import {
+  editedText,
+  MOCK_FAILURES,
+  releaseHeldMockRuns,
+  resetMockGrants,
+  runMockAgent,
+} from './mockAgent';
 import type { AgentStreamEvent, UiAction } from './types';
+import { notesPrompt, type ReviewNote } from '@/engine/reviewNotes';
+import { pendingWrites, queueAgentWrite, resetMockFs } from '@/lib/mockIpc';
+import { APPROVAL_MESSAGES, plan as planApproval } from '@/lib/policy/toolApproval';
 
 /**
  * The mock is what browser dev, vitest, and Playwright see instead of the real
@@ -358,6 +367,32 @@ describe('runMockAgent', () => {
       expect(replyOf(events)).toBe(`I appended that to ${PAGE}.`);
     });
 
+    it('chains two appends with " then ", each its own call and its own file (M58.3)', async () => {
+      const appended: [string, string][] = [];
+      const events: AgentStreamEvent[] = [];
+      await new Promise<void>((resolve) => {
+        runMockAgent(
+          'append "One." to notes/a.md then append "Two." to notes/b.md',
+          (event) => {
+            events.push(event);
+            if (event.kind === 'Done') resolve();
+          },
+          {
+            delayMs: 0,
+            onAppend: async (path, content) => {
+              appended.push([path, content]);
+            },
+          },
+        );
+      });
+      expect(toolNames(events)).toEqual(['append_to_note', 'append_to_note']);
+      expect(appended).toEqual([
+        ['notes/a.md', 'One.'],
+        ['notes/b.md', 'Two.'],
+      ]);
+      expect(replyOf(events)).toBe('I appended that to notes/a.md and notes/b.md.');
+    });
+
     it('a refused append is an error result, announces nothing, and claims no write', async () => {
       const { order, events, actions } = await runAppend(async () => {
         throw new Error('knowledge/ is written only through write_concept');
@@ -482,6 +517,131 @@ describe('runMockAgent', () => {
     });
   });
 
+  // M70.3 — the comment scripts: a comment tool through its handler, which
+  // posts beside the page and announces only its comments.
+  describe('the comment scripts', () => {
+    const PAGE = 'records/decisions/dec-conflict-resolution-is-manual.md';
+    const ID = '0123456789abcdef';
+    type Handler = (args: Record<string, unknown>) => Promise<string>;
+
+    function runComment(
+      ask: string,
+      handlers: { onComment?: Handler; onReply?: Handler; onResolve?: Handler } = {},
+    ) {
+      const events: AgentStreamEvent[] = [];
+      const actions: UiAction[] = [];
+      const done = new Promise<void>((resolve) => {
+        runMockAgent(
+          ask,
+          (event) => {
+            events.push(event);
+            if (event.kind === 'Done') resolve();
+          },
+          { delayMs: 0, onUiAction: (action) => void actions.push(action), ...handlers },
+        );
+      });
+      return done.then(() => ({ events, actions }));
+    }
+
+    it('comments on a quoted passage, with an occurrence, and says which thread', async () => {
+      const onComment = vi.fn(
+        async () => `Commented on ${PAGE} as thread ${ID}, on line 12: "…conflict…"`,
+      );
+      const { events, actions } = await runComment(
+        `comment "Detect the conflict" #2 on ${PAGE}: Who decides?`,
+        { onComment },
+      );
+      expect(toolNames(events)).toEqual(['comment_on_note']);
+      const args = {
+        path: PAGE,
+        quote: 'Detect the conflict',
+        text: 'Who decides?',
+        occurrence: 2,
+      };
+      expect(JSON.parse(toolInputs(events)[0])).toEqual(args);
+      expect(onComment).toHaveBeenCalledWith(args);
+      expect(actions).toEqual([{ action: 'comments_changed', path: PAGE }]);
+      expect(replyOf(events)).toBe(`I commented on ${PAGE} as thread ${ID}.`);
+    });
+
+    it('comments on the whole page', async () => {
+      const onComment = vi.fn(
+        async () => `Commented on ${PAGE} as thread ${ID}, about the whole page.`,
+      );
+      const { events } = await runComment(`comment on ${PAGE}: Looks right, mostly risky.`, {
+        onComment,
+      });
+      expect(onComment).toHaveBeenCalledWith({ path: PAGE, text: 'Looks right, mostly risky.' });
+      expect(replyOf(events)).toBe(`I commented on ${PAGE} as thread ${ID}.`);
+    });
+
+    it('replies, and resolves with or without a closing reply', async () => {
+      const onReply = vi.fn(async () => `Replied in thread ${ID} on ${PAGE}.`);
+      const onResolve = vi.fn(async () => `Resolved thread ${ID} on ${PAGE}.`);
+      let run = await runComment(`reply to ${ID} on ${PAGE}: The crew lead.`, { onReply });
+      expect(onReply).toHaveBeenCalledWith({ path: PAGE, thread: ID, text: 'The crew lead.' });
+      expect(replyOf(run.events)).toBe(`I replied in ${ID} on ${PAGE}.`);
+      run = await runComment(`resolve ${ID} on ${PAGE}`, { onResolve });
+      expect(onResolve).toHaveBeenLastCalledWith({ path: PAGE, thread: ID });
+      expect(replyOf(run.events)).toBe(`I resolved ${ID} on ${PAGE}.`);
+      run = await runComment(`resolve ${ID} on ${PAGE}: Done in the plan.`, { onResolve });
+      expect(onResolve).toHaveBeenLastCalledWith({
+        path: PAGE,
+        thread: ID,
+        text: 'Done in the plan.',
+      });
+      expect(run.actions).toEqual([{ action: 'comments_changed', path: PAGE }]);
+    });
+
+    it('a refusal is an error result, announces nothing, and says why', async () => {
+      const refusal = 'The quoted text appears 2 times.';
+      const refuse = async () => {
+        throw new Error(refusal);
+      };
+      for (const [ask, said] of [
+        [`comment "conflict" on ${PAGE}: x`, `I could not comment on ${PAGE}: ${refusal}`],
+        [`reply to ${ID} on ${PAGE}: x`, `I could not reply in ${ID} on ${PAGE}: ${refusal}`],
+        [`resolve ${ID} on ${PAGE}`, `I could not resolve ${ID} on ${PAGE}: ${refusal}`],
+      ]) {
+        const { events, actions } = await runComment(ask, {
+          onComment: refuse,
+          onReply: refuse,
+          onResolve: refuse,
+        });
+        expect(actions, ask).toEqual([]);
+        expect(
+          events.find((e) => e.kind === 'ToolDone'),
+          ask,
+        ).toMatchObject({
+          is_error: true,
+          output: refusal,
+        });
+        expect(replyOf(events), ask).toBe(said);
+      }
+    });
+
+    it('refuses when nothing can carry out the call', async () => {
+      for (const [ask, said] of [
+        [
+          `comment on ${PAGE}: x`,
+          `I could not comment on ${PAGE}: comment_on_note is not available here`,
+        ],
+        [
+          `reply to ${ID} on ${PAGE}: x`,
+          `I could not reply in ${ID} on ${PAGE}: reply_to_comment is not available here`,
+        ],
+        [
+          `resolve ${ID} on ${PAGE}`,
+          `I could not resolve ${ID} on ${PAGE}: resolve_comment is not available here`,
+        ],
+      ]) {
+        const { events, actions } = await runComment(ask);
+        expect(actions, ask).toEqual([]);
+        expect(replyOf(events), ask).toBe(said);
+      }
+    });
+  });
+
   // M55.6 — a browser-mode seam: a spec holds the agent's write while it
   // types into the open page, then lets it land.
   describe('the write gate', () => {
@@ -587,13 +747,528 @@ describe('the mock names its session and ends its turn as the fold does (M56.3)'
     expect(text).toMatchObject({ message_id: 'msg_mock', text: replyOf(events) });
   });
 
-  it('still emits only Done when cancelled', async () => {
+  it('emits Cancelled then Done when cancelled, once each (M57.5)', async () => {
     const events: AgentStreamEvent[] = [];
     const mock = runMockAgent('What is at risk right now?', (e) => events.push(e), {
       delayMs: 50,
       sessionId: SESSION,
     });
     mock.cancel();
-    expect(events.map((e) => e.kind)).toEqual(['Done']);
+    mock.cancel();
+    await new Promise((r) => setTimeout(r, 80));
+    expect(events.map((e) => e.kind)).toEqual(['Cancelled', 'Done']);
+    // A failure script's run closes the same way.
+    const failed: AgentStreamEvent[] = [];
+    const failure = runMockAgent('fail: unknown', (e) => failed.push(e), { delayMs: 50 });
+    failure.cancel();
+    expect(failed.map((e) => e.kind)).toEqual(['Cancelled', 'Done']);
+  });
+});
+
+describe('a held run: `wait for me` (M57.5)', () => {
+  const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  afterEach(() => releaseHeldMockRuns());
+
+  it('holds mid-tool until released, then finishes', async () => {
+    const events: AgentStreamEvent[] = [];
+    const done = new Promise<void>((resolve) => {
+      runMockAgent(
+        'wait for me',
+        (event) => {
+          events.push(event);
+          if (event.kind === 'Done') resolve();
+        },
+        { delayMs: 0 },
+      );
+    });
+    await pause(30);
+    expect(events.map((e) => e.kind)).toEqual(['Init', 'ModelChanged', 'ToolStart']);
+    expect(toolNames(events)).toEqual(['get_vault_context']);
+    releaseHeldMockRuns();
+    await done;
+    const kinds = events.map((e) => e.kind);
+    expect(kinds).toContain('ToolDone');
+    expect(kinds.slice(-4)).toEqual(['Text', 'TurnEnded', 'Result', 'Done']);
+    expect(replyOf(events)).toBe('Done waiting.');
+    // The browser's handle on the same gate.
+    expect((window as { __cerebroReleaseMockRuns?: unknown }).__cerebroReleaseMockRuns).toBe(
+      releaseHeldMockRuns,
+    );
+  });
+
+  it('a run cancelled while held emits nothing after release', async () => {
+    const events: AgentStreamEvent[] = [];
+    const run = runMockAgent('wait for me', (e) => events.push(e), { delayMs: 0 });
+    await pause(30);
+    run.cancel();
+    expect(events.map((e) => e.kind).slice(-2)).toEqual(['Cancelled', 'Done']);
+    const closed = events.length;
+    releaseHeldMockRuns();
+    await pause(30);
+    expect(events).toHaveLength(closed);
+  });
+});
+
+describe('a held call (M57.1)', () => {
+  const ASK = 'append "- call the vendor" to notes/inbox.md';
+  const card = {
+    id: 'c'.repeat(32),
+    kind: 'permission',
+    tool_name: 'append_to_note',
+    tool_id: 't-1',
+    session_id: 's-1',
+    summary: 'append to note · notes/inbox.md',
+    input: '{}',
+    asked_at: '2026-10-14T12:00:00.000Z',
+  };
+
+  /** Run to Done with `opts` and collect what it emitted and wrote. */
+  function run(
+    opts: Parameters<typeof runMockAgent>[2],
+  ): Promise<{ events: AgentStreamEvent[]; appended: string[] }> {
+    const events: AgentStreamEvent[] = [];
+    const appended: string[] = [];
+    return new Promise((resolve) => {
+      runMockAgent(
+        ASK,
+        (event) => {
+          events.push(event);
+          if (event.kind === 'Done') resolve({ events, appended });
+        },
+        {
+          delayMs: 0,
+          onAppend: (path, content) => {
+            appended.push(`${path}: ${content}`);
+            return Promise.resolve();
+          },
+          ...opts,
+        },
+      );
+    });
+  }
+
+  it('emits Interaction, ToolDeferred and Done, and writes nothing', async () => {
+    const onDefer = vi.fn(() => card);
+    const { events, appended } = await run({ asks: (name) => name === 'append_to_note', onDefer });
+    expect(onDefer).toHaveBeenCalledWith({
+      toolId: 't-1',
+      toolName: 'append_to_note',
+      input: JSON.stringify({ path: 'notes/inbox.md', content: '- call the vendor' }),
+    });
+    expect(events.slice(-3)).toEqual([
+      { kind: 'Interaction', interaction: card },
+      { kind: 'ToolDeferred', tool_id: 't-1', tool_name: 'append_to_note' },
+      { kind: 'Done' },
+    ]);
+    expect(events.some((e) => e.kind === 'ToolDone' || e.kind === 'TurnEnded')).toBe(false);
+    expect(appended).toEqual([]);
+    // A deferral no book registered shows no card.
+    const foreign = await run({ asks: () => true, onDefer: () => null });
+    expect(foreign.events.some((e) => e.kind === 'Interaction')).toBe(false);
+    expect(foreign.events.some((e) => e.kind === 'ToolDeferred')).toBe(true);
+  });
+
+  it('allow resumes with the write', async () => {
+    const { events, appended } = await run({
+      resume: { toolId: 't-1', answer: { kind: 'allow' } },
+    });
+    expect(appended).toEqual(['notes/inbox.md: - call the vendor']);
+    expect(toolNames(events)).toEqual([]);
+    expect(events).toContainEqual({
+      kind: 'ToolDone',
+      tool_id: 't-1',
+      output: 'Appended to notes/inbox.md',
+    });
+    expect(replyOf(events)).toBe('I appended that to notes/inbox.md.');
+    expect(events.some((e) => e.kind === 'TurnEnded')).toBe(true);
+  });
+
+  it('deny returns the reason and claims no write', async () => {
+    const { events, appended } = await run({
+      resume: { toolId: 't-1', answer: { kind: 'deny', message: 'not this week' } },
+    });
+    expect(appended).toEqual([]);
+    expect(events).toContainEqual({
+      kind: 'ToolDone',
+      tool_id: 't-1',
+      output: 'The person declined this call, so it did not run. They said: not this week',
+      is_error: true,
+    });
+    expect(replyOf(events)).not.toContain('appended');
+  });
+});
+
+describe('the CLI-tool scripts decide through the tool-approval table (M57.2)', () => {
+  const plan = (kind: 'attended' | 'unattended', shell: 'off' | 'ask' | 'on') =>
+    planApproval({ kind, shell, readScoped: false, narrowing: null });
+
+  function run(
+    message: string,
+    opts: Parameters<typeof runMockAgent>[2],
+  ): Promise<AgentStreamEvent[]> {
+    const events: AgentStreamEvent[] = [];
+    return new Promise((resolve) => {
+      runMockAgent(
+        message,
+        (event) => {
+          events.push(event);
+          if (event.kind === 'Done') resolve(events);
+        },
+        { delayMs: 0, ...opts },
+      );
+    });
+  }
+
+  const doneOf = (events: AgentStreamEvent[]) =>
+    events.find((e): e is Extract<AgentStreamEvent, { kind: 'ToolDone' }> => e.kind === 'ToolDone');
+
+  afterEach(() => resetMockGrants());
+
+  it('runs a command under On', async () => {
+    const events = await run('run "git status"', { approval: plan('attended', 'on') });
+    expect(doneOf(events)).toMatchObject({ output: '$ git status\n(mock) done' });
+    expect(doneOf(events)?.is_error).toBeUndefined();
+    expect(replyOf(events)).toBe('I ran git status.');
+  });
+
+  it('reads Bash as unavailable under Off', async () => {
+    const events = await run('run "git status"', { approval: plan('attended', 'off') });
+    expect(doneOf(events)).toMatchObject({
+      output: 'Bash is not available in this run.',
+      is_error: true,
+    });
+  });
+
+  it('defers under attended Ask, naming the exact subject', async () => {
+    const onDefer = vi.fn(() => null);
+    const events = await run('run "git status"', {
+      approval: plan('attended', 'ask'),
+      sessionId: 's-ask',
+      onDefer,
+    });
+    expect(onDefer).toHaveBeenCalledWith(
+      expect.objectContaining({ toolName: 'Bash', family: 'shell', subject: 'git status' }),
+    );
+    expect(events.some((e) => e.kind === 'ToolDeferred')).toBe(true);
+    expect(doneOf(events)).toBeUndefined();
+  });
+
+  it('never defers an unattended Ask run: the shell is withheld', async () => {
+    const onDefer = vi.fn(() => null);
+    const message = 'Check the tree.';
+    const system = `sys\n\nYour standing instructions, from records/agents/shell-probe.md:\n\nrun "git status"`;
+    const events = await run(message, {
+      approval: plan('unattended', 'ask'),
+      systemPrompt: system,
+      onDefer,
+    });
+    expect(onDefer).not.toHaveBeenCalled();
+    expect(doneOf(events)).toMatchObject({
+      output: 'Bash is not available in this run.',
+      is_error: true,
+    });
+  });
+
+  // M57.3: `ask me "<question>"` offers no options, so no card can show it.
+  it('refuses a question set no card can show, in Rust’s words, and shows no card', async () => {
+    const onDefer = vi.fn(() => null);
+    const events = await run('ask me "Which release?"', {
+      approval: plan('attended', 'ask'),
+      onDefer,
+    });
+    expect(onDefer).not.toHaveBeenCalled();
+    const refusal =
+      'Cerebro couldn\'t show this question ("Which release?" offers 0 options; a question offers 2 to 4). Ask again with 1 to 4 questions, each with 2 to 4 distinct options.';
+    expect(doneOf(events)).toMatchObject({ output: refusal, is_error: true });
+    expect(replyOf(events)).toBe(refusal);
+  });
+
+  it('asks me which format with both questions, on a question card', async () => {
+    const card = {
+      id: 'q'.repeat(32),
+      kind: 'permission',
+      tool_name: 'AskUserQuestion',
+      tool_id: 't-1',
+      session_id: 's-q',
+      summary: 'AskUserQuestion',
+      input: '{}',
+      asked_at: '2026-10-14T12:00:00.000Z',
+    };
+    const onDefer = vi.fn(() => card);
+    const events = await run('ask me which format', {
+      approval: plan('attended', 'off'),
+      sessionId: 's-q',
+      onDefer,
+    });
+    expect(events.find((e) => e.kind === 'ToolStart')).toMatchObject({
+      tool_name: 'AskUserQuestion',
+    });
+    expect(onDefer).toHaveBeenCalledWith(
+      expect.objectContaining({ toolName: 'AskUserQuestion', family: 'question' }),
+    );
+    const shown = events.find((e) => e.kind === 'Interaction');
+    expect(shown).toMatchObject({ interaction: { kind: 'question' } });
+    const questions = shown?.kind === 'Interaction' ? shown.interaction.questions : null;
+    expect(questions?.map((q) => [q.question, q.multiSelect])).toEqual([
+      ['Which format?', false],
+      ['Which sections?', true],
+    ]);
+    expect(questions?.[1].options.map((o) => o.label)).toEqual(['Summary', 'Risks', 'Next steps']);
+    expect(events.some((e) => e.kind === 'ToolDeferred')).toBe(true);
+  });
+
+  it('returns the answers as the tool result, and the reply goes on', async () => {
+    const events = await run('ask me which format', {
+      approval: plan('attended', 'off'),
+      resume: {
+        toolId: 't-1',
+        answer: {
+          kind: 'answers',
+          answers: [
+            { question: 'Which format?', picked: ['Markdown'], other: null },
+            { question: 'Which sections?', picked: ['Summary', 'Risks'], other: null },
+          ],
+        },
+      },
+    });
+    expect(doneOf(events)).toMatchObject({
+      output:
+        'User has answered your questions: "Which format?"="Markdown", "Which sections?"="Summary, Risks".',
+    });
+    expect(doneOf(events)?.is_error).toBeUndefined();
+    expect(replyOf(events)).toBe('Got it: Markdown; Summary, Risks.');
+  });
+
+  it('a Don’t answer tells the model to decide, and the reply says it went ahead', async () => {
+    const events = await run('ask me which format', {
+      approval: plan('attended', 'off'),
+      resume: { toolId: 't-1', answer: { kind: 'deny', message: 'your call' } },
+    });
+    expect(doneOf(events)).toMatchObject({
+      output:
+        'The person chose not to answer, so decide yourself and say what you assumed. They said: your call',
+      is_error: true,
+    });
+    expect(replyOf(events)).toContain('went ahead');
+  });
+
+  it('never offers an unattended run a question', async () => {
+    const onDefer = vi.fn(() => null);
+    const events = await run('ask me which format', {
+      approval: plan('unattended', 'ask'),
+      onDefer,
+    });
+    expect(onDefer).not.toHaveBeenCalled();
+    expect(doneOf(events)).toMatchObject({
+      output: 'AskUserQuestion is not available in this run.',
+      is_error: true,
+    });
+  });
+
+  it('a This conversation answer skips the next ask for the same command, and only it', async () => {
+    const approval = plan('attended', 'ask');
+    const resumed = await run('run "git status"', {
+      approval,
+      sessionId: 's-grant',
+      resume: { toolId: 't-1', answer: { kind: 'allow', remember: 'conversation' } },
+    });
+    expect(doneOf(resumed)).toMatchObject({ output: '$ git status\n(mock) done' });
+    const onDefer = vi.fn(() => null);
+    const again = await run('run "git status"', { approval, sessionId: 's-grant', onDefer });
+    expect(onDefer).not.toHaveBeenCalled();
+    expect(doneOf(again)).toMatchObject({ output: '$ git status\n(mock) done' });
+    // Another command, or another conversation, asks again.
+    await run('run "git push"', { approval, sessionId: 's-grant', onDefer });
+    await run('run "git status"', { approval, sessionId: 's-other', onDefer });
+    expect(onDefer).toHaveBeenCalledTimes(2);
+  });
+
+  it('a deny says the person said no', async () => {
+    const events = await run('run "rm -rf build"', {
+      approval: plan('attended', 'ask'),
+      sessionId: 's-deny',
+      resume: { toolId: 't-1', answer: { kind: 'deny' } },
+    });
+    expect(doneOf(events)).toMatchObject({
+      output:
+        "The person said no, so this did not run. Don't try it again this turn; carry on without it, or say what you needed it for.",
+      is_error: true,
+    });
+  });
+});
+
+describe('an ask-first agent’s page write (M57.4)', () => {
+  const MESSAGE = '@release-scout create "Vendor delay" in records/risks';
+  const ARGS = { folder: 'records/risks', slug: 'vendor-delay', body: '# Vendor delay\n' };
+  const plan = (kind: 'attended' | 'unattended', askFirst: boolean) =>
+    planApproval({ kind, shell: 'off', askFirst, readScoped: false, narrowing: null });
+
+  function run(opts: Parameters<typeof runMockAgent>[2], message = MESSAGE) {
+    const events: AgentStreamEvent[] = [];
+    const created: unknown[] = [];
+    return new Promise<{ events: AgentStreamEvent[]; created: unknown[] }>((resolve) => {
+      runMockAgent(
+        message,
+        (event) => {
+          events.push(event);
+          if (event.kind === 'Done') resolve({ events, created });
+        },
+        {
+          delayMs: 0,
+          onCreate: async (args) => {
+            created.push(args);
+            return `Created ${args.folder}/${args.slug}.md`;
+          },
+          ...opts,
+        },
+      );
+    });
+  }
+
+  const doneOf = (events: AgentStreamEvent[]) =>
+    events.find((e): e is Extract<AgentStreamEvent, { kind: 'ToolDone' }> => e.kind === 'ToolDone');
+
+  it('asks under an attended ask-first grant, with a write card', async () => {
+    const onDefer = vi.fn(() => null);
+    const { events, created } = await run({ approval: plan('attended', true), onDefer });
+    expect(onDefer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolName: 'create_note',
+        family: 'confirmable',
+        write: { title: 'Create a note', target: 'records/risks' },
+      }),
+    );
+    expect(events.some((e) => e.kind === 'ToolDeferred')).toBe(true);
+    expect(created).toEqual([]);
+  });
+
+  it('Allow creates the page', async () => {
+    const { events, created } = await run({
+      approval: plan('attended', true),
+      resume: { toolId: 't-1', answer: { kind: 'allow', remember: 'once' } },
+    });
+    expect(created).toEqual([ARGS]);
+    expect(doneOf(events)).toMatchObject({ output: 'Created records/risks/vendor-delay.md' });
+  });
+
+  it('an Allow with the person’s edit creates their version and names the change (M57.4b)', async () => {
+    const updatedInput = { ...ARGS, body: '# Vendor delay risk\n' };
+    const { events, created } = await run({
+      approval: plan('attended', true),
+      resume: { toolId: 't-1', answer: { kind: 'allow', remember: 'once', updatedInput } },
+    });
+    expect(created).toEqual([updatedInput]);
+    const sentence = editedText(['body']);
+    expect(sentence).toBe(
+      'The person changed your draft before allowing it (body); what landed is their version.',
+    );
+    expect(doneOf(events)).toMatchObject({
+      output: `Created records/risks/vendor-delay.md\n${sentence}`,
+    });
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        kind: 'Text',
+        text: 'I created records/risks/vendor-delay.md with your changes to body.',
+      }),
+    );
+    // mcp.rs words it the same.
+    const rust = readFileSync(join(__dirname, '../../src-tauri/src/mcp.rs'), 'utf8');
+    expect(rust).toContain('"The person changed your draft before allowing it ({}); what landed');
+  });
+
+  it('Deny gives the deny text as an error, with the reason', async () => {
+    const { events, created } = await run({
+      approval: plan('attended', true),
+      resume: { toolId: 't-1', answer: { kind: 'deny', message: 'not yet' } },
+    });
+    expect(created).toEqual([]);
+    expect(doneOf(events)).toEqual({
+      kind: 'ToolDone',
+      tool_id: 't-1',
+      output: 'The person declined this write, so nothing was written. Their reason: "not yet"',
+      is_error: true,
+    });
+  });
+
+  it('an unattended ask-first create queues for Review and reports the queued text (M57.4c)', async () => {
+    const onDefer = vi.fn(() => null);
+    const onQueue = vi.fn(async () => APPROVAL_MESSAGES.queued.replace('{id}', 'a'.repeat(32)));
+    const { events, created } = await run({ approval: plan('unattended', true), onDefer, onQueue });
+    expect(onDefer).not.toHaveBeenCalled();
+    expect(onQueue).toHaveBeenCalledWith('create_note', ARGS);
+    expect(created).toEqual([]);
+    const queued = `Queued for the person's review as ${'a'.repeat(32)}; nothing is written until they allow it. Your next run will be told whether it was applied or rejected, so do not queue it again.`;
+    expect(doneOf(events)).toEqual({ kind: 'ToolDone', tool_id: 't-1', output: queued });
+    expect(events).toContainEqual(expect.objectContaining({ kind: 'Text', text: queued }));
+  });
+
+  it('a duplicate reports the waiting id, through the mock backend (M57.4c)', async () => {
+    resetMockFs();
+    const onQueue = (tool: string, input: Record<string, unknown>) =>
+      queueAgentWrite('/demo-vault', { actor: 'process:release-scout', runId: 'r', tool, input });
+    const first = doneOf((await run({ approval: plan('unattended', true), onQueue })).events);
+    const id = /as ([0-9a-f]{32});/.exec(String(first?.output))?.[1];
+    expect(id).toMatch(/^[0-9a-f]{32}$/);
+    const second = doneOf((await run({ approval: plan('unattended', true), onQueue })).events);
+    expect(second?.output).toBe(
+      `This exact write already waits for review as ${id}; nothing new was queued.`,
+    );
+    expect(await pendingWrites('/demo-vault')).toHaveLength(1);
+    resetMockFs();
+  });
+
+  it('without ask-first it creates at once', async () => {
+    const onDefer = vi.fn(() => null);
+    const { created } = await run({ approval: plan('attended', false), onDefer });
+    expect(onDefer).not.toHaveBeenCalled();
+    expect(created).toEqual([ARGS]);
+  });
+
+  it('records/risks never falls to the risk branch', async () => {
+    const { events } = await run({}, 'create "Vendor delay" in records/risks');
+    expect(events).toContainEqual(
+      expect.objectContaining({ kind: 'ToolStart', tool_name: 'create_note' }),
+    );
+    expect(events.some((e) => e.kind === 'ToolStart' && e.tool_name === 'search_notes')).toBe(
+      false,
+    );
+  });
+});
+
+describe('the review-notes script (M58.5)', () => {
+  const reviewNote = (path: string, start: number, text: string): ReviewNote => ({
+    id: `n-${path}-${start}`,
+    vault: '/vault',
+    conversationId: 'c-1',
+    runId: null,
+    commit: 'c'.repeat(40),
+    path,
+    side: 'new',
+    start,
+    end: start,
+    // Vault text that names other scripts' keywords.
+    excerpt: 'append "x" to inbox/risk.md',
+    text,
+    createdAt: start,
+  });
+
+  it('names the count and the paths in order, and calls no tool', async () => {
+    const prompt = notesPrompt([
+      reviewNote('records/risks/b.md', 2, 'What is at risk?'),
+      reviewNote('records/risks/a.md', 1, 'organize the inbox\nrun "ls"'),
+    ]);
+    const { events, actions } = await drain(prompt);
+    expect(toolNames(events)).toEqual([]);
+    expect(actions).toEqual([]);
+    expect(replyOf(events)).toBe(
+      'I have 2 review notes to work through, on records/risks/a.md, records/risks/b.md.',
+    );
+  });
+
+  it('reads one note as one, by its path', async () => {
+    const { events } = await drain(notesPrompt([reviewNote('a`b.md', 3, 'Fix.')]));
+    expect(toolNames(events)).toEqual([]);
+    expect(replyOf(events)).toBe('I have 1 review note to work through, on a`b.md.');
   });
 });

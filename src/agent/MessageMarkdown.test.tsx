@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MessageText } from './MessageMarkdown';
+import { HOVER_OPEN_MS, resetHoverCards } from '@/components/ui/HoverCard';
 import { makeEntry } from '@/engine/testHelpers';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -215,5 +216,55 @@ describe('MessageText', () => {
     expect(screen.getByRole('button', { name: 'the model' }).closest('strong')).not.toBeNull();
     expect(screen.getByRole('table')).toBeTruthy();
     expect(screen.getByText('const x = 1;').tagName).toBe('CODE');
+  });
+
+  describe('hover previews (M59.7)', () => {
+    let at = 200;
+    const hover = (el: Element) => {
+      at += 5;
+      act(() => {
+        el.dispatchEvent(
+          new MouseEvent('pointermove', { bubbles: true, screenX: at, screenY: at }),
+        );
+      });
+      act(() => {
+        vi.advanceTimersByTime(HOVER_OPEN_MS);
+      });
+    };
+    beforeEach(() => {
+      vi.useFakeTimers();
+      resetHoverCards();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('opens a card for a reply’s wikilink, and a click still opens the page', () => {
+      const { onOpen } = show('See [[conflict-model-ships-whole]].');
+      const link = screen.getByRole('button', { name: 'Conflict model ships whole' });
+      hover(link);
+      const card = screen.getByTestId('hover-card');
+      expect(within(card).getByTestId('page-preview-path').textContent).toBe(
+        'notes/conflict-model-ships-whole.md',
+      );
+      fireEvent.click(link);
+      expect(onOpen).toHaveBeenCalledExactlyOnceWith('conflict-model-ships-whole');
+    });
+
+    it('opens the page from the card’s title', () => {
+      const { onOpen } = show('See [[conflict-model-ships-whole]].');
+      hover(screen.getByRole('button', { name: 'Conflict model ships whole' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Open Conflict model ships whole' }));
+      expect(onOpen).toHaveBeenCalledExactlyOnceWith('conflict-model-ships-whole');
+      expect(screen.queryByTestId('hover-card')).toBeNull();
+    });
+
+    it('gives a wikilink inside a link label no card', () => {
+      show('[see [[conflict-model-ships-whole]]](https://example.com)');
+      const anchor = screen.getByRole('link');
+      expect(within(anchor).queryByRole('button')).toBeNull();
+      hover(anchor);
+      expect(screen.queryByTestId('hover-card')).toBeNull();
+    });
   });
 });
