@@ -86,6 +86,11 @@ const TRIGGERS = [
  * here fails the coverage test below rather than going unchecked.
  */
 const BUILDERS: Record<string, () => string[]> = {
+  sheetAskPrompt: () => [
+    prompts.sheetAskPrompt('What is the total?', 'notes/plan.md', 'Plan', 'Sheet1!A1', [
+      { address: 'A1', source: '1', shown: '1' },
+    ]),
+  ],
   askedAbout: () => [prompts.askedAbout('A label', 'A page')],
   askAssistantLabel: () => [prompts.askAssistantLabel('what is due')],
   distillPrompt: () => [prompts.distillPrompt('notes/plan.md', 'The plan')],
@@ -133,6 +138,21 @@ const BUILDERS: Record<string, () => string[]> = {
           lastOutcome,
           openReviews,
         }),
+      ),
+    ),
+  assignmentLines: () =>
+    [
+      ...GRANTS,
+      {
+        tools: new Set(['get_note', 'update_frontmatter', 'edit_note']),
+        shell: false,
+        attended: true,
+      },
+    ].flatMap((grant) =>
+      [true, false].flatMap((canWrite) =>
+        [null, { title: 'Plan', path: 'notes/plan.md' }].map((host) =>
+          prompts.assignmentLines(grant, { field: 'agent', canWrite, host }).join('\n'),
+        ),
       ),
     ),
   agentMemoryLines: () =>

@@ -491,6 +491,9 @@ export function GroupEditorPopover({
       onClose={onClose}
       role="dialog"
       ariaLabel={`Edit ${title}`}
+      // Staging visibility can shrink and scroll the preview behind us.
+      // Keep the editor open, following its shell, until dismissal is asked.
+      closeOnScroll={false}
       trapFocus
     >
       {/* autoFocus off on every surface (PropertyMenu's drill-in idiom): the

@@ -1,3 +1,5 @@
+import { useWaitingFollowup } from '@/stores/followupStore';
+import { agentRef } from '@/engine/agents';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
@@ -5,6 +7,7 @@ import { useEscapeLayer } from '@/components/ui/Popover';
 import { Select } from '@/components/ui/Select';
 import { PropertyRow } from '@/detail/PropertyRow';
 import { writesInWords } from '@/engine/agentAccess';
+import { agentFieldNames } from '@/engine/assignment';
 import { agentHandle, askFirstOf } from '@/engine/agents';
 import { parseConnectors, type ConnectorSpec } from '@/engine/connectors';
 import { agentDraft, agentPatch, type AgentDraft, type AgentKey } from '@/engine/libraryDraft';
@@ -29,12 +32,15 @@ import {
 import { describeTrigger, type Trigger } from '@/engine/triggers';
 import { isRecordEntry } from '@/engine/typeCatalog';
 import type { Entry } from '@/engine/types';
+import { stampActivation, SCHEDULE_STAMP_FAILED } from '@/agent/activation';
+import { recordIdentity } from '@/engine/identity';
+import { describeScheduleSet, scheduleText } from '@/engine/skills';
 import { deepEqual } from '@/lib/deepEqual';
 import { readConnectors } from '@/lib/ipc';
 import { slugify } from '@/lib/slug';
 import type { ShellCeiling } from '@/lib/policy/toolApproval';
 import { useUiStore } from '@/stores/uiStore';
-import { useVaultStore } from '@/stores/vaultStore';
+import { getSchema, useVaultStore } from '@/stores/vaultStore';
 import { GuardRow, TextField } from './chrome';
 import { Picker, type PickerOption } from './Picker';
 import { ScheduleField } from './ScheduleField';
@@ -90,6 +96,7 @@ const CONNECTOR_GROUP = 'Connectors';
  * of prose and commits on blur.
  */
 export function AgentProperties({ entry }: { entry: Entry }) {
+  const later = useWaitingFollowup(agentRef(entry).actor);
   const entries = useVaultStore((s) => s.entries);
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
@@ -128,8 +135,19 @@ export function AgentProperties({ entry }: { entry: Entry }) {
       return next;
     });
 
-  const write = (next: AgentDraft, keys: readonly AgentKey[]): Promise<boolean> =>
-    patchFrontmatter(entry.path, agentPatch(next, keys));
+  const write = async (next: AgentDraft, keys: readonly AgentKey[]): Promise<boolean> => {
+    const saved = await patchFrontmatter(entry.path, agentPatch(next, keys));
+    if (
+      saved &&
+      vaultPath !== null &&
+      keys.includes('schedule') &&
+      scheduleText(next.schedule) !== scheduleText(entry.properties.schedule)
+    ) {
+      if (!(await stampActivation(vaultPath, recordIdentity(entry), next.schedule, new Date())))
+        useUiStore.getState().toast(SCHEDULE_STAMP_FAILED);
+    }
+    return saved;
+  };
 
   const derived = slugify(entry.title);
   const handle = agentHandle(entry);
@@ -217,13 +235,21 @@ export function AgentProperties({ entry }: { entry: Entry }) {
         'Schedule',
         'clock',
         ['schedule'],
-        draft.schedule === ''
+        draft.schedule.length === 0
           ? draft.triggers.length > 0
             ? 'none — its triggers fire it'
-            : 'none — off duty, runs only when you ask'
-          : draft.schedule,
+            : later
+              ? 'none — a follow-up waits for Learn on its own to be on'
+              : 'none — off duty, runs only when you ask'
+          : describeScheduleSet(draft.schedule),
         (d, set) => (
-          <ScheduleField value={d.schedule} onChange={(v) => set({ ...d, schedule: v })} />
+          <div className="flex flex-col gap-2">
+            <ScheduleField value={d.schedule} onChange={(v) => set({ ...d, schedule: v })} />
+            <p className="m-0 text-2xs text-n-500">
+              An agent with neither runs only when you ask it, or when a follow-up it booked comes
+              due while Learn on its own is on.
+            </p>
+          </div>
         ),
       )}
 
@@ -1069,6 +1095,7 @@ function TriggerEditor({
   const [trigger, setTrigger] = useState(seed);
   const [start] = useState(seed);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const shell = useRef<HTMLDivElement>(null);
   useEscapeLayer(onClose, { contains: (node) => shell.current?.contains(node) === true });
 
@@ -1086,6 +1113,15 @@ function TriggerEditor({
       return;
     }
     if (lost) return;
+    if (
+      trigger.event === 'assigned' &&
+      !agentFieldNames(getSchema(useVaultStore.getState().entries)).some(
+        (option) => option.field === trigger.field,
+      )
+    ) {
+      setError('Pick the field that assigns it.');
+      return;
+    }
     settle(onDone(trigger));
   };
   const remove = () => {
@@ -1109,6 +1145,11 @@ function TriggerEditor({
           Cancel, then open it again.
         </p>
       )}
+      {error !== null && (
+        <p role="alert" className="m-0 text-xs text-n-600">
+          {error}
+        </p>
+      )}
       <TriggerRow
         index={index}
         trigger={trigger}
@@ -1116,6 +1157,7 @@ function TriggerEditor({
         fields={fields}
         valuesFor={valuesFor}
         onChange={(patch) => {
+          setError(null);
           const next = { ...trigger, ...patch };
           // An undefined clause is an ABSENT clause, not an empty one: a
           // trigger carrying `field: ''` would never match anything and would
@@ -1137,9 +1179,9 @@ function TriggerEditor({
  * Layer one is deliberately a small deterministic grammar — event, folder,
  * field, value — because a person should be able to say what will fire an agent
  * WITHOUT running it. Every clause is therefore a picker over something real:
- * the folders in this vault, the property names its records carry, the values
- * that property has actually held. The one free-text field is `ask:`, which is
- * layer two, is answered by a model, and is prose on purpose.
+ * the folders in this vault, declared Agent relation fields for assignments,
+ * and stored property names and values for ordinary changes. The optional
+ * `ask:` is a yes/no question answered by the cheap check before the run.
  */
 function TriggerRow({
   index,
@@ -1158,6 +1200,9 @@ function TriggerRow({
   onChange: (patch: Partial<Trigger>) => void;
   onRemove: () => void;
 }) {
+  const entries = useVaultStore((state) => state.entries);
+  const agentFields = useMemo(() => agentFieldNames(getSchema(entries)), [entries]);
+  const assigned = trigger.event === 'assigned';
   const values = trigger.field === undefined ? [] : valuesFor(trigger.field);
   return (
     <div data-testid="agent-trigger" className="rounded-lg border border-n-200 bg-n-25 p-3">
@@ -1171,6 +1216,7 @@ function TriggerRow({
           onChange={(e) =>
             onChange({
               event: e.target.value === 'any' ? undefined : (e.target.value as Trigger['event']),
+              ...(e.target.value === 'assigned' ? { field: undefined, to: undefined } : {}),
             })
           }
           options={[
@@ -1178,6 +1224,7 @@ function TriggerRow({
             { value: 'created', label: 'created' },
             { value: 'changed', label: 'changed' },
             { value: 'moved', label: 'moved' },
+            { value: 'assigned', label: 'assigned to it' },
           ]}
         />
         <span className="flex-1" />
@@ -1207,42 +1254,68 @@ function TriggerRow({
         />
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-n-600">
-        <span className="w-9">and its</span>
-        <Select
-          size="sm"
-          width={150}
-          value={trigger.field ?? ''}
-          ariaLabel={`Trigger ${index + 1} field`}
-          onChange={(e) => onChange({ field: e.target.value, to: undefined })}
-          options={[
-            { value: '', label: 'any field' },
-            ...fields.map((f) => ({ value: f, label: f })),
-          ]}
-        />
-        <span>became</span>
-        {values.length > 0 ? (
+      {assigned ? (
+        <div className="mt-2 flex flex-col gap-1.5 text-xs text-n-600">
+          <div className="flex items-center gap-1.5">
+            <span className="w-9">via</span>
+            <Select
+              size="sm"
+              width={200}
+              value={trigger.field ?? ''}
+              ariaLabel={`Trigger ${index + 1} field`}
+              onChange={(event) => onChange({ field: event.target.value, to: undefined })}
+              options={[
+                { value: '', label: 'Pick a field' },
+                ...agentFields.map(({ field, label }) => ({ value: field, label })),
+              ]}
+            />
+          </div>
+          {agentFields.length === 0 && (
+            <p data-testid="trigger-no-agent-field" className="m-0 text-xs text-n-500">
+              No database has a relation to Agent yet. Add a Relation property related to Agent,
+              then pick it here.
+            </p>
+          )}
+          <p className="m-0 text-xs text-n-500">Only links made while Cerebro is open wake it.</p>
+        </div>
+      ) : (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-n-600">
+          <span className="w-9">and its</span>
           <Select
             size="sm"
             width={150}
-            value={trigger.to ?? ''}
-            ariaLabel={`Trigger ${index + 1} value`}
-            onChange={(e) => onChange({ to: e.target.value })}
+            value={trigger.field ?? ''}
+            ariaLabel={`Trigger ${index + 1} field`}
+            onChange={(e) => onChange({ field: e.target.value, to: undefined })}
             options={[
-              { value: '', label: 'any value' },
-              ...values.map((v) => ({ value: v, label: v })),
+              { value: '', label: 'any field' },
+              ...fields.map((f) => ({ value: f, label: f })),
             ]}
           />
-        ) : (
-          <input
-            value={trigger.to ?? ''}
-            aria-label={`Trigger ${index + 1} value`}
-            placeholder="any value"
-            onChange={(e) => onChange({ to: e.target.value })}
-            className="w-[150px] rounded-md border border-n-200 bg-n-0 px-2 py-1 font-mono text-2xs text-n-800 outline-none focus-visible:border-cortex-400"
-          />
-        )}
-      </div>
+          <span>became</span>
+          {values.length > 0 ? (
+            <Select
+              size="sm"
+              width={150}
+              value={trigger.to ?? ''}
+              ariaLabel={`Trigger ${index + 1} value`}
+              onChange={(e) => onChange({ to: e.target.value })}
+              options={[
+                { value: '', label: 'any value' },
+                ...values.map((v) => ({ value: v, label: v })),
+              ]}
+            />
+          ) : (
+            <input
+              value={trigger.to ?? ''}
+              aria-label={`Trigger ${index + 1} value`}
+              placeholder="any value"
+              onChange={(e) => onChange({ to: e.target.value })}
+              className="w-[150px] rounded-md border border-n-200 bg-n-0 px-2 py-1 font-mono text-2xs text-n-800 outline-none focus-visible:border-cortex-400"
+            />
+          )}
+        </div>
+      )}
 
       {/* The two prose fields, in the order they run: whether to act, then
           what acting means for THIS waking. Both optional; a trigger with
@@ -1251,7 +1324,8 @@ function TriggerRow({
         <input
           value={trigger.ask ?? ''}
           aria-label={`Trigger ${index + 1} question`}
-          placeholder="…and only if: a yes/no question the agent answers first (optional)"
+          placeholder="…and only if: a yes/no question a quick check answers before the run (optional)"
+          maxLength={500}
           onChange={(e) => onChange({ ask: e.target.value })}
           className="w-full rounded-md border border-n-200 bg-n-0 px-2 py-1.5 text-2xs text-n-800 outline-none placeholder:text-n-400 focus-visible:border-cortex-400"
         />

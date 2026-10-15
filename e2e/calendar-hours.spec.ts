@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot } from './boot';
+import { boot, readMockFile } from './boot';
 
 /**
  * Calendar hours (M61.8): Week and Day draw an all-day row, then the hours,
@@ -154,4 +154,82 @@ test('calendar hours: Day draws one column, and Month keeps a midnight end on it
   await expect(cell('2026-07-28').locator(`[data-path="${path('late-deploy')}"]`)).toHaveCount(1);
   await expect(cell('2026-07-29').locator(`[data-path="${path('late-deploy')}"]`)).toHaveCount(0);
   await expect(page.getByTestId('calendar-hours')).toHaveCount(0);
+});
+
+test('calendar hours: moves, resizes, selects a slot, cancels and edits an embedded calendar', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 1080 });
+  await seed(page);
+  await boot(page);
+  await openThisMonth(page);
+  await page.getByTestId('calendar-span-week').click();
+  const block = () =>
+    page.locator(`[data-testid="calendar-block"][data-path="${path('standup-sync')}"]`);
+  const drag = async (target: ReturnType<typeof block>, dy: number) => {
+    const box = await target.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + Math.min(12, box!.height / 2));
+    await page.mouse.down();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + Math.min(12, box!.height / 2) + dy, {
+      steps: 6,
+    });
+    await page.mouse.up();
+  };
+  await drag(block().getByTestId('calendar-block-grip-end'), 24);
+  await expect
+    .poll(() => readMockFile(page, path('standup-sync')))
+    .toContain('end: 2026-07-28 11:30');
+  await drag(block(), 48);
+  await expect
+    .poll(() => readMockFile(page, path('standup-sync')))
+    .toContain('start: 2026-07-28 11:00');
+  await expect
+    .poll(() => readMockFile(page, path('standup-sync')))
+    .toContain('end: 2026-07-28 12:30');
+
+  const column = page.locator('[data-testid="calendar-hours-day"][data-day="2026-07-29"]');
+  const box = await column.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + 840 * 0.8 + 2);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + 870 * 0.8 + 2, { steps: 6 });
+  await page.mouse.up();
+  await page.getByRole('textbox', { name: 'New record title' }).fill('Review');
+  await page.getByRole('textbox', { name: 'New record title' }).press('Enter');
+  await expect
+    .poll(() => readMockFile(page, 'records/work-items/review.md'))
+    .toContain('start: 2026-07-29 14:00');
+  await expect
+    .poll(() => readMockFile(page, 'records/work-items/review.md'))
+    .toContain('end: 2026-07-29 15:00');
+
+  const before = await readMockFile(page, path('standup-sync'));
+  const at = await block().boundingBox();
+  await page.mouse.move(at!.x + at!.width / 2, at!.y + 12);
+  await page.mouse.down();
+  await page.mouse.move(at!.x + at!.width / 2, at!.y + 60, { steps: 6 });
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  expect(await readMockFile(page, path('standup-sync'))).toBe(before);
+  await block().focus();
+  await page.keyboard.press('ArrowDown');
+  await expect
+    .poll(() => readMockFile(page, path('standup-sync')))
+    .toContain('start: 2026-07-28 11:30');
+
+  const delivery = page.getByTestId('collection-node-collection').filter({ hasText: 'Delivery' });
+  await delivery.getByRole('button', { name: 'Delivery', exact: true }).click();
+  const embedded = page
+    .getByTestId('database-block')
+    .filter({ has: page.getByTestId('calendar-view') });
+  await embedded.getByTestId('calendar-span-week').click();
+  const embeddedBlock = embedded.locator(
+    `[data-testid="calendar-block"][data-path="${path('standup-sync')}"]`,
+  );
+  await embeddedBlock.scrollIntoViewIfNeeded();
+  await drag(embeddedBlock, 24);
+  await expect
+    .poll(() => readMockFile(page, path('standup-sync')))
+    .toContain('start: 2026-07-28 12:00');
 });

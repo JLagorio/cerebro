@@ -6,6 +6,8 @@ import { resetMockFs } from '@/lib/mockIpc';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { FileTree } from './FileTree';
+import { RenameLinksHost } from '@/app/RenameLinksHost';
+import { useRenamePromptStore } from '@/stores/renamePromptStore';
 
 const ROOT = 'projects/guided-onboarding-ga';
 const PROJECT = `${ROOT}/project.md`;
@@ -19,6 +21,7 @@ const renderTree = (onOpen = vi.fn()) => {
 describe('FileTree', () => {
   beforeEach(async () => {
     resetMockFs();
+    useRenamePromptStore.getState().cancel();
     window.localStorage.clear();
     useUiStore.setState({ expandedFolders: {}, treeOrder: {}, toasts: [], detailPath: null });
     await useVaultStore.getState().openVault('/demo-vault');
@@ -117,6 +120,22 @@ describe('FileTree', () => {
     expect(fs().has(`${ROOT}/build-flow.md`)).toBe(false);
     // The bytes are untouched: no `# Build flow` spliced into the source.
     expect(fs().get(`${ROOT}/build-flow.mmd`)).toBe(MMD);
+  });
+
+  it('renames a whiteboard filename without reading or retitling its JSON', async () => {
+    const board = '{"nodes":[],"edges":[],"extra":{"keep":true}}';
+    fs().set(`${ROOT}/plan.canvas`, board);
+    await useVaultStore.getState().rescan();
+    renderTree();
+    fireEvent.click(screen.getByRole('button', { name: 'Options for Plan' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    fireEvent.change(screen.getByPlaceholderText('Page name'), {
+      target: { value: 'Release plan' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    await waitFor(() => expect(fs().has(`${ROOT}/release-plan.canvas`)).toBe(true));
+    expect(fs().get(`${ROOT}/release-plan.canvas`)).toBe(board);
+    expect(fs().has(`${ROOT}/plan.canvas`)).toBe(false);
   });
 
   // A row's label comes from the note's H1, so renaming only the filename
@@ -409,6 +428,47 @@ describe('FileTree', () => {
     expect(fs().has(`${ROOT}/meetings/kickoff.md`)).toBe(false);
     // The destination folder reveals the moved file.
     expect(useUiStore.getState().expandedFolders[`${ROOT}/items`]).toBe(true);
+    expect(useRenamePromptStore.getState().pending).toBeNull();
+  });
+
+  it('Move to folder keeps stem links without asking for a rewrite', async () => {
+    const path = `${ROOT}/meetings/kickoff.md`;
+    fs().set(`${ROOT}/move-citer.md`, '# Citer\n\nRead [[kickoff]].\n');
+    await useVaultStore.getState().rescan();
+    renderTree();
+    fireEvent.click(screen.getByRole('button', { name: /^Meetings/ }));
+    fireEvent.click(screen.getByRole('button', { name: `Options for ${KICKOFF_TITLE}` }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move to folder…' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Projects / Guided Onboarding GA / Items' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(fs().has(`${ROOT}/items/kickoff.md`)).toBe(true));
+    expect(fs().has(path)).toBe(false);
+    expect(fs().get(`${ROOT}/move-citer.md`)).toBe('# Citer\n\nRead [[kickoff]].\n');
+    expect(useRenamePromptStore.getState().pending).toBeNull();
+  });
+
+  it('a drag that strands a source pointer waits and Cancel moves nothing', async () => {
+    const path = `${ROOT}/meetings/kickoff.md`;
+    fs().set(
+      'knowledge/systems/move-proof.md',
+      `---\nsources:\n  - resource: /${path}\n---\n# Move proof\n`,
+    );
+    await useVaultStore.getState().rescan();
+    renderTree();
+    render(<RenameLinksHost />);
+    fireEvent.click(screen.getByRole('button', { name: /^Meetings/ }));
+    drag(path, `${ROOT}/items`, 0.5);
+    await screen.findByTestId('rename-links-prompt');
+    expect(screen.getByTestId('rename-links-refused').textContent).toContain(
+      `its source still names /${path}`,
+    );
+    expect(fs().has(path)).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(useRenamePromptStore.getState().pending).toBeNull());
+    expect(fs().has(path)).toBe(true);
+    expect(fs().has(`${ROOT}/items/kickoff.md`)).toBe(false);
   });
 
   // M55.13 — a page row takes a drop into its middle half as nesting; its

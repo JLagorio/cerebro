@@ -1,8 +1,9 @@
+import { useNavStore } from '@/stores/navStore';
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toIsoDate } from '@/engine/dates';
-import type { Entry } from '@/engine/types';
+import type { Entry, FilterGroup } from '@/engine/types';
 import { resetMockFs } from '@/lib/mockIpc';
 import { TypePage } from '@/pages/TypePage';
 import { VIEW_KINDS } from '@/views/viewKinds';
@@ -10,6 +11,7 @@ import { fixtureVault, makeEntry } from '@/test/factories';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import type { BatchOp } from '@/engine/batch';
+import * as csvActions from '@/app/csvActions';
 
 /**
  * jsdom cannot render mermaid, and the whiteboard tests below are about WHERE
@@ -23,6 +25,8 @@ vi.mock('@/mermaid/FullScreenDiagramEditor', () => ({
 let patches: { path: string; patch: Record<string, unknown> }[];
 
 beforeEach(() => {
+  useNavStore.getState().reset();
+  useNavStore.getState().navigate({ kind: 'type', name: 'Work item' });
   patches = [];
   useVaultStore.setState({
     vaultPath: '/demo-vault',
@@ -44,6 +48,79 @@ beforeEach(() => {
 });
 
 afterEach(cleanup);
+
+it('exports the selected saved database tab through its menu', () => {
+  const exportSpy = vi.spyOn(csvActions, 'exportViewCsv').mockResolvedValue(false);
+  try {
+    render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
+    const tab = screen.getAllByRole('tab')[0];
+    const view = tab.getAttribute('data-testid')!.replace('view-tab-', '');
+    fireEvent.click(tab);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Export as CSV…' }));
+    expect(exportSpy).toHaveBeenCalledWith({ kind: 'type', name: 'Work item', view }, []);
+  } finally {
+    exportSpy.mockRestore();
+  }
+});
+
+describe('TypePage names unusable view references (M60.2b)', () => {
+  const withFilters = (filters: FilterGroup) =>
+    fixtureVault().map((entry) =>
+      entry.path !== 'types/work-item.md'
+        ? entry
+        : {
+            ...entry,
+            properties: {
+              ...entry.properties,
+              views: [{ id: 'all', name: 'All', filters, presentation: { type: 'table' } }],
+            } as unknown as Entry['properties'],
+          },
+    );
+
+  it('names every invalid filter, marks its chip, and clears when the saved view is repaired', () => {
+    useVaultStore.setState({
+      entries: withFilters({
+        all: [
+          { field: 'ghost_field', op: 'equals', value: 'yes' },
+          { field: 'status', op: 'equals', value: 'wip' },
+        ],
+      }),
+    });
+    render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
+    expect(screen.getByTestId('view-problems').textContent).toContain(
+      '“ghost_field” in the filter: Work item has no property by that name.',
+    );
+    expect(screen.getByTestId('view-problems').textContent).toContain(
+      '“wip” is not an option of Status.',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+    expect(
+      screen
+        .getAllByTestId(/^filter-chip-\d+$/)
+        .map((chip) => chip.parentElement?.getAttribute('data-problem')),
+    ).toEqual(['unknown_field', 'unknown_option']);
+
+    act(() =>
+      useVaultStore.setState({
+        entries: withFilters({ all: [{ field: 'status', op: 'equals', value: 'todo' }] }),
+      }),
+    );
+    expect(screen.queryByTestId('view-problems')).toBeNull();
+    expect(
+      screen.getByTestId('filter-chip-0').parentElement?.getAttribute('data-problem'),
+    ).toBeNull();
+    expect(screen.getByText('Design first-run flow')).toBeTruthy();
+  });
+
+  it('checks held keys against the whole database even when the filter returns no rows', () => {
+    useVaultStore.setState({
+      entries: withFilters({ all: [{ field: 'channel', op: 'equals', value: 'different' }] }),
+    });
+    render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
+    expect(screen.getByText('Nothing matches these filters')).toBeTruthy();
+    expect(screen.queryByTestId('view-problems')).toBeNull();
+  });
+});
 
 describe('TypePage — Records tab', () => {
   it('shows the records of the type and the count', () => {
@@ -166,6 +243,41 @@ describe('TypePage — Records tab', () => {
         type: 'Work item',
         window: { start: day, end: null },
       });
+    });
+
+    it('writes selected hours into a date range through the type page creator', async () => {
+      const day = toIsoDate(new Date());
+      useVaultStore.setState({
+        entries: fixtureVault().map((entry) =>
+          entry.type !== 'Type' || entry.title !== 'Work item'
+            ? entry
+            : {
+                ...entry,
+                properties: {
+                  ...entry.properties,
+                  fields: { window: { kind: 'daterange' } },
+                } as never,
+              },
+        ),
+      });
+      render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
+      switchLayout('calendar');
+      fireEvent.click(screen.getByTestId('calendar-span-day'));
+      const column = screen.getByTestId('calendar-hours-day');
+      const pointer = (type: string, y: number) =>
+        new MouseEvent(type, { bubbles: true, button: 0, clientY: y });
+      fireEvent(column, pointer('pointerdown', 672));
+      fireEvent(window, pointer('pointermove', 696));
+      fireEvent(window, pointer('pointerup', 696));
+      const input = screen.getByRole('textbox', { name: 'New record title' });
+      fireEvent.change(input, { target: { value: 'Review' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      await waitFor(() => expect(created).toHaveLength(1));
+      expect(created[0].frontmatter).toEqual({
+        type: 'Work item',
+        window: { start: `${day} 14:00`, end: `${day} 15:00` },
+      });
+      await waitFor(() => expect(screen.queryByTestId('calendar-new-slot')).toBeNull());
     });
 
     it('writes the bare day into a field declared date', async () => {
@@ -520,18 +632,18 @@ describe('TypePage hosts a whiteboard tab (M29.48)', () => {
   // Settled first, asserted second: create-on-open ends by persisting the
   // pointer and opening the editor on it, and waiting for that keeps every
   // state update inside act().
-  const opened = () => screen.findByTestId('fake-editor');
+  const opened = () => screen.findByTestId('wb-board');
 
   it('creates the canvas beside the Type doc that owns the views', async () => {
     setupType([typeDoc('types/work-item.md')], 'sketch');
     await opened();
-    expect(fs().get('types/whiteboards/sketch.mmd')).toContain('flowchart TD');
+    expect(fs().get('types/whiteboards/sketch.canvas')).toContain('"nodes": []');
   });
 
   it('a Type doc at the vault root gets a top-level whiteboards/', async () => {
     setupType([typeDoc('work-item.md')], 'sketch');
     await opened();
-    expect(fs().get('whiteboards/sketch.mmd')).toBeTruthy();
+    expect(fs().get('whiteboards/sketch.canvas')).toBeTruthy();
   });
 
   /**
@@ -549,6 +661,46 @@ describe('TypePage hosts a whiteboard tab (M29.48)', () => {
     await opened();
     // Named after the open tab, which for a type with no saved views is the
     // derived default one.
-    expect(fs().get('whiteboards/table.mmd')).toBeTruthy();
+    expect(fs().get('whiteboards/table.canvas')).toBeTruthy();
   });
+});
+
+describe('TypePage visit state (M65.4)', () => {
+  function Place() {
+    const selection = useNavStore((state) => state.selection);
+    return selection.kind === 'type' ? <TypePage selection={selection} /> : <div>Elsewhere</div>;
+  }
+  it('search and the filter bar come back with Back, but the record peek does not', () => {
+    render(<Place />);
+    fireEvent.click(screen.getByTestId('view-control-search'));
+    fireEvent.change(screen.getByTestId('view-search-input'), { target: { value: 'flow' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sort' }));
+    fireEvent.click(screen.getByLabelText('Open Design first-run flow'));
+    expect(useUiStore.getState().detailPath).not.toBeNull();
+    act(() => useNavStore.getState().navigate({ kind: 'settings' }));
+    act(() => useNavStore.getState().back());
+    expect((screen.getByTestId('view-search-input') as HTMLInputElement).value).toBe('flow');
+    expect(useNavStore.getState().readEntryState('view.controls')).toBe(true);
+    expect(screen.getByTestId('filter-add')).toBeTruthy();
+    expect(useUiStore.getState().detailPath).toBeNull();
+  });
+  it('a new tab starts with an empty search', () => {
+    render(<Place />);
+    fireEvent.click(screen.getByTestId('view-control-search'));
+    fireEvent.change(screen.getByTestId('view-search-input'), { target: { value: 'flow' } });
+    act(() =>
+      useNavStore.getState().navigate({ kind: 'type', name: 'Work item', view: 'another' }),
+    );
+    expect(useNavStore.getState().readEntryState('view.search')).toBeUndefined();
+    expect((screen.getByTestId('view-search-input') as HTMLInputElement).value).toBe('');
+    expect(screen.getByText('Wire field sync banner')).toBeTruthy();
+  });
+});
+
+it('offers a calendar import on a database with a declared date', () => {
+  render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
+  fireEvent.click(screen.getByTestId('view-control-settings'));
+  fireEvent.click(screen.getByRole('button', { name: 'Import calendar file…' }));
+  expect((screen.getByLabelText('Calendar database') as HTMLSelectElement).value).toBe('Work item');
+  expect((screen.getByTestId('ics-import-submit') as HTMLButtonElement).disabled).toBe(true);
 });

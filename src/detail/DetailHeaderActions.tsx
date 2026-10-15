@@ -1,3 +1,4 @@
+import { formatWikilink, linkTargetOf } from '@/engine/wikilink';
 import { useRef, useState } from 'react';
 import { Dialog } from '@/components/ui/Dialog';
 import { FavoriteStar } from '@/app/FavoriteStar';
@@ -68,8 +69,8 @@ export function DetailHeaderActions({
   const entries = useVaultStore((s) => s.entries);
   const toast = useUiStore((s) => s.toast);
   const closeDetail = useUiStore((s) => s.closeDetail);
-  const openDetail = useUiStore((s) => s.openDetail);
-  const stepDetail = useUiStore((s) => s.stepDetail);
+  const openDetail = useNavStore((s) => s.openPeek);
+  const stepDetail = useNavStore((s) => s.stepPeek);
   const navigate = useNavStore((s) => s.navigate);
   const siblings = useUiStore((s) => s.detailSiblings);
   const width = useUiStore((s) => s.detailWidth);
@@ -224,7 +225,7 @@ export function DetailHeaderActions({
                 testId="record-copy-link"
                 onSelect={() => {
                   closeMenu();
-                  copy(`[[${entry.title}]]`, 'Link');
+                  copy(formatWikilink(linkTargetOf(entry)), 'Link');
                 }}
               />
               <MenuItem

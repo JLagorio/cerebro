@@ -1,0 +1,685 @@
+{
+  "format": 1,
+  "about": "M67 source fence cases. Both readers replay fences/pages; bodies are Rust-only until the M67.2b TS page reader. Half-open spans are UTF-8 byte offsets, line and bodyLines are one-based. Headerless CSV is source; internal blank rows keep addresses, trailing blank lines add none.",
+  "fences": [
+    {
+      "name": "no header",
+      "source": "Item,Amount\nRent,1200",
+      "expect": {
+        "ok": true,
+        "name": "",
+        "cells": [
+          {
+            "row": 1,
+            "col": 1,
+            "source": "Item"
+          },
+          {
+            "row": 1,
+            "col": 2,
+            "source": "Amount"
+          },
+          {
+            "row": 2,
+            "col": 1,
+            "source": "Rent"
+          },
+          {
+            "row": 2,
+            "col": 2,
+            "source": "1200"
+          }
+        ],
+        "rows": 2,
+        "cols": 2
+      }
+    },
+    {
+      "name": "a name",
+      "source": "---\nname: Budget\n---\nA,1",
+      "expect": {
+        "ok": true,
+        "name": "Budget",
+        "cells": [
+          {
+            "row": 1,
+            "col": 1,
+            "source": "A"
+          },
+          {
+            "row": 1,
+            "col": 2,
+            "source": "1"
+          }
+        ],
+        "rows": 1,
+        "cols": 2
+      }
+    },
+    {
+      "name": "format one",
+      "source": "---\nformat: 1\nname: X\n---\n1",
+      "expect": {
+        "ok": true,
+        "name": "X",
+        "cells": [
+          {
+            "row": 1,
+            "col": 1,
+            "source": "1"
+          }
+        ],
+        "rows": 1,
+        "cols": 1
+      }
+    },
+    {
+      "name": "format two",
+      "source": "---\nformat: 2\n---\na,b",
+      "expect": {
+        "ok": false,
+        "reason": "format",
+        "message": "This sheet says format 2. Cerebro reads format 1."
+      }
+    },
+    {
+      "name": "format text",
+      "source": "---\nformat: one\n---\n1",
+      "expect": {
+        "ok": false,
+        "reason": "format",
+        "message": "This sheet's format: isn't a number."
+      }
+    },
+    {
+      "name": "nonmapping header",
+      "source": "---\n- a\n---\n1",
+      "expect": {
+        "ok": false,
+        "reason": "header",
+        "message": "This sheet's header isn't key: value lines."
+      }
+    },
+    {
+      "name": "broken yaml",
+      "source": "---\nname: [\n---\n1",
+      "expect": {
+        "ok": false,
+        "reason": "header",
+        "message": "This sheet's header isn't key: value lines."
+      }
+    },
+    {
+      "name": "unknown keys",
+      "source": "---\nformat: 1\nextra: yes\n---\n1",
+      "expect": {
+        "ok": true,
+        "name": "",
+        "cells": [
+          {
+            "row": 1,
+            "col": 1,
+            "source": "1"
+          }
+        ],
+        "rows": 1,
+        "cols": 1
+      }
+    },
+    {
+      "name": "numeric name",
+      "source": "---\nname: 2026\n---\n1",
+      "expect": {
+        "ok": true,
+        "name": "2026",
+        "cells": [
+          {
+            "row": 1,
+            "col": 1,
+            "source": "1"
+          }
+        ],
+        "rows": 1,
+        "cols": 1
+      }
+    },
+    {
+      "name": "empty name",
+      "source": "---\nname: ''\n---\n1",
+      "expect": {
+        "ok": true,
+        "name": "",
+        "cells": [
+          {
+            "row": 1,
+            "col": 1,
+            "source": "1"
+          }
+        ],
+        "rows": 1,
+        "cols": 1
+      }
+    },
+    {
+      "name": "structured name",
+      "source": "---\nname: [one]\n---\n1",
+      "expect": {
+        "ok": false,
+        "reason": "header",
+        "message": "This sheet's name: must be text."
+      }
+    },
+    {
+      "name": "quoted comma and newline",
+      "source": "\"a,b\",\"two\nlines\"",
+      "expect": {
+        "ok": true,
+        "name": "",
+        "cells": [
+          {
+            "row": 1,
+            "col": 1,
+            "source": "a,b"
+          },
+          {
+            "row": 1,
+            "col": 2,
+            "source": "two\nlines"
+          }
+        ],
+        "rows": 1,
+        "cols": 2
+      }
+    },
+    {
+      "name": "double quotes",
+      "source": "\"Say \"\"hello\"\"\",1",
+      "expect": {
+        "ok": true,
+        "name": "",
+        "cells": [
+          {
+            "row": 1,
+            "col": 1,
+            "source": "Say \"hello\""
+          },
+          {
+            "row": 1,
+            "col": 2,
+            "source": "1"
+          }
+        ],
+        "rows": 1,
+        "cols": 2
+      }
+    },
+    {
+      "name": "ragged rows",
+      "source": "a,b\nx\ny,z,w",
+      "expect": {
+        "ok": true,
+        "name": "",
+        "cells": [
+          {
+            "row": 1,
+            "col": 1,
+            "source": "a"
+          },
+          {
+            "row": 1,
+            "col": 2,
+            "source": "b"
+          },
+          {
+            "row": 2,
+            "col": 1,
+            "source": "x"
+          },
+          {
+            "row": 3,
+            "col": 1,
+            "source": "y"
+          },
+          {
+            "row": 3,
+            "col": 2,
+            "source": "z"
+          },
+          {
+            "row": 3,
+            "col": 3,
+            "source": "w"
+          }
+        ],
+        "rows": 3,
+        "cols": 3
+      }
+    },
+    {
+      "name": "internal blank",
+      "source": "1\n\n3",
+      "expect": {
+        "ok": true,
+        "name": "",
+        "cells": [
+          {
+            "row": 1,
+            "col": 1,
+            "source": "1"
+          },
+          {
+            "row": 3,
+            "col": 1,
+            "source": "3"
+          }
+        ],
+        "rows": 3,
+        "cols": 1
+      }
+    },
+    {
+      "name": "trailing blanks",
+      "source": "1\n\n\n",
+      "expect": {
+        "ok": true,
+        "name": "",
+        "cells": [
+          {
+            "row": 1,
+            "col": 1,
+            "source": "1"
+          }
+        ],
+        "rows": 1,
+        "cols": 1
+      }
+    },
+    {
+      "name": "after quote",
+      "source": "\"a\"x",
+      "expect": {
+        "ok": false,
+        "reason": "csv",
+        "message": "Row 1: text follows a closing quote."
+      }
+    },
+    {
+      "name": "unclosed quote",
+      "source": "a\n\"b",
+      "expect": {
+        "ok": false,
+        "reason": "csv",
+        "message": "Row 2: a quote is never closed."
+      }
+    },
+    {
+      "name": "CRLF",
+      "source": "a,b\r\nc,d\r\n",
+      "expect": {
+        "ok": true,
+        "name": "",
+        "cells": [
+          {
+            "row": 1,
+            "col": 1,
+            "source": "a"
+          },
+          {
+            "row": 1,
+            "col": 2,
+            "source": "b"
+          },
+          {
+            "row": 2,
+            "col": 1,
+            "source": "c"
+          },
+          {
+            "row": 2,
+            "col": 2,
+            "source": "d"
+          }
+        ],
+        "rows": 2,
+        "cols": 2
+      }
+    },
+    {
+      "name": "CR",
+      "source": "a,b\rc,d\r",
+      "expect": {
+        "ok": true,
+        "name": "",
+        "cells": [
+          {
+            "row": 1,
+            "col": 1,
+            "source": "a"
+          },
+          {
+            "row": 1,
+            "col": 2,
+            "source": "b"
+          },
+          {
+            "row": 2,
+            "col": 1,
+            "source": "c"
+          },
+          {
+            "row": 2,
+            "col": 2,
+            "source": "d"
+          }
+        ],
+        "rows": 2,
+        "cols": 2
+      }
+    },
+    {
+      "name": "quoted CRLF",
+      "source": "\"a\r\nb\",c",
+      "expect": {
+        "ok": true,
+        "name": "",
+        "cells": [
+          {
+            "row": 1,
+            "col": 1,
+            "source": "a\nb"
+          },
+          {
+            "row": 1,
+            "col": 2,
+            "source": "c"
+          }
+        ],
+        "rows": 1,
+        "cols": 2
+      }
+    },
+    {
+      "name": "NUL",
+      "source": "a,\u0000",
+      "expect": {
+        "ok": false,
+        "reason": "csv",
+        "message": "Row 1 holds a NUL character."
+      }
+    },
+    {
+      "name": "spaces",
+      "source": "  a , b ",
+      "expect": {
+        "ok": true,
+        "name": "",
+        "cells": [
+          {
+            "row": 1,
+            "col": 1,
+            "source": "  a "
+          },
+          {
+            "row": 1,
+            "col": 2,
+            "source": " b "
+          }
+        ],
+        "rows": 1,
+        "cols": 2
+      }
+    },
+    {
+      "name": "empty",
+      "source": "",
+      "expect": {
+        "ok": true,
+        "name": "",
+        "cells": [],
+        "rows": 0,
+        "cols": 0
+      }
+    },
+    {
+      "name": "header only",
+      "source": "---\nname: Empty\n---\n",
+      "expect": {
+        "ok": true,
+        "name": "Empty",
+        "cells": [],
+        "rows": 0,
+        "cols": 0
+      }
+    }
+  ],
+  "pages": [
+    {
+      "name": "failed fences count toward names",
+      "sources": ["1", "---\nformat: 2\n---\n1", "2", "---\nname: Explicit\n---\n3"],
+      "names": ["Sheet1", "Sheet2", "Sheet3", "Explicit"],
+      "slots": [0, 2, 3]
+    }
+  ],
+  "bodies": [
+    {
+      "name": "two fences",
+      "body": "# Budget\n\n```cerebro-sheet\n1\n```\n\n```cerebro-sheet\n---\nname: Empty\n---\n```\n",
+      "expect": [
+        {
+          "span": [10, 33],
+          "line": 3,
+          "bodyLines": [4, 4],
+          "contentSpan": [27, 29],
+          "source": "1",
+          "name": "Sheet1",
+          "parsed": {
+            "ok": true,
+            "name": "",
+            "cells": [
+              {
+                "row": 1,
+                "col": 1,
+                "source": "1"
+              }
+            ],
+            "rows": 1,
+            "cols": 1
+          }
+        },
+        {
+          "span": [34, 75],
+          "line": 7,
+          "bodyLines": [8, 10],
+          "contentSpan": [51, 71],
+          "source": "---\nname: Empty\n---",
+          "name": "Empty",
+          "parsed": {
+            "ok": true,
+            "name": "Empty",
+            "cells": [],
+            "rows": 0,
+            "cols": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "inside a column",
+      "body": ":::columns\n::::column\n```cerebro-sheet\n1\n```\n::::\n:::\n",
+      "expect": [
+        {
+          "span": [22, 45],
+          "line": 3,
+          "bodyLines": [4, 4],
+          "contentSpan": [39, 41],
+          "source": "1",
+          "name": "Sheet1",
+          "parsed": {
+            "ok": true,
+            "name": "",
+            "cells": [
+              {
+                "row": 1,
+                "col": 1,
+                "source": "1"
+              }
+            ],
+            "rows": 1,
+            "cols": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "longer backtick delimiter",
+      "body": "````cerebro-sheet\n\"first\n```\nlast\",7\n````\n",
+      "expect": [
+        {
+          "span": [0, 42],
+          "line": 1,
+          "bodyLines": [2, 4],
+          "contentSpan": [18, 37],
+          "source": "\"first\n```\nlast\",7",
+          "name": "Sheet1",
+          "parsed": {
+            "ok": true,
+            "name": "",
+            "cells": [
+              {
+                "row": 1,
+                "col": 1,
+                "source": "first\n```\nlast"
+              },
+              {
+                "row": 1,
+                "col": 2,
+                "source": "7"
+              }
+            ],
+            "rows": 1,
+            "cols": 2
+          }
+        }
+      ]
+    },
+    {
+      "name": "tilde and longer closing marker",
+      "body": "  ~~~~cerebro-sheet\n1\n  ~~~~~ \n",
+      "expect": [
+        {
+          "span": [0, 31],
+          "line": 1,
+          "bodyLines": [2, 2],
+          "contentSpan": [20, 22],
+          "source": "1",
+          "name": "Sheet1",
+          "parsed": {
+            "ok": true,
+            "name": "",
+            "cells": [
+              {
+                "row": 1,
+                "col": 1,
+                "source": "1"
+              }
+            ],
+            "rows": 1,
+            "cols": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "unclosed source stays unavailable",
+      "body": "Intro\n\n```cerebro-sheet\n1\n",
+      "expect": [
+        {
+          "span": [7, 26],
+          "line": 3,
+          "bodyLines": [4, 4],
+          "contentSpan": [24, 26],
+          "source": "1\n",
+          "name": "Sheet1",
+          "parsed": {
+            "ok": false,
+            "reason": "header",
+            "message": "This sheet block has no closing fence."
+          }
+        }
+      ]
+    },
+    {
+      "name": "database code is not a sheet",
+      "body": "```cerebro-database\ndatabase: Work item\n```\n",
+      "expect": []
+    },
+    {
+      "name": "CRLF and Unicode byte spans",
+      "body": "é title\r\n\r\n```cerebro-sheet\r\na,b\r\nc,d\r\n```\r\n",
+      "expect": [
+        {
+          "span": [12, 45],
+          "line": 3,
+          "bodyLines": [4, 5],
+          "contentSpan": [30, 40],
+          "source": "a,b\r\nc,d",
+          "name": "Sheet1",
+          "parsed": {
+            "ok": true,
+            "name": "",
+            "cells": [
+              {
+                "row": 1,
+                "col": 1,
+                "source": "a"
+              },
+              {
+                "row": 1,
+                "col": 2,
+                "source": "b"
+              },
+              {
+                "row": 2,
+                "col": 1,
+                "source": "c"
+              },
+              {
+                "row": 2,
+                "col": 2,
+                "source": "d"
+              }
+            ],
+            "rows": 2,
+            "cols": 2
+          }
+        }
+      ]
+    },
+    {
+      "name": "a sheet example inside longer code is not a sheet",
+      "body": "````markdown\n```cerebro-sheet\n1\n```\n````\n",
+      "expect": []
+    },
+    {
+      "name": "empty content span",
+      "body": "```cerebro-sheet\n```\n",
+      "expect": [
+        {
+          "span": [0, 21],
+          "line": 1,
+          "bodyLines": [2, 1],
+          "contentSpan": [17, 17],
+          "source": "",
+          "name": "Sheet1",
+          "parsed": {
+            "ok": true,
+            "name": "",
+            "cells": [],
+            "rows": 0,
+            "cols": 0
+          }
+        }
+      ]
+    }
+  ]
+}

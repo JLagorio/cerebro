@@ -3,7 +3,8 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useTheme } from '@/hooks/useTheme';
 import { useRootsStore } from '@/stores/rootsStore';
-import { classifyHref, resolveRelative } from './docLinks';
+import { classifyHref, resolveRelative, resolveImagePath } from './docLinks';
+import { FileImage } from '@/components/FileImage';
 import { useGroupId } from './groupContext';
 import { highlight } from './highlighter';
 
@@ -102,22 +103,17 @@ export function DocViewer({
                 </a>
               );
             },
-            img({ src, alt, ...rest }) {
+            img({ src, alt }) {
               const source = typeof src === 'string' ? src : '';
-              if (classifyHref(source) !== 'internal') {
-                return <img {...rest} src={source} alt={alt ?? ''} className="max-w-full" />;
-              }
-              // Relative images resolve against the file. The resolved path is
-              // recorded so the asset pipeline (and its containment guard) has
-              // one place to read it from.
+              const imagePath = resolveImagePath(path, source);
+              if (imagePath === null) return <span>Image unavailable: {alt || source}</span>;
               return (
-                <img
-                  {...rest}
-                  data-testid="doc-image"
-                  data-resolved={resolveRelative(path, source)}
-                  src={source}
-                  alt={alt ?? ''}
+                <FileImage
+                  rootId={rootId}
+                  path={imagePath}
+                  alt={alt}
                   className="max-w-full"
+                  testId="doc-image"
                 />
               );
             },

@@ -11,7 +11,8 @@
 //! "record this run_key" and gets back whether the record was FRESH: a second
 //! window that derived the same due job loses the claim and spawns nothing.
 //! That is the whole two-window story — arbitration in the database, not a
-//! renderer promise to be quick.
+//! renderer promise to be quick. A resume or schedule edit may also claim
+//! the newest passed fire without running, so it waits for the next time.
 //!
 //! `stamp` exists because `triggerRuns` is not a claim: it is a cooldown
 //! clock, overwritten at every trigger fire, and a conditional write would
@@ -45,9 +46,9 @@ pub fn read_all(
 
 /// Record `run_key` for `(ledger, key)` unless it is ALREADY the recorded
 /// answer. Returns whether the record was fresh — true means "this caller
-/// runs the job", false means "that exact fire was already answered", by
-/// another window or an earlier session. An older stored key is updated and
-/// counts as fresh: a new fire is a new job.
+/// may run the job (or only mark activation)", false means "that exact fire
+/// was already answered", by another window or an earlier session. An older
+/// stored key is updated and counts as fresh: a new fire is a new job.
 pub fn claim(
     conn: &Connection,
     vault_id: &str,

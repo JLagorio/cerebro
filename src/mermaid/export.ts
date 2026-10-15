@@ -20,7 +20,7 @@ export function viewBoxSize(svg: string): { width: number; height: number } {
   return { width: Math.ceil(box.width), height: Math.ceil(box.height) };
 }
 
-/** The lines a mermaid HTML label holds, `<br>` and block elements included. */
+/** Plain text lines from an HTML label, preserving block boundaries. */
 function labelLines(el: Element): string[] {
   const out: string[] = [];
   let current = '';
@@ -40,7 +40,7 @@ function labelLines(el: Element): string[] {
         flush();
         continue;
       }
-      const block = tag === 'p' || tag === 'div';
+      const block = /^(p|div|li|h[1-6]|pre|blockquote|tr)$/.test(tag);
       if (block) flush();
       walk(child);
       if (block) flush();
@@ -52,7 +52,7 @@ function labelLines(el: Element): string[] {
 }
 
 /**
- * Turns mermaid's HTML labels into SVG text (M29.53).
+ * Turns HTML labels into portable SVG text (M29.53, M68.3).
  *
  * MEASURED: Copy PNG and Save PNG… failed for every diagram type mermaid draws
  * with `htmlLabels` — flowchart (the flagship), ELK flowchart, class, state,
@@ -92,6 +92,19 @@ export function inlineForeignObjects(svg: string): string {
     text.setAttribute('fill', 'currentColor');
     const classed = fo.querySelector('[class]')?.getAttribute('class');
     if (classed != null && classed !== '') text.setAttribute('class', classed);
+    else {
+      // Whiteboard labels use inline paint, so the first recorded values are
+      // their inherited face after HTML is removed for a raster export.
+      let color: string | undefined;
+      let size: string | undefined;
+      for (const node of Array.from(fo.querySelectorAll('[style]'))) {
+        const style = (node as HTMLElement).style;
+        color ??= style.color || undefined;
+        size ??= style.fontSize || undefined;
+      }
+      if (color) text.setAttribute('fill', color);
+      if (size) text.setAttribute('font-size', size);
+    }
     lines.forEach((line, i) => {
       const tspan = doc.createElementNS(SVG_NS, 'tspan');
       tspan.setAttribute('x', String(x + width / 2));
@@ -209,8 +222,14 @@ export function withFontFace(svg: string, css: string | null): string {
   return `${svg.slice(0, at)}<style>${css}</style>${svg.slice(at)}`;
 }
 
+/** Bound both raster dimensions without changing their aspect ratio. */
+export function rasterScale(width: number, height: number, scale = 2): number {
+  return Math.min(scale, 8192 / Math.max(1, width, height));
+}
+
 export async function svgToPngBytes(svg: string, scale = 2): Promise<Uint8Array> {
   const { width, height } = viewBoxSize(svg);
+  const boundedScale = rasterScale(width, height, scale);
   const printable = withFontFace(
     withBackground(inlineForeignObjects(svg), exportBackground()),
     await embeddedFontCss(),
@@ -224,8 +243,8 @@ export async function svgToPngBytes(svg: string, scale = 2): Promise<Uint8Array>
       img.src = url;
     });
     const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, width * scale);
-    canvas.height = Math.max(1, height * scale);
+    canvas.width = Math.max(1, Math.floor(width * boundedScale));
+    canvas.height = Math.max(1, Math.floor(height * boundedScale));
     const ctx = canvas.getContext('2d');
     if (ctx === null) throw new Error('canvas 2d unavailable');
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);

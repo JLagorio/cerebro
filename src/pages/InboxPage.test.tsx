@@ -1,10 +1,12 @@
+import * as ingest from '@/lib/ingest';
+import { navSeed } from '@/test/navSeed';
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ORGANIZED_KEY } from '@/engine/inbox';
 import type { Entry } from '@/engine/types';
-import { useNavStore } from '@/stores/navStore';
+import { PaneContext, useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { sha256Hex } from '@/lib/sha256';
@@ -64,7 +66,7 @@ beforeEach(() => {
   });
   useNavStore.setState({
     selection: { kind: 'inbox' },
-    history: [{ kind: 'inbox' }],
+    history: [navSeed({ kind: 'inbox' })],
     historyIndex: 0,
   });
   // inboxSelectedPath is store state so the agent can open the capture its
@@ -81,6 +83,21 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('InboxPage', () => {
+  it('walks with j/k, selects with x, and Escape keeps the capture before Enter opens its page', () => {
+    render(<InboxPage />);
+    fireEvent.keyDown(document.body, { key: 'j' });
+    expect(screen.getByTestId('body-editor').textContent).toBe(older.path);
+    fireEvent.keyDown(document.activeElement!, { key: 'k' });
+    expect(screen.getByTestId('body-editor').textContent).toBe(capture.path);
+    fireEvent.keyDown(document.activeElement!, { key: 'x' });
+    expect(screen.getByTestId('list-selection').textContent).toContain('1 selected');
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(screen.queryByTestId('list-selection')).toBeNull();
+    expect(screen.getByTestId('body-editor').textContent).toBe(capture.path);
+    fireEvent.keyDown(document.activeElement!, { key: 'Enter' });
+    expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: capture.path });
+  });
+
   it('queues only unorganized notes, newest first', () => {
     render(<InboxPage />);
     const rows = screen.getAllByTestId('inbox-row');
@@ -474,4 +491,73 @@ describe('InboxPage', () => {
     expect(screen.getByText('Inbox workflow is off')).toBeTruthy();
     expect(screen.queryAllByTestId('inbox-row')).toHaveLength(0);
   });
+});
+
+it('offers Show instead of a second editor for a capture held in another pane (M65.8)', () => {
+  useNavStore.getState().reset();
+  useNavStore.getState().setPaneCapacity(4);
+  const inbox = useNavStore.getState().active;
+  useNavStore.getState().navigate({ kind: 'inbox' });
+  const other = useNavStore.getState().openPane({ kind: 'doc', path: capture.path }).pane;
+  const mounted = render(
+    <PaneContext value={inbox}>
+      <InboxPage />
+    </PaneContext>,
+  );
+  expect(screen.getByTestId('inbox-held-editor').textContent).toContain('Open in another pane');
+  expect(screen.queryByTestId('body-editor')).toBeNull();
+  act(() => useNavStore.getState().focusPane(inbox));
+  fireEvent.click(screen.getByRole('button', { name: 'Show' }));
+  expect(useNavStore.getState().active).toBe(other);
+  act(() => useNavStore.getState().closePane(other));
+  expect(screen.getByTestId('body-editor').textContent).toBe(capture.path);
+  mounted.unmount();
+  useNavStore.getState().reset();
+});
+
+it('queues local calendar previews without capturing them, then Cancel opens the next', async () => {
+  render(<InboxPage />);
+  const input = screen.getByTestId('inbox-page').querySelector('input[type="file"]')!;
+  const bytes = new TextEncoder().encode('BEGIN:VCALENDAR\nEND:VCALENDAR');
+  fireEvent.change(input, {
+    target: {
+      files: ['one.ics', 'two.ics'].map((name) => ({
+        name,
+        size: bytes.length,
+        arrayBuffer: async () => bytes.buffer,
+      })),
+    },
+  });
+  await screen.findByText('one.ics');
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  await screen.findByText('two.ics');
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  await waitFor(() => expect(screen.queryByTestId('ics-import-dialog')).toBeNull());
+});
+
+it('offers document kinds and names the documents still being read', async () => {
+  let finish!: (result: ingest.IngestResult) => void;
+  const read = vi.spyOn(ingest, 'ingestFiles').mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  try {
+    render(<InboxPage />);
+    const input = screen
+      .getByTestId('inbox-page')
+      .querySelector<HTMLInputElement>('input[type="file"]')!;
+    expect(input.accept).toContain('.docx');
+    expect(input.accept).toContain('.pdf');
+    expect(input.accept).toContain('.ics');
+    const file = new File(['bytes'], 'Plan.docx');
+    fireEvent.change(input, { target: { files: [file] } });
+    expect(screen.getByRole('status').textContent).toBe('Reading 1 documents…');
+    expect(read).toHaveBeenCalledWith([file], expect.any(Function), expect.any(Function));
+    await act(async () => finish({ paths: [], duplicates: [], skipped: [] }));
+    expect(screen.queryByText('Reading 1 documents…')).toBeNull();
+  } finally {
+    read.mockRestore();
+  }
 });

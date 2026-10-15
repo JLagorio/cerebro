@@ -1,0 +1,96 @@
+.pdf-viewer {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.pdf-viewer > [role='status'] {
+  padding: 1.25rem;
+  color: var(--n-500);
+}
+.pdf-toolbar,
+.pdf-find {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.pdf-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.pdf-toolbar input {
+  width: 3.5rem;
+  text-align: center;
+}
+.pdf-toolbar input,
+.pdf-toolbar select,
+.pdf-find input {
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-raised);
+  color: var(--n-800);
+  border-radius: 0.3rem;
+  padding: 0.25rem 0.4rem;
+}
+.pdf-toolbar output,
+.pdf-find output {
+  font-variant-numeric: tabular-nums;
+  min-width: 3.5rem;
+}
+.pdf-find input {
+  min-width: 10rem;
+}
+.pdf-notice {
+  margin: 0;
+  padding: 0.4rem 0.75rem;
+  color: var(--n-500);
+  font-size: 0.8rem;
+}
+.pdf-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.pdf-body[hidden] {
+  display: none;
+}
+.pdf-outline {
+  width: 13rem;
+  flex: none;
+  overflow: auto;
+  border-right: 1px solid var(--border-subtle);
+  padding: 0.75rem;
+}
+.pdf-outline ul {
+  list-style: none;
+  padding-left: 0.65rem;
+}
+.pdf-outline button {
+  text-align: left;
+  padding: 0.3rem;
+  border-radius: 0.25rem;
+}
+.pdf-outline button:hover {
+  background: var(--n-100);
+}
+.pdf-page-area {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.pdf-scroll {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  background: var(--surface-sunken);
+}
+.pdf-scroll .pdfViewer {
+  min-height: 100%;
+}
+.pdf-scroll .annotationLayer section:not(.linkAnnotation) {
+  display: none;
+}

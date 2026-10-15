@@ -1,6 +1,7 @@
 ---
 type: Work item
 key: LNC-8
+project: "[[field-app-launch-campaign]]"
 status: progress
 priority: urgent
 assignee: "[[dana-fox]]"

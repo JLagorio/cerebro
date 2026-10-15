@@ -310,6 +310,18 @@ pub fn run_rows(
     run_ids: Option<&[String]>,
     limit: usize,
 ) -> Result<Page<ActivityRun>, String> {
+    run_rows_at(ro, vault_id, window, run_ids, limit, Utc::now())
+}
+
+/// The same read with a caller-captured clock, for deterministic tool answers.
+pub fn run_rows_at(
+    ro: &ReadOnly,
+    vault_id: &str,
+    window: &Window,
+    run_ids: Option<&[String]>,
+    limit: usize,
+    now: DateTime<Utc>,
+) -> Result<Page<ActivityRun>, String> {
     let floor = window.text_floor();
     let sql = format!(
         "SELECT {RUN_COLUMNS}, writes_booked, rowid FROM runs \
@@ -321,7 +333,6 @@ pub fn run_rows(
     let mut rows = statement
         .query(rusqlite::params![vault_id, window.text_ceiling(), floor])
         .map_err(|e| e.to_string())?;
-    let now = Utc::now();
     let read = std::iter::from_fn(|| match rows.next() {
         Ok(Some(row)) => Some(run_of(row)),
         Ok(None) => None,

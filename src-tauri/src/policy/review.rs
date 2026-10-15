@@ -64,6 +64,7 @@ pub struct CardLink {
 /// What a reviewer is being asked about.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ReviewCard {
+    pub submitted_at: String,
     pub proposal_id: String,
     pub commit_set_id: String,
     pub run_id: String,
@@ -127,6 +128,7 @@ fn card_of(
     let risk = row.queued_risk.unwrap_or(proposal.declared_risk);
     let path_of = |belief_id: &str| belief_path(state, belief_id);
     ReviewCard {
+        submitted_at: row.submitted_at.clone(),
         proposal_id: proposal.proposal_id.clone(),
         commit_set_id: set.commit_set_id.clone(),
         run_id: set.run_id.clone(),
@@ -672,6 +674,17 @@ mod tests {
             .is_none());
         assert_eq!(counters(), (1, 0, 1));
         crate::runtime::sink::disarm();
+        drop(writer);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_card_says_when_the_store_received_it() {
+        let (vault, writer, _) = queued("review-received-time");
+        let state = folded(&writer, &vault);
+        let cards = needs_review(&table(), &state);
+        assert_eq!(cards[0].submitted_at, state.proposals[P1].submitted_at);
+        assert!(!cards[0].submitted_at.is_empty());
         drop(writer);
         let _ = std::fs::remove_dir_all(&vault);
     }

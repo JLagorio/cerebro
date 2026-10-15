@@ -1,22 +1,15 @@
+import type { TimeSlot } from '@/engine/timeGrid';
 import { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { useOpenPath } from '@/app/useOpenPath';
-import { createTarget } from '@/engine/createRecord';
+import { createTarget, type FiledUnder } from '@/engine/createRecord';
 import { createOnDayValue } from '@/engine/schedule';
-import type { Entry } from '@/engine/types';
 import { slugify } from '@/lib/slug';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
-/**
- * Create a record from wherever you are looking at records (M9.6).
- *
- * Notion's rule: any surface that lists records can create one, and it
- * inherits the band it was created in. This was previously ListView's
- * private QuickAddRow, which meant only the list layout inside a project
- * could create anything at all.
- */
-export function useQuickAdd(typeName: string, project: Entry | null) {
+/** Create in a database's home, inheriting a view's band and related host. */
+export function useQuickAdd(typeName: string, host: FiledUnder | null = null) {
   const createItem = useVaultStore((s) => s.createItem);
   const entries = useVaultStore((s) => s.entries);
   // M20.1: `createTarget` coerces a band's key into what the field actually
@@ -31,7 +24,7 @@ export function useQuickAdd(typeName: string, project: Entry | null) {
   ): Promise<boolean> => {
     const trimmed = title.trim();
     if (trimmed === '') return false;
-    const target = createTarget(typeName, { project, entries, schema, ...band });
+    const target = createTarget(typeName, { host, entries, schema, ...band });
     // slugify('!!!') is '' and create_note rejects an empty name. The
     // record's own key is the meaningful fallback where there is one; a
     // timestamp only when the type carries no key.
@@ -59,7 +52,7 @@ export function useQuickAdd(typeName: string, project: Entry | null) {
 
 /**
  * A calendar day's "+" (M53.16): creates a record of `typeName` dated to the
- * day, in the shape `field` declares.
+ * day or selected hours, in the shape `field` declares.
  *
  * The date cannot ride the band mechanism — a band sets a grouping value, not
  * an arbitrary property — so it goes through `useQuickAdd`'s `extra`
@@ -68,11 +61,11 @@ export function useQuickAdd(typeName: string, project: Entry | null) {
  * rejects a bare day on the very next read. A page's embedded database, which
  * had no day "+" at all, creates through it too.
  */
-export function useCreateOnDay(typeName: string) {
-  const quickAdd = useQuickAdd(typeName, null);
+export function useCreateOnDay(typeName: string, host: FiledUnder | null = null) {
+  const quickAdd = useQuickAdd(typeName, host);
   const schema = useSchema();
-  return (title: string, day: string, field: string): Promise<boolean> =>
-    quickAdd(title, {}, { [field]: createOnDayValue(typeName, field, day, schema) });
+  return (title: string, day: string, field: string, slot?: TimeSlot): Promise<boolean> =>
+    quickAdd(title, {}, { [field]: createOnDayValue(typeName, field, day, schema, slot) });
 }
 
 /**
@@ -88,7 +81,7 @@ export function useNewRecord(typeName: string) {
   const openPath = useOpenPath('in-place');
 
   return async () => {
-    const target = createTarget(typeName, { project: null, entries, schema });
+    const target = createTarget(typeName, { entries, schema });
     const key = target.frontmatter.key;
     const slug =
       typeof key === 'string' && key !== ''

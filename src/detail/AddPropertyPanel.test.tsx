@@ -301,3 +301,33 @@ describe('AddPropertyPanel person config', () => {
     expect(onAdd).not.toHaveBeenCalled();
   });
 });
+
+describe('explicit Agent relations (M63.3)', () => {
+  beforeEach(() => {
+    resetLayers();
+    useVaultStore.setState({ entries: fixtureVault(), vaultPath: '/vault' });
+  });
+
+  it('offers Agent for Relation, drops a stale two-way selection, and writes only the target', async () => {
+    const user = userEvent.setup();
+    const onAdd = vi.fn();
+    render(<AddPropertyPanel ownerType="Work item" onAdd={onAdd} onCancel={vi.fn()} />);
+    await user.click(screen.getByTestId('property-kind-relation'));
+    await user.click(screen.getByTestId('relation-target-Project'));
+    await user.click(screen.getByRole('switch', { name: 'Add related property' }));
+    await user.click(screen.getByTestId('relation-target-Agent'));
+    expect(screen.queryByRole('switch', { name: 'Add related property' })).toBeNull();
+    expect(screen.queryByLabelText('Related property name')).toBeNull();
+    await user.click(screen.getByTestId('add-relation'));
+    expect(onAdd).toHaveBeenCalledWith('Agent', 'relation', { target: 'Agent' });
+  });
+
+  it('never offers Agent for Person', async () => {
+    const user = userEvent.setup();
+    render(<AddPropertyPanel ownerType="Work item" onAdd={vi.fn()} onCancel={vi.fn()} />);
+    await user.click(screen.getByTestId('property-kind-person'));
+    expect(screen.getByText('People come from')).toBeTruthy();
+    expect(screen.queryByTestId('relation-target-Agent')).toBeNull();
+    expect(screen.queryByTestId('relation-target-Skill')).toBeNull();
+  });
+});

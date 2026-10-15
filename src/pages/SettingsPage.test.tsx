@@ -36,6 +36,13 @@ describe('SettingsPage', () => {
     useUiStore.setState({ toasts: [] });
   });
 
+  it('puts the generated Keyboard shortcuts section immediately before About', () => {
+    render(<SettingsPage />);
+    const headings = [...document.querySelectorAll('h2')].map((h) => h.textContent);
+    expect(headings.indexOf('About')).toBe(headings.indexOf('Keyboard shortcuts') + 1);
+    expect(screen.getByTestId('settings-shortcuts')).toBeTruthy();
+  });
+
   it('shows the current vault path and app version', () => {
     render(<SettingsPage />);
     expect(screen.getByText('/demo-vault')).toBeTruthy();
@@ -43,12 +50,18 @@ describe('SettingsPage', () => {
   });
 
   // M59.3 — the open log is a Settings section, after Workflow.
-  it('renders Recently opened after Workflow', () => {
+  it('puts Other apps immediately before Knowledge', () => {
+    render(<SettingsPage />);
+    const headings = [...document.querySelectorAll('h2')].map((h) => h.textContent);
+    expect(headings.indexOf('Knowledge')).toBe(headings.indexOf('Other apps') + 1);
+  });
+
+  it('renders Recently opened after Reminders', () => {
     render(<SettingsPage />);
     const section = screen.getByTestId('settings-recently-opened');
     expect(section.querySelector('h2')?.textContent).toBe('Recently opened');
     const headings = [...document.querySelectorAll('h2')].map((h) => h.textContent);
-    expect(headings.indexOf('Recently opened')).toBe(headings.indexOf('Workflow') + 1);
+    expect(headings.indexOf('Recently opened')).toBe(headings.indexOf('Reminders') + 1);
   });
 
   // M60.8 — the vault's Trash is a Settings section, right after Vault.

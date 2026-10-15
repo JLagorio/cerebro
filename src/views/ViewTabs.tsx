@@ -52,6 +52,7 @@ export interface ViewTabsProps {
   onRename: (id: string, name: string) => void;
   onChangeLayout: (id: string, type: ViewType) => void;
   onDuplicate: (id: string) => void;
+  onExport?: (id: string) => void;
   onDelete: (id: string) => void;
   /** Move a tab to a new position (M16.26). Omitted leaves the strip fixed. */
   onReorder?: (id: string, toIndex: number) => void;
@@ -73,6 +74,7 @@ export function ViewTabs({
   onRename,
   onChangeLayout,
   onDuplicate,
+  onExport,
   onDelete,
   onReorder,
   onChangeIcon,
@@ -159,6 +161,10 @@ export function ViewTabs({
         ? [{ icon: 'settings-2', label: 'View settings…', onSelect: () => onConfigure(view.id) }]
         : []),
       { icon: 'copy', label: 'Duplicate', onSelect: () => onDuplicate(view.id) },
+      ...(onExport !== undefined &&
+      !['chart', 'dashboard', 'whiteboard'].includes(view.presentation.type)
+        ? [{ icon: 'file-down', label: 'Export as CSV…', onSelect: () => onExport(view.id) }]
+        : []),
     ];
     // The last view is the only way to look at the List; removing it would
     // leave a database with no surface. Delete the List instead.

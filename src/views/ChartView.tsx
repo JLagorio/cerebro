@@ -1,3 +1,6 @@
+import { bandContext, calendarBandBounds, dateScale, isDateKind } from '@/engine/dateBuckets';
+import { RELATIVE_PRESETS, resolveRelative } from '@/engine/relativeDates';
+import type { DateBucketing } from '@/engine/types';
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent, Ref, RefObject } from 'react';
 import { PICKABLE_OPTION_COLORS, resolveOptionColor } from '@/lib/swatch';
@@ -168,7 +171,12 @@ function clip(label: string, band: number): string {
  * ring of running totals would lie), so the caption must not claim one
  * either — a hand-edited `kind: donut` + `cumulative: true` is reachable via
  * the vault even though the panel never produces that combination. */
-function captionNotes(chart: ChartSpec | undefined, kind: ChartKind, unmeasured: number): string[] {
+function captionNotes(
+  chart: ChartSpec | undefined,
+  kind: ChartKind,
+  unmeasured: number,
+  overlap: number,
+): string[] {
   const notes: string[] = [];
   if (chart?.cumulative === true && kind !== 'donut') notes.push('cumulative');
   // An avg BAR under groupBy: each segment is its sub-band's average and the
@@ -186,6 +194,10 @@ function captionNotes(chart: ChartSpec | undefined, kind: ChartKind, unmeasured:
   // (M60.1), and the caption is where the missing band is admitted.
   if (unmeasured === 1) notes.push('1 band without a number');
   else if (unmeasured > 1) notes.push(`${unmeasured} bands without a number`);
+  if (overlap > 0)
+    notes.push(
+      `${overlap} ${overlap === 1 ? 'record appears' : 'records appear'} in more than one band`,
+    );
   return notes;
 }
 
@@ -663,7 +675,7 @@ const DONUT = { size: 240, r: 92, stroke: 34 };
 function arcs(data: ChartData, circumference: number) {
   let offset = 0;
   return data.slices.map((slice) => {
-    const length = (slice.value / data.total) * circumference;
+    const length = (slice.value / data.ringTotal) * circumference;
     const start = offset;
     offset += length;
     return { slice, start, length };
@@ -907,7 +919,8 @@ function ChartTooltip({
     el.style.left = `${Math.max(0, Math.min(x + 12, (box?.width ?? W) - el.offsetWidth))}px`;
     el.style.top = `${Math.max(0, Math.min(y + 12, (box?.height ?? 0) - el.offsetHeight))}px`;
   });
-  const share = !running && data.total > 0 ? Math.round((s.value / data.total) * 100) : null;
+  const share =
+    !running && data.ringTotal > 0 ? Math.round((s.value / data.ringTotal) * 100) : null;
   return (
     <div
       ref={cardRef}
@@ -1102,20 +1115,47 @@ const DRILL_CAP = 9;
  * stems for a derived one (never `bandValueFor`'s `[[…]]` write-form). `contains` would be wrong for all three — substring matching
  * catches 'darkred' in a 'red' band.
  */
-function bandRule(field: string, key: string, kind: FieldKind | undefined): FilterRule | null {
+function bandRule(
+  field: string,
+  key: string,
+  kind: FieldKind | undefined,
+  dateBucket?: DateBucketing,
+  deadlineRange = false,
+): FilterRule | null {
+  // Deadline ranges band by their end; date filters intentionally read their
+  // start. No saved rule can promise to restate that projection.
+  if (deadlineRange) return null;
   // "No <field>" is a band a filter CAN name, whatever the kind — `is_empty`
   // is in every family's op set, undeclared fields included.
   if (key === NO_VALUE_KEY) return { field, op: 'is_empty', value: '' };
   // An undeclared field has no family, so no operator can be TRUSTED to
   // restate the band: the quiet-refusal path.
   if (kind === undefined) return null;
+  // A relative band saves its token only when that token names the entire
+  // interval. Disjoint bands can trim a week or month, and Overdue/Earlier
+  // also read work status, so those cannot masquerade as whole periods.
+  if (isDateKind(kind)) {
+    if (dateBucket === undefined) {
+      if (key === 'rel:overdue' || key === 'rel:earlier') return null;
+      const ctx = bandContext();
+      const band = dateScale(kind, ctx).find((band) => band.key === key);
+      if (band === undefined || band.start === null || band.end === null) return null;
+      const token = RELATIVE_PRESETS.find(({ token }) => {
+        const range = resolveRelative(token, ctx);
+        return range?.[0] === band.start && range[1] === band.end;
+      })?.token;
+      return token === undefined ? null : { field, op: 'equals', value: token };
+    }
+    const bounds = calendarBandBounds(key, dateBucket);
+    if (bounds === null) return null;
+    return dateBucket === 'day'
+      ? { field, op: 'equals', value: bounds[0] }
+      : { field, op: 'is_between', value: bounds };
+  }
   const ops = filterOpsFor(kind);
   if (kind === 'multiselect' || kind === 'person' || kind === 'relation') {
-    // Membership never LOSES a drilled record — the one direction a saved
-    // view must not err in. A multi-value record bands by its FIRST value
-    // (first implies member), and a single-target relation's stem is its
-    // membership; the rule may additionally catch a record holding the value
-    // later in its list, which is over-inclusion, not loss.
+    // Every value is a membership: any_of restates the band's exact set,
+    // including a value that appears later in a multi-value record's list.
     return ops.includes('any_of') ? { field, op: 'any_of', value: [key] } : null;
   }
   const value = bandValueFor(key, kind);
@@ -1165,12 +1205,36 @@ function DrilldownDialog({
   const [name, setName] = useState(`${data.axis}: ${title}`);
 
   // The click as filter rules — the band's, plus the series' for a segment.
+  const deadlineRange = (field: string) =>
+    entries.some(
+      (entry) =>
+        entry.type !== null &&
+        schema.types.get(entry.type)?.deadline === field &&
+        schema.types.get(entry.type)?.fields.find((def) => def.name === field)?.kind ===
+          'daterange',
+    );
   const rules: (FilterRule | null)[] = [
-    bandRule(data.axisField, slice.key, bandKind(entries, data.axisField, schema)),
+    bandRule(
+      data.axisField,
+      slice.key,
+      bandKind(entries, data.axisField, schema),
+      presentation.group.find((spec) => spec.descend === undefined && spec.field === data.axisField)
+        ?.dateBucket,
+      deadlineRange(data.axisField),
+    ),
   ];
   if (part !== undefined) {
     const groupBy = chart?.groupBy ?? '';
-    rules.push(bandRule(groupBy, part.key, bandKind(entries, groupBy, schema)));
+    rules.push(
+      bandRule(
+        groupBy,
+        part.key,
+        bandKind(entries, groupBy, schema),
+        presentation.group.find((spec) => spec.descend === undefined && spec.field === groupBy)
+          ?.dateBucket,
+        deadlineRange(groupBy),
+      ),
+    );
   }
   const expressible = rules.every((r): r is FilterRule => r !== null);
 
@@ -1269,7 +1333,7 @@ export function ChartView({
   // The donut defaults its legend on — the ring has no other labels; the
   // axis kinds default off and can opt in.
   const showLegend = chart?.legend ?? kind === 'donut';
-  const notes = captionNotes(chart, kind, data.unmeasured);
+  const notes = captionNotes(chart, kind, data.unmeasured, data.overlap);
 
   // The band under the pointer and where the pointer is, figure-relative.
   const figureRef = useRef<HTMLElement>(null);
@@ -1341,7 +1405,7 @@ export function ChartView({
             )}
           </figcaption>
           {kind === 'donut' ? (
-            data.total <= 0 ? (
+            data.ringTotal <= 0 ? (
               // A donut of nothing is a full grey ring that reads as one
               // enormous slice.
               <p className="m-0 py-6 text-center text-xs text-n-500">
@@ -1376,7 +1440,7 @@ export function ChartView({
               puts it in the corner either way, and the chart svg staying the
               figure's first svg keeps `querySelector('svg')` honest. The
               zero-total donut draws prose, not an svg, so it gets no menu. */}
-          {!(kind === 'donut' && data.total <= 0) && (
+          {!(kind === 'donut' && data.ringTotal <= 0) && (
             <ExportMenu
               svgRef={svgRef}
               figureRef={figureRef}

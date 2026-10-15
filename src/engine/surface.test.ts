@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DESTINATIONS } from './destinations';
-import { resolveSurface, sortEntries } from './surface';
+import { resolveSurface, resolveTypeView, sortEntries } from './surface';
+import { typeViews } from './typeCatalog';
 import { buildSchema } from './schema';
 import { makeEntry } from './testHelpers';
 import type { FilterGroup, ListFile, Presentation } from './types';
@@ -373,4 +374,23 @@ describe('resolveSurface — destination titles (M59.1)', () => {
       expect(resolveSurface(d.selection, [], schema, []).title, d.kind).toBe(d.label);
     }
   });
+});
+
+it('a supplied type view and its saved tab resolve the same records and order', () => {
+  const { entries, schema } = fixture();
+  const view = typeViews('Work item', schema)[0];
+  expect(resolveTypeView('Work item', view, entries, schema)).toEqual(
+    resolveSurface({ kind: 'type', name: 'Work item', view: view.id }, entries, schema, []),
+  );
+});
+
+it('a whiteboard surface uses its filename stem without record rows', () => {
+  const surface = resolveSurface(
+    { kind: 'diagram', path: 'boards/plan.canvas' },
+    [],
+    buildSchema([]),
+    [],
+  );
+  expect(surface.title).toBe('plan');
+  expect(surface.entries).toEqual([]);
 });

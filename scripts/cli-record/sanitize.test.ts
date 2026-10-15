@@ -380,7 +380,7 @@ describe('writing a recording', () => {
       proves: 'A toy run reaches its result.',
       ends: 'result',
       session: '00000000-0000-4000-8000-000000000001.jsonl',
-      sanitizer: 1,
+      sanitizer: 2,
     });
 
     // Written again with no session file, the old one goes.
@@ -577,5 +577,52 @@ describe('one session-history line (M56.4)', () => {
     } finally {
       rmSync(out, { recursive: true, force: true });
     }
+  });
+});
+
+describe('an explicitly reviewed connector recording (M69.5)', () => {
+  const notionInit = () =>
+    init({
+      mcp_servers: [{ name: 'notion', status: 'connected' }],
+      tools: ['mcp__notion__notion-fetch'],
+    });
+  it('admits exactly --allow-server notion and records the allowance in metadata', () => {
+    const flags = parseFlags(['--allow-server', 'notion']);
+    const out = sanitizeRecording(input([notionInit(), result()]), {
+      ...CONTEXT,
+      allowServers: flags.get('allow-server'),
+    });
+    expect(out.meta.allowed_servers).toEqual(['notion']);
+    expect(lines(out.stream)[0].tools).toEqual(['mcp__notion__notion-fetch']);
+  });
+  it('refuses the same connector without its explicit allowance', () => {
+    expect(() => sanitizeRecording(input([notionInit(), result()]), CONTEXT)).toThrow(
+      /servers other than/,
+    );
+  });
+  it('still refuses a second server, a prefix lookalike or a tool suffix', () => {
+    for (const name of ['gmail', 'notion-other', 'NOTION']) {
+      expect(() =>
+        sanitizeRecording(
+          input([
+            init({
+              mcp_servers: [
+                { name: 'notion', status: 'connected' },
+                { name, status: 'connected' },
+              ],
+              tools: ['mcp__notion__notion-fetch'],
+            }),
+            result(),
+          ]),
+          { ...CONTEXT, allowServers: ['notion'] },
+        ),
+      ).toThrow(/servers other than/);
+    }
+    expect(() =>
+      sanitizeRecording(input([notionInit(), result()]), {
+        ...CONTEXT,
+        allowServers: ['notion__notion-fetch'],
+      }),
+    ).toThrow(/without a tool suffix/);
   });
 });

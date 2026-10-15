@@ -28,6 +28,11 @@ export function registerFlush(flush: Flush): () => void {
   };
 }
 
+/** Whether a page currently has a save registered for the Save command. */
+export function hasOpenPages(): boolean {
+  return flushes.size > 0;
+}
+
 type Holding = () => string | null;
 
 const holders = new Set<Holding>();
@@ -142,4 +147,49 @@ export function __resetOpenPages(): void {
   flushes.clear();
   holders.clear();
   watchers.clear();
+  editorHolders.clear();
+  editorSnapshots.clear();
+  editorListeners.clear();
+}
+
+/** Live editor owners, separate from pending-save holds. Counts preserve a
+ * holder until its final mounted editor releases it. */
+const editorHolders = new Map<string, Map<string, number>>();
+const editorSnapshots = new Map<string, readonly string[]>();
+const editorListeners = new Set<() => void>();
+const NO_EDITORS: readonly string[] = [];
+export function editorHoldersOf(path: string): readonly string[] {
+  return editorSnapshots.get(path) ?? NO_EDITORS;
+}
+export function subscribeEditorHolders(listener: () => void): () => void {
+  editorListeners.add(listener);
+  return () => {
+    editorListeners.delete(listener);
+  };
+}
+export function holdEditor(path: string, owner: string): () => void {
+  const owners = editorHolders.get(path) ?? new Map<string, number>();
+  const before = owners.get(owner) ?? 0;
+  owners.set(owner, before + 1);
+  editorHolders.set(path, owners);
+  const publish = () => {
+    if (owners.size) editorSnapshots.set(path, [...owners.keys()]);
+    else {
+      editorHolders.delete(path);
+      editorSnapshots.delete(path);
+    }
+    for (const listener of editorListeners) listener();
+  };
+  if (before === 0) publish();
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const count = owners.get(owner) ?? 0;
+    if (count > 1) owners.set(owner, count - 1);
+    else {
+      owners.delete(owner);
+      publish();
+    }
+  };
 }

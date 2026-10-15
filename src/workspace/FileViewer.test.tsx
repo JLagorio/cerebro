@@ -38,8 +38,8 @@ describe('FileViewer', () => {
 
   it('renders a distinct placeholder for a binary file', async () => {
     const root = seedRoot({ path: '/repos/alpha', label: 'alpha' });
-    seedFile('/repos/alpha', 'image.png', `PNG${NUL}data`);
-    render(<FileViewer rootId={root.id} path="image.png" />);
+    seedFile('/repos/alpha', 'binary.txt', `PNG${NUL}data`);
+    render(<FileViewer rootId={root.id} path="binary.txt" />);
     expect(await screen.findByTestId('viewer-binary')).toBeTruthy();
   });
 

@@ -1,6 +1,7 @@
 ---
 type: Work item
 key: SYN-3
+project: "[[offline-sync-hardening]]"
 status: progress
 priority: urgent
 assignee: "[[dana-fox]]"

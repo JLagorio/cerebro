@@ -7,6 +7,7 @@
 //     [--session <file>] --name <name> --source spike|scripted|app
 //     --proves <one sentence> [--transport per-turn|stream-json-input]
 //     [--ends result|killed|deferred|refused] [--scenario <words>] [--dir <record folder>]
+//     [--allow-server <exact CLI name>] (repeat once per reviewed connector)
 //   pnpm tsx scripts/cli-record/sanitize.ts corpus <name|all>
 //   pnpm tsx scripts/cli-record/sanitize.ts --line <session.jsonl> --at <n>
 //     --name <name> [--dir <record folder>]
@@ -24,7 +25,7 @@
 // 1. parses every line, and refuses a line that does not parse, by number;
 // 2. allowlists system/init: INIT_KEEP stays, INIT_DROP goes (each with its
 //    reason), and any other key refuses, by name. So do a server or an
-//    mcp__<server>__ tool other than the toys (never an owner's connector),
+//    mcp__<server>__ tool other than the toys or an explicitly allowed server,
 //    another CLI version, and any API-key source but none. The owner's own
 //    listings drop from the control protocol's answers and the session file;
 // 3. replaces secrets (scan.ts's SECRETS) with redacted-<kind>-<n>, ids
@@ -62,7 +63,7 @@ export const REAL = join(REPO, 'src-tauri/fixtures/cli-stream/real');
 
 /** The meta file's format, and this sanitizer's version, both in every meta. */
 export const META_FORMAT = 1;
-export const SANITIZER_VERSION = 1;
+export const SANITIZER_VERSION = 2;
 /** One recording file may hold this much, and real/ this much in all. */
 export const FILE_CAP = 256 * 1024;
 export const FOLDER_CAP = 2 * 1024 * 1024;
@@ -139,6 +140,8 @@ export interface SanitizeContext {
   /** For a recording written from the CLI's own code, owed a live run. */
   derivedFrom?: string[];
   machine: Machine;
+  /** Exact CLI server names explicitly reviewed for this one recording. */
+  allowServers?: string[];
 }
 
 export interface Meta {
@@ -153,6 +156,7 @@ export interface Meta {
   ends: Ends;
   session: string | null;
   sanitizer: number;
+  allowed_servers?: string[];
 }
 
 export interface Sanitized {
@@ -191,7 +195,11 @@ function serverOf(tool: unknown): string | null {
 }
 
 /** One init, kept to INIT_KEEP, or a refusal naming what it may not carry. */
-export function allowInit(init: JsonObject, at: number): JsonObject {
+export function allowInit(
+  init: JsonObject,
+  at: number,
+  allowServers: readonly string[] = [],
+): JsonObject {
   for (const key of Object.keys(init)) {
     if (!(INIT_KEEP as readonly string[]).includes(key) && !(key in INIT_DROP)) {
       throw new Refusal(
@@ -211,11 +219,12 @@ export function allowInit(init: JsonObject, at: number): JsonObject {
   const names = servers.map((server) => (isObject(server) ? server.name : undefined));
   const tools = Array.isArray(init.tools) ? init.tools : [];
   const foreign = [...names, ...tools.map(serverOf).filter((name) => name !== null)].filter(
-    (name) => typeof name !== 'string' || !TOY_SERVERS.includes(name),
+    (name) =>
+      typeof name !== 'string' || (!TOY_SERVERS.includes(name) && !allowServers.includes(name)),
   );
   if (foreign.length > 0) {
     throw new Refusal(
-      `The init on stream line ${at} lists ${foreign.length} server(s) or tool(s) from servers other than ${TOY_SERVERS.join(' and ')}; re-record with them off.`,
+      `The init on stream line ${at} lists ${foreign.length} server(s) or tool(s) from servers other than ${[...TOY_SERVERS, ...allowServers].join(' and ')}; re-record with them off.`,
     );
   }
   // The CLI's own key order, less what drops.
@@ -238,9 +247,9 @@ function dropKeys(value: JsonObject, drop: Readonly<Record<string, string>>): Js
 }
 
 /** A stream line with the structural rules applied: init allowlisted, the owner's listings out. */
-function structureStream(line: unknown, at: number): unknown {
+function structureStream(line: unknown, at: number, allowServers: readonly string[]): unknown {
   if (!isObject(line)) return line;
-  if (line.type === 'system' && line.subtype === 'init') return allowInit(line, at);
+  if (line.type === 'system' && line.subtype === 'init') return allowInit(line, at, allowServers);
   if (line.type === 'control_response' && isObject(line.response)) {
     const answer = line.response.response;
     if (isObject(answer)) {
@@ -380,6 +389,10 @@ export function sanitizeRecording(input: RecordingInput, context: SanitizeContex
   }
   if (!SOURCES.includes(context.source)) throw new Refusal('The source is spike, scripted or app.');
   if (context.proves.trim() === '') throw new Refusal('Say, in one sentence, what it proves.');
+  const allowServers = [...new Set(context.allowServers ?? [])];
+  if (allowServers.some((name) => !/^[A-Za-z0-9_-]{1,64}$/.test(name) || name.includes('__'))) {
+    throw new Refusal('Each --allow-server names one exact CLI server, without a tool suffix.');
+  }
   // 1. Parse, and 2. the structural rules.
   const rawStream = parseLines(input.stream, 'stream');
   const rawSession = input.session ? parseLines(input.session.text, 'session') : null;
@@ -389,7 +402,7 @@ export function sanitizeRecording(input: RecordingInput, context: SanitizeContex
   );
   if (inits.length === 0)
     throw new Refusal('The stream has no init, so nothing says which CLI wrote it.');
-  let stream = rawStream.map((line, index) => structureStream(line, index + 1));
+  let stream = rawStream.map((line, index) => structureStream(line, index + 1, allowServers));
   let session = rawSession?.map(structureSession) ?? null;
   const hasResult = rawStream.some((line) => isObject(line) && line.type === 'result');
   const ends = context.ends ?? (hasResult ? 'result' : undefined);
@@ -441,6 +454,7 @@ export function sanitizeRecording(input: RecordingInput, context: SanitizeContex
     ends,
     session: sessionName,
     sanitizer: SANITIZER_VERSION,
+    ...(allowServers.length > 0 ? { allowed_servers: allowServers } : {}),
   };
   const synthetic = new Set(
     [streamText, sessionText ?? ''].flatMap((text) =>
@@ -844,6 +858,7 @@ async function main(argv: string[]): Promise<void> {
       scenario: one('scenario'),
       transport: one('transport') as Transport | undefined,
       ends: one('ends') as Ends | undefined,
+      allowServers: flags.get('allow-server'),
       machine: machine(layout(root)),
     },
   );

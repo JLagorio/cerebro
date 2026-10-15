@@ -31,6 +31,31 @@ afterEach(cleanup);
 const stake = { name: 'stake', kind: 'text' } as const;
 
 describe('KindChangeList (M60.5)', () => {
+  it('offers an explicit Convert action when a formula prevents an in-place change', () => {
+    const doc = {
+      ...betDoc,
+      properties: {
+        fields: { stake: { kind: 'number' }, twice: { kind: 'formula', formula: 'stake * 2' } },
+      } as unknown as Entry['properties'],
+    };
+    useVaultStore.setState({
+      entries: [doc, { ...bet(1, '12'), properties: { stake: 12 } }],
+      views: [],
+    });
+    const onPick = vi.fn();
+    render(
+      <KindChangeList typeName="Bet" def={{ name: 'stake', kind: 'number' }} onPick={onPick} />,
+    );
+    const option = screen.getByTestId('change-type-text') as HTMLButtonElement;
+    expect(option.disabled).toBe(false);
+    expect(option.textContent).toContain('Convert into a new property');
+    fireEvent.click(option);
+    expect(onPick.mock.calls[0][0]).toMatchObject({
+      cast: 'never',
+      copyOnly: true,
+      lossless: false,
+    });
+  });
   it('shows each kind with what changing to it would do', () => {
     render(<KindChangeList typeName="Bet" def={stake} onPick={() => {}} />);
     expect(screen.getByTestId('change-type-hint-number').textContent).toBe(
@@ -72,6 +97,7 @@ describe('KindChangeList (M60.5)', () => {
     expect(screen.queryAllByRole('menuitem')).toHaveLength(0);
     unmount();
     render(<KindChangeList typeName="Bet" def={stake} asMenu onPick={() => {}} />);
-    expect(screen.getAllByRole('menuitem').length).toBe(13);
+    expect(screen.getAllByRole('menuitem')).toHaveLength(14);
+    expect(screen.getByTestId('change-type-repeat').getAttribute('role')).toBe('menuitem');
   });
 });

@@ -1,5 +1,6 @@
+import { navSeed } from '@/test/navSeed';
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ListFile, Presentation, ViewDefinition } from '@/engine/types';
 import { parseListYaml } from '@/engine/views';
@@ -9,6 +10,7 @@ import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { fixtureVault } from '@/test/factories';
+import * as csvActions from '@/app/csvActions';
 
 /**
  * jsdom cannot render mermaid, and this file is about WHERE a whiteboard tab's
@@ -75,12 +77,66 @@ function setup(views = TWO_VIEWS, active?: string) {
     collection: 'work',
     ...(active === undefined ? {} : { view: active }),
   };
-  useNavStore.setState({ selection, history: [selection], historyIndex: 0 });
+  useNavStore.setState({ selection, history: [navSeed(selection)], historyIndex: 0 });
   useUiStore.setState({ collapsed: {} });
   render(<ListPage selection={selection} />);
 }
 
 afterEach(cleanup);
+
+it('exports a closed List tab from its own menu', () => {
+  const exportSpy = vi.spyOn(csvActions, 'exportViewCsv').mockResolvedValue(false);
+  try {
+    setup();
+    fireEvent.contextMenu(screen.getByTestId('view-tab-risk'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Export as CSV…' }));
+    expect(exportSpy).toHaveBeenCalledWith(
+      { kind: 'list', id: 'delivery', collection: 'work', view: 'risk' },
+      useVaultStore.getState().views,
+    );
+  } finally {
+    exportSpy.mockRestore();
+  }
+});
+
+describe('ListPage names unusable view references (M60.2b)', () => {
+  it('names an unknown field and marks a nested filter chip', () => {
+    setup([
+      {
+        ...view('broken', 'Broken', 'table'),
+        filters: { all: [{ any: [{ field: 'ghost_field', op: 'equals', value: 'yes' }] }] },
+      },
+    ]);
+    expect(screen.getByTestId('view-problems').textContent).toContain(
+      '“ghost_field” in the filter: Work item has no property by that name.',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+    expect(screen.getByTestId('filter-chip-0').parentElement?.getAttribute('data-problem')).toBe(
+      'unknown_field',
+    );
+  });
+
+  it('checks a typeless list against every database and uses typeless problem wording', () => {
+    const list = mkList([
+      {
+        ...view('all', 'All pages', 'table'),
+        filters: {
+          all: [
+            { field: 'key', op: 'equals', value: 'FLD' },
+            { field: 'ghost_field', op: 'equals', value: 'yes' },
+          ],
+        },
+      },
+    ]);
+    list.definition.source.type = null;
+    useVaultStore.setState({ entries: fixtureVault(), views: [list] });
+    render(<ListPage selection={{ kind: 'list', id: 'delivery', collection: 'work' }} />);
+    expect(screen.getAllByTestId('view-problem')).toHaveLength(1);
+    expect(screen.getByTestId('view-problems').textContent).toContain(
+      '“ghost_field” in the filter: no database has a property by that name.',
+    );
+  });
+});
 
 describe('ListPage view tabs (M11)', () => {
   beforeEach(() => {
@@ -227,7 +283,7 @@ describe('ListPage hosts a whiteboard tab (M29.48)', () => {
       rescan: vi.fn(async () => {}),
     });
     const selection = { kind: 'list' as const, id: 'delivery', collection, view: open };
-    useNavStore.setState({ selection, history: [selection], historyIndex: 0 });
+    useNavStore.setState({ selection, history: [navSeed(selection)], historyIndex: 0 });
     useUiStore.setState({ collapsed: {} });
     render(<ListPage selection={selection} />);
   }
@@ -244,7 +300,7 @@ describe('ListPage hosts a whiteboard tab (M29.48)', () => {
   // Settled first, asserted second: create-on-open ends by persisting the
   // pointer and opening the editor on it, and waiting for that lets every
   // state update land inside act() instead of after the test.
-  const opened = () => screen.findByTestId('fake-editor');
+  const opened = () => screen.findByTestId('wb-board');
 
   it('creates the canvas in the collection folder the List itself lives in', async () => {
     setupBoard(
@@ -254,13 +310,13 @@ describe('ListPage hosts a whiteboard tab (M29.48)', () => {
       'sketch',
     );
     await opened();
-    expect(fs().get('work/whiteboards/sketch.mmd')).toContain('flowchart TD');
+    expect(fs().get('work/whiteboards/sketch.canvas')).toContain('"nodes": []');
   });
 
   it('a root-level List gets a top-level whiteboards/, with no leading slash', async () => {
     setupBoard('delivery.list.yml', null, [view('sketch', 'Sketch', 'whiteboard')], 'sketch');
     await opened();
-    expect(fs().get('whiteboards/sketch.mmd')).toBeTruthy();
+    expect(fs().get('whiteboards/sketch.canvas')).toBeTruthy();
   });
 
   /**
@@ -276,8 +332,8 @@ describe('ListPage hosts a whiteboard tab (M29.48)', () => {
       'plan',
     );
     await opened();
-    expect(fs().get('work/whiteboards/plan-b.mmd')).toBeTruthy();
-    expect(fs().has('work/whiteboards/sketch.mmd')).toBe(false);
+    expect(fs().get('work/whiteboards/plan-b.canvas')).toBeTruthy();
+    expect(fs().has('work/whiteboards/sketch.canvas')).toBe(false);
   });
 });
 
@@ -315,7 +371,7 @@ describe('ListPage saves a chart drilldown as a view (M44.3)', () => {
       rescan: vi.fn(async () => {}),
     });
     const selection = { kind: 'list' as const, id: 'delivery', collection: 'work', view: 'chart' };
-    useNavStore.setState({ selection, history: [selection], historyIndex: 0 });
+    useNavStore.setState({ selection, history: [navSeed(selection)], historyIndex: 0 });
     useUiStore.setState({ collapsed: {} });
     render(<ListPage selection={selection} />);
 
@@ -343,4 +399,28 @@ describe('ListPage saves a chart drilldown as a view (M44.3)', () => {
       view: 'status-todo',
     });
   });
+});
+
+it('List search and controls return with Back and a new tab starts empty (M65.4)', () => {
+  setup();
+  cleanup();
+  function Place() {
+    const selection = useNavStore((state) => state.selection);
+    return selection.kind === 'list' ? <ListPage selection={selection} /> : <div>Elsewhere</div>;
+  }
+  render(<Place />);
+  fireEvent.click(screen.getByLabelText('Search this view'));
+  fireEvent.change(screen.getByTestId('view-search-input'), { target: { value: 'sync' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Sort' }));
+  act(() => useNavStore.getState().navigate({ kind: 'settings' }));
+  act(() => useNavStore.getState().back());
+  expect((screen.getByTestId('view-search-input') as HTMLInputElement).value).toBe('sync');
+  expect(screen.getByTestId('filter-add')).toBeTruthy();
+  act(() =>
+    useNavStore
+      .getState()
+      .navigate({ kind: 'list', id: 'delivery', collection: 'work', view: 'risk' }),
+  );
+  expect(useNavStore.getState().readEntryState('view.search')).toBeUndefined();
+  expect(screen.queryByTestId('view-search-input')).toBeNull();
 });

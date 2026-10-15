@@ -6,45 +6,7 @@ declare global {
   }
 }
 
-/**
- * Stage H end to end (M29.45–M29.50): the whiteboard is the tenth view kind,
- * and this journey is the only place the whole chain runs for real — a tab
- * created through the picker, a `.mmd` written to the (mock) disk by
- * `write_text_file`'s mirror, a pointer persisted into the List's own YAML,
- * real mermaid in real Chromium accepting every edit, a record bound through a
- * `click` line naming its actual vault path, and the chip over that node
- * opening the record in place.
- *
- * A new file rather than more of collections.spec: this flow mutates the mock
- * disk heavily (a created view, a created file, three edits to it), and
- * collections.spec's tests read the seeded corpus as it shipped.
- *
- * How each step proves REAL mermaid accepted the edit, without reaching into
- * mermaid's private svg internals: `renderMermaid` stamps every successful
- * render with a fresh `cerebro-mermaid-<seq>` id and caches per source, so the
- * id is a function of the CODE, and StructuralEditor only writes a new svg into
- * its host on success (`if (!r.ok) return` — it holds the last good render
- * otherwise). A CHANGED host svg id therefore means mermaid parsed and drew the
- * edited source. This is the device diagrams.spec.ts documents at :492-499.
- */
-
-async function boot(page: Page): Promise<void> {
-  // The background distiller (M8.6) is off for tests that are not about it:
-  // a reader that fires four seconds in would rescan the vault mid-assertion.
-  await page.addInitScript(() => {
-    window.localStorage.setItem('cerebro.autoLearn', 'false');
-    // Pin the theme (M16.39). These specs assert on rendered UI, and an unset
-    // themeMode resolves 'system' — so a dark display would flip every colour
-    // out from under them.
-    window.localStorage.setItem('cerebro.themeMode', 'light');
-  });
-  await page.goto('/');
-  const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
-  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
-  if (await demoButton.isVisible()) await demoButton.click();
-  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
-}
+import { boot } from './boot';
 
 /** Open the Delivery schedule view of the Work item database. */
 async function openDeliverySchedule(page: Page): Promise<void> {
@@ -60,13 +22,30 @@ async function openDeliverySchedule(page: Page): Promise<void> {
 }
 
 /** + → Whiteboard → Create, the same idiom collections.spec uses for a board. */
-async function addWhiteboardTab(page: Page): Promise<void> {
+async function addWhiteboardTab(page: Page, legacy = false): Promise<void> {
   await page.getByTestId('new-view').click();
   await page.getByTestId('new-view-whiteboard').click();
   await page.getByTestId('create-view').click();
+  if (legacy) {
+    await expect.poll(() => canvasFiles(page)).toHaveLength(1);
+    const canvas = (await canvasFiles(page))[0];
+    await expect
+      .poll(() => page.evaluate(() => window.__cerebroMockFs.get('types/work-item.md') ?? ''))
+      .toContain(canvas);
+    await page.evaluate(async (path) => {
+      const mmd = path.replace(/\.canvas$/, '.mmd');
+      window.__cerebroMockFs.set(mmd, 'flowchart TD\n%% cerebro:layout manual\n');
+      window.__cerebroMockFs.delete(path);
+      const doc = window.__cerebroMockFs.get('types/work-item.md')!;
+      window.__cerebroMockFs.set('types/work-item.md', doc.replace(path, mmd));
+      const module = '/src/stores/vaultStore.ts';
+      const { useVaultStore } = await import(module);
+      await useVaultStore.getState().rescan();
+    }, canvas);
+  }
 }
 
-/** Every `.mmd` the whiteboard machinery could have created for this List. */
+/** New whiteboards and deliberately seeded legacy tabs. */
 /**
  * The canvases this spec creates.
  *
@@ -79,10 +58,14 @@ async function addWhiteboardTab(page: Page): Promise<void> {
  */
 const canvasFiles = (page: Page): Promise<string[]> =>
   page.evaluate(() =>
-    [...window.__cerebroMockFs.keys()].filter((k) => /(^|\/)whiteboards\/.+\.mmd$/.test(k)),
+    [...window.__cerebroMockFs.keys()].filter((k) =>
+      /(^|\/)whiteboards\/.+\.(canvas|mmd)$/.test(k),
+    ),
   );
 
-test('whiteboard: a tab creates its canvas, takes a record, and opens it', async ({ page }) => {
+test('whiteboard: a legacy Mermaid tab stays editable, takes a record, and opens it', async ({
+  page,
+}) => {
   // 120s like the Stage F/G journeys: this one runs a cold mermaid chunk load
   // plus two op → re-render laps and three debounced disk waits, and a cold
   // run would otherwise surface as an outer timeout rather than the assertion
@@ -91,7 +74,7 @@ test('whiteboard: a tab creates its canvas, takes a record, and opens it', async
 
   await boot(page);
   await openDeliverySchedule(page);
-  await addWhiteboardTab(page);
+  await addWhiteboardTab(page, true);
 
   // -- Create-on-open: the canvas exists ON DISK, once ---------------------
   // `<host folder>/whiteboards/<view-slug>.mmd` — beside the file that owns
@@ -202,10 +185,7 @@ test('whiteboard: reopening the tab finds the same canvas, not a second file', a
   await expect(page.getByTestId('whiteboard-view')).toBeVisible({ timeout: 10_000 });
   await expect.poll(() => canvasFiles(page), { timeout: 10_000 }).toHaveLength(1);
   const mmdPath = (await canvasFiles(page))[0];
-  await page
-    .getByTestId('structural-host')
-    .locator('svg[id^="cerebro-mermaid-"]')
-    .waitFor({ timeout: 30_000 });
+  await expect(page.getByTestId('wb-board')).toBeVisible();
 
   // Away to the List's original tab, and back.
   const tabs = page.getByTestId('view-tabs');
@@ -213,14 +193,11 @@ test('whiteboard: reopening the tab finds the same canvas, not a second file', a
   await expect(page.getByTestId('whiteboard-view')).toHaveCount(0);
   await tabs.getByRole('tab').last().click();
   await expect(page.getByTestId('whiteboard-view')).toBeVisible();
-  await page
-    .getByTestId('structural-host')
-    .locator('svg[id^="cerebro-mermaid-"]')
-    .waitFor({ timeout: 30_000 });
+  await expect(page.getByTestId('wb-board')).toBeVisible();
 
   // Still exactly one canvas, and the SAME one: create-on-open is once for the
   // tab's life, not once per visit. (A per-visit creation would show up as
-  // `…-2.mmd`, which is what `write_text_file`'s stem dedupe would mint.)
+  // `…-2.canvas`, which is what `write_text_file`'s stem dedupe would mint.)
   await page.waitForTimeout(1_000);
   expect(await canvasFiles(page)).toEqual([mmdPath]);
 });
@@ -242,10 +219,7 @@ test('whiteboard: the record picker marks the row Enter will take', async ({ pag
   await openDeliverySchedule(page);
   await addWhiteboardTab(page);
   await expect(page.getByTestId('whiteboard-view')).toBeVisible({ timeout: 15_000 });
-  await page
-    .getByTestId('structural-host')
-    .locator('svg[id^="cerebro-mermaid-"]')
-    .waitFor({ timeout: 30_000 });
+  await expect(page.getByTestId('wb-board')).toBeVisible();
   await page.getByTestId('whiteboard-add-record').click();
   await expect(page.getByTestId('whiteboard-record-picker')).toBeVisible();
   await page.keyboard.press('ArrowDown');
@@ -273,7 +247,7 @@ test('whiteboard: a chip adds only what the node does not say, and drags it', as
   test.setTimeout(150_000);
   await boot(page);
   await openDeliverySchedule(page);
-  await addWhiteboardTab(page);
+  await addWhiteboardTab(page, true);
   await expect(page.getByTestId('whiteboard-view')).toBeVisible({ timeout: 15_000 });
   await page
     .getByTestId('structural-host')
@@ -318,4 +292,46 @@ test('whiteboard: a chip adds only what the node does not say, and drags it', as
   // A click that goes nowhere still opens the record.
   await chip.click();
   await expect(page.getByTestId('detail-panel')).toBeVisible({ timeout: 10_000 });
+});
+
+test('whiteboard: a new tab writes JSON Canvas and adds a record with one undo step', async ({
+  page,
+}) => {
+  await boot(page);
+  await openDeliverySchedule(page);
+  await addWhiteboardTab(page);
+  await expect(page.getByTestId('wb-board')).toBeVisible();
+  await expect.poll(() => canvasFiles(page)).toHaveLength(1);
+  const path = (await canvasFiles(page))[0];
+  expect(path).toMatch(/\.canvas$/);
+  const read = () => page.evaluate((p) => window.__cerebroMockFs.get(p)!, path);
+  const seed = await read();
+  expect(JSON.parse(seed)).toMatchObject({ nodes: [], edges: [] });
+  await expect
+    .poll(() => page.evaluate(() => window.__cerebroMockFs.get('types/work-item.md')))
+    .toContain(path);
+  await page.getByTestId('whiteboard-add-record').click();
+  const option = page.getByTestId('whiteboard-add-option').first();
+  const record = await option.getAttribute('title');
+  await option.click();
+  await expect.poll(async () => JSON.parse(await read()).nodes).toHaveLength(1);
+  expect(JSON.parse(await read()).nodes[0]).toMatchObject({
+    type: 'file',
+    file: record,
+    width: 320,
+    height: 120,
+  });
+  await page.screenshot({
+    path: '/private/tmp/cerebro-whiteboard-new-tab.png',
+    fullPage: true,
+    animations: 'disabled',
+  });
+  await page.getByTestId('whiteboard-add-record').click();
+  await expect(
+    page.getByTestId('whiteboard-record-picker').getByTitle(record!, { exact: true }),
+  ).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await page.getByTestId('wb-input').click({ position: { x: 20, y: 100 } });
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect.poll(read).toBe(seed);
 });

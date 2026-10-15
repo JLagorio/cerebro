@@ -1,0 +1,62 @@
+{
+  "format": 1,
+  "artifact_version": 1,
+  "rule_version": "views/2026-10-15",
+  "view_types": [
+    { "id": "table", "suggestable": true, "needs": [], "reads": ["group", "sort", "columns", "limit"] },
+    { "id": "list", "suggestable": true, "needs": [], "reads": ["group", "sort", "columns", "limit"] },
+    { "id": "board", "suggestable": true, "needs": ["band"], "reads": ["group", "sort", "columns", "limit"] },
+    { "id": "calendar", "suggestable": true, "needs": ["dateField"], "reads": ["sort", "columns", "dateField", "calendarSpan", "limit"] },
+    { "id": "gantt", "suggestable": true, "needs": ["dateField"], "reads": ["group", "sort", "columns", "dateField", "zoom", "limit"] },
+    { "id": "timeline", "suggestable": true, "needs": ["dateField"], "reads": ["group", "sort", "columns", "dateField", "zoom", "limit"] },
+    { "id": "gallery", "suggestable": true, "needs": [], "reads": ["sort", "columns", "gallery", "limit"] },
+    { "id": "chart", "suggestable": true, "needs": ["chart", "axis"], "reads": ["group", "chart"] },
+    { "id": "dashboard", "suggestable": false, "needs": [], "reads": [] },
+    { "id": "whiteboard", "suggestable": false, "needs": [], "reads": [] }
+  ],
+  "chart_kinds": [
+    { "id": "bar", "needs_axis": true, "reads": ["agg", "value", "xField", "groupBy", "sort"] },
+    { "id": "line", "needs_axis": true, "reads": ["agg", "value", "xField", "groupBy", "sort"] },
+    { "id": "donut", "needs_axis": true, "reads": ["agg", "value", "xField", "sort"] },
+    { "id": "number", "needs_axis": false, "reads": ["agg", "value"] }
+  ],
+  "chart_aggs": ["count", "sum", "avg"],
+  "measured_aggs": ["sum", "avg"],
+  "chart_sorts": ["value-desc", "value-asc", "label"],
+  "directions": ["asc", "desc"],
+  "date_buckets": ["day", "week", "month", "year"],
+  "calendar_spans": ["month", "week"],
+  "zooms": ["day", "week", "month", "quarter"],
+  "slots": {
+    "group": { "fact": "groupable", "verb": "band a view" },
+    "sort": { "fact": "orderable", "verb": "sort a view" },
+    "chart.xField": { "fact": "groupable", "verb": "be a chart axis" },
+    "chart.groupBy": { "fact": "groupable", "verb": "split a chart" },
+    "chart.value": { "fact": "numeric", "verb": "be summed or averaged" },
+    "dateField": { "family": "date", "verb": "place records on dates" },
+    "gallery.cover": { "fact": "media", "verb": "cover a card" },
+    "dateBucket": { "family": "date", "verb": "band dates" }
+  },
+  "keys": {
+    "view": ["name", "filters", "presentation"],
+    "presentation": ["type", "group", "sort", "columns", "dateField", "calendarSpan", "zoom", "chart", "gallery", "limit"],
+    "group": ["field", "dir", "hideEmpty", "dateBucket"],
+    "sort": ["field", "dir"],
+    "column": ["field"],
+    "chart": ["kind", "agg", "value", "xField", "groupBy", "sort"],
+    "gallery": ["cover"]
+  },
+  "limits": {
+    "name": 80,
+    "reasoning": 280,
+    "args_bytes": 16384,
+    "group_levels": 3,
+    "sort_keys": 4,
+    "columns": 40,
+    "filter_rules": 40,
+    "filter_depth": 3,
+    "view_limit": 500,
+    "problems": 20,
+    "names_listed": 8
+  }
+}

@@ -1,7 +1,7 @@
 import { addDays, parseDateProperty, type DateValue } from './dates';
 import { readDateValue } from './dateGrammar';
-import { spanOfValue, type Span } from './schedule';
-import type { Entry } from './types';
+import { scheduleValue, spanOfValue, type Span } from './schedule';
+import type { Entry, Schema } from './types';
 
 /**
  * Placing records on the HOURS of a day (M61.8): what the Week and Day
@@ -11,8 +11,8 @@ import type { Entry } from './types';
  * day it sits, and whether it sits in the hours at all. Pure, and it never
  * reads the clock: "now" is the renderer's business, passed in.
  *
- * The rules live in TS only for now. A Rust agenda reader (M62.3) moves them
- * into a shared case file before it reads a single date (D3).
+ * Stored placement is held to Rust's agenda reader (M62.3) by
+ * src-tauri/fixtures/agenda-cases.json, replayed in agendaCases.test.ts (D3).
  */
 
 export const MINUTES_PER_DAY = 1440;
@@ -47,7 +47,7 @@ export function clockOf(minute: number): string {
  *   (`end` may be 1440: a range that stops at midnight).
  * - `point` — a chip at one minute: a start time with nothing usable after it.
  *
- * `fixed` is true when the stored start is an INSTANT: a moment, shown at
+ * `fixed` is true when either stored endpoint is an INSTANT: a moment, shown at
  * this machine's wall time, as opposed to a floating time that means the same
  * clock face everywhere.
  */
@@ -84,13 +84,14 @@ export function placementOfValue(value: DateValue, fixed: boolean): Placement {
 }
 
 /** A record's placement by `field`, or null when it carries no usable date. */
-export function placementOf(entry: Entry, field: string | null): Placement | null {
+export function placementOf(entry: Entry, field: string | null, schema?: Schema): Placement | null {
   if (field === null) return null;
-  const raw: unknown = entry.properties[field];
+  const raw: unknown = scheduleValue(entry, field, schema);
   const value = parseDateProperty(raw);
   if (value === null) return null;
   // The endpoint form the shared grammar read (M60.3) — never a second regex.
-  return placementOfValue(value, readDateValue(raw)?.start.instant === true);
+  const read = readDateValue(raw);
+  return placementOfValue(value, read?.start.instant === true || read?.end?.instant === true);
 }
 
 /** One item a day column packs: minutes, `end` exclusive. */
@@ -145,4 +146,37 @@ export function packDay(items: PackItem[]): Map<string, PackSlot> {
   }
   close();
   return out;
+}
+
+/** A half-open interval of wall-clock minutes within one day. */
+export interface TimeSlot {
+  start: number;
+  end: number;
+}
+
+/** Round a gesture's minute change to its nearest snap, symmetrically. */
+export function snapDelta(minutes: number, snap = PACK_FLOOR): number {
+  return Math.sign(minutes) * Math.round(Math.abs(minutes) / snap) * snap;
+}
+
+/** Move the whole interval, preserving its duration at the day's bounds. */
+export function moveTimed(slot: TimeSlot, minutes: number): TimeSlot {
+  const duration = slot.end - slot.start;
+  const start = Math.max(0, Math.min(MINUTES_PER_DAY - duration, slot.start + minutes));
+  return { start, end: start + duration };
+}
+
+/** Move one edge, leaving at least a half hour between the endpoints. */
+export function resizeTimed(slot: TimeSlot, edge: 'start' | 'end', minutes: number): TimeSlot {
+  return edge === 'start'
+    ? { start: Math.max(0, Math.min(slot.end - PACK_FLOOR, slot.start + minutes)), end: slot.end }
+    : {
+        start: slot.start,
+        end: Math.min(MINUTES_PER_DAY, Math.max(slot.start + PACK_FLOOR, slot.end + minutes)),
+      };
+}
+
+/** Points have no duration; retain room for their minimum drawing height. */
+export function movePoint(at: number, minutes: number): number {
+  return Math.max(0, Math.min(MINUTES_PER_DAY - PACK_FLOOR, at + minutes));
 }

@@ -34,7 +34,8 @@ pub const UNAVAILABLE: &str = "the runtime database isn't open";
 /// the stamp a delete moves the page into; `restored` the stamp a restore
 /// takes it from; `sidecar` the comment file that travels with it. Hashes are
 /// SHA-256 hex; `after_hash` is `None` for a page the batch leaves absent.
-/// `moved_from` is a rename's source, kept null until M60.10 writes one.
+/// `moved_from` is a rename's source (M60.10); its `path` is the destination.
+/// Renames follow the pre-images, so recovery reverses moves before bytes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JournalFile {

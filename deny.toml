@@ -11,11 +11,10 @@ yanked = "deny"
 # Vulnerabilities and yanked crates stay hard errors — those are actionable.
 # `unmaintained` is scoped to crates this workspace names itself, because the
 # first run surfaced 16 unmaintained advisories and ZERO vulnerabilities, and
-# all 16 are transitive and unfixable from here: the gtk-rs GTK3 bindings
-# (10 of them, Linux-only deps of tauri that macOS never compiles), the
-# `unic-*` family via tauri-utils → urlpattern (RUSTSEC-2025-0098, upstream
-# says "no safe upgrade is available"), and proc-macro-error. Pinning 16
-# ignore ids instead would rot silently as tauri's tree moves. We are
+# they were transitive: gtk-rs GTK3 bindings (Linux-only deps of tauri
+# that macOS never compiles), unic-* and proc-macro-error. Tauri 2.12
+# removed the unic-* family (M64.5); pinning the old ignore ids instead
+# would rot silently as tauri's tree moves. We are
 # accountable for what we depend on; tauri is accountable for its tree.
 # If this ever hides something actionable, the answer is to raise it back to
 # "all" and carry explicit, dated ignores.

@@ -1,3 +1,4 @@
+import { inheritedAgentsPatch } from '@/engine/assignment';
 import { create } from 'zustand';
 import { announceExternalWrites, flushOpenPages } from '@/editor/openPages';
 import {
@@ -10,11 +11,11 @@ import { validatePatch } from '@/engine/properties';
 import { UNDO } from '@/engine/undoPlan';
 import { buildSchema } from '@/engine/schema';
 import { collectionsFromPages, parseCollectionYaml } from '@/engine/collections';
-import type { CollectionFile, Entry, Scalar, Schema, ListFile } from '@/engine/types';
+import type { CollectionFile, Entry, Schema, ListFile } from '@/engine/types';
 import { parseListYaml } from '@/engine/views';
 import * as ipc from '@/lib/ipc';
 import { coalescedRefresh, writeFence, type PassOutcome } from '@/lib/trailingRefresh';
-import { parseWikilinks } from '@/engine/wikilink';
+import { applyEntryPatch } from '@/engine/entryPatch';
 import { useUiStore } from '@/stores/uiStore';
 import { useUndoStore } from '@/stores/undoStore';
 
@@ -84,10 +85,8 @@ export interface VaultState {
    * (M19.3). Returns whether the write landed; like `patchFrontmatter`, it
    * refuses while `entries` is another vault's.
    *
-   * Deliberately NOT `renameNote`: that moves the file, and `resolveTarget`
-   * matches a wikilink on the filename stem FIRST, so moving the file would
-   * dangle every link that names it. This is the same write the detail panel
-   * has always made, now reachable from a table cell.
+   * A title edit keeps the file path. Moves use renameKeepingLinks to carry
+   * inbound links; this is the title-only edit also used by the detail panel.
    */
   setTitle(path: string, title: string): Promise<boolean>;
   /**
@@ -115,52 +114,28 @@ function inTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
-// Re-derive an entry's properties/relationships from an optimistic patch:
-// null deletes the field, values containing [[wikilinks]] become
-// relationships, everything else lands in properties. Mirrors the split the
-// Rust parser performs on the next scan, so the optimistic entry and the
-// rescanned entry agree on every field but the hash, which only the write
-// knows: until it answers, the hash is null, and a trigger compares nothing
-// (M55.2).
-function applyPatch(entry: Entry, patch: Record<string, unknown>): Entry {
-  const properties = { ...entry.properties };
-  const relationships = { ...entry.relationships };
-  for (const [key, value] of Object.entries(patch)) {
-    delete properties[key];
-    delete relationships[key];
-    if (value === null || value === undefined) continue;
-    const links = parseWikilinks(value);
-    if (links !== null) relationships[key] = links;
-    else properties[key] = value as Scalar | Scalar[];
-  }
-  return {
-    ...entry,
-    properties,
-    relationships,
-    modifiedAt: new Date().toISOString(),
-    hash: null,
-  };
-}
-
 /**
  * Refuses an inline edit whose path came from another vault's `entries`
  * (see `VaultState.entriesVault`, M53.30): an open is still in flight, or it
  * failed and left the last vault's records on screen. The toast says which,
- * and never stacks under a copy still on screen: a type rename retags its
- * records one patch at a time, so each refusal would add another.
+ * and never stacks under a copy still on screen.
  *
  * null passes. No scan has landed yet, so the app holds no entries to take a
  * path from, and tests seed `entries` without it.
  *
  * Exported for the page actions that move files (app/pageActions.ts, M55.13),
- * which refuse by the same rule.
+ * which refuse by the same rule. A non-save action may supply its own notice.
  */
-export function refusedAcrossVaults({ vaultPath, entriesVault, status }: VaultState): boolean {
+export function refusedAcrossVaults(
+  { vaultPath, entriesVault, status }: VaultState,
+  notice?: string,
+): boolean {
   if (entriesVault === null || entriesVault === vaultPath) return false;
   const message =
-    status === 'error'
+    notice ??
+    (status === 'error'
       ? "Not saved — the vault didn't open"
-      : 'Not saved — the vault is still opening';
+      : 'Not saved — the vault is still opening');
   const ui = useUiStore.getState();
   if (!ui.toasts.some((t) => t.message === message)) ui.toast(message);
   return true;
@@ -409,6 +384,8 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
   // intercept every internal caller, which all go through get().rescan().
   rescan: () => refresh(),
 
+  // Human filing inherits agents in this same patch, before validation and
+  // the optimistic update. Batch replay and non-human writers add nothing.
   async patchFrontmatter(path, patch) {
     const state = get();
     const vault = state.vaultPath;
@@ -427,6 +404,15 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     // match their YAML-declared shape or the write never reaches disk.
     const target = get().entries.find((e) => e.path === path);
     if (target !== undefined) {
+      const type = Object.hasOwn(normalized, 'type')
+        ? typeof normalized.type === 'string'
+          ? normalized.type
+          : null
+        : target.type;
+      Object.assign(
+        normalized,
+        inheritedAgentsPatch(target, type, normalized, state.entries, getSchema(state.entries)),
+      );
       const errors = validatePatch(getSchema(get().entries), target, normalized);
       if (errors.length > 0) {
         useUiStore.getState().toast(errors[0]);
@@ -435,7 +421,8 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     }
     // Optimistic: local state updates synchronously, before the disk write,
     // inside the write fence, so no scan read before the write lands over it.
-    const optimistic = target === undefined ? null : applyPatch(target, normalized);
+    const optimistic =
+      target === undefined ? null : applyEntryPatch(target, normalized, new Date().toISOString());
     try {
       const hash = await fencedWrite(
         () => {
@@ -458,7 +445,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
       // the write. In Tauri no reconcile pass runs at all — the watcher
       // DISCARDS our own write's event (own-write suppression) — so the
       // optimistic entry stands with the hash the write answered; its fields
-      // are right because applyPatch classifies values exactly like the
+      // are right because applyEntryPatch classifies values exactly like the
       // parser will on the next scan. A knowledge capture answers no hash,
       // so that entry's hash stays null until the next rescan.
       if (!inTauri()) await get().rescan();
@@ -487,7 +474,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     // blur, so one clicked and left unchanged mid-open must not toast.
     if (refusedAcrossVaults(state)) return false;
     // Optimistic and fenced, like patchFrontmatter: `title` is a top-level
-    // Entry field rather than frontmatter, so applyPatch is not involved. The
+    // Entry field rather than frontmatter, so applyEntryPatch is not involved. The
     // new bytes' hash is not known until the rescan below reads them (M55.2).
     try {
       await fencedWrite(
@@ -518,7 +505,10 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     const vault = state.vaultPath;
     if (vault === null) return null;
     if (refusedAcrossVaults(state)) return null;
+    const ticket = openTicket;
+    const sameVault = () => openTicket === ticket && get().vaultPath === vault;
     await flushOpenPages();
+    if (!sameVault() || refusedAcrossVaults(get())) return null;
     const titleOf = (path: string) => get().entries.find((e) => e.path === path)?.title ?? path;
     try {
       const applied = await fencedWrite(
@@ -529,16 +519,21 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
             entries: get().entries.map((entry) =>
               patches
                 .filter((op) => op.path === entry.path)
-                .reduce((shown, op) => applyPatch(shown, op.set), entry),
+                .reduce(
+                  (shown, op) => applyEntryPatch(shown, op.set, new Date().toISOString()),
+                  entry,
+                ),
             ),
           });
         },
         () => ipc.applyBatch(vault, ops),
       );
+      if (!sameVault()) return applied;
       await announceExternalWrites(
         applied.files.map((file) => file.path),
-        () => get().rescan(),
+        () => (sameVault() ? get().rescan() : Promise.resolve()),
       );
+      if (!sameVault()) return applied;
       const label = options.undo;
       if (label !== undefined) {
         const id = useUndoStore.getState().pushBatch(label, vault, applied.files);
@@ -553,6 +548,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
       }
       return applied;
     } catch (err) {
+      if (!sameVault()) return null;
       const message = err instanceof Error ? err.message : String(err);
       if (options.onRefused !== undefined) options.onRefused(message);
       else useUiStore.getState().toast(batchFailureWords(message, titleOf));
@@ -566,10 +562,20 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
   // context-specific failure message — so failure stays an exception the
   // caller catches, not a null every caller would have to branch on anyway.
   // Every call site awaits inside try/catch; keep it that way.
+  // A human creation receives newly filed host agents in its one create write.
   async createItem({ folder, slug, frontmatter, body = '' }) {
     const vault = get().vaultPath;
     if (vault === null) throw new Error('No vault open');
-    const path = await ipc.createNote(vault, folder, slug, frontmatter, body);
+    const state = get();
+    if (refusedAcrossVaults(state)) throw new Error('The vault is still opening');
+    const inherited = inheritedAgentsPatch(
+      null,
+      typeof frontmatter.type === 'string' ? frontmatter.type : null,
+      frontmatter,
+      state.entries,
+      getSchema(state.entries),
+    );
+    const path = await ipc.createNote(vault, folder, slug, { ...frontmatter, ...inherited }, body);
     // Rescan unconditionally: the watcher never reports our own writes (its
     // own-write suppression discards the event), so without this the created
     // note would exist on disk but never enter the store in Tauri. Safe — a

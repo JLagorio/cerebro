@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useOpenPath } from '@/app/useOpenPath';
 import type { Entry, Schema } from '@/engine/types';
+import { statusFieldOf } from '@/engine/pageCard';
 import { useCanvasScale, useCanvasTransformRef } from '@/mermaid/CanvasViewport';
 import { claimedByHostEditor } from '@/mermaid/keys';
 import { parseFlowchart } from '@/mermaid/flowchart/model';
@@ -29,18 +30,6 @@ function sameRects(a: ReadonlyMap<string, NodeRect>, b: ReadonlyMap<string, Node
     if (other.x !== r.x || other.y !== r.y || other.w !== r.w || other.h !== r.h) return false;
   }
   return true;
-}
-
-/**
- * The entry's own status field, whatever it is called on its type.
- *
- * Capability-gated, never type-routed (AGENTS.md): a record whose type
- * declares a `status`-kind field is task-like and gets the badge; one that
- * declares none simply has no badge, and no type name is ever consulted.
- */
-function statusFieldName(schema: Schema, entry: Entry): string | null {
-  const type = entry.type === null ? undefined : schema.types.get(entry.type);
-  return type?.fields.find((f) => f.kind === 'status')?.name ?? null;
 }
 
 /**
@@ -179,7 +168,7 @@ export function RecordChipOverlay({
         const binding = bound.get(id);
         if (binding === undefined) return null;
         const { entry, contested } = binding;
-        const field = statusFieldName(schema, entry);
+        const field = statusFieldOf(entry, schema)?.name ?? null;
         const status = field === null ? null : schema.resolveField(entry, field);
         return (
           <button

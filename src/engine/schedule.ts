@@ -1,3 +1,4 @@
+import { kindFacts } from './fieldKindTable';
 import {
   addDays,
   fromIsoDate,
@@ -7,10 +8,14 @@ import {
   toIsoDate,
   type DateValue,
 } from './dates';
+import { clockOf, type TimeSlot } from './timeGrid';
 import { resolveTarget } from './wikilink';
 import type { Entry, FieldKind, Presentation, Schema } from './types';
 
 /**
+ * Stored placement replays src-tauri/fixtures/agenda-cases.json against Rust
+ * vault/agenda.rs (M62.3, D3), through agendaCases.test.ts.
+ *
  * Placing records on a date axis (M10) — the one engine behind Calendar,
  * Timeline, and Gantt.
  *
@@ -74,13 +79,25 @@ export function dateFieldOptions(
  * error. A calendar's job includes reporting how much of the collection it
  * cannot place (see `unscheduled`).
  */
-export function spanOf(entry: Entry, field: string | null): Span | null {
+/** Date axes share the schema read, including file times and declared
+ * computed date fields. Occurrence entries carry their projected date here. */
+export function scheduleValue(entry: Entry, field: string, schema?: Schema): unknown {
+  return schema !== undefined
+    ? schema.fieldValue(entry, field)
+    : field === 'createdAt'
+      ? entry.createdAt
+      : field === 'modifiedAt'
+        ? entry.modifiedAt
+        : entry.properties[field];
+}
+
+export function spanOf(entry: Entry, field: string | null, schema?: Schema): Span | null {
   if (field === null) return null;
   // M16.23: this used to run its own `^\d{4}-\d{2}-\d{2}` scan over both the
   // scalar and the `{start,end}` mapping — a second date parser, written
   // before M16.14 gave dates a time component, and one that would have had to
   // learn every spelling `parseDateProperty` already knows.
-  const value = parseDateProperty(entry.properties[field]);
+  const value = parseDateProperty(scheduleValue(entry, field, schema));
   return value === null ? null : spanOfValue(value);
 }
 
@@ -141,6 +158,28 @@ export function rescheduleValue(raw: unknown, kind: 'date' | 'daterange', next: 
   );
 }
 
+/** Write an hours-grid placement. Midnight belongs to the following day on
+ * disk; points keep an open end, and scalar date properties stay scalar. */
+export function retimeValue(
+  raw: unknown,
+  kind: 'date' | 'daterange',
+  day: string,
+  slot: TimeSlot | { at: number },
+): unknown {
+  const current = parseDateProperty(raw) ?? makeDateValue(day);
+  const start = 'at' in slot ? slot.at : slot.start;
+  return serializeDateProperty(
+    {
+      ...current,
+      start: day,
+      startTime: clockOf(start),
+      end: 'at' in slot ? null : slot.end === 1440 ? addDays(day, 1) : day,
+      endTime: 'at' in slot ? null : clockOf(slot.end),
+    },
+    kind,
+  );
+}
+
 /** The same span `days` later (negative moves it earlier). Duration is kept. */
 export function shiftSpan(span: Span, days: number): Span {
   return { start: addDays(span.start, days), end: addDays(span.end, days) };
@@ -163,8 +202,8 @@ export function resizeSpan(span: Span, edge: 'start' | 'end', days: number): Spa
 }
 
 /** The records a date view cannot place. */
-export function unscheduled(entries: Entry[], field: string | null): Entry[] {
-  return entries.filter((e) => spanOf(e, field) === null);
+export function unscheduled(entries: Entry[], field: string | null, schema?: Schema): Entry[] {
+  return entries.filter((e) => spanOf(e, field, schema) === null);
 }
 
 /** Tightest span covering all of them; null when none are dated. */
@@ -313,9 +352,14 @@ export function weekdayLabels(weekStart: WeekStart = 0, showWeekends = true): st
 }
 
 /** Records whose span covers `day`, in the order given. */
-export function onDay(entries: Entry[], field: string | null, day: string): Entry[] {
+export function onDay(
+  entries: Entry[],
+  field: string | null,
+  day: string,
+  schema?: Schema,
+): Entry[] {
   return entries.filter((e) => {
-    const span = spanOf(e, field);
+    const span = spanOf(e, field, schema);
     return span !== null && span.start <= day && day <= span.end;
   });
 }
@@ -589,6 +633,13 @@ export function scrollToCentre(
  * that nothing declares is still a range, and flattening it on a drag would
  * delete the end date as a side effect of moving the record by a day.
  */
+/** Computed dates and virtual file times can be read but never rescheduled. */
+export function canReschedule(entry: Entry, field: string | null, schema?: Schema): boolean {
+  if (field === null || field === 'createdAt' || field === 'modifiedAt') return false;
+  const def = schema?.resolveField(entry, field).def;
+  return def == null || !kindFacts(def.kind).computed;
+}
+
 export function dateKindOf(entry: Entry, field: string, schema: Schema): 'date' | 'daterange' {
   const declared = schema.resolveField(entry, field).def?.kind;
   if (declared === 'date' || declared === 'daterange') return declared;
@@ -607,16 +658,21 @@ export function dateKindOf(entry: Entry, field: string, schema: Schema): 'date' 
  * start/end range"). A `daterange` gets an open range, `{ start: day, end:
  * null }` — the shape the date picker writes before anyone gives the range an
  * end. A `date`, an undeclared field or any other kind gets the bare day:
- * unlike a drag, a new record has no shape on disk to keep.
+ * unlike a drag, a new record has no shape on disk to keep. An hours-grid slot
+ * supplies floating start/end times instead of the bare day.
  */
 export function createOnDayValue(
   typeName: string,
   field: string,
   day: string,
   schema: Schema,
+  slot?: TimeSlot,
 ): unknown {
   const declared = schema.types.get(typeName)?.fields.find((f) => f.name === field)?.kind;
-  return serializeDateProperty(makeDateValue(day), declared === 'daterange' ? 'daterange' : 'date');
+  const kind = declared === 'daterange' ? 'daterange' : 'date';
+  return slot === undefined
+    ? serializeDateProperty(makeDateValue(day), kind)
+    : retimeValue(undefined, kind, day, slot);
 }
 
 /** Left offset and width in px for a record's bar on the axis. */

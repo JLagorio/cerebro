@@ -1,6 +1,7 @@
 import type { PageAttribution } from './attribution';
 import { writerWords } from './attribution';
 import type { BatchOp, FileResult } from './batch';
+import type { RenameStep } from './linkRewrite';
 import { isKnowledgePath } from './okf';
 import { humanize } from './schema';
 import type { Entry } from './types';
@@ -44,6 +45,33 @@ export function revertOps(files: readonly FileResult[]): BatchOp[] {
  * counts. */
 export function entryBytes(files: readonly FileResult[]): number {
   return files.reduce((sum, file) => sum + (file.before?.length ?? 0), 0);
+}
+
+/** The byte-exact writes and moves of one human rename (M60.10b).
+ * File paths name the pre-move locations. Concept anchors are forward edits
+ * through the capture valve, never whole-file knowledge restorations. */
+export interface RenameChange {
+  steps: RenameStep[];
+  files: { path: string; before: string; after: string }[];
+  anchors: { path: string; title: string; before: string | string[]; after: string | string[] }[];
+}
+
+/** Both sides are retained so undo and redo can compare exact bytes. */
+export function renameBytes(change: RenameChange): number {
+  return (
+    change.files.reduce((sum, file) => sum + file.before.length + file.after.length, 0) +
+    JSON.stringify(change.anchors).length
+  );
+}
+
+/** A rename history entry never contains a knowledge file write or move. */
+export function undoableRename(change: RenameChange): boolean {
+  return (
+    (change.files.length > 0 || change.steps.length > 0) &&
+    change.files.every((file) => !isKnowledgePath(file.path)) &&
+    change.steps.every(({ from, to }) => !isKnowledgePath(from) && !isKnowledgePath(to)) &&
+    change.anchors.every((anchor) => isKnowledgePath(anchor.path))
+  );
 }
 
 // --- Words (Appendix B) ----------------------------------------------------------

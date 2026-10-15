@@ -138,3 +138,24 @@ describe('installErrorReporting (M53.24)', () => {
     expect(logFrontend).toHaveBeenCalledTimes(21);
   });
 });
+
+it('forwards CSP directives and blocked origins once, never document paths or queries', () => {
+  uninstall = installErrorReporting();
+  const report = (blockedURI: string) =>
+    window.dispatchEvent(
+      Object.assign(new Event('securitypolicyviolation'), {
+        effectiveDirective: 'connect-src',
+        blockedURI,
+      }),
+    );
+  report('https://example.test/private/report.pdf?secret=123');
+  report('https://example.test/another-file');
+  report('data:application/pdf;base64,secret');
+  expect(sent()).toEqual([
+    { level: 'error', message: 'Content policy blocked connect-src: https://example.test' },
+    { level: 'error', message: 'Content policy blocked connect-src: data:' },
+  ]);
+  uninstall();
+  report('https://other.test/private');
+  expect(sent()).toHaveLength(2);
+});

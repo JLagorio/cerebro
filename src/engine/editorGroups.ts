@@ -1,5 +1,5 @@
 /**
- * Editor groups — the side-by-side pane model (M30.24).
+ * Work's editor groups (M30.24); page panes live in panes.ts (M65.8).
  *
  * A workspace holds one or more GROUPS laid left to right. Each group owns its
  * own tab strip and shows exactly one of its tabs. Exactly one group has focus,

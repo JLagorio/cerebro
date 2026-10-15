@@ -167,16 +167,6 @@ export function isMarkdownPath(path: string): boolean {
   return kindFor(path).kind === 'markdown';
 }
 
-/**
- * Which viewer renders this file: the doc viewer for a `doc` row, the code
- * viewer for everything else. The table's unknown row reads as code, so a
- * `Dockerfile.dev` or a `.env.example` shows as monospace text, not a
- * refusal.
- */
-export function viewerKindFor(path: string): 'doc' | 'code' {
-  return kindFor(path).viewer === 'doc' ? 'doc' : 'code';
-}
-
 /** The containing directory, or `''` at the root. */
 export function parentPath(path: string): string {
   const cut = path.lastIndexOf('/');

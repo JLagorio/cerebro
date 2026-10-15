@@ -1,3 +1,4 @@
+import { navSeed } from '@/test/navSeed';
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
@@ -35,6 +36,8 @@ vi.mock('@/lib/ipc', async (orig) => ({
 const TYPE_DOC = makeEntry({ path: 'types/work-item.md', title: 'Work item', type: 'Type' });
 
 function setup(siblings: string[] = [A, B, C], open = B) {
+  useNavStore.getState().reset();
+  useNavStore.getState().navigate({ kind: 'type', name: 'Work item' });
   const records = [A, B, C].map((p) =>
     makeEntry({
       path: p,
@@ -127,7 +130,7 @@ describe('DetailHeaderActions', () => {
     setup();
     useNavStore.setState({
       selection: { kind: 'home' },
-      history: [{ kind: 'home' }],
+      history: [navSeed({ kind: 'home' })],
       historyIndex: 0,
     });
     await user.click(screen.getByRole('button', { name: 'Open in full page' }));
@@ -225,7 +228,7 @@ describe('DetailHeaderActions', () => {
     await user.click(await screen.findByTestId('record-copy-link'));
     // Read back through userEvent's own clipboard stub, which it installs on
     // setup() and which therefore replaces anything the test put there first.
-    await waitFor(async () => expect(await navigator.clipboard.readText()).toBe('[[B]]'));
+    await waitFor(async () => expect(await navigator.clipboard.readText()).toBe('[[b]]'));
   });
 
   it('duplicates without copying the key, and re-wraps relationships', async () => {

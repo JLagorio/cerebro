@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
-import { renameNote } from '@/lib/ipc';
+import { renameKeepingLinks } from '@/app/renameActions';
 import { humanizeSlug } from '@/lib/slug';
-import { useNavStore } from '@/stores/navStore';
-import { useUiStore } from '@/stores/uiStore';
+import { useRenamePromptStore } from '@/stores/renamePromptStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 const parentDir = (path: string): string =>
@@ -30,9 +29,7 @@ export function MoveDialog({
 }) {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const folders = useVaultStore((s) => s.folders);
-  const rescan = useVaultStore((s) => s.rescan);
-  const replacePath = useNavStore((s) => s.replacePath);
-  const toast = useUiStore((s) => s.toast);
+  const reviewingRename = useRenamePromptStore((s) => s.pending !== null);
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -46,14 +43,11 @@ export function MoveDialog({
     try {
       const name = path.split('/').pop() ?? path;
       const dest = selected === '' ? name : `${selected}/${name}`;
-      await renameNote(vaultPath, path, dest);
-      await rescan();
-      // Moving a folder moves everything under it, so history entries for its
-      // pages have to follow too — otherwise Back lands on a dead path.
-      replacePath(path, dest);
-      onMoved(dest);
-    } catch {
-      toast("Couldn't move — does something with that name already exist there?");
+      const result = await renameKeepingLinks({
+        steps: [{ from: path, to: dest }],
+        label: `Move ${label}`,
+      });
+      if (result !== null) onMoved(dest);
     } finally {
       setBusy(false);
     }
@@ -61,7 +55,7 @@ export function MoveDialog({
 
   return (
     <Dialog
-      open
+      open={!reviewingRename}
       onClose={onClose}
       title={`Move ${label}`}
       width={440}

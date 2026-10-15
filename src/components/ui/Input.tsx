@@ -23,6 +23,11 @@ if (typeof document !== 'undefined' && !document.getElementById('cb-input-css'))
 
 /** Text input with optional leading icon and suffix node. */
 export interface InputProps {
+  id?: string;
+  type?: React.HTMLInputTypeAttribute;
+  role?: React.AriaRole;
+  ariaExpanded?: boolean;
+  ariaAutocomplete?: React.AriaAttributes['aria-autocomplete'];
   /** leading lucide icon, e.g. "search" */
   icon?: string;
   placeholder?: string;
@@ -56,6 +61,11 @@ export interface InputProps {
 }
 
 export function Input({
+  id,
+  type,
+  role,
+  ariaExpanded,
+  ariaAutocomplete,
   icon,
   placeholder,
   value,
@@ -87,6 +97,11 @@ export function Input({
     >
       {icon ? <Icon name={icon} size={size === 'sm' ? 14 : 16} /> : null}
       <input
+        id={id}
+        type={type}
+        role={role}
+        aria-expanded={ariaExpanded}
+        aria-autocomplete={ariaAutocomplete}
         data-testid={testId}
         aria-label={ariaLabel}
         aria-activedescendant={ariaActivedescendant}

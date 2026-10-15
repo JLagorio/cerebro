@@ -21,26 +21,74 @@ const project = makeEntry({
 const emptySchema = buildSchema([]);
 
 describe('createTarget', () => {
-  it('puts work items inside their project folder with a generated key', () => {
-    const target = createTarget('Work item', {
-      project,
+  it('files task-like records under a keyed host while keeping the database home', () => {
+    const host = makeEntry({
+      path: 'projects/atlas/project.md',
+      title: 'Atlas renamed',
+      properties: { key: 'FLD' },
+    });
+    const type = makeEntry({
+      path: 'types/ticket.md',
+      type: 'Type',
+      title: 'Ticket',
+      properties: { fields: { state: { kind: 'status' }, project: { kind: 'relation' } } } as never,
+    });
+    const entries = [
+      type,
+      host,
+      makeEntry({ path: 'old/fld-12.md', properties: { key: 'FLD-12' } }),
+    ];
+    const target = createTarget('Ticket', {
+      host: { host, field: 'project' },
+      entries,
+      schema: buildSchema(entries),
+      groupBy: 'state',
+      groupValue: 'todo',
+    });
+    expect(target).toEqual({
+      folder: 'records/tickets',
+      frontmatter: { type: 'Ticket', key: 'FLD-13', state: 'todo', project: '[[atlas]]' },
+    });
+    expect(Object.keys(target.frontmatter)).toEqual(['type', 'key', 'state', 'project']);
+  });
+
+  it('a host link wins over a band naming another host', () => {
+    const target = createTarget('Risk', {
+      host: { host: project, field: 'project' },
       entries: [project],
       schema: emptySchema,
+      groupBy: 'project',
+      groupValue: 'another',
     });
-    expect(target.folder).toBe('projects/atlas/items');
-    expect(target.frontmatter.type).toBe('Work item');
-    expect(target.frontmatter.key).toMatch(/^ATL-/);
+    expect(target.frontmatter).toEqual({ type: 'Risk', project: '[[atlas]]' });
+  });
+
+  it('mints no key for a type without status, an unkeyed host or no host', () => {
+    const type = makeEntry({
+      path: 'types/task.md',
+      title: 'Task',
+      type: 'Type',
+      properties: { fields: { status: { kind: 'status' } } } as never,
+    });
+    const entries = [type];
+    const schema = buildSchema(entries);
+    for (const [typeName, host] of [
+      ['Spec', { host: project, field: 'project' }],
+      ['Task', { host: makeEntry({ path: 'plain.md' }), field: 'project' }],
+      ['Task', null],
+    ] as const) {
+      expect(createTarget(typeName, { host, entries, schema }).frontmatter.key).toBeUndefined();
+    }
   });
 
   it('puts other types under the records convention', () => {
-    const target = createTarget('Risk', { project: null, entries: [], schema: emptySchema });
+    const target = createTarget('Risk', { entries: [], schema: emptySchema });
     expect(target.folder).toBe('records/risks');
     expect(target.frontmatter.key).toBeUndefined();
   });
 
   it('presets the band value it was created in', () => {
     const target = createTarget('Risk', {
-      project: null,
       entries: [],
       schema: emptySchema,
       groupBy: 'severity',
@@ -54,7 +102,6 @@ describe('createTarget', () => {
   it('never presets from the no-value or all-items bands', () => {
     for (const groupValue of ['__none__', '', null]) {
       const target = createTarget('Risk', {
-        project: null,
         entries: [],
         schema: emptySchema,
         groupBy: 'severity',
@@ -93,8 +140,7 @@ describe('createTarget', () => {
     const entries = [...typeDocs, item];
     const schema = buildSchema(entries);
     const seed = (groupBy: string, groupValue: string) =>
-      createTarget('Work item', { project: null, entries, schema, groupBy, groupValue })
-        .frontmatter;
+      createTarget('Work item', { entries, schema, groupBy, groupValue }).frontmatter;
 
     it('wraps a relation band as a wikilink', () => {
       expect(seed('epic', 'epic-bonsai').epic).toBe('[[epic-bonsai]]');
@@ -111,10 +157,8 @@ describe('createTarget', () => {
       expect(seed('done', 'false').done).toBe(false);
     });
 
-    // A multi-select record sits in several bands at once, so one scalar
-    // cannot express the band without deleting the record's other values.
-    it('seeds nothing for a multi-select band', () => {
-      expect(seed('labels', 'urgent').labels).toBeUndefined();
+    it('seeds a multi-select band as a list', () => {
+      expect(seed('labels', 'urgent').labels).toEqual(['urgent']);
     });
 
     it('leaves a status band exactly as it is keyed', () => {
@@ -128,7 +172,6 @@ describe('createTarget', () => {
       const stranger = makeEntry({ path: 'd/1.md', type: 'Doc', title: 'Doc' });
       const mixed = [...typeDocs, stranger, item];
       const target = createTarget('Work item', {
-        project: null,
         entries: mixed,
         schema: buildSchema(mixed),
         groupBy: 'epic',
@@ -144,7 +187,7 @@ describe('createTarget', () => {
     const entries = computedVault();
     const schema = buildSchema(entries);
     const seed = (typeName: string, groupBy: string, groupValue: string) =>
-      createTarget(typeName, { project: null, entries, schema, groupBy, groupValue }).frontmatter;
+      createTarget(typeName, { entries, schema, groupBy, groupValue }).frontmatter;
 
     it('creating in a derived-relation band seeds nothing', () => {
       expect(seed('Epic', 'tasks', 'big-1')).toEqual({ type: 'Epic' });
@@ -249,7 +292,7 @@ describe('childLink', () => {
       type: 'Key result',
       field: 'objective',
     });
-    expect(link?.frontmatter).toEqual({ objective: '[[Ship it]]' });
+    expect(link?.frontmatter).toEqual({ objective: '[[o]]' });
   });
 
   // A forward descent means the PARENT holds the list, so the child cannot
@@ -308,7 +351,11 @@ describe('createTarget honours a declared home folder', () => {
 
   /** Schema built from the same entries, exactly as every call site does. */
   const homeOf = (entries: Entry[], inProject: Entry | null = null) =>
-    createTarget('Reading', { project: inProject, entries, schema: buildSchema(entries) }).folder;
+    createTarget('Reading', {
+      host: inProject === null ? null : { host: inProject, field: 'project' },
+      entries,
+      schema: buildSchema(entries),
+    }).folder;
 
   it('places new records in the folder the Type doc declares', () => {
     expect(homeOf([typeDoc({ folder: 'reading' })])).toBe('reading');
@@ -340,13 +387,25 @@ describe('createTarget honours a declared home folder', () => {
     }
   });
 
-  /**
-   * Containment is a property of the CONTEXT, not of the type (M12.2), and
-   * that rule outranks `folder:` — a record created inside a project lands in
-   * the project. Worth pinning because it is the one case where a database's
-   * declared home does NOT win, and M47's create affordances have to know it.
-   */
-  it('yields to a project context, which still wins over the declared folder', () => {
-    expect(homeOf([project, typeDoc({ folder: 'reading' })], project)).toBe('projects/atlas/items');
+  it('keeps the declared folder while filing under a host', () => {
+    expect(homeOf([project, typeDoc({ folder: 'reading' })], project)).toBe('reading');
   });
+});
+
+it('creates into date days with their declared shape, including an empty database (M61.3)', () => {
+  const doc = makeEntry({
+    path: 'types/dated.md',
+    title: 'Dated',
+    type: 'Type',
+    properties: { fields: { due: { kind: 'date' }, span: { kind: 'daterange' } } } as never,
+  });
+  const schema = buildSchema([doc]);
+  const create = (groupBy: string, groupValue: string) =>
+    createTarget('Dated', { entries: [], schema, groupBy, groupValue }).frontmatter;
+  expect(create('due', '2026-07-28')).toEqual({ type: 'Dated', due: '2026-07-28' });
+  expect(create('span', '2026-07-28')).toEqual({
+    type: 'Dated',
+    span: { start: '2026-07-28', end: null },
+  });
+  expect(create('due', 'rel:this-week')).toEqual({ type: 'Dated' });
 });

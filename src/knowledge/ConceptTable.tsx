@@ -1,3 +1,6 @@
+import { useListCursor, type ListCursor } from '@/hooks/useListCursor';
+import { ListSelectionBar } from '@/components/ListSelectionBar';
+import { copyPageLinks } from '@/app/recordActions';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { actorLabel, isAssistantActor } from '@/engine/authors';
@@ -505,7 +508,9 @@ function ConceptRow({
   proposals,
   entries,
   today,
+  cursor,
 }: {
+  cursor?: ListCursor;
   layout: Layout;
   plan: Plan;
   concept: Concept;
@@ -518,6 +523,11 @@ function ConceptRow({
   const replaced = concept.supersededBy !== null;
   const inQueue = layout === 'queue';
   const updated = updatedAt(concept);
+  const open = () => {
+    if (inQueue) startWholeQueueWalk();
+    navigate({ kind: 'doc', path: concept.entry.path });
+  };
+  const cursorProps = cursor?.itemProps(concept.entry.path, { open });
 
   const cell = (column: Column): React.ReactNode => {
     switch (column) {
@@ -628,19 +638,15 @@ function ConceptRow({
       data-testid={inQueue ? 'queue-row' : 'concept-row'}
       data-path={concept.entry.path}
       data-reason={inQueue ? queued?.reason : undefined}
-      onClick={() => {
-        // A Review-tab row starts a walk of the whole queue, whose pager
-        // ends at Review once nothing in it waits.
-        if (inQueue) startWholeQueueWalk();
-        navigate({ kind: 'doc', path: concept.entry.path });
-      }}
+      {...cursorProps}
+      onClick={cursorProps?.onClick ?? open}
       className={[
         TABLE_ANATOMY.row,
         // A row as tall as its title's lines, where they wrap (M12.4b).
         plan.wrap ? ROW_MIN_HEIGHT.default : ROW_HEIGHT.default,
         TABLE_ANATOMY.rowHover,
         // The keyboard cursor, drawn as a view's table draws its own.
-        'cursor-pointer has-[:focus-visible]:bg-cortex-50 has-[:focus-visible]:shadow-[inset_2px_0_0_var(--cortex-500)]',
+        'cursor-pointer outline-none has-[:focus-visible]:bg-cortex-50 has-[:focus-visible]:shadow-[inset_2px_0_0_var(--cortex-500)] data-[focused=true]:bg-cortex-50 data-[focused=true]:shadow-[inset_2px_0_0_var(--cortex-500)]',
       ].join(' ')}
     >
       <Gutter />
@@ -779,6 +785,7 @@ function Table({
   tableRef,
   fill,
   children,
+  cursor,
 }: {
   label: string;
   testId: string;
@@ -788,11 +795,17 @@ function Table({
   tableRef: React.RefObject<HTMLDivElement | null>;
   fill: boolean;
   children: React.ReactNode;
+  cursor?: ListCursor;
 }) {
+  const cursorRef = useRef(cursor);
+  cursorRef.current = cursor;
+  const { ref: _cursorRef, ...cursorProps } = cursor?.containerProps ?? {};
+  const entries = useVaultStore((s) => s.entries);
   const boxRef = useRef<HTMLDivElement | null>(null);
   const box = useCallback(
     (el: HTMLDivElement | null) => {
       boxRef.current = el;
+      cursorRef.current?.containerProps.ref(el);
       return measureRef(el);
     },
     [measureRef],
@@ -801,6 +814,7 @@ function Table({
   const moreRight = useOverflowRight(boxRef, plan.minWidth);
   return (
     <div
+      {...cursorProps}
       ref={box}
       data-testid={`${testId}-scroll`}
       className={
@@ -820,6 +834,14 @@ function Table({
         <HeaderRow plan={plan} />
         {children}
       </div>
+      {cursor && (
+        <ListSelectionBar
+          count={cursor.state.selected.size}
+          onCopy={() =>
+            void copyPageLinks(entries.filter((entry) => cursor.state.selected.has(entry.path)))
+          }
+        />
+      )}
     </div>
   );
 }
@@ -880,6 +902,10 @@ export function ConceptTable({
       ? []
       : s.concepts.map((concept) => ({ concept, queued: queued.get(concept.entry.path) })),
   );
+  const cursor = useListCursor({
+    keys: drawn.map((row) => row.concept.entry.path),
+    selectable: true,
+  });
   const { measureRef, tableRef, plan, width } = useTable(
     'filed',
     contentKey('filed', drawn, proposals, entries, today),
@@ -887,6 +913,7 @@ export function ConceptTable({
   return (
     <Table
       label="Concepts"
+      cursor={cursor}
       testId="concept-list"
       plan={plan}
       width={width}
@@ -920,6 +947,7 @@ export function ConceptTable({
               <ConceptRow
                 key={concept.entry.path}
                 layout="filed"
+                cursor={cursor}
                 plan={plan}
                 concept={concept}
                 queued={queued.get(concept.entry.path)}
@@ -956,6 +984,10 @@ export function ReviewQueueList({
   const shut = useUiStore((s) => s.collapsed[REVIEW_SCOPE]?.queue === true);
   const toggleCollapsed = useUiStore((s) => s.toggleCollapsed);
   const today = todayIso();
+  const cursor = useListCursor({
+    keys: shut ? [] : queue.map((item) => item.concept.entry.path),
+    selectable: true,
+  });
   const { measureRef, tableRef, plan, width } = useTable(
     'queue',
     shut
@@ -971,6 +1003,7 @@ export function ReviewQueueList({
   return (
     <Table
       label="Review queue"
+      cursor={cursor}
       testId="review-queue"
       plan={plan}
       width={width}
@@ -996,6 +1029,7 @@ export function ReviewQueueList({
             <ConceptRow
               key={item.concept.entry.path}
               layout="queue"
+              cursor={cursor}
               plan={plan}
               concept={item.concept}
               queued={item}

@@ -1,10 +1,290 @@
 {
   "format": 1,
-  "about": "What a tool call writes and where it is aimed, read off shared/policy/tools.v1.json (M54.1). A name is read in its short or its mcp__cerebro__ spelling. `confirmable` is whether an ask-first agent's call waits for the person's Allow (M57.4): the five note writers, in any spelling. `writes_disk` is whether a successful call changes something on disk: the row's door, the generated door for an op the policy table offers agents, or the CLI row, and false for a name the manifest does not know (propose_revert_proposal is no agent-facing op, so it is one). The comment tools (door comment, M70.3) write only a page's comment sidecar, never a page, so they count as no write: no rescan, checkpoint or written path. `write_target` is the path the write scope checks, '' being the vault root when a folder target is missing; `read_target` is the path the read scope checks, the bundle's folder for a bundle target, and a read_write writer (edit_note, M55.5; set_fields, M60.4) has both. `written_path` is what a run log reports for the call: the target argument of a tool that writes, else null, for the frontend's replay (M54.2). `renderer` is how a transcript draws the call and `fold` the phrases a run of its calls folds under, null for a tool that never folds (M56.8): a step with no fold for a name the manifest does not know. Replayed by replays_the_shared_tool_cases in src-tauri/src/mcp.rs.",
+  "about": "What a tool call writes and where it is aimed, read off shared/policy/tools.v1.json (M54.1). A name is read in its short or its mcp__cerebro__ spelling. `confirmable` is whether an ask-first agent's call waits for the person's Allow (M57.4): the note writers, in any spelling. `writes_disk` is whether a successful call changes something on disk: the row's door, the generated door for an op the policy table offers agents, or the CLI row, and false for a name the manifest does not know (propose_revert_proposal is no agent-facing op, so it is one). The comment tools (door comment, M70.3) write only a page's comment sidecar, never a page, so they count as no write: no rescan, checkpoint or written path. `write_target` is the path the write scope checks, '' being the vault root when a folder target is missing; `read_target` is the path the read scope checks, the bundle's folder for a bundle target, and a read_write writer (edit_note, M55.5; set_fields, M60.4) has both. `written_path` is what a run log reports for the call: the target argument of a tool that writes, else null, for the frontend's replay (M54.2). `renderer` is how a transcript draws the call and `fold` the phrases a run of its calls folds under, null for a tool that never folds (M56.8): a step with no fold for a name the manifest does not know. Replayed by replays_the_shared_tool_cases in src-tauri/src/mcp.rs.",
   "cases": [
     {
+      "tool": "import_notion_page",
+      "args": {
+        "page": "11111111111111111111111111111111",
+        "folder": "notion"
+      },
+      "writes_disk": true,
+      "confirmable": false,
+      "write_target": "notion",
+      "read_target": null,
+      "written_path": "notion",
+      "renderer": "change",
+      "fold": null
+    },
+    {
+      "tool": "mcp__cerebro__import_notion_page",
+      "args": {
+        "page": "11111111111111111111111111111111",
+        "folder": "notion"
+      },
+      "writes_disk": true,
+      "confirmable": false,
+      "write_target": "notion",
+      "read_target": null,
+      "written_path": "notion",
+      "renderer": "change",
+      "fold": null
+    },
+    {
+      "tool": "read_canvas",
+      "args": {
+        "path": "boards/plan.canvas"
+      },
+      "writes_disk": false,
+      "confirmable": false,
+      "write_target": null,
+      "read_target": "boards/plan.canvas",
+      "written_path": null,
+      "renderer": "step",
+      "fold": {
+        "one": "read a whiteboard",
+        "many": "read whiteboards {n} times"
+      }
+    },
+    {
+      "tool": "mcp__cerebro__read_canvas",
+      "args": {
+        "path": "boards/plan.canvas",
+        "start": 10
+      },
+      "writes_disk": false,
+      "confirmable": false,
+      "write_target": null,
+      "read_target": "boards/plan.canvas",
+      "written_path": null,
+      "renderer": "step",
+      "fold": {
+        "one": "read a whiteboard",
+        "many": "read whiteboards {n} times"
+      }
+    },
+    {
+      "tool": "mcp__cerebro__read_document",
+      "args": {
+        "path": "attachments/deck.pptx",
+        "slides": [3]
+      },
+      "writes_disk": false,
+      "confirmable": false,
+      "write_target": null,
+      "read_target": "attachments/deck.pptx",
+      "written_path": null,
+      "renderer": "step",
+      "fold": {
+        "one": "read a document",
+        "many": "read {n} documents"
+      }
+    },
+    {
+      "tool": "read_document",
+      "args": {
+        "path": "attachments/deck.pptx",
+        "slides": [3]
+      },
+      "writes_disk": false,
+      "confirmable": false,
+      "write_target": null,
+      "read_target": "attachments/deck.pptx",
+      "written_path": null,
+      "renderer": "step",
+      "fold": {
+        "one": "read a document",
+        "many": "read {n} documents"
+      }
+    },
+    {
+      "tool": "read_sheet",
+      "args": {
+        "path": "notes/budget.md"
+      },
+      "writes_disk": false,
+      "confirmable": false,
+      "write_target": null,
+      "read_target": "notes/budget.md",
+      "written_path": null,
+      "renderer": "step",
+      "fold": {
+        "one": "read a sheet",
+        "many": "read sheets {n} times"
+      }
+    },
+    {
+      "tool": "mcp__cerebro__calculate_sheet",
+      "args": {
+        "path": "notes/budget.md",
+        "formulas": [
+          {
+            "formula": "=SUM(B2:B3)"
+          }
+        ]
+      },
+      "writes_disk": false,
+      "confirmable": false,
+      "write_target": null,
+      "read_target": "notes/budget.md",
+      "written_path": null,
+      "renderer": "step",
+      "fold": {
+        "one": "calculated on a sheet",
+        "many": "calculated on sheets {n} times"
+      }
+    },
+    {
+      "tool": "schedule_followup",
+      "args": {
+        "at": "2026-10-15T14:00:00Z",
+        "note": "Check the reply",
+        "agent": "someone-else"
+      },
+      "writes_disk": false,
+      "confirmable": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null,
+      "renderer": "step",
+      "fold": null
+    },
+    {
+      "tool": "list_agenda",
+      "args": {
+        "start": "2026-07-27",
+        "end": "2026-08-03"
+      },
+      "writes_disk": false,
+      "confirmable": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null,
+      "renderer": "step",
+      "fold": {
+        "one": "checked the agenda",
+        "many": "checked the agenda {n} times"
+      }
+    },
+    {
+      "tool": "mcp__cerebro__list_agenda",
+      "args": {
+        "start": "2026-07-27",
+        "end": "2026-08-03"
+      },
+      "writes_disk": false,
+      "confirmable": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null,
+      "renderer": "step",
+      "fold": {
+        "one": "checked the agenda",
+        "many": "checked the agenda {n} times"
+      }
+    },
+    {
+      "tool": "read_activity",
+      "args": {
+        "from": "2026-07-27"
+      },
+      "writes_disk": false,
+      "confirmable": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null,
+      "renderer": "step",
+      "fold": {
+        "one": "read activity",
+        "many": "read activity {n} times"
+      }
+    },
+    {
+      "tool": "mcp__cerebro__read_activity",
+      "args": {
+        "from": "2026-07-27"
+      },
+      "writes_disk": false,
+      "confirmable": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null,
+      "renderer": "step",
+      "fold": {
+        "one": "read activity",
+        "many": "read activity {n} times"
+      }
+    },
+    {
+      "tool": "describe_database",
+      "args": {
+        "type": "Decision"
+      },
+      "writes_disk": false,
+      "confirmable": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null,
+      "renderer": "step",
+      "fold": {
+        "one": "described a database",
+        "many": "described {n} databases"
+      }
+    },
+    {
+      "tool": "mcp__cerebro__describe_database",
+      "args": {
+        "type": "Decision"
+      },
+      "writes_disk": false,
+      "confirmable": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null,
+      "renderer": "step",
+      "fold": {
+        "one": "described a database",
+        "many": "described {n} databases"
+      }
+    },
+    {
+      "tool": "query_records",
+      "args": {
+        "type": "Decision"
+      },
+      "writes_disk": false,
+      "confirmable": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null,
+      "renderer": "step",
+      "fold": {
+        "one": "queried records",
+        "many": "queried records {n} times"
+      }
+    },
+    {
+      "tool": "mcp__cerebro__query_records",
+      "args": {
+        "type": "Decision"
+      },
+      "writes_disk": false,
+      "confirmable": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null,
+      "renderer": "step",
+      "fold": {
+        "one": "queried records",
+        "many": "queried records {n} times"
+      }
+    },
+    {
       "tool": "append_to_note",
-      "args": { "path": "notes/a.md", "content": "More." },
+      "args": {
+        "path": "notes/a.md",
+        "content": "More."
+      },
       "writes_disk": true,
       "confirmable": true,
       "write_target": "notes/a.md",
@@ -15,7 +295,10 @@
     },
     {
       "tool": "mcp__cerebro__append_to_note",
-      "args": { "path": "notes/a.md", "content": "More." },
+      "args": {
+        "path": "notes/a.md",
+        "content": "More."
+      },
       "writes_disk": true,
       "confirmable": true,
       "write_target": "notes/a.md",
@@ -26,7 +309,34 @@
     },
     {
       "tool": "edit_note",
-      "args": { "path": "notes/a.md", "edits": [{ "old": "A", "new": "B" }] },
+      "args": {
+        "path": "notes/a.md",
+        "edits": [
+          {
+            "old": "A",
+            "new": "B"
+          }
+        ]
+      },
+      "writes_disk": true,
+      "confirmable": true,
+      "write_target": "notes/a.md",
+      "read_target": "notes/a.md",
+      "written_path": "notes/a.md",
+      "renderer": "change",
+      "fold": null
+    },
+    {
+      "tool": "edit_sheet",
+      "args": {
+        "path": "notes/a.md",
+        "ops": [
+          {
+            "op": "add_sheet",
+            "name": "Budget"
+          }
+        ]
+      },
       "writes_disk": true,
       "confirmable": true,
       "write_target": "notes/a.md",
@@ -52,7 +362,11 @@
     },
     {
       "tool": "mcp__cerebro__reply_to_comment",
-      "args": { "path": "records/decisions/d-1.md", "thread": "0000000000000001", "text": "Done." },
+      "args": {
+        "path": "records/decisions/d-1.md",
+        "thread": "0000000000000001",
+        "text": "Done."
+      },
       "writes_disk": false,
       "confirmable": false,
       "write_target": null,
@@ -63,7 +377,10 @@
     },
     {
       "tool": "resolve_comment",
-      "args": { "path": "records/decisions/d-1.md", "thread": "0000000000000001" },
+      "args": {
+        "path": "records/decisions/d-1.md",
+        "thread": "0000000000000001"
+      },
       "writes_disk": false,
       "confirmable": false,
       "write_target": null,
@@ -74,7 +391,11 @@
     },
     {
       "tool": "create_note",
-      "args": { "folder": "projects/atlas", "slug": "kickoff", "body": "# Kickoff" },
+      "args": {
+        "folder": "projects/atlas",
+        "slug": "kickoff",
+        "body": "# Kickoff"
+      },
       "writes_disk": true,
       "confirmable": true,
       "write_target": "projects/atlas",
@@ -85,7 +406,10 @@
     },
     {
       "tool": "create_note",
-      "args": { "slug": "loose", "body": "# Loose" },
+      "args": {
+        "slug": "loose",
+        "body": "# Loose"
+      },
       "writes_disk": true,
       "confirmable": true,
       "write_target": "",
@@ -96,7 +420,12 @@
     },
     {
       "tool": "update_frontmatter",
-      "args": { "path": "records/risks/r-1.md", "patch": { "status": "closed" } },
+      "args": {
+        "path": "records/risks/r-1.md",
+        "patch": {
+          "status": "closed"
+        }
+      },
       "writes_disk": true,
       "confirmable": true,
       "write_target": "records/risks/r-1.md",
@@ -107,7 +436,12 @@
     },
     {
       "tool": "set_fields",
-      "args": { "path": "records/risks/r-1.md", "set": { "status": "Closed" } },
+      "args": {
+        "path": "records/risks/r-1.md",
+        "set": {
+          "status": "Closed"
+        }
+      },
       "writes_disk": true,
       "confirmable": true,
       "write_target": "records/risks/r-1.md",
@@ -118,7 +452,12 @@
     },
     {
       "tool": "mcp__cerebro__set_fields",
-      "args": { "path": "records/risks/r-1.md", "add": { "owners": "ana" } },
+      "args": {
+        "path": "records/risks/r-1.md",
+        "add": {
+          "owners": "ana"
+        }
+      },
       "writes_disk": true,
       "confirmable": true,
       "write_target": "records/risks/r-1.md",
@@ -129,47 +468,69 @@
     },
     {
       "tool": "get_note",
-      "args": { "path": "records/risks/r-1.md" },
+      "args": {
+        "path": "records/risks/r-1.md"
+      },
       "writes_disk": false,
       "confirmable": false,
       "write_target": null,
       "read_target": "records/risks/r-1.md",
       "written_path": null,
       "renderer": "step",
-      "fold": { "one": "read a note", "many": "read {n} notes" }
+      "fold": {
+        "one": "read a note",
+        "many": "read {n} notes"
+      }
     },
     {
       "tool": "knowledge_about",
-      "args": { "target": "atlas" },
+      "args": {
+        "target": "atlas"
+      },
       "writes_disk": false,
       "confirmable": false,
       "write_target": null,
       "read_target": "knowledge",
       "written_path": null,
       "renderer": "step",
-      "fold": { "one": "read what Knowledge holds", "many": "read Knowledge {n} times" }
+      "fold": {
+        "one": "read what Knowledge holds",
+        "many": "read Knowledge {n} times"
+      }
     },
     {
       "tool": "search_notes",
-      "args": { "query": "kestrel" },
+      "args": {
+        "query": "kestrel"
+      },
       "writes_disk": false,
       "confirmable": false,
       "write_target": null,
       "read_target": null,
       "written_path": null,
       "renderer": "step",
-      "fold": { "one": "searched notes", "many": "searched notes {n} times" }
+      "fold": {
+        "one": "searched notes",
+        "many": "searched notes {n} times"
+      }
     },
     {
       "tool": "list_notes",
-      "args": { "type": "Risk", "folder": "records/risks", "sort": "modified" },
+      "args": {
+        "type": "Risk",
+        "folder": "records/risks",
+        "sort": "modified"
+      },
       "writes_disk": false,
       "confirmable": false,
       "write_target": null,
       "read_target": null,
       "written_path": null,
       "renderer": "step",
-      "fold": { "one": "listed notes", "many": "listed notes {n} times" }
+      "fold": {
+        "one": "listed notes",
+        "many": "listed notes {n} times"
+      }
     },
     {
       "tool": "write_concept",
@@ -190,7 +551,12 @@
     },
     {
       "tool": "cache_source",
-      "args": { "id": "PHX-421", "kind": "issue", "title": "PHX-421", "body": "The ticket." },
+      "args": {
+        "id": "PHX-421",
+        "kind": "issue",
+        "title": "PHX-421",
+        "body": "The ticket."
+      },
       "writes_disk": true,
       "confirmable": false,
       "write_target": null,
@@ -201,7 +567,10 @@
     },
     {
       "tool": "propose_organize",
-      "args": { "path": "inbox/capture.md", "reasoning": "It is a risk." },
+      "args": {
+        "path": "inbox/capture.md",
+        "reasoning": "It is a risk."
+      },
       "writes_disk": false,
       "confirmable": false,
       "write_target": null,
@@ -211,8 +580,48 @@
       "fold": null
     },
     {
+      "tool": "suggest_view",
+      "args": {
+        "database": "Decision",
+        "view": {
+          "name": "Current",
+          "presentation": {
+            "type": "table"
+          }
+        }
+      },
+      "writes_disk": false,
+      "confirmable": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null,
+      "renderer": "view",
+      "fold": null
+    },
+    {
+      "tool": "mcp__cerebro__suggest_view",
+      "args": {
+        "database": "Decision",
+        "view": {
+          "name": "Current",
+          "presentation": {
+            "type": "table"
+          }
+        }
+      },
+      "writes_disk": false,
+      "confirmable": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null,
+      "renderer": "view",
+      "fold": null
+    },
+    {
       "tool": "open_note",
-      "args": { "path": "records/risks/r-1.md" },
+      "args": {
+        "path": "records/risks/r-1.md"
+      },
       "writes_disk": false,
       "confirmable": false,
       "write_target": null,
@@ -223,7 +632,9 @@
     },
     {
       "tool": "propose_create_belief",
-      "args": { "reason": "A new claim." },
+      "args": {
+        "reason": "A new claim."
+      },
       "writes_disk": true,
       "confirmable": false,
       "write_target": null,
@@ -234,7 +645,9 @@
     },
     {
       "tool": "propose_revert_proposal",
-      "args": { "reason": "Undo it." },
+      "args": {
+        "reason": "Undo it."
+      },
       "writes_disk": false,
       "confirmable": false,
       "write_target": null,
@@ -245,7 +658,9 @@
     },
     {
       "tool": "commit_proposals",
-      "args": { "proposal_ids": ["p-1"] },
+      "args": {
+        "proposal_ids": ["p-1"]
+      },
       "writes_disk": true,
       "confirmable": false,
       "write_target": null,
@@ -256,7 +671,10 @@
     },
     {
       "tool": "MultiEdit",
-      "args": { "file_path": "/VAULT/notes/a.md", "edits": [] },
+      "args": {
+        "file_path": "/VAULT/notes/a.md",
+        "edits": []
+      },
       "writes_disk": true,
       "confirmable": false,
       "write_target": null,
@@ -267,7 +685,9 @@
     },
     {
       "tool": "Bash",
-      "args": { "command": "ls" },
+      "args": {
+        "command": "ls"
+      },
       "writes_disk": false,
       "confirmable": false,
       "write_target": null,
@@ -278,7 +698,9 @@
     },
     {
       "tool": "delete_everything",
-      "args": { "path": "notes/a.md" },
+      "args": {
+        "path": "notes/a.md"
+      },
       "writes_disk": false,
       "confirmable": false,
       "write_target": null,
@@ -289,7 +711,9 @@
     },
     {
       "tool": "mcp__gmail__search",
-      "args": { "query": "churn" },
+      "args": {
+        "query": "churn"
+      },
       "writes_disk": false,
       "confirmable": false,
       "write_target": null,
@@ -300,7 +724,10 @@
     },
     {
       "tool": "hand_to",
-      "args": { "agent": "release-scout", "message": "Check the release notes." },
+      "args": {
+        "agent": "release-scout",
+        "message": "Check the release notes."
+      },
       "writes_disk": false,
       "confirmable": false,
       "write_target": null,
@@ -311,18 +738,29 @@
     },
     {
       "tool": "Read",
-      "args": { "file_path": "/VAULT/notes/a.md" },
+      "args": {
+        "file_path": "/VAULT/notes/a.md"
+      },
       "writes_disk": false,
       "confirmable": false,
       "write_target": null,
       "read_target": null,
       "written_path": null,
       "renderer": "step",
-      "fold": { "one": "read a file", "many": "read {n} files" }
+      "fold": {
+        "one": "read a file",
+        "many": "read {n} files"
+      }
     },
     {
       "tool": "AskUserQuestion",
-      "args": { "questions": [{ "question": "Which release?" }] },
+      "args": {
+        "questions": [
+          {
+            "question": "Which release?"
+          }
+        ]
+      },
       "writes_disk": false,
       "confirmable": false,
       "write_target": null,
@@ -333,7 +771,23 @@
     },
     {
       "tool": "ExitPlanMode",
-      "args": { "plan": "Do it" },
+      "args": {
+        "plan": "Do it"
+      },
+      "writes_disk": false,
+      "confirmable": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null,
+      "renderer": "step",
+      "fold": null
+    },
+    {
+      "tool": "submit_condition",
+      "args": {
+        "answer": "no",
+        "reason": "Nothing calls for work."
+      },
       "writes_disk": false,
       "confirmable": false,
       "write_target": null,

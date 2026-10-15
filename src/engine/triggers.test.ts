@@ -180,3 +180,25 @@ describe('per-trigger instructions (M18.5)', () => {
     expect('do' in trigger).toBe(false);
   });
 });
+
+describe('assignment triggers', () => {
+  it('needs a field, drops to, and never fires as an ordinary event', () => {
+    expect(parseTriggers([{ event: 'assigned' }, 'assigned'])).toEqual([]);
+    const [trigger] = parseTriggers({
+      event: 'assigned',
+      field: ' agent ',
+      to: 'ignored',
+      in: 'tasks',
+    });
+    expect(trigger).toEqual({ event: 'assigned', field: 'agent', in: 'tasks' });
+    expect(describeTrigger(trigger)).toBe('When it is assigned via agent in tasks.');
+    expect(fires(trigger, { kind: 'created', path: 'tasks/a.md', entry: makeEntry({}) })).toBe(
+      false,
+    );
+  });
+});
+
+it('preserves an explicitly empty ask so the check records why it cannot answer', () => {
+  expect(parseTriggers([{ event: 'changed', ask: '  ' }])[0].ask).toBe('');
+  expect(parseTriggers([{ event: 'changed' }])[0].ask).toBeUndefined();
+});

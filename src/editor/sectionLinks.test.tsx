@@ -1,3 +1,4 @@
+import { navSeed } from '@/test/navSeed';
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -255,7 +256,7 @@ describe('section links in the editor', () => {
     useUiStore.setState({ toast });
     useNavStore.setState({
       selection: { kind: 'doc', path: SCHEDULE },
-      history: [{ kind: 'doc', path: SCHEDULE }],
+      history: [navSeed({ kind: 'doc', path: SCHEDULE })],
       historyIndex: 0,
     });
     useVaultStore.setState({

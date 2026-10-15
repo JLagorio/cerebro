@@ -1,6 +1,7 @@
 ---
 type: Work item
 key: FLD-7
+project: "[[guided-onboarding-ga]]"
 status: progress
 priority: urgent
 assignee: "[[sam-ito]]"

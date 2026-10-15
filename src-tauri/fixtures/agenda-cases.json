@@ -1,0 +1,735 @@
+{
+  "format": 1,
+  "about": "Stored date placement and agenda windows, replayed by Rust vault/agenda.rs and TypeScript agendaCases.test.ts. Bounds and labels are Rust words; timed windows are Rust-only.",
+  "values": [
+    {
+      "why": "one day",
+      "zone": "UTC",
+      "kind": "date",
+      "value": "2026-07-24",
+      "expect": {
+        "point": false,
+        "days": ["2026-07-24", "2026-07-24"],
+        "converted": false,
+        "start": "2026-07-24 00:00",
+        "end": "2026-07-25 00:00",
+        "labels": []
+      }
+    },
+    {
+      "why": "floating minute",
+      "zone": "UTC",
+      "kind": "date",
+      "value": "2026-07-28 09:00",
+      "expect": {
+        "point": true,
+        "days": ["2026-07-28", "2026-07-28"],
+        "converted": false,
+        "start": "2026-07-28 09:00",
+        "end": "2026-07-28 09:00",
+        "labels": []
+      }
+    },
+    {
+      "why": "floating T separator",
+      "zone": "UTC",
+      "kind": "date",
+      "value": "2026-07-28T09:00",
+      "expect": {
+        "point": true,
+        "days": ["2026-07-28", "2026-07-28"],
+        "converted": false,
+        "start": "2026-07-28 09:00",
+        "end": "2026-07-28 09:00",
+        "labels": []
+      }
+    },
+    {
+      "why": "leap day",
+      "zone": "UTC",
+      "kind": "date",
+      "value": "2028-02-29",
+      "expect": {
+        "point": false,
+        "days": ["2028-02-29", "2028-02-29"],
+        "converted": false,
+        "start": "2028-02-29 00:00",
+        "end": "2028-03-01 00:00",
+        "labels": []
+      }
+    },
+    {
+      "why": "instant in UTC",
+      "zone": "UTC",
+      "kind": "date",
+      "value": "2026-07-28T09:20:00Z",
+      "expect": {
+        "point": true,
+        "days": ["2026-07-28", "2026-07-28"],
+        "converted": true,
+        "start": "2026-07-28 09:20",
+        "end": "2026-07-28 09:20",
+        "labels": ["converted from 2026-07-28T09:20:00Z"]
+      }
+    },
+    {
+      "why": "instant in Australia/Sydney",
+      "zone": "Australia/Sydney",
+      "kind": "date",
+      "value": "2026-07-28T09:20:00Z",
+      "expect": {
+        "point": true,
+        "days": ["2026-07-28", "2026-07-28"],
+        "converted": true,
+        "start": "2026-07-28 19:20",
+        "end": "2026-07-28 19:20",
+        "labels": ["converted from 2026-07-28T09:20:00Z"]
+      }
+    },
+    {
+      "why": "instant in America/Los_Angeles",
+      "zone": "America/Los_Angeles",
+      "kind": "date",
+      "value": "2026-07-28T09:20:00Z",
+      "expect": {
+        "point": true,
+        "days": ["2026-07-28", "2026-07-28"],
+        "converted": true,
+        "start": "2026-07-28 02:20",
+        "end": "2026-07-28 02:20",
+        "labels": ["converted from 2026-07-28T09:20:00Z"]
+      }
+    },
+    {
+      "why": "Sydney next day",
+      "zone": "Australia/Sydney",
+      "kind": "date",
+      "value": "2026-07-28T22:30:00Z",
+      "expect": {
+        "point": true,
+        "days": ["2026-07-29", "2026-07-29"],
+        "converted": true,
+        "start": "2026-07-29 08:30",
+        "end": "2026-07-29 08:30",
+        "labels": ["converted from 2026-07-28T22:30:00Z"]
+      }
+    },
+    {
+      "why": "explicit positive offset",
+      "zone": "UTC",
+      "kind": "date",
+      "value": "2026-07-28T09:20:00+02:00",
+      "expect": {
+        "point": true,
+        "days": ["2026-07-28", "2026-07-28"],
+        "converted": true,
+        "start": "2026-07-28 07:20",
+        "end": "2026-07-28 07:20",
+        "labels": ["converted from 2026-07-28T09:20:00+02:00"]
+      }
+    },
+    {
+      "why": "seconds keep the containing minute",
+      "zone": "UTC",
+      "kind": "date",
+      "value": "2026-07-28T09:20:59Z",
+      "expect": {
+        "point": true,
+        "days": ["2026-07-28", "2026-07-28"],
+        "converted": true,
+        "start": "2026-07-28 09:20",
+        "end": "2026-07-28 09:20",
+        "labels": ["converted from 2026-07-28T09:20:59Z"]
+      }
+    },
+    {
+      "why": "US daylight saving jump",
+      "zone": "America/Los_Angeles",
+      "kind": "date",
+      "value": "2026-03-08T10:30:00Z",
+      "expect": {
+        "point": true,
+        "days": ["2026-03-08", "2026-03-08"],
+        "converted": true,
+        "start": "2026-03-08 03:30",
+        "end": "2026-03-08 03:30",
+        "labels": ["converted from 2026-03-08T10:30:00Z"]
+      }
+    },
+    {
+      "why": "Sydney daylight saving jump",
+      "zone": "Australia/Sydney",
+      "kind": "date",
+      "value": "2026-10-03T16:30:00Z",
+      "expect": {
+        "point": true,
+        "days": ["2026-10-04", "2026-10-04"],
+        "converted": true,
+        "start": "2026-10-04 03:30",
+        "end": "2026-10-04 03:30",
+        "labels": ["converted from 2026-10-03T16:30:00Z"]
+      }
+    },
+    {
+      "why": "UTC has no daylight saving jump",
+      "zone": "UTC",
+      "kind": "date",
+      "value": "2026-03-08T10:30:00Z",
+      "expect": {
+        "point": true,
+        "days": ["2026-03-08", "2026-03-08"],
+        "converted": true,
+        "start": "2026-03-08 10:30",
+        "end": "2026-03-08 10:30",
+        "labels": ["converted from 2026-03-08T10:30:00Z"]
+      }
+    },
+    {
+      "why": "date range includes last day",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-07-20",
+        "end": "2026-07-31"
+      },
+      "expect": {
+        "point": false,
+        "days": ["2026-07-20", "2026-07-31"],
+        "converted": false,
+        "start": "2026-07-20 00:00",
+        "end": "2026-08-01 00:00",
+        "labels": []
+      }
+    },
+    {
+      "why": "same day timed range",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-07-28 10:00",
+        "end": "2026-07-28 11:00"
+      },
+      "expect": {
+        "point": false,
+        "days": ["2026-07-28", "2026-07-28"],
+        "converted": false,
+        "start": "2026-07-28 10:00",
+        "end": "2026-07-28 11:00",
+        "labels": []
+      }
+    },
+    {
+      "why": "midnight ends previous day",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-07-28 22:00",
+        "end": "2026-07-29 00:00"
+      },
+      "expect": {
+        "point": false,
+        "days": ["2026-07-28", "2026-07-28"],
+        "converted": false,
+        "start": "2026-07-28 22:00",
+        "end": "2026-07-29 00:00",
+        "labels": []
+      }
+    },
+    {
+      "why": "timed range across days",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-07-28 22:00",
+        "end": "2026-07-30 10:00"
+      },
+      "expect": {
+        "point": false,
+        "days": ["2026-07-28", "2026-07-30"],
+        "converted": false,
+        "start": "2026-07-28 22:00",
+        "end": "2026-07-30 10:00",
+        "labels": []
+      }
+    },
+    {
+      "why": "later midnight ends previous day",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-07-28 22:00",
+        "end": "2026-07-30 00:00"
+      },
+      "expect": {
+        "point": false,
+        "days": ["2026-07-28", "2026-07-29"],
+        "converted": false,
+        "start": "2026-07-28 22:00",
+        "end": "2026-07-30 00:00",
+        "labels": []
+      }
+    },
+    {
+      "why": "backwards minutes are a point",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-07-28 11:00",
+        "end": "2026-07-28 10:00"
+      },
+      "expect": {
+        "point": true,
+        "days": ["2026-07-28", "2026-07-28"],
+        "converted": false,
+        "start": "2026-07-28 11:00",
+        "end": "2026-07-28 11:00",
+        "labels": ["end before start"]
+      }
+    },
+    {
+      "why": "equal minutes are a point",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-07-28 10:00",
+        "end": "2026-07-28 10:00"
+      },
+      "expect": {
+        "point": true,
+        "days": ["2026-07-28", "2026-07-28"],
+        "converted": false,
+        "start": "2026-07-28 10:00",
+        "end": "2026-07-28 10:00",
+        "labels": []
+      }
+    },
+    {
+      "why": "backwards dates keep start",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-07-28",
+        "end": "2026-07-20"
+      },
+      "expect": {
+        "point": false,
+        "days": ["2026-07-28", "2026-07-28"],
+        "converted": false,
+        "start": "2026-07-28 00:00",
+        "end": "2026-07-29 00:00",
+        "labels": ["end before start"]
+      }
+    },
+    {
+      "why": "instant range crosses Sydney midnight",
+      "zone": "Australia/Sydney",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-07-28T13:00:00Z",
+        "end": "2026-07-28T15:00:00Z"
+      },
+      "expect": {
+        "point": false,
+        "days": ["2026-07-28", "2026-07-29"],
+        "converted": true,
+        "start": "2026-07-28 23:00",
+        "end": "2026-07-29 01:00",
+        "labels": ["converted from 2026-07-28T13:00:00Z", "converted from 2026-07-28T15:00:00Z"]
+      }
+    },
+    {
+      "why": "date start with timed end includes end day",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-07-28",
+        "end": "2026-07-30 10:00"
+      },
+      "expect": {
+        "point": false,
+        "days": ["2026-07-28", "2026-07-30"],
+        "converted": false,
+        "start": "2026-07-28 00:00",
+        "end": "2026-07-31 00:00",
+        "labels": []
+      }
+    },
+    {
+      "why": "date start with later midnight",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-07-28",
+        "end": "2026-07-30 00:00"
+      },
+      "expect": {
+        "point": false,
+        "days": ["2026-07-28", "2026-07-29"],
+        "converted": false,
+        "start": "2026-07-28 00:00",
+        "end": "2026-07-30 00:00",
+        "labels": []
+      }
+    },
+    {
+      "why": "date start with same midnight keeps whole day",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-07-28",
+        "end": "2026-07-28 00:00"
+      },
+      "expect": {
+        "point": false,
+        "days": ["2026-07-28", "2026-07-28"],
+        "converted": false,
+        "start": "2026-07-28 00:00",
+        "end": "2026-07-29 00:00",
+        "labels": []
+      }
+    },
+    {
+      "why": "timed start with same date end is point",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-07-28 10:00",
+        "end": "2026-07-28"
+      },
+      "expect": {
+        "point": true,
+        "days": ["2026-07-28", "2026-07-28"],
+        "converted": false,
+        "start": "2026-07-28 10:00",
+        "end": "2026-07-28 10:00",
+        "labels": []
+      }
+    },
+    {
+      "why": "timed start with later date end",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-07-28 10:00",
+        "end": "2026-07-30"
+      },
+      "expect": {
+        "point": false,
+        "days": ["2026-07-28", "2026-07-30"],
+        "converted": false,
+        "start": "2026-07-28 10:00",
+        "end": "2026-07-31 00:00",
+        "labels": []
+      }
+    },
+    {
+      "why": "null end is open",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-07-28",
+        "end": null
+      },
+      "expect": {
+        "point": false,
+        "days": ["2026-07-28", "2026-07-28"],
+        "converted": false,
+        "start": "2026-07-28 00:00",
+        "end": "2026-07-29 00:00",
+        "labels": ["no end"]
+      }
+    },
+    {
+      "why": "missing end is open",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-07-28 09:00"
+      },
+      "expect": {
+        "point": true,
+        "days": ["2026-07-28", "2026-07-28"],
+        "converted": false,
+        "start": "2026-07-28 09:00",
+        "end": "2026-07-28 09:00",
+        "labels": ["no end"]
+      }
+    },
+    {
+      "why": "junk end is open",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-07-28",
+        "end": "soon"
+      },
+      "expect": {
+        "point": false,
+        "days": ["2026-07-28", "2026-07-28"],
+        "converted": false,
+        "start": "2026-07-28 00:00",
+        "end": "2026-07-29 00:00",
+        "labels": ["no end"]
+      }
+    },
+    {
+      "why": "end alone",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "end": "2026-07-28"
+      },
+      "expect": "unreadable"
+    },
+    {
+      "why": "empty mapping",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {},
+      "expect": "unreadable"
+    },
+    {
+      "why": "template date",
+      "zone": "UTC",
+      "kind": "date",
+      "value": "{{date}}",
+      "expect": "unreadable"
+    },
+    {
+      "why": "prose",
+      "zone": "UTC",
+      "kind": "date",
+      "value": "soon",
+      "expect": "unreadable"
+    },
+    {
+      "why": "number",
+      "zone": "UTC",
+      "kind": "date",
+      "value": 20260724,
+      "expect": "unreadable"
+    },
+    {
+      "why": "array",
+      "zone": "UTC",
+      "kind": "date",
+      "value": ["2026-07-24"],
+      "expect": "unreadable"
+    },
+    {
+      "why": "impossible day",
+      "zone": "UTC",
+      "kind": "date",
+      "value": "2026-02-30",
+      "expect": "unreadable"
+    },
+    {
+      "why": "empty string",
+      "zone": "UTC",
+      "kind": "date",
+      "value": "",
+      "expect": "none"
+    },
+    {
+      "why": "blank string",
+      "zone": "UTC",
+      "kind": "date",
+      "value": "   ",
+      "expect": "none"
+    },
+    {
+      "why": "null",
+      "zone": "UTC",
+      "kind": "date",
+      "value": null,
+      "expect": "none"
+    }
+  ],
+  "windows": [
+    {
+      "why": "overlapping range",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-07-20",
+        "end": "2026-07-31"
+      },
+      "window": ["2026-07-20", "2026-08-03"],
+      "in": true
+    },
+    {
+      "why": "starts at excluded end",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-08-03",
+        "end": "2026-08-20"
+      },
+      "window": ["2026-07-20", "2026-08-03"],
+      "in": false
+    },
+    {
+      "why": "ends before start",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-07-07",
+        "end": "2026-07-18"
+      },
+      "window": ["2026-07-20", "2026-08-03"],
+      "in": false
+    },
+    {
+      "why": "inclusive date end at window start",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-07-07",
+        "end": "2026-07-20"
+      },
+      "window": ["2026-07-20", "2026-08-03"],
+      "in": true
+    },
+    {
+      "why": "point at excluded end",
+      "zone": "UTC",
+      "kind": "date",
+      "value": "2026-08-03 00:00",
+      "window": ["2026-07-20", "2026-08-03"],
+      "in": false
+    },
+    {
+      "why": "point just before end",
+      "zone": "UTC",
+      "kind": "date",
+      "value": "2026-08-02 23:59",
+      "window": ["2026-07-20", "2026-08-03"],
+      "in": true
+    },
+    {
+      "why": "midnight range does not enter next day",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-08-02 22:00",
+        "end": "2026-08-03 00:00"
+      },
+      "window": ["2026-08-03", "2026-08-04"],
+      "in": false
+    },
+    {
+      "why": "Sydney shifted point",
+      "zone": "Australia/Sydney",
+      "kind": "date",
+      "value": "2026-07-27T23:30:00Z",
+      "window": ["2026-07-28", "2026-07-29"],
+      "in": true
+    },
+    {
+      "why": "UTC unshifted point",
+      "zone": "UTC",
+      "kind": "date",
+      "value": "2026-07-27T23:30:00Z",
+      "window": ["2026-07-28", "2026-07-29"],
+      "in": false
+    },
+    {
+      "why": "timed earlier range",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-07-28 10:00",
+        "end": "2026-07-28 11:00"
+      },
+      "window": ["2026-07-28 12:00", "2026-07-28 13:00"],
+      "in": false,
+      "rust_only": true
+    },
+    {
+      "why": "point at timed end",
+      "zone": "UTC",
+      "kind": "date",
+      "value": "2026-07-28 13:00",
+      "window": ["2026-07-28 12:00", "2026-07-28 13:00"],
+      "in": false,
+      "rust_only": true
+    },
+    {
+      "why": "point inside timed window",
+      "zone": "UTC",
+      "kind": "date",
+      "value": "2026-07-28 12:30",
+      "window": ["2026-07-28 12:00", "2026-07-28 13:00"],
+      "in": true,
+      "rust_only": true
+    },
+    {
+      "why": "whole day overlaps timed window",
+      "zone": "UTC",
+      "kind": "date",
+      "value": "2026-07-28",
+      "window": ["2026-07-28 12:00", "2026-07-28 13:00"],
+      "in": true,
+      "rust_only": true
+    },
+    {
+      "why": "late multi day range is not ongoing yet",
+      "zone": "UTC",
+      "kind": "daterange",
+      "value": {
+        "start": "2026-07-28 22:00",
+        "end": "2026-07-30 10:00"
+      },
+      "window": ["2026-07-28 00:00", "2026-07-28 20:00"],
+      "in": false,
+      "rust_only": true
+    }
+  ],
+  "repeat_pairs": [
+    {
+      "why": "range before date",
+      "fields": [
+        ["due", "date"],
+        ["window", "daterange"]
+      ],
+      "pair": "window"
+    },
+    {
+      "why": "only date",
+      "fields": [["date", "date"]],
+      "pair": "date"
+    },
+    {
+      "why": "first date",
+      "fields": [
+        ["start", "date"],
+        ["finish", "date"]
+      ],
+      "pair": "start"
+    },
+    {
+      "why": "first range",
+      "fields": [
+        ["a", "daterange"],
+        ["b", "daterange"]
+      ],
+      "pair": "a"
+    },
+    {
+      "why": "no date",
+      "fields": [
+        ["title", "text"],
+        ["done", "checkbox"]
+      ],
+      "pair": null
+    },
+    {
+      "why": "stored date not stamp",
+      "fields": [
+        ["stamp", "created_time"],
+        ["due", "date"]
+      ],
+      "pair": "due"
+    }
+  ]
+}

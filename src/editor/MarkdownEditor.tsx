@@ -1,3 +1,6 @@
+import { settleSheetDrafts } from '@/sheet/pendingSheets';
+import { nextSheetName, newSheetSource } from '@/engine/sheet/gridEdit';
+import { parseSheetFence, sheetNames, sheetSourcesOf } from '@/engine/sheet/fence';
 import '@blocknote/mantine/style.css';
 import './editor.css';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
@@ -17,6 +20,17 @@ import {
   type DefaultSuggestionItem,
 } from '@blocknote/core/extensions';
 import { BlockGrip } from './BlockDragLayer';
+import { AttachmentFilePanel, AttachmentUploadContext } from './AttachmentFilePanel';
+import {
+  addAttachments,
+  anchorAt,
+  pastedFiles,
+  resolveAttachmentUrl,
+  type AttachmentAnchor,
+  type AttachmentSource,
+} from './attachments';
+import { useOsDropZone } from '@/hooks/useOsDropZone';
+import { useVaultActionGuard } from '@/hooks/useVaultActionGuard';
 import { CommentHighlights } from './commentHighlights';
 import { FindBar } from './FindBar';
 import { FindHighlights } from './findHighlights';
@@ -26,9 +40,14 @@ import { onAgentEvent, runAgent, startedOrThrow } from '@/agent/agentIpc';
 import { createLinkedPage } from '@/app/listActions';
 import { AskAiPopover } from '@/editor/AskAiPopover';
 import { AiFormattingToolbar, CarriedBlockMenu, type Preset } from '@/editor/SelectionToolbar';
+import { PromoteDialog } from './PromoteDialog';
+import { linkPromotedLines, promotable, readChecklistLine } from './promoteLines';
+import type { ChecklistLine } from '@/engine/promote';
+import type { PromotionResult } from '@/app/promoteActions';
 import { BlockNoteView } from '@blocknote/mantine';
 import {
   AddBlockButton,
+  FilePanelController,
   DragHandleButton,
   getDefaultReactSlashMenuItems,
   SideMenu,
@@ -45,7 +64,7 @@ import { parseSources } from '@/engine/okf';
 import { isLinkablePage } from '@/engine/pageCard';
 import { peopleTypes } from '@/engine/properties';
 import type { Entry } from '@/engine/types';
-import { linkTargetsFor, resolveTarget } from '@/engine/wikilink';
+import { linkTargetOfPath, linkTargetsFor, resolveTarget } from '@/engine/wikilink';
 import { readNote } from '@/lib/ipc';
 import { listTemplates, templateDisplayName, todayIso } from '@/lib/templates';
 import { useRecency } from '@/stores/openLogStore';
@@ -60,6 +79,8 @@ import {
   leaveAiAnswer,
   MermaidBlock,
   PageCardBlock,
+  SheetBlock,
+  WhiteboardBlock,
   SubPagesBlock,
 } from './blocks';
 import { AssigneeChip, CitationChip, DueChip, WikilinkChip } from './chips';
@@ -73,7 +94,6 @@ import {
   mentionAtWordStart,
   mentionNamesPage,
   readLinkQuery,
-  stemOfPath,
   type SectionQuery,
 } from './linkMenu';
 import {
@@ -121,7 +141,7 @@ export const TABLE_SETTINGS = {
 } as const;
 
 // Default schema with that code block swapped in, plus the Cerebro custom
-// blocks (AI block, callout, columns, database, mermaid, the child-page list,
+// blocks (AI block, callout, columns, database, mermaid, sheet, whiteboard, the child-page list,
 // the page card) and inline chips: wikilinks, assignees, dates, and footnote
 // citations (M2.x, M47.2, M48.1, M51.5, M55.13, M55.14).
 export const cerebroSchema = BlockNoteSchema.create({
@@ -135,6 +155,8 @@ export const cerebroSchema = BlockNoteSchema.create({
     database: DatabaseBlock(),
     mermaid: MermaidBlock(),
     pageCard: PageCardBlock(),
+    sheet: SheetBlock(),
+    whiteboard: WhiteboardBlock(),
     subPages: SubPagesBlock(),
   },
   inlineContentSpecs: {
@@ -434,13 +456,33 @@ export function MarkdownEditor({
   const closeLinkMenu = useRef(() => {});
   // The same, for the Enter that leaves an AI block's answer (M53.9).
   const leaveAnswer = useRef<(event: KeyboardEvent) => boolean>(() => false);
+  const attachmentDoor = useRef<
+    (
+      sources: readonly AttachmentSource[],
+      point?: { x: number; y: number },
+      anchor?: AttachmentAnchor,
+    ) => Promise<void>
+  >(async () => {});
+  const attachmentPath = useRef<string | null>(null);
   const editor = useCreateBlockNote({
     schema: cerebroSchema,
     tables: TABLE_SETTINGS,
+    resolveFileUrl: (url) => resolveAttachmentUrl(url, attachmentPath.current),
     _tiptapOptions: {
       editorProps: {
         // M52.1: a hand-typed `[^id]` becomes a chip as its `]` lands.
         handleTextInput: citationTextInput(() => closeLinkMenu.current()),
+        handleDOMEvents: {
+          drop: (_view, event) => {
+            if (!event.dataTransfer?.types.includes('Files')) return false;
+            event.preventDefault();
+            void attachmentDoor.current(Array.from(event.dataTransfer.files), {
+              x: event.clientX,
+              y: event.clientY,
+            });
+            return true;
+          },
+        },
         // M53.9: Enter at the end of an AI block's answer starts a paragraph
         // after the block (`leaveAiAnswer`). A view prop runs before every
         // keymap, and an open suggestion menu takes its Enter before the view
@@ -451,7 +493,12 @@ export function MarkdownEditor({
     },
     // M55.14: a lone page link pasted on an empty line becomes a page card;
     // every other paste goes on to the citation half (M52.4).
-    pasteHandler: pageLinkPasteHandler,
+    pasteHandler: (ctx) => {
+      const files = pastedFiles(ctx.event.clipboardData);
+      if (files.length === 0) return pageLinkPasteHandler(ctx);
+      void attachmentDoor.current(files);
+      return true;
+    },
     // M70.1: comment highlights, and M59.6: find highlights, each drawn as
     // decorations outside the document.
     extensions: [CommentHighlights(), FindHighlights()],
@@ -481,7 +528,43 @@ export function MarkdownEditor({
   // the `[^` menu offers first (M52.1). Null outside a NoteBodyEditor, where
   // the page's own footnotes are all there is to cite.
   const notePath = useContext(NotePathContext);
+  attachmentPath.current = notePath;
+  const captureAttachmentOwner = useVaultActionGuard(JSON.stringify([vaultPath, notePath]));
   const noteEntry = notePath === null ? undefined : entries.find((e) => e.path === notePath);
+  const [promoting, setPromoting] = useState<ChecklistLine[] | null>(null);
+  const [selectionPromotable, setSelectionPromotable] = useState(false);
+  const promotionDoor = useRef<{ enabled: boolean; open: (id: string) => void }>({
+    enabled: false,
+    open: () => {},
+  });
+  promotionDoor.current = {
+    enabled: !readOnly && notePath !== null,
+    open: (id) => {
+      if (readOnly || notePath === null) return;
+      const block = editor.getBlock(id);
+      const line = block === undefined ? null : readChecklistLine(block, entries, notePath);
+      if (line !== null) setPromoting([line]);
+    },
+  };
+  // Stable component identity: changing selection must not remount the open
+  // grip menu. The ref supplies the current page and read-only verdict.
+  const dragHandleMenu = useMemo(
+    () =>
+      function PromotionBlockMenu() {
+        const door = promotionDoor.current;
+        return <CarriedBlockMenu onPromote={door.enabled ? door.open : undefined} />;
+      },
+    [],
+  );
+  useEffect(
+    () =>
+      editor.onSelectionChange(() => {
+        setSelectionPromotable(
+          promotable(editor.getSelection()?.blocks ?? [], entries, notePath).length > 0,
+        );
+      }),
+    [editor, entries, notePath],
+  );
   const sources = useMemo(
     () => (noteEntry === undefined ? [] : parseSources(noteEntry)),
     [noteEntry],
@@ -563,6 +646,34 @@ export function MarkdownEditor({
     lastEmit.current = Promise.allSettled([lastEmit.current, emitted]).then(() => undefined);
   };
 
+  const prepareAttachment = (anchor: AttachmentAnchor | null) => {
+    const current = captureAttachmentOwner();
+    const captured = anchor?.replace
+      ? { ...anchor, expected: JSON.stringify(editor.getBlock(anchor.id)) }
+      : anchor;
+    return (sources: readonly AttachmentSource[]) =>
+      addAttachments({
+        editor,
+        sources,
+        anchor: captured,
+        current,
+        readOnly: () => readOnlyRef.current,
+      });
+  };
+  attachmentDoor.current = (sources, point, anchor) =>
+    prepareAttachment(anchor ?? anchorAt(editor, host.current, point))(sources);
+  const attachmentZone = useOsDropZone('editor', (paths, point) =>
+    attachmentDoor.current(paths, point),
+  );
+  const setAttachmentZone = attachmentZone.zoneProps.ref;
+  const setEditorHost = useCallback(
+    (element: HTMLDivElement | null) => {
+      host.current = element;
+      setAttachmentZone(element);
+    },
+    [setAttachmentZone],
+  );
+
   // Handed to the owner via onReady and kept for the editor's lifetime, so
   // they must be identity-stable — they close over refs only, never props.
   const cancelPendingSave = useRef(() => {
@@ -571,6 +682,7 @@ export function MarkdownEditor({
     timer.current = null;
   }).current;
   const flushPendingSave = useRef(() => {
+    settleSheetDrafts(editor);
     const wasPending = timer.current !== null;
     cancelPendingSave();
     if (wasPending && !readOnlyRef.current) emitRef.current();
@@ -792,7 +904,7 @@ export function MarkdownEditor({
     const fragment = heading === null ? '' : `#${heading}`;
     if (page === '') {
       if (!double || heading === null || notePath === null) return [];
-      const title = noteEntry?.title ?? stemOfPath(notePath);
+      const title = noteEntry?.title ?? linkTargetOfPath(notePath);
       return [
         {
           title: `${title} \u203A ${heading}`,
@@ -905,7 +1017,7 @@ export function MarkdownEditor({
               typeof cerebroSchema.inlineContentSchema,
               typeof cerebroSchema.styleSchema
             >(
-              [{ type: 'wikilink', props: { target: stemOfPath(path), alias: '' } }, ' '],
+              [{ type: 'wikilink', props: { target: linkTargetOfPath(path), alias: '' } }, ' '],
               editor.pmSchema,
             ),
           );
@@ -980,7 +1092,7 @@ export function MarkdownEditor({
   };
 
   // Custom blocks (M2.x): AI block, callout, mermaid diagram, database, the
-  // child-page list (M55.13) and the page card (M55.14).
+  // child-page list (M55.13), page card (M55.14) sheet (M67.3), and whiteboard (M68.5c).
   const insertBlockAtCursor = (block: { type: string; props?: Record<string, string> }) => {
     const cursor = editor.getTextCursorPosition().block;
     const inserted = editor.insertBlocks([block as never], cursor, 'after');
@@ -990,8 +1102,21 @@ export function MarkdownEditor({
     // is still placed on the next tick, once that close has finished handing
     // focus back, or typing continues in the old block.
     window.setTimeout(() => {
-      if (target !== undefined && (block.type === 'ai' || block.type === 'pageCard')) {
+      if (
+        target !== undefined &&
+        (block.type === 'ai' || block.type === 'pageCard' || block.type === 'whiteboard')
+      ) {
         focusBlockField(target.id, block.type);
+        return;
+      }
+      if (target !== undefined && block.type === 'sheet') {
+        const focus = (tries = 10) => {
+          const block = host.current?.querySelector(`[data-id="${target.id}"]`);
+          const grid = block?.querySelector<HTMLElement>('[data-testid="sheet-grid"]');
+          if (grid) grid.focus();
+          else if (tries > 0) requestAnimationFrame(() => focus(tries - 1));
+        };
+        requestAnimationFrame(() => focus());
         return;
       }
       if (target !== undefined && block.type === 'callout') {
@@ -1002,6 +1127,31 @@ export function MarkdownEditor({
   };
 
   const blockSlashItems = (): DefaultReactSuggestionItem[] => [
+    {
+      title: 'Whiteboard',
+      subtext: 'Show a whiteboard with Open',
+      group: 'Advanced blocks',
+      aliases: ['whiteboard', 'canvas', 'board', 'sketch'],
+      icon: <Icon name="presentation" size={14} />,
+      onItemClick: () => insertBlockAtCursor({ type: 'whiteboard', props: { source: '' } }),
+    },
+
+    {
+      title: 'Sheet',
+      subtext: 'A grid with formulas, saved on this page',
+      group: 'Advanced blocks',
+      aliases: ['sheet', 'spreadsheet', 'grid', 'cells', 'formula', 'excel'],
+      icon: <Icon name="sheet" size={14} />,
+      onItemClick: () => {
+        const names = sheetNames(
+          sheetSourcesOf(editor.document).map((sheet) => parseSheetFence(sheet.source)),
+        );
+        insertBlockAtCursor({
+          type: 'sheet',
+          props: { source: newSheetSource(nextSheetName(names)) },
+        });
+      },
+    },
     {
       title: 'AI block',
       subtext: 'A standing question — a summary, the open questions — you can ask again',
@@ -1088,9 +1238,10 @@ export function MarkdownEditor({
       if (turnInto) editor.removeBlocks([at]);
       // The `/2 columns` query is already gone — BlockNote clears it before
       // this callback — so the copy above holds only the block's own text.
-      // The cursor is placed on the next tick, once the menu's close has
-      // finished, or typing continues in the block we just left.
-      window.setTimeout(() => {
+      // Finish placement after the menu closes, before the browser can
+      // dispatch the next key. A timer left the first typed character in the
+      // preceding block under load.
+      queueMicrotask(() => {
         const firstColumn = (inserted[0] as { children?: { children?: unknown[] }[] })
           ?.children?.[0];
         const landing = firstColumn?.children?.[0];
@@ -1098,7 +1249,7 @@ export function MarkdownEditor({
           editor.setTextCursorPosition(landing as never, turnInto ? 'end' : 'start');
         }
         editor.focus();
-      }, 0);
+      });
     };
     return COLUMN_COUNTS.flatMap((count) => [
       {
@@ -1374,126 +1525,185 @@ export function MarkdownEditor({
     scheduleEmit();
   };
 
+  const finishPromotion = (results: PromotionResult[]): PromotionResult[] => {
+    const created = results.filter(
+      (result): result is Extract<PromotionResult, { outcome: 'created' }> =>
+        result.outcome === 'created',
+    );
+    let linked = new Set<string>();
+    if (alive.current && !readOnlyRef.current && notePath !== null) {
+      try {
+        linked = linkPromotedLines(editor, created);
+        if (linked.size > 0) scheduleEmit();
+      } catch {
+        // The records exist. Report that their source could not be linked,
+        // rather than pretending the creates failed or retrying them.
+      }
+    }
+    return results.map((result) =>
+      result.outcome === 'created' && !linked.has(result.line.blockId)
+        ? {
+            ...result,
+            notes: [
+              ...result.notes,
+              "The record exists, but the line changed, so it wasn't linked.",
+            ],
+          }
+        : result,
+    );
+  };
+
   return (
     <div
-      ref={host}
+      ref={setEditorHost}
+      data-os-drop="editor"
+      data-os-drag-over={attachmentZone.over || undefined}
       data-testid="markdown-editor"
       className="cerebro-editor min-h-0 flex-1"
       onKeyDown={onEditorKeyDown}
     >
       {loaded && <FindBar editor={editor} host={host} readOnly={readOnly} />}
       {loaded && (
-        <BlockNoteView
-          editor={editor}
-          theme="light"
-          editable={!readOnly}
-          onChange={scheduleEmit}
-          sideMenu={false}
-          slashMenu={false}
-          // M18: ours replaces it (AI first, then everything it would have
-          // rendered). Left on, BlockNote mounts a SECOND controller and two
-          // toolbars stack on the same selection.
-          formattingToolbar={false}
-        >
-          <SuggestionMenuController
-            triggerCharacter="@"
-            getItems={async (query) => {
-              // Ranked within each group — People, Link page, Due date — and
-              // the groups stay contiguous in that order (M59.3).
-              const rows = rankSuggestionItems(
-                [...personItems(), ...docItems({ excludePeople: true }), ...dueItems()],
-                query,
-                { recency, pathOf: rowPathOf },
-              );
-              // Create only where a mention starts: `ana@example.com` is an
-              // address, and the `@` in `meet @ 5pm` names nothing. And only
-              // while the query could be a name: past that the row goes, so
-              // the menu closes and Enter ends the line (`mentionNamesPage`).
-              const starts =
-                !/^\s/.test(query) &&
-                mentionNamesPage(query) &&
-                mentionAtWordStart(charBeforeTrigger(editor.prosemirrorState, query, '@'));
-              return withCreate(rows, starts ? createRow(query, '@') : null);
-            }}
-          />
-          <SuggestionMenuController
-            triggerCharacter="["
-            getItems={async (query) => {
-              const asked = readLinkQuery(
-                query,
-                charBeforeTrigger(editor.prosemirrorState, query, '['),
-              );
-              if (asked.kind === 'cite') {
-                const cites = filterItems(citeItems(), asked.text);
-                // Nothing to cite — a page with no sources and no footnotes,
-                // or an id nobody has used yet. Closed rather than shown empty:
-                // an open menu swallows Enter, and the author is typing a
-                // marker that its `]` will turn into a chip.
-                if (cites.length === 0) closeLinkMenu.current();
-                return cites;
+        <AttachmentUploadContext.Provider value={prepareAttachment}>
+          <BlockNoteView
+            editor={editor}
+            theme="light"
+            editable={!readOnly}
+            onChange={scheduleEmit}
+            sideMenu={false}
+            slashMenu={false}
+            filePanel={false}
+            // M18: ours replaces it (AI first, then everything it would have
+            // rendered). Left on, BlockNote mounts a SECOND controller and two
+            // toolbars stack on the same selection.
+            formattingToolbar={false}
+          >
+            <FilePanelController filePanel={AttachmentFilePanel} />
+            <SuggestionMenuController
+              triggerCharacter="@"
+              getItems={async (query) => {
+                // Ranked within each group — People, Link page, Due date — and
+                // the groups stay contiguous in that order (M59.3).
+                const rows = rankSuggestionItems(
+                  [...personItems(), ...docItems({ excludePeople: true }), ...dueItems()],
+                  query,
+                  { recency, pathOf: rowPathOf },
+                );
+                // Create only where a mention starts: `ana@example.com` is an
+                // address, and the `@` in `meet @ 5pm` names nothing. And only
+                // while the query could be a name: past that the row goes, so
+                // the menu closes and Enter ends the line (`mentionNamesPage`).
+                const starts =
+                  !/^\s/.test(query) &&
+                  mentionNamesPage(query) &&
+                  mentionAtWordStart(charBeforeTrigger(editor.prosemirrorState, query, '@'));
+                return withCreate(rows, starts ? createRow(query, '@') : null);
+              }}
+            />
+            <SuggestionMenuController
+              triggerCharacter="["
+              getItems={async (query) => {
+                const asked = readLinkQuery(
+                  query,
+                  charBeforeTrigger(editor.prosemirrorState, query, '['),
+                );
+                if (asked.kind === 'cite') {
+                  const cites = filterItems(citeItems(), asked.text);
+                  // Nothing to cite — a page with no sources and no footnotes,
+                  // or an id nobody has used yet. Closed rather than shown empty:
+                  // an open menu swallows Enter, and the author is typing a
+                  // marker that its `]` will turn into a chip.
+                  if (cites.length === 0) closeLinkMenu.current();
+                  return cites;
+                }
+                // A `]` ends the link being typed. Closed for the same reason: an
+                // open menu would swallow the Enter that starts the next line.
+                if (asked.kind === 'closed') {
+                  closeLinkMenu.current();
+                  return [];
+                }
+                // Create only after `[[`; a lone `[` is a bracket. Every row,
+                // Create included, strips the first bracket before it inserts, so
+                // Create tracks the caret with the bracket already gone. A `#`
+                // asks for a section, which offers no Create row (M55.8).
+                const create =
+                  asked.double && asked.section === null ? createRow(asked.text, '[') : null;
+                const rows =
+                  asked.section === null
+                    ? rankSuggestionItems(docItems(), asked.text, { recency, pathOf: rowPathOf })
+                    : sectionItems(asked.section, asked.double);
+                return withCreate(rows, create).map((item) => ({
+                  ...item,
+                  onItemClick: () => {
+                    stripDanglingBracket();
+                    item.onItemClick?.();
+                  },
+                }));
+              }}
+            />
+            <SuggestionMenuController
+              triggerCharacter="/"
+              getItems={async (query) =>
+                // BlockNote's entries less DROPPED_SLASH_KEYS, then ours: the
+                // date, columns, Cerebro's blocks and per-template inserts.
+                filterItems(
+                  slashMenuItems(editor, [
+                    dateSlashItem(),
+                    ...columnSlashItems(),
+                    ...blockSlashItems(),
+                    ...templateSlashItems(),
+                  ]),
+                  query,
+                )
               }
-              // A `]` ends the link being typed. Closed for the same reason: an
-              // open menu would swallow the Enter that starts the next line.
-              if (asked.kind === 'closed') {
-                closeLinkMenu.current();
-                return [];
-              }
-              // Create only after `[[`; a lone `[` is a bracket. Every row,
-              // Create included, strips the first bracket before it inserts, so
-              // Create tracks the caret with the bracket already gone. A `#`
-              // asks for a section, which offers no Create row (M55.8).
-              const create =
-                asked.double && asked.section === null ? createRow(asked.text, '[') : null;
-              const rows =
-                asked.section === null
-                  ? rankSuggestionItems(docItems(), asked.text, { recency, pathOf: rowPathOf })
-                  : sectionItems(asked.section, asked.double);
-              return withCreate(rows, create).map((item) => ({
-                ...item,
-                onItemClick: () => {
-                  stripDanglingBracket();
-                  item.onItemClick?.();
-                },
-              }));
-            }}
-          />
-          <SuggestionMenuController
-            triggerCharacter="/"
-            getItems={async (query) =>
-              // BlockNote's entries less DROPPED_SLASH_KEYS, then ours: the
-              // date, columns, Cerebro's blocks and per-template inserts.
-              filterItems(
-                slashMenuItems(editor, [
-                  dateSlashItem(),
-                  ...columnSlashItems(),
-                  ...blockSlashItems(),
-                  ...templateSlashItems(),
-                ]),
-                query,
-              )
-            }
-          />
-          {/* M18: AI at the head of the editor's OWN formatting toolbar. A
+            />
+            {/* M18: AI at the head of the editor's OWN formatting toolbar. A
               second floating bar beside BlockNote's fought it for the same few
               pixels on every selection. */}
-          {!readOnly && <AiFormattingToolbar onAsk={askFromToolbar} />}
-          <SideMenuController
-            sideMenu={(props) => (
-              <SideMenu {...props}>
-                <AssignTaskButton onOpen={openAssignDialog} />
-                <AddBlockButton />
-                {/* M48.4: ours, not BlockNote's `DragHandleButton`. Same
+            {!readOnly && (
+              <AiFormattingToolbar
+                onAsk={askFromToolbar}
+                onPromote={
+                  notePath !== null && selectionPromotable
+                    ? () => {
+                        const lines = promotable(
+                          editor.getSelection()?.blocks ?? [],
+                          entries,
+                          notePath,
+                        );
+                        if (lines.length > 0) setPromoting(lines);
+                      }
+                    : undefined
+                }
+              />
+            )}
+            <SideMenuController
+              sideMenu={(props) => (
+                <SideMenu {...props}>
+                  <AssignTaskButton onOpen={openAssignDialog} />
+                  <AddBlockButton />
+                  {/* M48.4: ours, not BlockNote's `DragHandleButton`. Same
                     position, same click-opens-the-menu behaviour; a drag that
                     a test can drive and a drop that can land in a column. The
-                    menu it opens holds only what a save keeps (M55.15). */}
-                <BlockGripButton
-                  hostRef={host}
-                  sideMenu={<DragHandleButton {...props} dragHandleMenu={CarriedBlockMenu} />}
-                />
-              </SideMenu>
-            )}
-          />
-        </BlockNoteView>
+                    menu it opens holds only what a save keeps (M55.15), plus
+                    Promote on a checklist line (M61.7). */}
+                  <BlockGripButton
+                    hostRef={host}
+                    sideMenu={<DragHandleButton {...props} dragHandleMenu={dragHandleMenu} />}
+                  />
+                </SideMenu>
+              )}
+            />
+          </BlockNoteView>
+        </AttachmentUploadContext.Provider>
+      )}
+      {promoting !== null && !readOnly && notePath !== null && (
+        <PromoteDialog
+          lines={promoting}
+          source={noteEntry ?? null}
+          onClose={() => setPromoting(null)}
+          onCreated={finishPromotion}
+        />
       )}
       {flash !== null && (
         <SectionFlash

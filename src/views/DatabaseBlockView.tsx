@@ -1,3 +1,4 @@
+import type { TimeSlot } from '@/engine/timeGrid';
 import { useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
@@ -14,6 +15,8 @@ import { useNavStore } from '@/stores/navStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { useCreateOnDay, useQuickAdd } from './QuickAdd';
 import { ViewCanvas } from './ViewCanvas';
+import { checkView } from '@/engine/viewCheck';
+import { ViewProblems } from './ViewProblems';
 
 /** What a block writes back when its pointer changes. */
 export type DatabasePointer = { database: string; view: string };
@@ -133,7 +136,7 @@ export function DatabaseBlockView({
    * The block names the field: the one its view is keyed on, resolved the way
    * the calendar resolves it. Absent means a calendar shows no day "+".
    */
-  onCreateOn?: (title: string, day: string, field: string) => Promise<boolean>;
+  onCreateOn?: (title: string, day: string, field: string, slot?: TimeSlot) => Promise<boolean>;
   /**
    * Opens the database's own full-page screen — the tabbed surface carrying
    * every one of its views (M47.5).
@@ -155,6 +158,10 @@ export function DatabaseBlockView({
   );
 
   const shown = resolved === null || resolved.kind === 'no-database' ? null : viewOf(resolved);
+  const problems = useMemo(
+    () => (shown === null ? [] : checkView(shown, database, schema, entries)),
+    [shown, database, schema, entries],
+  );
 
   const surface = useMemo(
     () =>
@@ -277,6 +284,7 @@ export function DatabaseBlockView({
       )}
       {surface !== null && (
         <div className="mt-1 flex min-h-0 flex-col overflow-hidden">
+          <ViewProblems problems={problems} source={resolved.database} />
           <ViewCanvas
             embedded
             entries={surface.entries}
@@ -296,7 +304,10 @@ export function DatabaseBlockView({
             onCreateOn={
               onCreateOn === undefined || dateField === null
                 ? undefined
-                : (title, day) => onCreateOn(title, day, dateField)
+                : (title, day, slot) =>
+                    slot === undefined
+                      ? onCreateOn(title, day, dateField)
+                      : onCreateOn(title, day, dateField, slot)
             }
             // Schema by use (M47.4). The table's "+" already declares a real
             // property on the database — `AddColumnButton` has called

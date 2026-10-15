@@ -390,7 +390,8 @@ pub fn guard_human_write(path: &str) -> Result<HumanCleared, String> {
 /// `update_frontmatter` could patch `verified` straight onto a concept,
 /// `create_note` could author one pre-stamped, and `append_to_note` could
 /// grow a body with no provenance at all, as `edit_note` (M55.5) could
-/// rewrite one and `set_fields` (M60.4) could set its fields.
+/// rewrite one, `set_fields` (M60.4) could set its fields, and `edit_sheet`
+/// (M67.2b) could change spreadsheet blocks in it.
 pub fn guard_agent_write(path: &str) -> Result<(), String> {
     if is_knowledge_path(path) {
         return Err(refuse("agent_write", AGENT_USE_WRITE_CONCEPT));

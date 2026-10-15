@@ -1,5 +1,5 @@
 //! Persisted app configuration (the last opened vault, the proposal switch,
-//! and who answers in each vault's assistant panel), stored as JSON in the
+//! who answers in each vault's assistant panel, and opt-in client access), stored as JSON in the
 //! Tauri app-config directory — and where that directory is (`app_dir`).
 
 use serde::{Deserialize, Serialize};
@@ -22,6 +22,14 @@ pub const SHARED_APP_DATA_ENV: &str = "CEREBRO_SHARED_APP_DATA";
 pub fn app_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager;
     let base = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let shared = std::env::var_os(SHARED_APP_DATA_ENV).is_some_and(|v| v == "1");
+    Ok(scoped(base, cfg!(debug_assertions), shared))
+}
+
+/// Derived previews are purgeable and never enter the vault or its backups.
+pub fn cache_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    use tauri::Manager;
+    let base = app.path().app_cache_dir().map_err(|e| e.to_string())?;
     let shared = std::env::var_os(SHARED_APP_DATA_ENV).is_some_and(|v| v == "1");
     Ok(scoped(base, cfg!(debug_assertions), shared))
 }
@@ -61,9 +69,26 @@ pub fn build_label() -> String {
 
 const CONFIG_FILE: &str = "config.json";
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ClientAccessConfig {
+    pub enabled: bool,
+    pub port: u16,
+}
+
+impl Default for ClientAccessConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            port: 37421,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppConfig {
+    pub client_access: ClientAccessConfig,
     pub last_vault: Option<String>,
     /// **The proposal kill switch** (M26.3c). While this is false, the live
     /// loopback MCP server serves only the tool manifest's base rows and NO
@@ -233,9 +258,33 @@ mod tests {
     }
 
     #[test]
+    fn client_access_is_off_on_37421_when_absent_and_round_trips() {
+        let old: AppConfig = serde_json::from_str(r#"{"lastVault":"/vault"}"#).unwrap();
+        assert_eq!(
+            old.client_access,
+            ClientAccessConfig {
+                enabled: false,
+                port: 37421
+            }
+        );
+        let dir = testutil::temp_vault("client-access-config");
+        let config = AppConfig {
+            client_access: ClientAccessConfig {
+                enabled: true,
+                port: 37500,
+            },
+            ..old
+        };
+        save(&dir, &config).unwrap();
+        assert_eq!(load(&dir), config);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn save_then_load_round_trips() {
         let dir = testutil::temp_vault("config-roundtrip");
         let config = AppConfig {
+            client_access: ClientAccessConfig::default(),
             last_vault: Some("/Users/me/vault".to_string()),
             agent_proposals_enabled: false,
             panel_agents: BTreeMap::from([("/Users/me/vault".to_string(), "scout".to_string())]),
@@ -256,6 +305,7 @@ mod tests {
     #[test]
     fn config_serializes_last_vault_as_camel_case() {
         let raw = serde_json::to_string(&AppConfig {
+            client_access: ClientAccessConfig::default(),
             last_vault: Some("/v".into()),
             agent_proposals_enabled: false,
             panel_agents: BTreeMap::new(),
@@ -275,6 +325,7 @@ mod tests {
         save(
             &dir,
             &AppConfig {
+                client_access: ClientAccessConfig::default(),
                 last_vault: None,
                 agent_proposals_enabled: false,
                 panel_agents: BTreeMap::new(),

@@ -1,5 +1,6 @@
+import { navSeed } from '@/test/navSeed';
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -132,6 +133,8 @@ function measureEverythingAt(width: number): void {
 
 describe('App boot flow', () => {
   beforeEach(() => {
+    window.localStorage.removeItem('cerebro.lastPlace');
+    window.localStorage.removeItem('cerebro.panes');
     // jsdom implements no scrolling at all; the assistant's transcript pins
     // itself to the bottom on mount. Not a stub for app behaviour — a stub for
     // a DOM method the environment simply does not have.
@@ -145,7 +148,7 @@ describe('App boot flow', () => {
     });
     useNavStore.setState({
       selection: { kind: 'home' },
-      history: [{ kind: 'home' }],
+      history: [navSeed({ kind: 'home' })],
       historyIndex: 0,
     });
     useUiStore.setState({
@@ -171,6 +174,32 @@ describe('App boot flow', () => {
     expect(vi.mocked(ipc.getLastVault)).toHaveBeenCalled();
     expect(screen.queryByText('Open demo vault')).toBeNull();
   });
+
+  it.each([true, false])(
+    'restores a last page only while it resolves: %s (M65.4)',
+    async (exists) => {
+      const path = 'strategy/systems-map.md';
+      window.localStorage.setItem(
+        'cerebro.lastPlace',
+        JSON.stringify({ '/demo-vault': { kind: 'doc', path } }),
+      );
+      vi.mocked(ipc.scanVault).mockResolvedValueOnce(
+        exists
+          ? fixtureVault().map((entry) => (entry.path === ITEM ? { ...entry, path } : entry))
+          : [],
+      );
+      render(<App />);
+      await screen.findByRole('navigation', { name: 'Sidebar' });
+      await waitFor(() => expect(useVaultStore.getState().status).toBe('ready'));
+      expect(useNavStore.getState().selection).toEqual(
+        exists ? { kind: 'doc', path } : { kind: 'home' },
+      );
+      expect(useNavStore.getState().history).toHaveLength(1);
+      expect(useUiStore.getState().toasts).toEqual([]);
+      if (!exists)
+        expect(JSON.parse(window.localStorage.getItem('cerebro.lastPlace')!)).toEqual({});
+    },
+  );
 
   it('shows the vault chooser when no vault is configured', async () => {
     vi.mocked(ipc.getLastVault).mockResolvedValueOnce(null);
@@ -527,12 +556,15 @@ describe('App boot flow', () => {
     });
 
     // M65.1: the canvas is the page key scope, the keymap's fallback.
-    it('makes <main> the page key scope', async () => {
+    it('makes each pane the page key scope inside main', async () => {
       render(<App />);
       await screen.findByRole('navigation', { name: 'Sidebar' });
       const main = screen.getByRole('main');
-      expect(main.getAttribute('data-key-scope')).toBe('page');
-      expect(main.hasAttribute('data-key-scope-page')).toBe(true);
+      expect(main.hasAttribute('data-key-scope')).toBe(false);
+      const pane = screen.getByTestId('pane');
+      expect(main.contains(pane)).toBe(true);
+      expect(pane.getAttribute('data-key-scope')).toBe('page');
+      expect(pane.hasAttribute('data-key-scope-page')).toBe(true);
     });
   });
 

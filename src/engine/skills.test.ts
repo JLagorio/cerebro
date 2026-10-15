@@ -1,7 +1,18 @@
+import { localTimeLine } from './skills';
 import { describe, expect, it } from 'vitest';
 import {
   fireKeyDate,
   lastFireKey,
+  parseSchedule,
+  formatSchedule,
+  parseScheduleSet,
+  scheduleItems,
+  scheduleText,
+  describeSchedule,
+  describeScheduleSet,
+  nextFire,
+  lastSetFireKey,
+  nextSetFire,
   listSkills,
   matchSkillInvocation,
   skillIndex,
@@ -347,16 +358,148 @@ describe('fireKeyDate (M34.2)', () => {
   it('round-trips a dated key through the local clock', () => {
     const now = new Date(2026, 6, 31, 10, 30);
     const key = lastFireKey({ kind: 'daily', hour: 9, minute: 0 }, now);
-    expect(fireKeyDate(key)?.getTime()).toBe(new Date(2026, 6, 31, 9, 0).getTime());
+    expect(fireKeyDate(key!)?.getTime()).toBe(new Date(2026, 6, 31, 9, 0).getTime());
   });
 
   it('round-trips an hourly key through UTC', () => {
     const now = new Date(Date.UTC(2026, 6, 31, 14, 45));
     const key = lastFireKey({ kind: 'hourly' }, now);
-    expect(fireKeyDate(key)?.getTime()).toBe(Date.UTC(2026, 6, 31, 14, 0));
+    expect(fireKeyDate(key!)?.getTime()).toBe(Date.UTC(2026, 6, 31, 14, 0));
   });
 
   it('returns null for an event runKey rather than inventing a due time', () => {
     expect(fireKeyDate('event:changed:records/r.md@2026-07-31')).toBeNull();
   });
+});
+
+describe('skill local clock', () => {
+  it.each([
+    [240, '2026-07-28 08:30 (UTC-04:00)'],
+    [0, '2026-07-28 12:30 (UTC+00:00)'],
+    [-330, '2026-07-28 18:00 (UTC+05:30)'],
+  ])('states the wall time at offset %i', (offset, expected) => {
+    expect(localTimeLine(new Date('2026-07-28T12:30:00Z'), Number(offset))).toBe(
+      `The user's local time is ${expected}.`,
+    );
+  });
+  it('crosses the date boundary with the stated offset', () => {
+    expect(localTimeLine(new Date('2026-07-28T00:30:00Z'), 420)).toContain(
+      '2026-07-27 17:30 (UTC-07:00)',
+    );
+  });
+});
+
+describe('closed schedule shapes and sets (M63.6)', () => {
+  const examples = [
+    ['hourly', 'Every hour'],
+    ['daily 09:00', 'Every day at 09:00'],
+    ['weekdays 08:30', 'Every weekday at 08:30'],
+    ['weekly fri 17:30', 'Every Friday at 17:30'],
+    ['weekly mon,thu 17:00', 'Every Monday and Thursday at 17:00'],
+    ['weekly mon,wed,fri 09:00', 'Every Monday, Wednesday and Friday at 09:00'],
+    ['monthly 15 09:00', 'Monthly on the 15th at 09:00'],
+    ['monthly last 18:00', 'Monthly on the last day at 18:00'],
+    ['once 2026-10-20 15:00', 'Once, on 2026-10-20 at 15:00'],
+  ];
+  it.each(examples)('round-trips %s and describes its whole meaning', (text, words) => {
+    const parsed = parseSchedule(text)!;
+    expect(parsed).not.toBeNull();
+    expect(formatSchedule(parsed)).toBe(text);
+    expect(describeSchedule(parsed)).toBe(words);
+  });
+  it.each([
+    'monthly 29 09:00',
+    'monthly 30 09:00',
+    'monthly 31 09:00',
+    'monthly 0 09:00',
+    'weekly fri,fri 09:00',
+    'weekly mon,wat 09:00',
+    'once 2026-02-29 09:00',
+    'once 2026-04-31 09:00',
+    'once 2026-13-01 09:00',
+    'daily 24:00',
+  ])('refuses %s', (text) => expect(parseSchedule(text)).toBeNull());
+  it('accepts leap days, sorts day sets and keeps one weekday in the old shape', () => {
+    expect(parseSchedule('once 2028-02-29 09:00')?.kind).toBe('once');
+    expect(formatSchedule(parseSchedule('weekly thu,mon 17:00')!)).toBe('weekly mon,thu 17:00');
+    expect(parseSchedule('weekly mon 17:00')).toEqual({
+      kind: 'weekly',
+      day: 1,
+      hour: 17,
+      minute: 0,
+    });
+  });
+  it('preserves authored bytes, bounds lists, and never partially reads a list', () => {
+    const raw = ['  Weekly Friday 9:00  ', 'monthly last 18:00'];
+    expect(scheduleItems(raw)).toEqual(raw);
+    expect(scheduleItems(raw[0])).toEqual([raw[0]]);
+    expect(scheduleText(raw)).toBe(raw.join('; '));
+    expect(scheduleItems(null)).toEqual([]);
+    expect(parseScheduleSet(raw)).toHaveLength(2);
+    expect(parseScheduleSet(Array(8).fill('hourly'))).toHaveLength(8);
+    for (const bad of [null, [], ['hourly', 'no'], ['hourly', 2], Array(9).fill('hourly')])
+      expect(parseScheduleSet(bad)).toBeNull();
+    expect(describeScheduleSet(['daily 09:00', 'monthly last 18:00'])).toBe(
+      'Every day at 09:00; Monthly on the last day at 18:00',
+    );
+    expect(describeScheduleSet(['bad'])).toBe('Schedule not understood');
+  });
+  it('walks weekday sets across the week and monthly last across short months and years', () => {
+    const days = parseSchedule('weekly mon,thu 17:00')!;
+    expect(lastFireKey(days, new Date(2026, 6, 29, 12))).toBe('2026-07-27 17:00');
+    expect(nextFire(days, new Date(2026, 6, 29, 12))).toEqual(new Date(2026, 6, 30, 17));
+    const monthly = parseSchedule('monthly last 18:00')!;
+    expect(lastFireKey(monthly, new Date(2026, 1, 1, 12))).toBe('2026-01-31 18:00');
+    expect(nextFire(monthly, new Date(2026, 0, 31, 19))).toEqual(new Date(2026, 1, 28, 18));
+    expect(nextFire(monthly, new Date(2028, 0, 31, 19))).toEqual(new Date(2028, 1, 29, 18));
+    expect(lastFireKey(monthly, new Date(2026, 0, 1))).toBe('2025-12-31 18:00');
+    expect(nextFire(monthly, new Date(2026, 11, 31, 19))).toEqual(new Date(2027, 0, 31, 18));
+  });
+  it('a once has no past before its instant and no future at or after it', () => {
+    const once = parseSchedule('once 2026-10-20 15:00')!;
+    expect(lastFireKey(once, new Date(2026, 9, 20, 14))).toBeNull();
+    expect(nextFire(once, new Date(2026, 9, 20, 14))).toEqual(new Date(2026, 9, 20, 15));
+    expect(lastFireKey(once, new Date(2026, 9, 20, 15))).toBe('2026-10-20 15:00');
+    expect(nextFire(once, new Date(2026, 9, 20, 15))).toBeNull();
+    expect(nextFire(once, new Date(2027, 0, 1))).toBeNull();
+  });
+  it('a set takes the latest passed time and soonest future time, not its first item', () => {
+    const set = parseScheduleSet(['monthly last 18:00', 'weekdays 08:30', 'daily 11:00'])!;
+    expect(lastSetFireKey(set, new Date(2026, 6, 28, 12))).toBe('2026-07-28 11:00');
+    expect(nextSetFire(set, new Date(2026, 6, 28, 12))).toEqual(new Date(2026, 6, 29, 8, 30));
+    const future = parseScheduleSet(['once 2026-10-20 15:00'])!;
+    expect(lastSetFireKey(future, new Date(2026, 6, 28, 12))).toBeNull();
+    expect(nextSetFire(future, new Date(2027, 0, 1))).toBeNull();
+  });
+  it('keeps authored wall time over March DST for all new calendar shapes', () => {
+    for (const text of [
+      'weekly sun,tue 02:30',
+      'monthly 8 02:30',
+      'monthly last 02:30',
+      'once 2026-03-08 02:30',
+    ]) {
+      const schedule = parseSchedule(text)!;
+      for (let day = 7; day <= 10; day++) {
+        const now = new Date(2026, 2, day, 12);
+        const key = lastFireKey(schedule, now);
+        if (key !== null) {
+          expect(key).toMatch(/ 02:30$/);
+          expect(fireKeyDate(key)!.getTime()).toBeLessThanOrEqual(now.getTime());
+        }
+        const next = nextFire(schedule, now);
+        if (next !== null) expect(next.getTime()).toBeGreaterThan(now.getTime());
+      }
+    }
+  });
+});
+
+it('equal instants choose the larger key and hourly fires distinguish repeated local hours', () => {
+  const now = new Date(2026, 6, 28, 12);
+  expect(lastSetFireKey([{ kind: 'daily', hour: 12, minute: 0 }, { kind: 'hourly' }], now)).toBe(
+    lastFireKey({ kind: 'hourly' }, now),
+  );
+  const first = new Date('2026-11-01T01:30:00-07:00');
+  const second = new Date('2026-11-01T01:30:00-08:00');
+  expect(lastFireKey({ kind: 'hourly' }, first)).not.toBe(lastFireKey({ kind: 'hourly' }, second));
+  expect(nextFire({ kind: 'hourly' }, first)).toEqual(new Date('2026-11-01T09:00:00Z'));
 });

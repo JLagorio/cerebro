@@ -1,7 +1,9 @@
+import { WHITEBOARD_FENCE, parseWhiteboardRef } from '@/engine/whiteboardRef';
 import type { BlockNoteEditor, PartialBlock } from '@blocknote/core';
 import { DATABASE_FENCE, parseDatabaseRef, serializeDatabaseRef } from '@/engine/databaseBlock';
 import { SUBPAGES_FENCE } from '@/engine/docPages';
 import { PAGE_CARD_FENCE, parsePageRef, serializePageRef } from '@/engine/pageCard';
+import { SHEET_FENCE } from '@/engine/sheet/fence';
 import {
   chipPropsToDateValue,
   DATE_TOKEN_SOURCE,
@@ -345,9 +347,11 @@ export function unescapeChipMarkdown(markdown: string): string {
     .join('\n');
 }
 
-// --- Callout / mermaid / database / sub-pages / page card round-trip --------
+// --- Callout / mermaid / sheet / whiteboard / database / sub-pages / page card round-trip --
 // On disk a callout is an Obsidian-style `> [!info] …` quote, a diagram is a
-// ```mermaid fence, an embedded database is a ```cerebro-database fence
+// ```mermaid fence, a whiteboard is a raw ```cerebro-whiteboard pointer,
+// a sheet is a ```cerebro-sheet fence of CSV source cells,
+// and an embedded database is a ```cerebro-database fence
 // holding a pointer (M47.2), a child-page list is an EMPTY ```cerebro-subpages
 // fence (M55.13), and a page card is a ```cerebro-page fence holding one
 // wikilink (M55.14). promoteRichBlocks upgrades those plain forms into the
@@ -371,6 +375,19 @@ export function promoteRichBlocks<T extends PartialBlock>(blocks: T[]): T[] {
     const b = block as PartialBlock & { content?: unknown; children?: PartialBlock[] };
     if (b.type === 'codeBlock' && (b.props as { language?: string })?.language === 'mermaid') {
       return { type: 'mermaid', props: { code: blockText(b.content) } } as unknown as T;
+    }
+    if (
+      b.type === 'codeBlock' &&
+      (b.props as { language?: string })?.language === WHITEBOARD_FENCE
+    ) {
+      const source = blockText(b.content);
+      if (source === '' || parseWhiteboardRef(source) !== null)
+        return { type: 'whiteboard', props: { source } } as unknown as T;
+    }
+    // An unreadable sheet is still a sheet: its source remains verbatim and
+    // its renderer explains the problem without discarding any bytes.
+    if (b.type === 'codeBlock' && (b.props as { language?: string })?.language === SHEET_FENCE) {
+      return { type: 'sheet', props: { source: blockText(b.content) } } as unknown as T;
     }
     // Only an EMPTY fence is the list: one holding text stays the code block
     // it is, so promoting it can never replace a word anyone wrote.
@@ -433,7 +450,7 @@ export function promoteRichBlocks<T extends PartialBlock>(blocks: T[]): T[] {
   });
 }
 
-export function demoteRichBlocks<T extends PartialBlock>(blocks: T[]): T[] {
+export function demoteRichBlocks<T extends PartialBlock>(blocks: T[], setAside?: SetAside): T[] {
   return blocks.map((block) => {
     const b = block as {
       type?: string;
@@ -447,6 +464,22 @@ export function demoteRichBlocks<T extends PartialBlock>(blocks: T[]): T[] {
         type: 'codeBlock',
         props: { language: 'mermaid' },
         content: [{ type: 'text', text: code, styles: {} }],
+      } as unknown as T;
+    }
+    if (b.type === 'sheet' || b.type === 'whiteboard') {
+      let source = typeof b.props?.source === 'string' ? b.props.source : '';
+      // BlockNote trims trailing blank code lines. A temporary final token
+      // keeps those source bytes through its serializer, then disappears
+      // with the other set-aside markers. No calculated value is serialized.
+      if (source.endsWith('\n') && setAside) {
+        const placeholder = `${setAside.prefix}${setAside.lines.size}`;
+        setAside.lines.set(placeholder, '');
+        source += placeholder;
+      }
+      return {
+        type: 'codeBlock',
+        props: { language: b.type === 'sheet' ? SHEET_FENCE : WHITEBOARD_FENCE },
+        content: source === '' ? [] : [{ type: 'text', text: source, styles: {} }],
       } as unknown as T;
     }
     // Read off the type alone, never the rendering (DOM trap 10): the list is
@@ -495,7 +528,7 @@ export function demoteRichBlocks<T extends PartialBlock>(blocks: T[]): T[] {
       } as unknown as T;
     }
     if (Array.isArray(b.children) && b.children.length > 0) {
-      return { ...b, children: demoteRichBlocks(b.children) } as unknown as T;
+      return { ...b, children: demoteRichBlocks(b.children, setAside) } as unknown as T;
     }
     return block;
   });
@@ -1825,7 +1858,7 @@ export function blocksToMarkdownNow(editor: AnyEditor, blocks?: PartialBlock[]):
     summaries: writeToggleSummaries(editor, copy),
   };
   const demoted = demoteChips(
-    demoteRichBlocks(demoteContainers(copy, BASE_MARKER_DEPTH, setAside)),
+    demoteRichBlocks(demoteContainers(copy, BASE_MARKER_DEPTH, setAside), setAside),
   );
   return tightenOpeners(
     tightenColumnMarkers(

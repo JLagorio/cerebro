@@ -1,14 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
-import {
-  LIBRARY_FOLDER,
-  libraryIcon,
-  libraryKind,
-  libraryLabel,
-  libraryLabelPlural,
-  type LibraryKind,
-} from '@/engine/library';
+import { libraryIcon, libraryKind, libraryLabelPlural, type LibraryKind } from '@/engine/library';
 import {
   skillDraft,
   skillPatch,
@@ -17,12 +10,14 @@ import {
   type SkillDraft,
   type TemplateDraft,
 } from '@/engine/libraryDraft';
-import { parseSchedule } from '@/engine/skills';
+import { stampActivation, SCHEDULE_STAMP_FAILED, RESUME_STAMP_FAILED } from '@/agent/activation';
+import { recordIdentity } from '@/engine/identity';
+import { parseScheduleSet, nextSetFire, scheduleText } from '@/engine/skills';
 import { listTypes } from '@/engine/typeCatalog';
 import type { Entry, Schema } from '@/engine/types';
-import { createNote, readNote, saveNote, setNoteTitle, updateFrontmatter } from '@/lib/ipc';
+import { readNoteSource, saveNote, setNoteTitle, updateFrontmatter } from '@/lib/ipc';
 import { splitFrontmatter } from '@/engine/frontmatter';
-import { slugify } from '@/lib/slug';
+import { isStaleContent } from '@/engine/staleContent';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
@@ -30,6 +25,7 @@ import { FileNote } from './chrome';
 import { LibraryIndex } from './LibraryIndex';
 import { SkillEditor } from './SkillEditor';
 import { TemplateEditor } from './TemplateEditor';
+import { createLibraryItem, libraryItemPlace } from './libraryActions';
 
 /**
  * The library (M18): the assistant's own workshop.
@@ -87,7 +83,18 @@ export function LibraryPage() {
     if (vaultPath === null) return;
     void (async () => {
       try {
+        const current = entries.find((candidate) => candidate.path === path);
+        const stamped =
+          !on ||
+          current === undefined ||
+          (await stampActivation(
+            vaultPath,
+            recordIdentity(current),
+            current.properties.schedule,
+            new Date(),
+          ));
         await updateFrontmatter(vaultPath, path, { paused: on ? null : true });
+        if (!stamped) toast(RESUME_STAMP_FAILED);
         await rescan();
       } catch {
         toast("Couldn't change that");
@@ -96,39 +103,9 @@ export function LibraryPage() {
   };
 
   const create = () => {
-    if (vaultPath === null) return;
-    void (async () => {
-      try {
-        const title = `New ${libraryLabel(tab).toLowerCase()}`;
-        const slug = slugify(title);
-        const path = await createNote(
-          vaultPath,
-          LIBRARY_FOLDER[tab],
-          slug,
-          // Ships INERT: no schedule, no trigger, no fill prompt. Something that
-          // starts running the moment it is created is something nobody had a
-          // chance to read. A `slug:` from the start on the two that have an
-          // identity, because this one is certainly about to be renamed.
-          //
-          // M36.2 — and an AGENT is born PAUSED, explicitly, not just inert
-          // by absence: inert-by-no-schedule ends the moment somebody adds
-          // one, and the settled design makes activation two acts —
-          // configure, then unpause. The duty toggle (which already writes
-          // `paused: null | true`) is the way back; nothing new to learn.
-          tab === 'template'
-            ? { type: null }
-            : tab === 'skill'
-              ? { type: 'Skill', slug, description: '' }
-              : { type: 'Agent', slug, description: '', paused: true },
-          NEW_BODY[tab](title),
-        );
-        await rescan();
-        if (tab === 'agent') navigate({ kind: 'doc', path });
-        else go({ tab, path });
-      } catch {
-        toast(`Couldn't create the ${tab}`);
-      }
-    })();
+    void createLibraryItem(tab).then((path) => {
+      if (path !== null) navigate(libraryItemPlace(tab, path));
+    });
   };
 
   if (forwardTo !== null) return null;
@@ -168,14 +145,6 @@ function typeNames(entries: Entry[], schema: Schema): string[] {
     .map((t) => t.name);
 }
 
-const NEW_BODY: Record<LibraryKind, (title: string) => string> = {
-  skill: (title) =>
-    `# ${title}\n\nWhat should the assistant do when this is invoked? Write it as numbered steps.\n`,
-  agent: (title) =>
-    `# ${title}\n\nStanding instructions for every run. Say what to read, what to produce, and what never to touch.\n`,
-  template: (title) => `# {{title}}\n\n<!-- ${title} -->\n`,
-};
-
 type Draft = { kind: 'skill'; value: SkillDraft } | { kind: 'template'; value: TemplateDraft };
 
 function LibraryEditor({
@@ -201,15 +170,18 @@ function LibraryEditor({
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [baseHash, setBaseHash] = useState<string | null>(null);
+  const [stale, setStale] = useState(false);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     if (vaultPath === null || entry === undefined) return;
     let live = true;
     void (async () => {
       try {
-        const raw = await readNote(vaultPath, path);
+        const source = await readNoteSource(vaultPath, path);
         if (!live) return;
-        const body = splitFrontmatter(raw).body.replace(/^\n+/, '');
+        const body = splitFrontmatter(source.content).body.replace(/^\n+/, '');
         setName(entry.title);
         setDraft(
           kind === 'template'
@@ -217,6 +189,9 @@ function LibraryEditor({
             : { kind: 'skill', value: skillDraft(entry, body) },
         );
         setDirty(false);
+        setBaseHash(source.hash);
+        setStale(false);
+        setFailed(false);
       } catch {
         if (live) setFailed(true);
       }
@@ -224,43 +199,73 @@ function LibraryEditor({
     return () => {
       live = false;
     };
-    // Loads ONCE per file. Re-running on `entry` would throw away everything
-    // typed the moment a background rescan produced a new object — and a
-    // rescan happens on every save, including this editor's own.
+    // Background scans preserve the draft and the version it was based on.
+    // Only opening another file or explicitly loading the new version resets it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vaultPath, path, kind]);
+  }, [vaultPath, path, kind, reload]);
 
   const edit = useCallback((next: Draft) => {
     setDraft(next);
     setDirty(true);
   }, []);
 
-  const save = () => {
-    if (vaultPath === null || draft === null || saving) return;
+  const save = (overwrite = false) => {
+    if (vaultPath === null || draft === null || baseHash === null || saving) return;
     setSaving(true);
     void (async () => {
       try {
-        // Body first, then title, then frontmatter — three sequential
-        // read-modify-writes of the same file, and the title rewrites an H1
-        // that the body write just placed.
+        // Compare the loaded version before writing any part of this draft.
+        // Title and frontmatter still use their own locked writers afterward.
         const body = draft.kind === 'template' ? draft.value.body : draft.value.instructions;
-        await saveNote(vaultPath, path, body.endsWith('\n') ? body : `${body}\n`);
+        await saveNote(
+          vaultPath,
+          path,
+          body.endsWith('\n') ? body : `${body}\n`,
+          overwrite ? undefined : baseHash,
+        );
         if (name.trim() !== '' && name.trim() !== entry?.title) {
           await setNoteTitle(vaultPath, path, name.trim());
         }
-        await updateFrontmatter(
+        const hash = await updateFrontmatter(
           vaultPath,
           path,
           draft.kind === 'skill' ? skillPatch(draft.value) : templatePatch(draft.value),
         );
+        if (
+          draft.kind === 'skill' &&
+          entry !== undefined &&
+          scheduleText(draft.value.schedule) !== scheduleText(entry.properties.schedule)
+        ) {
+          if (
+            !(await stampActivation(
+              vaultPath,
+              recordIdentity(entry),
+              draft.value.schedule,
+              new Date(),
+            ))
+          )
+            toast(SCHEDULE_STAMP_FAILED);
+        }
+        setBaseHash(hash ?? (await readNoteSource(vaultPath, path)).hash);
         await rescan();
         setDirty(false);
+        setStale(false);
       } catch (err) {
-        toast(err instanceof Error ? err.message : "Couldn't save");
+        if (isStaleContent(err)) setStale(true);
+        else toast(err instanceof Error ? err.message : "Couldn't save");
       } finally {
         setSaving(false);
       }
     })();
+  };
+
+  const loadNewVersion = () => {
+    if (saving) return;
+    setSaving(true);
+    void rescan()
+      .then(() => setReload((value) => value + 1))
+      .catch(() => toast("Couldn't load the new version"))
+      .finally(() => setSaving(false));
   };
 
   if (failed || entry === undefined) {
@@ -314,10 +319,28 @@ function LibraryEditor({
             {duty.label}
           </span>
         )}
-        <Button variant="primary" size="sm" disabled={!dirty || saving} onClick={save}>
+        <Button variant="primary" size="sm" disabled={!dirty || saving} onClick={() => save()}>
           {saving ? 'Saving…' : dirty ? 'Save' : 'Saved'}
         </Button>
       </div>
+
+      {stale && (
+        <div
+          data-testid="library-stale"
+          role="status"
+          className="flex flex-wrap items-center gap-3 border-b border-n-200 bg-n-50 px-6 py-3 text-sm text-n-700"
+        >
+          <p className="m-0 flex-1">
+            “{entry.title}” changed on disk since you opened it, so nothing was saved.
+          </p>
+          <Button size="sm" disabled={saving} onClick={loadNewVersion}>
+            Load the new version
+          </Button>
+          <Button size="sm" disabled={saving} onClick={() => save(true)}>
+            Save mine anyway
+          </Button>
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[820px] px-6 py-5">
@@ -353,8 +376,11 @@ function dutyOf(
   paused: boolean,
 ): { on: boolean; label: string } | null {
   if (draft === null) return null;
-  if (draft.kind === 'skill' && draft.value.schedule.trim() !== '') {
-    if (parseSchedule(draft.value.schedule) === null) return { on: false, label: 'Bad schedule' };
+  if (draft.kind === 'skill' && draft.value.schedule.length > 0) {
+    const schedules = parseScheduleSet(draft.value.schedule);
+    if (schedules === null) return { on: false, label: 'Schedule not understood' };
+    if (nextSetFire(schedules, new Date()) === null)
+      return { on: false, label: 'Its one time has passed' };
     return paused ? { on: false, label: 'Paused' } : { on: true, label: 'Scheduled' };
   }
   if (kind === 'skill') return { on: false, label: 'On demand' };

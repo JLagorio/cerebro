@@ -1,0 +1,8 @@
+{
+	"nodes": [
+		{"id":"text","type":"text","text":"Roadmap [[Vision]]","x":0,"y":0,"width":240,"height":120,"color":"1"}
+	],
+	"edges": [
+		{"id":"edge","fromNode":"text","toNode":"gone","color":"var(--old)"}
+	]
+}

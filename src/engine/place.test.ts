@@ -41,6 +41,7 @@ const ONE_OF_EACH: { [K in Selection['kind']]: Extract<Selection, { kind: K }> }
   knowledge: { kind: 'knowledge', nav: { tab: 'runs', run: 'run-1' }, path: 'knowledge/a.md' },
   doc: { kind: 'doc', path: 'a/b.md', tab: 'spec' },
   diagram: { kind: 'diagram', path: 'a/flow.mmd' },
+  file: { kind: 'file', path: 'attachments/a.pdf' },
   collection: { kind: 'collection', folder: 'a/b' },
   list: { kind: 'list', id: 'x', collection: 'a', view: 'board' },
   type: { kind: 'type', name: 'Work item', view: 'at-risk' },
@@ -65,6 +66,12 @@ const EVERY_SHAPE: Selection[] = [
 ];
 
 describe('placeOf — a place is a subject, not a lens', () => {
+  it('keeps a file subject and its filename, including the extension', () => {
+    const file = { kind: 'file', path: 'attachments/brief.pdf' } as const;
+    expect(placeOf(file)).toEqual(file);
+    expect(placeKey(file)).toBe('file:attachments/brief.pdf');
+    expect(placeLabel(file)).toBe('brief.pdf');
+  });
   it('is the same place whichever view tab of a List is open', () => {
     const board: Selection = { kind: 'list', id: 'roadmap', collection: 'product', view: 'board' };
     const table: Selection = { kind: 'list', id: 'roadmap', collection: 'product', view: 'table' };
@@ -288,4 +295,8 @@ describe('placeLabel — a destination says what the nav says (M59.1)', () => {
   it('titles the window with the place and the app', () => {
     expect(windowTitle('History')).toBe('History — Cerebro');
   });
+});
+
+it('an unscanned whiteboard place drops its extension', () => {
+  expect(placeLabel({ kind: 'diagram', path: 'boards/plan.canvas' })).toBe('plan');
 });

@@ -3,6 +3,7 @@ import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
 import { Switch } from '@/components/ui/Switch';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { AGENT_TYPE, isLibraryType } from '@/engine/library';
 import { CREATABLE_PROPERTY_KINDS } from '@/engine/properties';
 import { typeStyle } from '@/engine/typeCatalog';
 import type { FieldKind } from '@/engine/types';
@@ -119,7 +120,12 @@ export function AddPropertyPanel({
   const [twoWay, setTwoWay] = useState(false);
   const [reciprocal, setReciprocal] = useState('');
 
-  const targets = [...schema.types.keys()].filter((t) => t !== 'Type').sort();
+  const targets = [
+    ...new Set([...schema.types.keys(), ...(configKind === 'relation' ? [AGENT_TYPE] : [])]),
+  ]
+    .filter((t) => t !== 'Type' && (configKind !== 'person' || !isLibraryType(t)))
+    .sort();
+  const libraryTarget = isLibraryType(target);
 
   // The guard `DocProperties` had and `RecordProperties` did not. Doing it
   // here means both callers get it, before the write rather than as a toast
@@ -182,7 +188,7 @@ export function AddPropertyPanel({
     onAdd(finalName, configKind, {
       target,
       ...(single ? { limit: 1 as const } : {}),
-      ...(twoWay
+      ...(twoWay && !libraryTarget
         ? {
             reciprocalName:
               reciprocal.trim() !== ''
@@ -280,16 +286,18 @@ export function AddPropertyPanel({
         <span className="text-xs text-n-600">Limit to 1 {isPerson ? 'person' : 'record'}</span>
         <Switch ariaLabel="Limit to 1 record" checked={single} onChange={setSingle} />
       </div>
-      <div className="flex items-center justify-between px-1 py-0.5">
-        <span className="text-xs text-n-600">Add related property</span>
-        <Switch
-          ariaLabel="Add related property"
-          checked={twoWay}
-          onChange={setTwoWay}
-          disabled={target === null}
-        />
-      </div>
-      {twoWay && target !== null && (
+      {!libraryTarget && (
+        <div className="flex items-center justify-between px-1 py-0.5">
+          <span className="text-xs text-n-600">Add related property</span>
+          <Switch
+            ariaLabel="Add related property"
+            checked={twoWay}
+            onChange={setTwoWay}
+            disabled={target === null}
+          />
+        </div>
+      )}
+      {twoWay && target !== null && !libraryTarget && (
         <Input
           ariaLabel="Related property name"
           placeholder={`Related ${(ownerType ?? 'records').toLowerCase()}`}

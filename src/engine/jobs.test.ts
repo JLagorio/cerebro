@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import SCHEMA_RS from '../../src-tauri/src/runtime/schema.rs?raw';
 import { agentRef } from './agents';
-import { causeOfJob, jobQueue, TRIGGER_COOLDOWN_MS, type AgentJob } from './jobs';
+import {
+  causeOfJob,
+  dueFireKey,
+  runNowJob,
+  jobQueue,
+  TRIGGER_COOLDOWN_MS,
+  type AgentJob,
+} from './jobs';
 import type { Trigger } from './triggers';
 import { triggerDigest, type PendingWake } from './wakes';
 import { fireKeyDate, lastFireKey, parseSchedule } from './skills';
@@ -67,7 +74,9 @@ describe('parseSchedule', () => {
       'daily 9:60',
       'weekly 09:00',
       'weekly noday 09:00',
-      'monthly 1 09:00',
+      'monthly 29 09:00',
+      'once 2026-02-29 09:00',
+      'weekly fri,fri 09:00',
     ]) {
       expect(parseSchedule(bad)).toBeNull();
     }
@@ -585,6 +594,15 @@ describe('jobQueue — the wake lane (M63.1)', () => {
     });
   });
 
+  it('coalesces only wakes that share the same recorded parent', () => {
+    const head = wake({ parentRunId: 'a' });
+    const same = wake({ parentRunId: 'a' });
+    const other = wake({ parentRunId: 'b' });
+    const root = wake();
+    const [job] = derive([head, same, other, root], at(10));
+    expect(job.wake?.coalesce).toEqual([same.wakeId]);
+  });
+
   it('coalesces at most nineteen, oldest first', () => {
     const wakes = Array.from({ length: 25 }, (_, n) =>
       wake({ admittedAt: `2026-07-31T09:${String(n).padStart(2, '0')}:00.000Z` }),
@@ -758,5 +776,134 @@ describe('causeOfJob (M56.7)', () => {
     // A woken run's kind is the wake's: engine/wakes.ts names `event`.
     named.add('event');
     for (const kind of named) expect(held).toContain(kind);
+  });
+});
+
+it('Run now takes an unconsumed due fire and otherwise records no ledger', () => {
+  const entry = makeEntry({
+    path: 'agents/scout.md',
+    type: 'Agent',
+    title: 'Scout',
+    properties: { slug: 'scout', schedule: 'daily 08:00' },
+  });
+  const now = new Date(2026, 6, 28, 12);
+  const due = dueFireKey(entry, {}, now)!;
+  expect(due).toBe(lastFireKey(parseSchedule('daily 08:00')!, now));
+  const job = runNowJob(entry, { skillRuns: {}, now });
+  expect(job).toMatchObject({ manual: true, ledger: 'skillRuns', runKey: due, cooldownKey: null });
+  expect(causeOfJob(job, 'daily 08:00')).toEqual({
+    kind: 'manual',
+    subject: entry.path,
+    detail: 'in place of its run due 2026-07-28 08:00',
+  });
+  expect(dueFireKey(entry, { [job.key]: due }, now)).toBeNull();
+  const again = runNowJob(entry, { skillRuns: { [job.key]: due }, now });
+  expect(again).toMatchObject({
+    manual: true,
+    ledger: null,
+    runKey: `manual:${now.toISOString()}`,
+  });
+  expect(causeOfJob(again, 'daily 08:00')).toEqual({ kind: 'manual', subject: entry.path });
+  expect(dueFireKey({ ...entry, properties: {} }, {}, now)).toBeNull();
+});
+
+it('a list owes its newest fire and records the whole list as its cause', () => {
+  const entry = skill('Digest');
+  entry.properties.schedule = ['monthly last 18:00', 'weekdays 08:30'];
+  const now = new Date(2026, 6, 28, 12);
+  const jobs = jobQueue([entry], [], { ...EMPTY, now });
+  expect(jobs).toHaveLength(1);
+  expect(jobs[0].runKey).toBe('2026-07-28 08:30');
+  expect(causeOfJob(jobs[0], entry.properties.schedule)?.detail).toBe(
+    'monthly last 18:00; weekdays 08:30',
+  );
+  expect(
+    jobQueue([entry], [], { ...EMPTY, now, skillRuns: { [entry.path]: jobs[0].runKey } }),
+  ).toEqual([]);
+  entry.properties.schedule = 'once 2026-10-20 09:00';
+  expect(jobQueue([entry], [], { ...EMPTY, now })).toEqual([]);
+});
+
+describe('booked follow-ups (M63.8)', () => {
+  const now = new Date('2026-10-15T12:00:00.000Z');
+  const owner = makeEntry({
+    path: 'agents/scout.md',
+    type: 'Agent',
+    title: 'Scout',
+    properties: { slug: 'scout', schedule: 'hourly' },
+  });
+  const row = (
+    over: Partial<import('./followups').Followup> = {},
+  ): import('./followups').Followup => ({
+    followupId: '00000000000000000000000000000001',
+    actor: 'process:scout',
+    note: 'check the vendor reply',
+    dueAt: '2026-10-15T11:59:00.000Z',
+    requestedAt: '2026-10-15T10:00:00.000Z',
+    requestedByRun: 'previous',
+    state: 'pending',
+    claimedAt: null,
+    runId: null,
+    endedAt: null,
+    cancelReason: null,
+    ...over,
+  });
+  const queue = (followups: import('./followups').Followup[], entries = [owner]) =>
+    jobQueue(entries, [], { ...EMPTY, now, followups });
+  it('derives one job per due row before any schedule and gives it its recorded cause', () => {
+    const job = queue([row()])[0];
+    expect(job).toMatchObject({
+      kind: 'agent',
+      path: owner.path,
+      title: 'Scout',
+      ledger: 'followup',
+      key: 'followup:00000000000000000000000000000001',
+      cooldownKey: null,
+    });
+    expect(causeOfJob(job, 'hourly')).toEqual({
+      kind: 'followup',
+      subject: 'check the vendor reply',
+      due_at: '2026-10-15T11:59:00.000Z',
+    });
+    expect(queue([row()], [owner, skill('Digest', 'hourly')]).map((item) => item.ledger)).toEqual([
+      'followup',
+      'skillRuns',
+      'skillRuns',
+    ]);
+  });
+  it('a future row, a fresh claim and ended rows derive nothing', () => {
+    for (const input of [
+      row({ dueAt: '2026-10-15T12:00:00.001Z' }),
+      row({ state: 'claimed', claimedAt: '2026-10-15T11:50:00.001Z' }),
+      row({ state: 'fired' }),
+      row({ state: 'cancelled' }),
+    ])
+      expect(queue([input]).filter((item) => item.followup !== undefined)).toEqual([]);
+  });
+  it('a claim at the ten-minute boundary can recover, with no schedule cooldown', () => {
+    const expired = row({ state: 'claimed', claimedAt: '2026-10-15T11:50:00.000Z' });
+    const jobs = jobQueue([owner], [], {
+      ...EMPTY,
+      now,
+      followups: [expired],
+      triggerRuns: { 'slug:scout': now.toISOString() },
+    });
+    expect(jobs[0].followup).toEqual(expired);
+  });
+  it('missing, duplicate and paused owners still derive a row for the runtime to cancel', () => {
+    expect(queue([row()], [])[0]).toMatchObject({ path: '', title: 'process:scout' });
+    expect(queue([row()], [owner, { ...owner, path: 'other.md' }])[0]).toMatchObject({ path: '' });
+    expect(
+      queue([row()], [{ ...owner, properties: { ...owner.properties, paused: true } }])[0],
+    ).toMatchObject({ path: owner.path, ledger: 'followup' });
+  });
+  it('orders follow-ups by due time then id', () => {
+    const later = row({ followupId: 'a', dueAt: '2026-10-15T12:00:00.000Z' });
+    const earlier = row({ followupId: 'b' });
+    expect(
+      queue([later, earlier])
+        .filter((job) => job.followup)
+        .map((job) => job.followup!.followupId),
+    ).toEqual(['b', 'a']);
   });
 });

@@ -1,7 +1,10 @@
+import { ClientAccessSettings } from '@/app/ClientAccessSettings';
+import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { useEffect, useMemo, useState } from 'react';
 import { useLedgerReview, useQuarantine } from '@/stores/ledgerStore';
 import { Button } from '@/components/ui/Button';
 import { ClaudeCodeRow } from '@/pages/ClaudeCodeRow';
+import { ReminderSettings } from '@/pages/ReminderSettings';
 import { RecentlyOpenedSettings } from '@/pages/RecentlyOpenedSettings';
 import { CliWorkspaceRow } from '@/pages/CliWorkspaceRow';
 import { Input } from '@/components/ui/Input';
@@ -369,6 +372,7 @@ export function SettingsPage() {
             disabled={!inboxEnabled}
           />
         </section>
+        <ReminderSettings />
         <RecentlyOpenedSettings />
         <section className="mb-6 rounded-xl border border-n-200 p-5">
           <h2 className="mb-1 text-md font-semibold text-n-900">Assistant</h2>
@@ -390,7 +394,7 @@ export function SettingsPage() {
           />
           <SettingRow
             label="Connectors"
-            hint="Let the assistant use MCP servers — Jira, Confluence — to fetch what a note refers to. Anything it fetches is written down under sources/, so the same ticket is only ever fetched once. A cached copy past its refresh date is marked stale; ask for a fresh one when you need it."
+            hint="Let the assistant use MCP servers — Jira, Confluence — to fetch what a note refers to. Tickets and pages it fetches are written down under sources/, so the same ticket is only ever fetched once. A cached copy past its refresh date is marked stale; ask for a fresh one when you need it. Mail is never cached as a web page."
             checked={connectors}
             onChange={setConnectors}
           />
@@ -417,6 +421,7 @@ export function SettingsPage() {
             />
           </div>
         </section>
+        <ClientAccessSettings />
         <section className="mb-6 rounded-xl border border-n-200 p-5">
           <h2 className="mb-1 text-md font-semibold text-n-900">Knowledge</h2>
           <p className="mb-4 text-sm text-n-500">
@@ -459,6 +464,7 @@ export function SettingsPage() {
         <section className="mb-6 rounded-xl border border-n-200 p-5">
           <GitSettings />
         </section>
+        <KeyboardShortcutsSettings />
         <section className="rounded-xl border border-n-200 p-5">
           <h2 className="mb-1 text-md font-semibold text-n-900">About</h2>
           <p className="text-sm text-n-500">

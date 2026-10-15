@@ -9,6 +9,8 @@ import {
 import { FAMILY_OPS } from './fieldKindTable';
 import { kindMeta } from './properties';
 import { searchableFields } from './searchable';
+import { bandContext, type BandContext } from './dateBuckets';
+import { parseRelative, relativeLabel, resolveRelative } from './relativeDates';
 import type {
   Entry,
   FieldDef,
@@ -279,6 +281,9 @@ export function filterDateLabel(
  * caller with no schema context still gets the raw value rather than nothing.
  */
 function describeFilterValue(value: Scalar, def: FieldDef | undefined): string {
+  const relative =
+    def === undefined || kindMeta(def.kind).filters === 'date' ? relativeLabel(value) : null;
+  if (relative !== null) return relative;
   if (def === undefined) return String(value);
   const option = def.options?.find((o) => o.id === String(value));
   return option?.label ?? filterDateLabel(value, def) ?? String(value);
@@ -309,17 +314,20 @@ function matchesEquals(v: unknown, target: unknown): boolean {
   return asList(v).some((x) => x !== undefined && x !== null && x === target);
 }
 
-/** Case-insensitive text predicate applied to any element of the value. */
+/** Case-insensitive text predicate applied to any scalar element of the value. */
 function matchesText(
   v: unknown,
   target: unknown,
   test: (haystack: string, needle: string) => boolean,
 ): boolean {
   if (target === undefined || target === null || target === '') return false;
-  const needle = String(target).toLowerCase();
-  return asList(v).some(
-    (x) => x !== undefined && x !== null && test(String(x).toLowerCase(), needle),
-  );
+  const text = scalarText(target);
+  if (text === null) return false;
+  const needle = text.toLowerCase();
+  return asList(v).some((x) => {
+    const text = scalarText(x);
+    return text !== null && test(text.toLowerCase(), needle);
+  });
 }
 
 /** Set intersection between the field value(s) and the rule value(s). */
@@ -332,11 +340,21 @@ function firstScalar(v: unknown): unknown {
   return Array.isArray(v) ? (v.length > 0 ? v[0] : undefined) : v;
 }
 
-const asNumber = (v: unknown): number | null => {
-  if (typeof v === 'boolean' || v === '' || v === null || v === undefined) return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-};
+/** Decimal numbers only: ASCII whitespace is trimmed, and absence is never zero. */
+export function numericText(raw: unknown): number | null {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  if (typeof raw !== 'string') return null;
+  const text = raw.replace(/^[ \t\n\f\r]+|[ \t\n\f\r]+$/g, '');
+  if (!/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(text)) return null;
+  const number = Number(text);
+  return Number.isFinite(number) ? number : null;
+}
+
+function scalarText(raw: unknown): string | null {
+  return typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean'
+    ? String(raw)
+    : null;
+}
 
 /**
  * The comparable form of a date, at the rule's granularity (M16.14).
@@ -359,16 +377,25 @@ function dateKey(raw: unknown, withTime: boolean): string | null {
  *
  * One comparator behind every ordered operator, chosen from the VALUES rather
  * than from the field's declared kind: a rollup has no static type, and an
- * undeclared frontmatter key has no declaration at all.
+ * undeclared frontmatter key has no declaration at all. Numbers use only
+ * decimal text; if exactly one side is numeric, the values do not compare.
  */
-function compareValues(raw: unknown, target: unknown): number | null {
-  const a = firstScalar(raw);
+function compareValues(raw: unknown, target: unknown, ctx: BandContext | null): number | null {
+  const a = raw;
   if (a === undefined || a === null || a === '') return null;
   if (target === undefined || target === null || target === '') return null;
 
-  const an = asNumber(a);
-  const bn = asNumber(target);
+  if (ctx !== null && parseRelative(target) !== null) {
+    const range = resolveRelative(target, ctx);
+    const day = dateKey(a, false);
+    if (range === null || day === null) return null;
+    return day < range[0] ? -1 : day > range[1] ? 1 : 0;
+  }
+
+  const an = numericText(a);
+  const bn = numericText(target);
   if (an !== null && bn !== null) return an === bn ? 0 : an < bn ? -1 : 1;
+  if (an !== null || bn !== null) return null;
 
   const bounds = parseEndpoint(target);
   if (bounds !== null) {
@@ -378,13 +405,19 @@ function compareValues(raw: unknown, target: unknown): number | null {
     return ak === bk ? 0 : ak < bk ? -1 : 1;
   }
 
-  const as = String(a);
-  const bs = String(target);
+  const as = scalarText(a);
+  const bs = scalarText(target);
+  if (as === null || bs === null) return null;
   return as === bs ? 0 : as < bs ? -1 : 1;
 }
 
-const ordered = (raw: unknown, target: unknown, keep: (cmp: number) => boolean): boolean => {
-  const cmp = compareValues(raw, target);
+const ordered = (
+  raw: unknown,
+  target: unknown,
+  ctx: BandContext | null,
+  keep: (cmp: number) => boolean,
+): boolean => {
+  const cmp = compareValues(firstScalar(raw), target, ctx);
   return cmp !== null && keep(cmp);
 };
 
@@ -399,16 +432,27 @@ const ordered = (raw: unknown, target: unknown, keep: (cmp: number) => boolean):
  * both without loosening anything else — it returns null, not 0, for values
  * that are not comparable at all.
  */
-function matchesLoose(v: unknown, target: unknown): boolean {
-  if (matchesEquals(v, target)) return true;
-  return asList(v).some((x) => compareValues(x, target) === 0);
+function matchesLoose(v: unknown, target: unknown, ctx: BandContext | null): boolean {
+  // A token names calendar days, never prose that happens to say "today".
+  if ((ctx === null || parseRelative(target) === null) && matchesEquals(v, target)) return true;
+  return asList(v).some((x) => compareValues(x, target, ctx) === 0);
 }
 
 /** `schema.fieldValue` is the read (M60.1): created and edited time, rollups
  * and derived relations answer here the way the cell shows them, and the four
  * virtual fields answer from the entry before any frontmatter key. */
-function evalRule(entry: Entry, rule: FilterRule, schema: Schema): boolean {
+function evalRule(entry: Entry, rule: FilterRule, schema: Schema, context: BandContext): boolean {
   const v = schema.fieldValue(entry, rule.field);
+  const def = schema.types.get(entry.type ?? '')?.fields.find((field) => field.name === rule.field);
+  const family = def === undefined ? undefined : kindMeta(def.kind).filters;
+  // A declared text or option value named "today" stays literal. Untyped
+  // values and computed results retain the value-driven date comparison.
+  const ctx =
+    rule.field === 'title' ||
+    rule.field === 'type' ||
+    (family !== undefined && family !== 'date' && family !== 'any')
+      ? null
+      : context;
   const bounds = Array.isArray(rule.value) ? rule.value : [rule.value];
   switch (rule.op) {
     case 'is_empty':
@@ -416,9 +460,9 @@ function evalRule(entry: Entry, rule: FilterRule, schema: Schema): boolean {
     case 'is_not_empty':
       return !isEmptyValue(v);
     case 'equals':
-      return matchesLoose(v, rule.value);
+      return matchesLoose(v, rule.value, ctx);
     case 'not_equals':
-      return !matchesLoose(v, rule.value);
+      return !matchesLoose(v, rule.value, ctx);
     case 'contains':
       return matchesText(v, rule.value, (h, n) => h.includes(n));
     case 'does_not_contain':
@@ -436,21 +480,21 @@ function evalRule(entry: Entry, rule: FilterRule, schema: Schema): boolean {
       return !matchesAnyOf(v, rule.value);
     case 'gt':
     case 'after':
-      return ordered(v, rule.value, (c) => c > 0);
+      return ordered(v, rule.value, ctx, (c) => c > 0);
     case 'gte':
     case 'on_or_after':
-      return ordered(v, rule.value, (c) => c >= 0);
+      return ordered(v, rule.value, ctx, (c) => c >= 0);
     case 'lt':
     case 'before':
-      return ordered(v, rule.value, (c) => c < 0);
+      return ordered(v, rule.value, ctx, (c) => c < 0);
     case 'lte':
     case 'on_or_before':
-      return ordered(v, rule.value, (c) => c <= 0);
+      return ordered(v, rule.value, ctx, (c) => c <= 0);
     case 'is_between':
       // Inclusive at both ends. An exclusive range cannot express "this week"
       // without naming a day outside it, which is how off-by-one bugs get
       // authored into saved views.
-      return ordered(v, bounds[0], (c) => c >= 0) && ordered(v, bounds[1], (c) => c <= 0);
+      return ordered(v, bounds[0], ctx, (c) => c >= 0) && ordered(v, bounds[1], ctx, (c) => c <= 0);
   }
 }
 
@@ -458,9 +502,14 @@ function isGroup(node: FilterRule | FilterGroup): node is FilterGroup {
   return 'all' in node || 'any' in node;
 }
 
-export function evaluateFilters(entry: Entry, group: FilterGroup, schema: Schema): boolean {
+export function evaluateFilters(
+  entry: Entry,
+  group: FilterGroup,
+  schema: Schema,
+  ctx: BandContext = bandContext(),
+): boolean {
   const evalNode = (node: FilterRule | FilterGroup): boolean =>
-    isGroup(node) ? evaluateFilters(entry, node, schema) : evalRule(entry, node, schema);
+    isGroup(node) ? evaluateFilters(entry, node, schema, ctx) : evalRule(entry, node, schema, ctx);
 
   // A half-built rule is SKIPPED, not answered (M16.29). Answering it false
   // empties the view mid-edit; answering it true would make a Match-any group

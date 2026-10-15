@@ -132,7 +132,11 @@ export function AgentRunHistory({ actor }: { actor: string }) {
               >
                 ↳ a hop from{' '}
                 <span title={parent?.actor ?? undefined}>
-                  {parent === null ? `run ${run.parent_run_id}` : who(parent.actor).text}
+                  {parent === null
+                    ? `run ${run.parent_run_id}`
+                    : parent.actor === null
+                      ? 'an assistant turn'
+                      : who(parent.actor).text}
                 </span>{' '}
                 — billed to that run's ceiling
               </p>

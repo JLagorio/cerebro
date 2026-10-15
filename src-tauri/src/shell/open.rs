@@ -1,6 +1,6 @@
 //! Open with (M55.9): what the app may hand to the rest of the Mac.
 //!
-//! Exactly two kinds of target leave the app here, and nothing else does:
+//! This module serves the established note and agent-link actions:
 //!
 //! - a markdown note inside the vault, judged by `vault::write::existing_note`
 //!   (the note writers' own door, so M53.4's refusals hold), which Finder
@@ -17,14 +17,15 @@
 //! because `hand_to` and `start_handoff_run` already mean one agent handing
 //! work to another.
 //!
-//! Every action goes through the [`Desktop`] seam, so the tests pass a
-//! recorder and no cargo test starts a process. macOS only, like the bundle.
+//! `file_actions` adds kinds-table guarded files through the same Desktop
+//! seam. Quick Look has one explicitly reaped child; its tests use stand-ins,
+//! never the real preview application. macOS only, like the bundle.
 
 use std::ffi::OsString;
 use std::io::Write as _;
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::vault::write::existing_note;
@@ -168,12 +169,16 @@ pub enum AgentLinkOutcome {
     NoApp,
 }
 
-/// The two things Open with asks of the Mac.
+/// The desktop side effects behind the guarded note, file and link doors.
 pub trait Desktop {
     /// Run `/usr/bin/open` with `args`; `true` when it exits 0.
     fn open(&self, args: &[OsString]) -> Result<bool, String>;
     /// Put `text` on the clipboard as plain text.
     fn copy(&self, text: &str) -> Result<(), String>;
+    /// Show a guarded file in Quick Look. Recorders need no native process.
+    fn quick_look(&self, _path: &Path) -> Result<(), String> {
+        Err("Quick Look is unavailable".into())
+    }
 }
 
 /// Finder selects the note.
@@ -226,6 +231,91 @@ pub fn copy_with(desktop: &dyn Desktop, text: &str) -> Result<(), String> {
 /// The real Mac: `/usr/bin/open` and `/usr/bin/pbcopy`, each bounded.
 pub struct SystemDesktop;
 
+/// The native previewer is always a direct executable, with one path
+/// argument. No shell reads the filename, and its diagnostics are discarded.
+#[cfg(any(target_os = "macos", test))]
+fn quick_look_command(path: &Path) -> Command {
+    let mut command = crate::spawn::command("/usr/bin/qlmanage");
+    command
+        .arg("-p")
+        .arg(path)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command
+}
+
+#[derive(Default)]
+struct PreviewBook {
+    #[cfg(any(target_os = "macos", test))]
+    next: u64,
+    closed: bool,
+    child: Option<(u64, Child)>,
+}
+
+impl PreviewBook {
+    fn stop(&mut self) {
+        if let Some((_, mut child)) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+fn previews() -> &'static Arc<Mutex<PreviewBook>> {
+    static BOOK: OnceLock<Arc<Mutex<PreviewBook>>> = OnceLock::new();
+    BOOK.get_or_init(|| Arc::new(Mutex::new(PreviewBook::default())))
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn start_preview(book: &Arc<Mutex<PreviewBook>>, mut command: Command) -> Result<(), String> {
+    let mut state = book.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if state.closed {
+        return Err("Quick Look is stopping with the app".into());
+    }
+    state.stop();
+    let child = command
+        .spawn()
+        .map_err(|error| format!("starting Quick Look: {error}"))?;
+    state.next += 1;
+    let generation = state.next;
+    state.child = Some((generation, child));
+    drop(state);
+    let book = Arc::clone(book);
+    std::thread::spawn(move || loop {
+        {
+            let mut state = book.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let Some((active, child)) = state.child.as_mut() else {
+                return;
+            };
+            if *active != generation {
+                return;
+            }
+            match child.try_wait() {
+                Ok(Some(_)) => {
+                    state.child = None;
+                    return;
+                }
+                Err(_) => {
+                    state.stop();
+                    return;
+                }
+                Ok(None) => {}
+            }
+        }
+        std::thread::sleep(POLL);
+    });
+    Ok(())
+}
+
+/// RunEvent::Exit ends and reaps the sole preview before the process exits.
+pub fn stop_quick_look() {
+    let mut state = previews()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    state.closed = true;
+    state.stop();
+}
+
 /// The `pbcopy` child, built and not started. Its stdin is piped, and it
 /// speaks UTF-8: with no locale (an app launched from Finder has none)
 /// pbcopy reads its input in the C encoding, and `café` would paste as
@@ -262,6 +352,17 @@ fn wait_bounded(mut child: Child, what: &str, limit: Duration) -> Result<ExitSta
 }
 
 impl Desktop for SystemDesktop {
+    fn quick_look(&self, path: &Path) -> Result<(), String> {
+        #[cfg(target_os = "macos")]
+        {
+            start_preview(previews(), quick_look_command(path))
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = path;
+            Err("Quick Look is available on macOS only".into())
+        }
+    }
     fn open(&self, args: &[OsString]) -> Result<bool, String> {
         let child = crate::spawn::command("/usr/bin/open")
             .args(args)
@@ -326,6 +427,77 @@ mod tests {
     use super::*;
     use crate::vault::testutil::{temp_vault, write};
     use std::cell::RefCell;
+
+    #[test]
+    fn no_preview_starts_after_shutdown() {
+        let book = Arc::new(Mutex::new(PreviewBook {
+            closed: true,
+            ..Default::default()
+        }));
+        assert!(
+            start_preview(&book, crate::spawn::command("does-not-exist"))
+                .unwrap_err()
+                .contains("stopping")
+        );
+        assert!(book.lock().unwrap().child.is_none());
+    }
+
+    #[test]
+    fn the_quick_look_child_is_qlmanage_dash_p_with_no_shell() {
+        let command = quick_look_command(Path::new("/root/space;$(example).pdf"));
+        assert_eq!(command.get_program(), "/usr/bin/qlmanage");
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            ["-p", "/root/space;$(example).pdf"]
+        );
+        let source = include_str!("../lib.rs");
+        assert!(source.contains("shell::open::stop_quick_look();"));
+    }
+
+    #[cfg(unix)]
+    fn assert_reaped(pid: u32) {
+        // SAFETY: signal zero only checks whether our own stand-in child
+        // still exists; it neither signals nor modifies another process.
+        assert_eq!(unsafe { libc::kill(pid as libc::pid_t, 0) }, -1);
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ESRCH)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_new_preview_ends_the_last() {
+        let book = Arc::new(Mutex::new(PreviewBook::default()));
+        let mut command = crate::spawn::command("/bin/sleep");
+        command.arg("30");
+        start_preview(&book, command).unwrap();
+        let first = book.lock().unwrap().child.as_ref().unwrap().1.id();
+        let mut command = crate::spawn::command("/bin/sleep");
+        command.arg("30");
+        start_preview(&book, command).unwrap();
+        let second = book.lock().unwrap().child.as_ref().unwrap().1.id();
+        assert_ne!(first, second);
+        assert_reaped(first);
+        book.lock().unwrap().stop();
+        assert_reaped(second);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_closed_preview_is_reaped() {
+        let book = Arc::new(Mutex::new(PreviewBook::default()));
+        let mut command = crate::spawn::command("/bin/sleep");
+        command.arg("0.1");
+        start_preview(&book, command).unwrap();
+        let pid = book.lock().unwrap().child.as_ref().unwrap().1.id();
+        let started = Instant::now();
+        while book.lock().unwrap().child.is_some() && started.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(POLL);
+        }
+        assert!(book.lock().unwrap().child.is_none());
+        assert_reaped(pid);
+    }
 
     /// A Desktop that records what it was asked and answers from a script.
     struct Recorder {

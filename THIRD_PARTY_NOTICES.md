@@ -5,6 +5,20 @@ asks to travel with it. Dependencies installed from npm or crates.io keep
 their own licence files in the package; an entry here records a library Cerebro
 adopted on purpose under owner decision D0 (M53 roadmap), and where it is used.
 
+## IronCalc 0.8.3
+
+- Source: https://github.com/ironcalc/IronCalc, upstream release at
+  `9bed9ec023e645101df6b6ac5aebbe0708b259fb`; published as `ironcalc_base`
+  on crates.io and `@ironcalc/wasm` on npm. Author: Nicolás Hatcher.
+- Licence: MIT OR Apache-2.0. Cerebro uses the engine and the recovered
+  timezone shim under Apache-2.0, whose complete text is in [LICENSE](LICENSE).
+- Used by: `src-tauri/src/sheet/engine.rs` for page spreadsheet calculations;
+  the paired wasm is dev-only in `src/lib/mockSheet.ts`. The npm package
+  omitted its own generated timezone module. The patch documented in
+  [patches/README.md](patches/README.md) adds that module from the matching
+  crate byte for byte and updates the package files list. No engine source
+  or wasm bytes are modified, and Macro's fork is not used.
+
 ## @leeoniya/ufuzzy 1.0.19
 
 - Source: https://github.com/leeoniya/uFuzzy, installed from npm, pinned
@@ -203,3 +217,124 @@ express Statement of Purpose.
     party to this document and has no duty or obligation with respect to
     this CC0 or use of the Work.
 ```
+
+## rrule 2.8.1
+
+- Source: https://github.com/jkbrzt/rrule, installed from npm and pinned exactly.
+- Licence: BSD-3-Clause.
+- Used only by `src/engine/recurrence.ts` (M61.10). Cerebro validates its own subset and passes structured options to the upstream expander.
+
+```text
+rrule.js: Library for working with recurrence rules for calendar dates.
+=======================================================================
+
+Copyright 2010, Jakub Roztocil <jakub@roztocil.name> and Lars Schöning
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+    1. Redistributions of source code must retain the above copyright notice,
+       this list of conditions and the following disclaimer.
+
+    2. Redistributions in binary form must reproduce the above copyright
+       notice, this list of conditions and the following disclaimer in the
+       documentation and/or other materials provided with the distribution.
+
+    3. Neither the name of The author nor the names of its contributors may
+       be used to endorse or promote products derived from this software
+       without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE AUTHOR AND CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+
+./rrule.js and ./test/tests.js is based on python-dateutil. LICENCE:
+
+python-dateutil - Extensions to the standard Python datetime module.
+====================================================================
+
+Copyright (c) 2003-2011 - Gustavo Niemeyer <gustavo@niemeyer.net>
+Copyright (c) 2012 - Tomi Pieviläinen <tomi.pievilainen@iki.fi>
+
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright notice,
+      this list of conditions and the following disclaimer in the documentation
+      and/or other materials provided with the distribution.
+    * Neither the name of the copyright holder nor the names of its
+      contributors may be used to endorse or promote products derived from
+      this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+
+## Unicode CLDR Windows time zones
+
+`src/engine/windowsZones.ts` is generated from the territory-001 rows of
+[CLDR release 48 windowsZones.xml](https://github.com/unicode-org/cldr/blob/release-48/common/supplemental/windowsZones.xml).
+The generator accepts a local source file; the upstream XML is not vendored.
+
+UNICODE LICENSE V3
+
+COPYRIGHT AND PERMISSION NOTICE
+
+Copyright © 1991-2026 Unicode, Inc.
+
+NOTICE TO USER: Carefully read the following legal agreement. BY
+DOWNLOADING, INSTALLING, COPYING OR OTHERWISE USING DATA FILES, AND/OR
+SOFTWARE, YOU UNEQUIVOCALLY ACCEPT, AND AGREE TO BE BOUND BY, ALL OF THE
+TERMS AND CONDITIONS OF THIS AGREEMENT. IF YOU DO NOT AGREE, DO NOT
+DOWNLOAD, INSTALL, COPY, DISTRIBUTE OR USE THE DATA FILES OR SOFTWARE.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of data files and any associated documentation (the "Data Files") or
+software and any associated documentation (the "Software") to deal in the
+Data Files or Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, and/or sell
+copies of the Data Files or Software, and to permit persons to whom the
+Data Files or Software are furnished to do so, provided that either (a)
+this copyright and permission notice appear with all copies of the Data
+Files or Software, or (b) this copyright and permission notice appear in
+associated Documentation.
+
+THE DATA FILES AND SOFTWARE ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF
+THIRD PARTY RIGHTS.
+
+IN NO EVENT SHALL THE COPYRIGHT HOLDER OR HOLDERS INCLUDED IN THIS NOTICE
+BE LIABLE FOR ANY CLAIM, OR ANY SPECIAL INDIRECT OR CONSEQUENTIAL DAMAGES,
+OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THE DATA
+FILES OR SOFTWARE.
+
+Except as contained in this notice, the name of a copyright holder shall
+not be used in advertising or otherwise to promote the sale, use or other
+dealings in these Data Files or Software without prior written
+authorization of the copyright holder.

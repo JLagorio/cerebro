@@ -42,3 +42,17 @@ shared/calendar/
 # (include_str!) and by vitest, and keeps one row per line: a reflow would
 # change the bytes both readers must agree on.
 shared/files/
+
+# JSON Canvas format and round-trip goldens are byte anchors (M68.2).
+shared/canvas/
+
+# Starter files install byte for byte in Rust and the browser mock.
+shared/starter/
+
+# Shared import artifact bytes are deliberate and hashed.
+shared/import/
+
+# Pinned IronCalc MIT catalog: preserve upstream bytes for refresh review.
+src/engine/sheet/functions.json
+
+src-tauri/fixtures/sheets/

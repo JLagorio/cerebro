@@ -6,6 +6,7 @@
   Cerebro opens folders of markdown the user chooses, and seeds its demo vault
   into Documents on first run. macOS gates that folder behind a consent prompt;
   without a reason string the prompt has nothing to show but the app's name.
+  The URL type hands cerebro: links to RunEvent::Opened for UI-only navigation.
 -->
 <plist version="1.0">
   <dict>
@@ -15,6 +16,15 @@
     <string>Cerebro needs this to open a vault you keep on your Desktop.</string>
     <key>NSDownloadsFolderUsageDescription</key>
     <string>Cerebro needs this to open a vault you keep in Downloads.</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+      <dict>
+        <key>CFBundleURLName</key>
+        <string>com.cerebro.app</string>
+        <key>CFBundleURLSchemes</key>
+        <array><string>cerebro</string></array>
+      </dict>
+    </array>
     <key>NSHighResolutionCapable</key>
     <true/>
   </dict>

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  paneRowFloor,
+  paneCapacity,
+  paneParked,
+  PANE_PARK,
+  PANE_TAB,
   dragCeiling,
   fitWidth,
   mainColumnFloor,
@@ -448,5 +453,31 @@ describe('pageAsides', () => {
 
   it('never draws a Pages panel that is not open', () => {
     expect(pageAsides({ row: 2000, pages: false, side: false }).pages).toBe(false);
+  });
+});
+
+describe('pane row floors', () => {
+  it('admits panes only at readable widths, reserving the parked strip', () => {
+    expect([400, 831, 832, 1231, 1232, 2400].map(paneCapacity)).toEqual([1, 1, 2, 2, 3, 4]);
+    expect([1, 2, 3, 4].map(paneRowFloor)).toEqual([400, 832, 1232, 1632]);
+  });
+  it('keeps literal CSS parking thresholds equal to the measured ones', () => {
+    expect(PANE_PARK[0]).toBe('');
+    for (let rank = 1; rank < 4; rank++) {
+      const floor = paneRowFloor(rank + 1);
+      expect(PANE_PARK[rank]).toContain(`@max-[${floor}px]/panes:w-0`);
+      expect(PANE_TAB[rank]).toContain(`@max-[${floor}px]/panes:flex`);
+      expect(paneParked(rank, floor - 1)).toBe(true);
+      expect(paneParked(rank, floor)).toBe(false);
+    }
+    expect(paneParked(0, 1)).toBe(false);
+  });
+  it('asks the sidebar for room for every pane before parking', () => {
+    expect(
+      mainColumnFloorPx({ detail: false, assistant: false, assistantWidth: 0, panes: 3 }),
+    ).toBe(1232);
+    expect(mainColumnFloor({ detail: true, assistant: false, assistantWidth: 0, panes: 2 })).toBe(
+      'min(1152px, 100vw - 180px)',
+    );
   });
 });

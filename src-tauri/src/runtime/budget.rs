@@ -123,9 +123,9 @@ pub fn shipped_defaults() -> Result<Ceilings, String> {
 
 /// This machine's IANA zone, or UTC when the system will not say.
 ///
-/// Captured ONCE, into the first settings version, and never re-read: a
-/// laptop that crosses a timezone should not silently redefine what "today"
-/// meant for the days already recorded.
+/// Budgets capture this into their first settings version, so travel never
+/// redefines days already recorded. The describe_database, query_records and
+/// list_agenda dispatch arms read it per call to explain dates in the current local zone.
 pub fn system_timezone() -> String {
     iana_time_zone::get_timezone()
         .ok()
@@ -480,6 +480,39 @@ pub enum GateReason {
 }
 
 impl GateReason {
+    pub const ALL: [Self; 12] = [
+        Self::AccountingUnknown,
+        Self::AgentPaused,
+        Self::AmbientBusy,
+        Self::ConsecutiveFailures,
+        Self::DailyOutputTokens,
+        Self::DailyRuns,
+        Self::DailyTokens,
+        Self::GlobalPause,
+        Self::LaneDisabled,
+        Self::QuotaBackoff,
+        Self::ReservationExceedsRemaining,
+        Self::ReservationExceedsRunCap,
+    ];
+
+    /// Stable human words travel with the code, so the renderer need not
+    /// keep a second budget vocabulary or show an internal identifier.
+    pub fn words(self) -> &'static str {
+        match self {
+            Self::AccountingUnknown => "today's usage could not be counted",
+            Self::AgentPaused => "this agent is paused on the fleet",
+            Self::AmbientBusy => "another background run is going",
+            Self::ConsecutiveFailures => "the last background runs failed in a row",
+            Self::DailyOutputTokens => "today's output-token budget is spent",
+            Self::DailyRuns => "today's background-run budget is spent",
+            Self::DailyTokens => "today's token budget is spent",
+            Self::GlobalPause => "background work is paused",
+            Self::LaneDisabled => "this kind of background run is switched off",
+            Self::QuotaBackoff => "Claude Code's usage limit is cooling down",
+            Self::ReservationExceedsRemaining => "too little of today's budget is left for one run",
+            Self::ReservationExceedsRunCap => "one run would pass the per-run cap",
+        }
+    }
     pub fn as_str(self) -> &'static str {
         match self {
             GateReason::AccountingUnknown => "accounting_unknown",
@@ -930,6 +963,23 @@ pub fn record_decision(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn every_gate_reason_says_itself_in_distinct_words() {
+        let words = super::GateReason::ALL.map(super::GateReason::words);
+        let distinct: std::collections::BTreeSet<_> = words.into_iter().collect();
+        assert_eq!(distinct.len(), super::GateReason::ALL.len());
+        for reason in super::GateReason::ALL {
+            let words = reason.words();
+            assert_ne!(words, reason.as_str());
+            assert!(!words.is_empty());
+            assert!(!words.ends_with('.'));
+            assert!(
+                words.starts_with(|c: char| c.is_ascii_lowercase())
+                    || words.starts_with("Claude Code")
+            );
+        }
+    }
+
     use super::*;
     use crate::vault::testutil;
 

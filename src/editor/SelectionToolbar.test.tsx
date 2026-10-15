@@ -7,6 +7,7 @@ import { ComponentsContext, getFormattingToolbarItems } from '@blocknote/react';
 import { PageCommentsContext } from './PageCommentsContext';
 import {
   AiToolbarButtons,
+  canDownloadFile,
   blockMenuItems,
   formattingToolbarItems,
   PRESETS,
@@ -149,4 +150,36 @@ describe('the Comment button', () => {
     fireEvent.click(button);
     expect(start).toHaveBeenCalledTimes(1);
   });
+
+  it('places Promote after Comment and preserves the selected checklist on mousedown', () => {
+    const promote = vi.fn();
+    render(
+      <ComponentsContext.Provider value={components}>
+        <PageCommentsContext.Provider value={{ start: vi.fn() }}>
+          <AiToolbarButtons onAsk={() => undefined} onPromote={promote} />
+        </PageCommentsContext.Provider>
+      </ComponentsContext.Provider>,
+    );
+    const button = screen.getByTestId('selection-promote');
+    expect(fireEvent.mouseDown(button)).toBe(false);
+    fireEvent.click(button);
+    expect(promote).toHaveBeenCalledTimes(1);
+    const buttons = screen.getAllByRole('button');
+    expect(buttons.indexOf(button)).toBeGreaterThan(
+      buttons.indexOf(screen.getByTestId('selection-comment')),
+    );
+  });
+});
+
+it('offers Download only for web URLs, never a local attachment or media scheme', () => {
+  for (const url of [
+    '/attachments/a.pdf',
+    '../a.png',
+    'attachments/b.zip',
+    'cerebro-file://root/0/a.png',
+    '',
+    undefined,
+  ])
+    expect(canDownloadFile(url)).toBe(false);
+  expect(canDownloadFile('https://example.com/file.pdf')).toBe(true);
 });

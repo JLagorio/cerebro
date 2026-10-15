@@ -97,9 +97,9 @@ pub struct Meter {
     /// `parent_run_id` and `cause`; the other two modes work on a row
     /// `dispatch::claim` already attributed and gave its cause.
     pub actor: Option<String>,
-    /// The run whose tool call started this one (M34.3). `None` is a root —
-    /// every run a person or a schedule started. Attended-mode only, like
-    /// `actor`, and for the same reason.
+    /// The recorded run whose tool call or write started this one. None is a
+    /// root. Attended-mode writes it here; a wake claim already wrote its
+    /// ancestry atomically with the lease.
     pub parent_run_id: Option<String>,
     /// Why the run started (M56.7). Attended-mode writes it with the row it
     /// opens, or with the fallback insert at finish; the other two modes
@@ -121,6 +121,8 @@ pub struct RunEnd {
     /// `None` means the run ended without saying what it spent. It is not
     /// zero — M25 treats missing usage as an unknown day, never a free one.
     pub usage: Option<Usage>,
+    /// Terminal model and other measured facts, passed to a supervisor's finalize.
+    pub facts: Option<RunFacts>,
     /// The run's final reply: its terminal Result's text, when not empty
     /// (`agent::ReplyCollector`).
     pub answer: Option<String>,
@@ -307,6 +309,10 @@ impl Tally {
     /// switch, quit — and it names the ending only of a run that never
     /// reached its terminal event: one that already said how it ended keeps
     /// that ending, because the stop lost the race to it.
+    pub fn facts(&self) -> &RunFacts {
+        &self.facts
+    }
+
     pub fn ended(&self, aborted: bool, cancelled: bool) -> (RunOutcome, Option<Usage>) {
         let outcome = if aborted {
             RunOutcome::ElapsedAborted

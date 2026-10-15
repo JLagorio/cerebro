@@ -96,6 +96,78 @@ struct ContentRow {
     last: LastWrite,
 }
 
+/// The recorded writer of the exact version a scan observed (M63.2).
+/// A run with no surviving row is still a recorded writer; admission decides
+/// whether it can attach a parent. Missing attribution never becomes a person.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EventWriter {
+    Person { actor: String },
+    Run { actor: String, run_id: String },
+    NotRecorded(UnrecordedWriter),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnrecordedWriter {
+    NoRow,
+    NullActor,
+    NoRun,
+    ChangedOutside,
+}
+
+/// The newest content row counts when its hash is the observed version, when
+/// it is the move itself, or when an autosave burst continued after the scan.
+/// Unlike page_attribution, a move names the mover, not the earlier writer.
+pub fn writer_of(
+    ro: &ReadOnly,
+    vault_id: &str,
+    path: &str,
+    hash: &str,
+    event: &str,
+    seen_at: Option<chrono::DateTime<chrono::Utc>>,
+) -> Result<EventWriter, String> {
+    let row = ro
+        .query_row(
+            "SELECT kind, content_hash, actor, run_id, recorded_at FROM vault_writes \
+         WHERE vault_id = ?1 AND ((path = ?2 AND kind IN ('vault.write', 'vault.create')) \
+         OR (to_path = ?2 AND kind = 'vault.rename')) ORDER BY rowid DESC LIMIT 1",
+            rusqlite::params![vault_id, path],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                    r.get::<_, String>(4)?,
+                ))
+            },
+        )
+        .map(Some)
+        .or_else(none_when_empty)?;
+    let Some((kind, content_hash, actor, run_id, recorded_at)) = row else {
+        return Ok(EventWriter::NotRecorded(UnrecordedWriter::NoRow));
+    };
+    let after_scan = seen_at.is_some_and(|seen| {
+        chrono::DateTime::parse_from_rfc3339(&recorded_at)
+            .is_ok_and(|at| at.with_timezone(&chrono::Utc) > seen)
+    });
+    if !(event == "moved" && kind == "vault.rename")
+        && content_hash.as_deref() != Some(hash)
+        && !after_scan
+    {
+        return Ok(EventWriter::NotRecorded(UnrecordedWriter::ChangedOutside));
+    }
+    let Some(actor) = actor.filter(|actor| !actor.trim().is_empty()) else {
+        return Ok(EventWriter::NotRecorded(UnrecordedWriter::NullActor));
+    };
+    if actor.starts_with("human:") {
+        return Ok(EventWriter::Person { actor });
+    }
+    Ok(match run_id.filter(|id| !id.is_empty()) {
+        Some(run_id) => EventWriter::Run { actor, run_id },
+        None => EventWriter::NotRecorded(UnrecordedWriter::NoRun),
+    })
+}
+
 /// Who last changed `path` in `vault_id`, given the sha-256 of its bytes now.
 /// `path` is spelled as the scan lists it (`write::landing_path`), as every
 /// row is stored.
@@ -773,5 +845,135 @@ mod tests {
         for word in ["execute", "execute_batch", "pragma_update", "Connection"] {
             assert!(!body.contains(word), "write_log.rs names {word}");
         }
+    }
+
+    #[test]
+    fn a_scan_writer_is_recorded_as_person_run_or_not_recorded() {
+        let (dir, conn, vault) = fixture("scan-writer");
+        let h = hash('a');
+        let read_writer = || {
+            writer_of(
+                &ReadOnly::open(&dir).unwrap(),
+                &vault,
+                "notes/a.md",
+                &h,
+                "changed",
+                None,
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            read_writer(),
+            EventWriter::NotRecorded(UnrecordedWriter::NoRow)
+        );
+        let mut write = row("vault.write", "notes/a.md", Some(&h));
+        record_at(&conn, &vault, &write, at(0)).unwrap();
+        assert_eq!(
+            read_writer(),
+            EventWriter::Person {
+                actor: "human:me".into()
+            }
+        );
+        write.actor = Some("process:scout");
+        write.run_id = Some("run-scout");
+        record_at(&conn, &vault, &write, at(2)).unwrap();
+        assert_eq!(
+            read_writer(),
+            EventWriter::Run {
+                actor: "process:scout".into(),
+                run_id: "run-scout".into()
+            }
+        );
+        write.actor = Some("client:editor");
+        record_at(&conn, &vault, &write, at(4)).unwrap();
+        assert_eq!(
+            read_writer(),
+            EventWriter::Run {
+                actor: "client:editor".into(),
+                run_id: "run-scout".into()
+            }
+        );
+        write.run_id = None;
+        record_at(&conn, &vault, &write, at(6)).unwrap();
+        assert_eq!(
+            read_writer(),
+            EventWriter::NotRecorded(UnrecordedWriter::NoRun)
+        );
+        write.actor = None;
+        record_at(&conn, &vault, &write, at(8)).unwrap();
+        assert_eq!(
+            read_writer(),
+            EventWriter::NotRecorded(UnrecordedWriter::NullActor)
+        );
+        done(dir, conn);
+    }
+
+    #[test]
+    fn a_burst_after_the_scan_keeps_its_writer_but_an_outside_change_does_not() {
+        let (dir, conn, vault) = fixture("scan-writer-burst");
+        let (seen, later) = (hash('a'), hash('b'));
+        record_at(
+            &conn,
+            &vault,
+            &row("vault.write", "notes/a.md", Some(&later)),
+            at(2),
+        )
+        .unwrap();
+        let ro = ReadOnly::open(&dir).unwrap();
+        assert_eq!(
+            writer_of(&ro, &vault, "notes/a.md", &seen, "changed", Some(at(1))).unwrap(),
+            EventWriter::Person {
+                actor: "human:me".into()
+            }
+        );
+        assert_eq!(
+            writer_of(&ro, &vault, "notes/a.md", &seen, "changed", Some(at(3))).unwrap(),
+            EventWriter::NotRecorded(UnrecordedWriter::ChangedOutside)
+        );
+        assert_eq!(
+            writer_of(&ro, &vault, "notes/a.md", &seen, "changed", None).unwrap(),
+            EventWriter::NotRecorded(UnrecordedWriter::ChangedOutside)
+        );
+        drop(ro);
+        done(dir, conn);
+    }
+
+    #[test]
+    fn a_move_event_names_the_mover_and_ignores_other_vaults_and_comments() {
+        let (dir, conn, vault) = fixture("scan-writer-move");
+        let h = hash('a');
+        record_at(
+            &conn,
+            &vault,
+            &row("vault.write", "notes/a.md", Some(&h)),
+            at(0),
+        )
+        .unwrap();
+        let mut moved = row("vault.rename", "notes/a.md", None);
+        moved.to = Some("notes/b.md");
+        moved.actor = Some("process:mover");
+        moved.run_id = Some("run-mover");
+        record_at(&conn, &vault, &moved, at(1)).unwrap();
+        record_at(
+            &conn,
+            &vault,
+            &row("vault.comment", "notes/b.md", None),
+            at(2),
+        )
+        .unwrap();
+        let ro = ReadOnly::open(&dir).unwrap();
+        assert_eq!(
+            writer_of(&ro, &vault, "notes/b.md", &h, "moved", None).unwrap(),
+            EventWriter::Run {
+                actor: "process:mover".into(),
+                run_id: "run-mover".into()
+            }
+        );
+        assert_eq!(
+            writer_of(&ro, "another-vault", "notes/b.md", &h, "moved", None).unwrap(),
+            EventWriter::NotRecorded(UnrecordedWriter::NoRow)
+        );
+        drop(ro);
+        done(dir, conn);
     }
 }

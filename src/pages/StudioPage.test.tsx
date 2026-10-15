@@ -1,21 +1,32 @@
+import { navSeed } from '@/test/navSeed';
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetMockFs } from '@/lib/mockIpc';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { StudioPage } from './StudioPage';
+import { calculateSheets } from '@/lib/ipc';
+import * as ipc from '@/lib/ipc';
+import { resetSheetCache } from '@/sheet/useSheetWorkbook';
+
+vi.mock('@/lib/ipc', async (original) => ({
+  ...(await original<typeof import('@/lib/ipc')>()),
+  calculateSheets: vi.fn(),
+}));
 
 const fs = () => (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
 
 describe('StudioPage', () => {
   beforeEach(async () => {
+    resetSheetCache();
+    vi.mocked(calculateSheets).mockReset();
     resetMockFs();
     await useVaultStore.getState().openVault('/demo-vault');
     useNavStore.setState({
       selection: { kind: 'studio' },
-      history: [{ kind: 'studio' }],
+      history: [navSeed({ kind: 'studio' })],
       historyIndex: 0,
     });
     useUiStore.setState({ aiPanelOpen: false, handoffs: [] });
@@ -45,6 +56,51 @@ describe('StudioPage', () => {
     render(<StudioPage selection={{ kind: 'studio', project: 'landing' }} />);
     // The preview is the RENDERED body, via the read-only renderer.
     await waitFor(() => expect(screen.getByText('Hero copy here.')).toBeTruthy());
+  });
+
+  it('shows calculated source fences without changing the prototype bytes', async () => {
+    const path = 'studio/budget/index.md';
+    const source = '# Budget\n\n```cerebro-sheet\n=SUM(1,2)\n```\n';
+    fs().set(path, source);
+    await useVaultStore.getState().rescan();
+    vi.mocked(calculateSheets).mockResolvedValue([
+      {
+        ok: true,
+        name: 'Sheet1',
+        rows: 1,
+        cols: 1,
+        cells: [{ row: 1, col: 1, kind: 'number', display: '3' }],
+      },
+    ]);
+    render(<StudioPage selection={{ kind: 'studio', project: 'budget' }} />);
+    await waitFor(() => expect(screen.getByTestId('sheet-grid')).toBeTruthy());
+    expect(screen.getAllByTestId('sheet-cell')[0].textContent).toBe('3');
+    expect(fs().get(path)).toBe(source);
+  });
+  it('previews a board fence and a canvas file without reading the canvas as markdown', async () => {
+    const path = 'studio/map/sketch.canvas';
+    const source =
+      '{"nodes":[{"id":"a","type":"text","text":"Board card","x":0,"y":0,"width":200,"height":100}]}';
+    fs().set(
+      'studio/map/index.md',
+      '# Map\n\n```cerebro-whiteboard\nboard: studio/map/sketch.canvas\n```',
+    );
+    fs().set(path, source);
+    await useVaultStore.getState().rescan();
+    const read = vi.spyOn(ipc, 'readNote');
+    const view = render(<StudioPage selection={{ kind: 'studio', project: 'map' }} />);
+    expect(await screen.findByText('Board card')).toBeTruthy();
+    expect(screen.queryByTestId('wb-input')).toBeNull();
+    fireEvent.click(
+      screen.getAllByTestId('studio-page-row').find((item) => item.textContent === 'Sketch')!,
+    );
+    await waitFor(() => expect(screen.getByTestId('wb-board').style.height).toBe('520px'));
+    expect(read.mock.calls.every((call) => call[1] !== path)).toBe(true);
+    fireEvent.click(screen.getByTestId('studio-edit-page'));
+    expect(useNavStore.getState().selection).toEqual({ kind: 'diagram', path });
+    view.unmount();
+    expect(fs().get(path)).toBe(source);
+    read.mockRestore();
   });
 
   it('Build with the assistant seeds the panel at the prototype folder', async () => {

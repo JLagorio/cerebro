@@ -1,6 +1,7 @@
+import { seedBytes, reset as resetBytes } from '@/lib/mockBytes';
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { resetLayers } from '@/components/ui/layers';
 import { __resetOpenPages, registerFlush } from '@/editor/openPages';
@@ -10,11 +11,19 @@ import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { PageCoverBand, PageIconHeader } from './PageChrome';
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 const ipc = vi.hoisted(() => ({
   canPickFiles: vi.fn(() => true),
   pickFiles: vi.fn(async () => [] as string[]),
   importAttachment: vi.fn(async (_v: string, source: string) => {
-    return `attachments/${source.split('/').pop() ?? 'file'}`;
+    return { path: `attachments/${source.split('/').pop() ?? 'file'}`, reused: false };
   }),
 }));
 
@@ -29,6 +38,7 @@ let order: string[];
 
 beforeEach(() => {
   resetLayers();
+  resetBytes();
   __resetOpenPages();
   order = [];
   patchFrontmatter = vi.fn(async () => {
@@ -37,7 +47,9 @@ beforeEach(() => {
   });
   useUiStore.setState({ toasts: [] });
   useVaultStore.setState({ vaultPath: '/vault', patchFrontmatter });
-  ipc.importAttachment.mockClear();
+  ipc.importAttachment
+    .mockReset()
+    .mockImplementation(async (_v, source) => ({ path: `attachments/${source.split('/').pop() ?? 'file'}`, reused: false }));
   ipc.canPickFiles.mockReturnValue(true);
   ipc.pickFiles.mockResolvedValue([]);
 });
@@ -128,6 +140,56 @@ describe('PageIconHeader', () => {
     await user.click(screen.getByTestId('page-add-icon'));
     await user.click(screen.getByRole('button', { name: ROCKET }));
     await waitFor(() => expect(order).toEqual(['flush', 'patch']));
+  });
+
+  it.each(['vault round trip', 'another record', 'unmount'])(
+    'does not patch after a flush outlives %s',
+    async (change) => {
+      const user = userEvent.setup();
+      const flushed = deferred<void>();
+      registerFlush(() => flushed.promise);
+      const view = render(<PageIconHeader entry={page()} editable />);
+      await user.click(screen.getByTestId('page-add-icon'));
+      await user.click(screen.getByRole('button', { name: ROCKET }));
+      if (change === 'unmount') view.unmount();
+      else if (change === 'another record')
+        view.rerender(<PageIconHeader entry={page({}, 'notes/other.md')} editable />);
+      else
+        act(() => {
+          useVaultStore.setState({ vaultPath: '/other' });
+          useVaultStore.setState({ vaultPath: '/vault' });
+        });
+      await act(async () => flushed.resolve());
+      expect(patchFrontmatter).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not import after its native picker closes with a vault switch', async () => {
+    const user = userEvent.setup();
+    const picked = deferred<string[]>();
+    ipc.pickFiles.mockReturnValue(picked.promise);
+    renderChrome(page());
+    await user.click(screen.getByTestId('page-add-cover'));
+    await user.click(screen.getByRole('button', { name: 'Choose an image…' }));
+    act(() => useVaultStore.setState({ vaultPath: '/other' }));
+    await act(async () => picked.resolve(['/a/new.png']));
+    expect(ipc.importAttachment).not.toHaveBeenCalled();
+    expect(patchFrontmatter).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('page-cover-picker')).toBeNull();
+  });
+
+  it('does not patch a different record when an image copy finishes', async () => {
+    const user = userEvent.setup();
+    const copied = deferred<{ path: string; reused: boolean }>();
+    ipc.pickFiles.mockResolvedValue(['/a/new.png']);
+    ipc.importAttachment.mockReturnValue(copied.promise);
+    const view = render(<PageIconHeader entry={page()} editable />);
+    await user.click(screen.getByTestId('page-add-cover'));
+    await user.click(screen.getByRole('button', { name: 'Choose an image…' }));
+    await waitFor(() => expect(ipc.importAttachment).toHaveBeenCalledTimes(1));
+    view.rerender(<PageIconHeader entry={page({}, 'notes/other.md')} editable />);
+    await act(async () => copied.resolve({ path: 'attachments/new.png', reused: false }));
+    expect(patchFrontmatter).not.toHaveBeenCalled();
   });
 
   it('under knowledge/ an icon shows but there is no Add row and no button', () => {
@@ -237,10 +299,26 @@ describe('PageCoverBand', () => {
     expect(screen.queryByTestId('page-add-cover')).toBeNull();
   });
 
-  it('a file cover names its path and loads nothing', () => {
-    const { container } = renderChrome(page({ cover: 'attachments/c.png' }));
-    expect(screen.getByTestId('page-cover').textContent).toContain('attachments/c.png');
+  it('a file cover draws contained bytes without changing the page', async () => {
+    seedBytes('0', 'attachments/c.png', { bytes: [1, 2] });
+    renderChrome(page({ cover: 'attachments/c.png' }));
+    const image = await screen.findByRole('img', { name: 'c.png' });
+    expect(image.getAttribute('src')).toBe('data:image/png;base64,AQI=');
+    expect(image.style.objectFit).toBe('cover');
+    expect(patchFrontmatter).not.toHaveBeenCalled();
+  });
+  it('a missing or remote cover keeps its named fallback', async () => {
+    const { rerender, container } = render(
+      <PageCoverBand entry={page({ cover: 'attachments/missing.png' })} editable={false} />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('page-cover').textContent).toContain('attachments/missing.png'),
+    );
+    rerender(
+      <PageCoverBand entry={page({ cover: 'https://example.com/c.png' })} editable={false} />,
+    );
     expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByTestId('page-cover').textContent).toContain('https://example.com/c.png');
   });
 
   it('a cover that is no colour takes the neutral swatch', () => {

@@ -3,8 +3,8 @@ type: Bet
 status: open
 confidence: high
 horizon: this-quarter
-stake: "The whole conflict epic — roughly six weeks"
-supports: "[[obj-retention-foundation]]"
+stake: The whole conflict epic — roughly six weeks
+supports: '[[obj-retention-foundation]]'
 settles_by: 2026-10-01
 ---
 

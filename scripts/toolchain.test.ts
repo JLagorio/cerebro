@@ -33,6 +33,8 @@ const toml = read('rust-toolchain.toml');
 const pkg = JSON.parse(read('package.json')) as {
   packageManager?: string;
   engines?: Record<string, string>;
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
 };
 const hook = read('.husky/pre-push');
 const workflowText = read('.github/workflows/mac-app.yml');
@@ -90,6 +92,48 @@ describe('the pins', () => {
   it('package.json pins pnpm exactly and Node by major', () => {
     expect(pkg.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/);
     expect(pkg.engines?.node).toMatch(/^\d+\.x$/);
+  });
+
+  it('the locked Tauri crate and JS API share a minor, as do both dialog halves', () => {
+    const cargo = read('src-tauri/Cargo.lock');
+    const lockedCrate = (name: string) => {
+      const versions = [
+        ...cargo.matchAll(/\[\[package\]\]\nname = "([^"]+)"\nversion = "([^"]+)"/g),
+      ]
+        .filter((match) => match[1] === name)
+        .map((match) => match[2]);
+      expect(versions, `one locked ${name}`).toHaveLength(1);
+      return versions[0];
+    };
+    const lock = parse(read('pnpm-lock.yaml')) as {
+      importers: Record<
+        string,
+        {
+          dependencies: Record<string, { version: string }>;
+          devDependencies: Record<string, { version: string }>;
+        }
+      >;
+    };
+    const minor = (version: string) => version.split('.').slice(0, 2).join('.');
+    const js = lock.importers['.'];
+    expect(minor(lockedCrate('tauri'))).toBe(minor(js.dependencies['@tauri-apps/api'].version));
+    expect(minor(lockedCrate('tauri-plugin-dialog'))).toBe(
+      minor(js.dependencies['@tauri-apps/plugin-dialog'].version),
+    );
+    expect(pkg.dependencies['@tauri-apps/api']).toBe('~2.12.0');
+    expect(pkg.devDependencies['@tauri-apps/cli']).toBe('~2.12.0');
+    expect(minor(js.devDependencies['@tauri-apps/cli'].version)).toBe('2.12');
+    for (const name of [
+      'tauri-build',
+      'tauri-codegen',
+      'tauri-macros',
+      'tauri-plugin',
+      'tauri-runtime',
+      'tauri-runtime-wry',
+      'tauri-utils',
+      'wry',
+    ])
+      lockedCrate(name);
   });
 });
 

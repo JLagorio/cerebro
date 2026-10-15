@@ -1,6 +1,7 @@
 ---
 type: Work item
 key: FLD-9
+project: "[[guided-onboarding-ga]]"
 status: todo
 priority: high
 assignee: "[[maya-chen]]"

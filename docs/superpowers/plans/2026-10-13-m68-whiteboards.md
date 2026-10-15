@@ -8,8 +8,10 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M68. House style: the M53–M67 
 
 ## Status
 
+- **Integrated unstaged (.2):** Rust reader/scanner/corpus/catch-up/guard checks 69 passed (two intended ignored digest writers); TS scanner/search/rename slice 1077 passed plus final targeted rails and retries. Six rename browser scenarios passed, the board-citer warning was reviewed, and its source bytes stayed unchanged. The combined scene/bytes/kinds/scan/IPC/convention gate passed 622 tests. Generated JSON Canvas interoperability fixtures are not a substitute for an actual Obsidian round-trip, which remains unperformed. .2b doors and page lifecycle are now integrating.
+
 - **Precondition:** M53–M57, M70 and M58–M67 closed, in that order, gates green. They are built unstaged in this checkout, so this plan names finished functions, never lines.
-- **Built:** nothing. No `src/engine/scene`, `src/whiteboard`, `shared/canvas` or `src-tauri/src/canvas`; neither library in package.json (grep, 2026-10-14). 7 roadmap parts split by their own sentences into 17.
+- **Built, unstaged:** .1 scene core. .2 is in progress: shared format, six text goldens, strict TS tokenizer/codec and Rust reader groundwork; scanner and surface integration follow the file-page dependency. The first scene gate passed 171 tests; the expanded shared-case replay passed 39 focused tests. 7 roadmap parts split by their own sentences into 17.
 - **Effort:** 11 L + 5 M ≈ 13.5 L (roadmap ≈6 L). .2 → .2 + .2b; .3 → .3 + .3b + .3c (M); .4 → .4 + .4b + .4c; .5 → .5 + .5b (M) + .5c (M); .7 M → .7 L + .7b L + .7c M (the Rust writer twin was uncounted).
 - **Crash risk:** none of the crash-suite kind. New doors run on M55.1's funnel and lock; no schema step, spawn or kill point.
 - **Checks:** packaged (owner, `./scripts/mac-build.sh`) .2b, .3, .3b, .4, .4c, .5, .5c, .7b. Live (owner, CLI 2.1.250, an isolated `CLAUDE_CONFIG_DIR`, never the main `~/.claude`) .7, .7b, .7c. Obsidian (owner, a scratch vault) .2, .3b, .5, .6, .7b, .7c.
@@ -170,6 +172,8 @@ Roadmap risks: no rotation (D14; .1, .3b); the Rust validator twins the TS scene
 - **Packaged check:** a board at 25–400% zoom, light and dark: foreignObject cards sit right in WKWebView (fallback: SVG text lines); export SVG and PNG.
 - **Wave** 4 · **Depends** M68.1, .2, .2b; M53.20; M58.1; M64.3 · **Size** L · **Crash risk** no · **Packaged check** yes
 - **Commit:** `feat(whiteboard): a board draws as one SVG, keeps its camera and exports like a diagram (M68.3)`.
+- **Implemented and checked, 2026-10-15 (unstaged):** the renderer, safe markdown labels, six theme paints, camera persistence, wheel modes and SVG/PNG copy/save are implemented. The scene/whiteboard/viewport/export suites passed 293 tests, followed by 10 focused export-bounds tests (three new regressions). Three whiteboard browser scenarios passed, including literal light/dark export colours, all four export actions, 150% camera restore, no file writes and actual SVG bounds for long labels and outward loops. All 15 existing diagram scenarios passed (two required isolated retries after a blank boot and a delayed picker result); the three canvas-page scenarios also passed. Light/dark screenshots and the exported PNG were inspected. Scoped lint is clean; the last whole-tree app typecheck was blocked only by active PDF viewer errors outside this part. No packaged WKWebView check was run.
+- **Review correction:** export bounds include drawable connection control hulls, arrowheads and label boxes, not just card/ink bounds; group labels are clipped to their available frame. This prevents standalone SVG/PNG clipping that an overflowing live SVG could hide.
 
 ### M68.3b Select, move, resize, marquee and snapping, one undo step per gesture
 
@@ -187,6 +191,7 @@ Roadmap risks: no rotation (D14; .1, .3b); the Rust validator twins the TS scene
 - **Packaged check:** trackpad drags and pointer capture in WKWebView; ⌘Z against the native Edit menu (M55.10). **Obsidian check:** drag and resize on `goldens/extras-kept.canvas`; Obsidian reopens it, unknown keys intact.
 - **Wave** 5 · **Depends** M68.1, .2b, .3; M65.1; M60.7; M58.1; M64.3 · **Size** L · **Crash risk** no · **Packaged check** yes
 - **Commit:** `feat(whiteboard): select, move, resize and marquee with snapping, one undo step per gesture (M68.3b)`.
+- **Implemented and checked, 2026-10-15 (unstaged):** selection, eight handles, move/resize/marquee/pan, grid/object snapping, Delete, held-key nudge, Select All and scoped Undo/Redo are implemented. The focused scene/whiteboard/viewport/command suites passed 311 tests (two test-fixture corrections were replayed successfully in a 17-test retry); all three editor browser scenarios passed. Real pointer sequences proved one write after release, exact Undo/Redo with unknown keys preserved, group-member movement, Shift ratio, node-and-edge deletion, and no writes for cancelled or view gestures. The selection screenshot was inspected. Three-config typecheck and scoped lint passed. Review caught and fixed centre-resize snapping, then a pointer/key ownership race: one coordinator now retires the prior interaction before a pointer or held key takes ownership, including the pre-drag threshold. Three concrete handoff regressions passed, and independent rereview found the issue resolved. Packaged WKWebView/native Edit-menu and external Obsidian checks remain unperformed.
 
 ### M68.3c Read-only boards in ConceptBody, Studio and knowledge/
 
@@ -201,6 +206,7 @@ Roadmap risks: no rotation (D14; .1, .3b); the Rust validator twins the TS scene
 - **Acceptance:** roadmap: a read-only mode for ConceptBody and Studio; embeds are read-only with Open (M29.48 holds). knowledge/ boards never try to save. Embeds never write; unavailable is never empty; a missing board keeps its pointer. One pointer grammar, ready for .5c. No Rust, IPC, mock, schema step, code or twin.
 - **Wave** 5 · **Depends** M68.2, .2b, .3; M67.1; M64.3 · **Size** M · **Crash risk** no · **Packaged check** no
 - **Commit:** `feat(whiteboard): boards show read-only in Studio, concept bodies and knowledge/ (M68.3c)`.
+- **Implemented and checked, 2026-10-15 (unstaged):** the shared whiteboard pointer grammar, read-only embed, Studio direct-board preview and concept fence host are implemented. Invalid or unclosed fences stay code; missing pointers remain visible, failed reads stay unavailable, and entry-hash changes trigger fresh reads. A keyed vault/path lifetime rejects late reads from a former vault. The focused suites passed 47 tests; three new browser scenarios and the existing Studio scenario passed. The stable browser run used an isolated Vite configuration with HMR disabled after development reloads invalidated earlier mock snapshots. Knowledge-board drags and preview/Open navigation produced no writes.
 
 ### M68.4 Tools: shapes, text cards edited in place as markdown, ink and the eraser
 
@@ -218,6 +224,7 @@ Roadmap risks: no rotation (D14; .1, .3b); the Rust validator twins the TS scene
 - **Packaged check:** IME and textarea placement under zoom in WKWebView; a trackpad pencil stroke.
 - **Wave** 6 · **Depends** M68.1, .3b; M65.1, .1b · **Size** L · **Crash risk** no · **Packaged check** yes
 - **Commit:** `feat(whiteboard): shapes, text cards edited as markdown, ink and the eraser (M68.4)`.
+- **Implemented and checked, 2026-10-15 (unstaged):** the seven tools, modifier-aware shape creation, raw markdown and group-label editing, pressure-aware capped pencil strokes, and cancellable eraser sweeps are implemented. Creation and deletion each make one undo step. The focused suites passed 108 tests; the added autosave regression and text lifetime suite passed 31 tests afterward (109 distinct checks in total). Two browser scenarios passed, including four edits/four Undos back to the seed, verbatim markdown, typed tool letters, the Home chord, and navigating away with an unfinished draft. The final screenshot was inspected. Explicit Save/quit and retiring flush settle raw text; an earlier edit’s scheduled autosave leaves current typing open. Independent lifetime review found no further confirmed issue. Scoped lint passed; the app typecheck was blocked only by the concurrent attachment test fixture, with no whiteboard error. Packaged WKWebView IME/zoom placement and trackpad pencil checks remain unperformed.
 
 ### M68.4b Connectors join cards by their sides and carry labels
 
@@ -233,6 +240,7 @@ Roadmap risks: no rotation (D14; .1, .3b); the Rust validator twins the TS scene
 - **Acceptance:** connectors bind to a side or a node and labels edit in place, each one undo step. The UI never writes a dangling edge, the human twin of edit_canvas's refusal. Deleting a node detaches its UI-made edges in the same commit. No Rust, IPC, mock, schema step, code or twin.
 - **Wave** 7 · **Depends** M68.1, .4 · **Size** L · **Crash risk** no · **Packaged check** no
 - **Commit:** `feat(whiteboard): connectors join cards by their sides and carry labels (M68.4b)`.
+- **Implemented and checked, 2026-10-15 (unstaged):** connector and line tools, screen-sized side ports and halos, free previews, atomic new-card-plus-edge creation, endpoint rebinding and in-place connection labels are implemented. The focused board/ports/command suites passed 112 tests; the final text/atomic-refusal/source/convention run passed 31 tests. Both connector browser scenarios passed, proving side bindings, omitted sides, arrow-free lines, exact one-step Undo, new-card deletion with its edge, endpoint changes and labels with unknown edge keys retained. The screenshot was inspected. Scoped lint passed; the latest app typecheck reached only concurrent sheet errors, with no whiteboard error. No backend or artifact change was required.
 
 ### M68.4c The inspector, align and distribute, and a board clipboard
 
@@ -250,6 +258,7 @@ Roadmap risks: no rotation (D14; .1, .3b); the Rust validator twins the TS scene
 - **Packaged check:** copy and paste within and between boards in WKWebView; plain text from Notes.
 - **Wave** 8 · **Depends** M68.1, .4b; M65.1 · **Size** L · **Crash risk** no · **Packaged check** yes
 - **Commit:** `feat(whiteboard): the inspector, align and distribute, and a board clipboard (M68.4c)`.
+- **Implemented and checked, 2026-10-15 (unstaged):** the inspector, numeric scrubbing, durable colours and per-family defaults, arrangement commands, clipboard, Duplicate and Alt-drag are implemented. The scene/whiteboard/command suites passed 365 tests; the final edge run passed 42 tests, adding three regressions for mixed-item edits, clipboard retirement of a live connector and separate shape/text defaults. Both browser scenarios passed, proving exact save and Undo counts for colours, align/distribute, copied internal edges, cut, Duplicate and Alt-drag. The screenshot was inspected. All three TypeScript configurations and scoped lint passed. Independent review found no additional data-loss or lifetime issue. Packaged WKWebView clipboard checks remain unperformed.
 
 ### M68.5 Linked cards through one resolver; a missing target keeps its pointer; boards nest at most 8 deep
 
@@ -267,6 +276,7 @@ Roadmap risks: no rotation (D14; .1, .3b); the Rust validator twins the TS scene
 - **Packaged check:** cards at 50% and 200% and mid-drag in WKWebView (fallback: an HTML layer fed by the drawn boxes). **Obsidian check:** an Obsidian board with note, image and link cards shows live cards; after one moves in Cerebro, Obsidian reopens it with every pointer intact.
 - **Wave** 7 · **Depends** M68.1–.4, .3c; M55.8, .11, .14; M59.3; M65.9; M66.1, .2, .4, .4b · **Size** L · **Crash risk** no · **Packaged check** yes
 - **Commit:** `feat(whiteboard): cards show the pages, records, diagrams, images and links they point at (M68.5)`.
+- **Implemented and checked, 2026-10-15 (unstaged):** exact-path card resolution, page/status faces, inert diagrams, vault images, guarded web links, nested boards, the shared 16-entry read cache, Add card and safe pointer/text exports are implemented. The focused whiteboard/page/viewport suite passed 187 tests, including a nine-board chain that reads only eight, shared reads, stale-vault refusal, native Open event isolation, bounded picker results and export removal of live HTML/URLs. All three browser journeys passed: every face and decoded poster, no-write record Open with the board mounted, missing-pointer movement, one-step Add/Undo and a Pages rename that leaves the old pointer and board bytes unchanged. The screenshot was inspected. Scoped lint and all three TypeScript configurations passed. Packaged WKWebView and Obsidian interoperability checks remain unperformed.
 
 ### M68.5b Whiteboard tabs seed a `.canvas`; `.mmd` tabs keep working; New → Whiteboard
 
@@ -285,6 +295,8 @@ Roadmap risks: no rotation (D14; .1, .3b); the Rust validator twins the TS scene
 - **Wave** 8 · **Depends** M68.2b, .3, .4, .5; M59.3; M65.5 · **Size** M · **Crash risk** no · **Packaged check** no
 - **Commit:** `feat(views): whiteboard tabs and New → Whiteboard make .canvas boards; .mmd tabs keep working (M68.5b)`.
 
+- **Implemented and checked, 2026-10-15 (unstaged):** new tabs create `.canvas` files through the guarded create door, existing `.mmd` pointers keep the Mermaid branch, and missing/invalid/non-board pointers retain their honest faces. New → Whiteboard and `c w` create deduped root files and open them as pages. The focused suite passed 152 tests; all eight browser journeys passed, covering creation, one-step Add record/Undo, reopening, keyboard picker selection, legacy Mermaid edits/chip drags, and both launcher entry points. The new-tab screenshot was inspected and scoped lint passed. All three TypeScript configurations passed after the concurrent import-source typing repair. No native-only claim is made.
+
 ### M68.5c A `cerebro-whiteboard` page block: read-only with Open, guarded at 8 levels, saved byte for byte
 
 - **What:** M29.48 refuses whiteboards inside blocks; D14 keeps the page block read-only with Open. .3c gives the grammar and embed, .5 the guard; this part gives the block its disk carrier (M55.4, M55.6).
@@ -301,6 +313,8 @@ Roadmap risks: no rotation (D14; .1, .3b); the Rust validator twins the TS scene
 - **Wave** 9 · **Depends** M68.3c, .5, .5b; M55.4, .6, .14; M53.31; M59.3 · **Size** M · **Crash risk** no · **Packaged check** yes
 - **Commit:** `feat(editor): a cerebro-whiteboard block shows a board read-only with Open (M68.5c)`.
 
+- **Implemented and checked, 2026-10-15 (unstaged):** the raw `cerebro-whiteboard` carrier, read-only block, missing-pointer chooser, bounded picker, page-relative New whiteboard and slash focus are implemented. The focused block/carrier/creation suite passed 470 tests, including raw bytes through two saves, nested containers, copy, reconcile and unmount flush, plus late creation after a batched vault round trip. Both page-block browser journeys and the launcher regression passed (3 flows); the screenshot was inspected. Browser measurement exposed the app-wide overscroll reset trapping the wheel inside clipped embedded content; the scoped embed override now lets the page scroll. All three TypeScript configurations and scoped lint passed. Packaged WKWebView wheel/Open/clipboard checks remain unperformed.
+
 ### M68.6 Convert a manual-layout `.mmd` board into a new `.canvas` with an import report; the `.mmd` stays
 
 - **What:** CANVAS-6, mermaid half; nothing converts today. `%% cerebro:pos` stores centres only, and demo-vault holds no manual board, so sizes come from the live render or defaults, and fixtures are in-test. The engine admits no `@/mermaid/` import, so a thin adapter reads the flowchart model outside it.
@@ -316,6 +330,7 @@ Roadmap risks: no rotation (D14; .1, .3b); the Rust validator twins the TS scene
 - **Obsidian check:** the converted board opens in Obsidian with its cards, groups, labels and arrows.
 - **Wave** 9 · **Depends** M68.1, .2, .5, .5b · **Size** M · **Crash risk** no · **Packaged check** no
 - **Commit:** `feat(whiteboard): convert a manual-layout .mmd board into a .canvas, with a report (M68.6)`.
+- **Implemented and checked, 2026-10-15 (unstaged):** conversion is available for nonempty manual flowcharts on the diagram page and legacy whiteboard tabs. The report precedes every write; the create door chooses a free `.canvas` name and leaves the `.mmd` unchanged. The pure/adapter/dialog/host suite passed 70 tests, including deterministic bytes, group nesting, shape and style losses, measured geometry, tab repointing and stale async results. The real browser flow passed with a record card, nested frame, labelled connections, hex colour and stored centres within two units; Cancel creates nothing. Screenshots were inspected. That inspection found measurement initially selecting a header SVG icon; the repaired helper binds the diagram's SVG and the final browser report confirms measured sizes. Scoped lint and all three TypeScript configurations passed. Obsidian open/save remains unperformed.
 
 ### M68.7 read_canvas: agents read a whiteboard, on the one Rust JSON Canvas codec, with caps in shared JSON
 
@@ -333,6 +348,7 @@ Roadmap risks: no rotation (D14; .1, .3b); the Rust validator twins the TS scene
 - **Live check:** "what does boards/plan.canvas say?" calls read_canvas, folds as "Read a whiteboard" and quotes a node.
 - **Wave** 6 · **Depends** M68.1, .2; M66.1, .2, .8; M67.2; M64.2c; M62.5; M60.3; M57.4; M56.8; M55.2; M54.1, .2, .4, .5, .7, .10; M53.20 · **Size** L · **Crash risk** no · **Packaged check** no
 - **Commit:** `feat(mcp): read_canvas reads a whiteboard on the one Rust JSON Canvas codec (M68.7)`.
+- **Implemented and checked, 2026-10-15 (unstaged):** `read_canvas` is a scoped read-toolset capability with a strict canvas target and bounded JSON answers. The Rust writer replays the same byte goldens as TypeScript, including raw unknown numbers, escaped values and negative-zero ink points. Native tests prove node/byte paging, first-node cuts, hub-edge continuation, invalid-board refusals, untouched bytes/mtime/write rows, and canonical-descriptor scope before bytes. The broader native run passed 715 checks; the new catalog count and additional canvas filters passed in the follow-up. All-target Clippy passed. TypeScript focused checks passed 299, policy/prompt checks passed 420, and a final 201-test digest/twin/IPC pass was green; all three typechecks and scoped lint passed. Independent scope and codec/paging reviews closed. The requested live CLI read remains unperformed.
 
 ### M68.7b edit_canvas: one checked batch of node and edge ops, validated in Rust, written once, twinned in the mock
 
@@ -417,6 +433,7 @@ Each default applies if unanswered. Ask Q1–Q3 before wave 1, Q4–Q8 before 2,
 - **Size:** 13.5 L, 2.25× the roadmap. Seams if a part outgrows L: .2's Rust reader as .2c; .4c's clipboard as .4d; .5's AddCardPopover as .5d; .7b's mock twin as .7d.
 - **Obsidian's bytes are unverified** (no Obsidian here, no vendored spec). The layout lives in format.v1, so a mismatch is one artifact edit (Q4). Obsidian may drop `cerebro` or unknown keys on its own save, and then shapes and ink vanish; the .2 check records it.
 - **D14** trades rotation for interop: no rotation or free transform, edges bind to box sides, shapes and ink are invisible in Obsidian.
+- **Reader copy reconciliation (.2):** syntax failures use the same short sentence in both readers ("This whiteboard isn't valid JSON.") rather than leaking parser-specific diagnostics; other reasons name the invalid field. Size errors state the exact shared byte cap, and unsupported versions state the received version without assuming it is newer. Shared cases pin these words.
 - **D3 twins** (reader, writer, planner) are held by `cases.json`, the goldens and `canvas-edit-cases.json`. Recorded divergences: syntax-error words differ (verdicts compare by reason); a repeated key keeps first place and last value; `1.0` is not whole in a file, while an agent's integral float counts.
 - **WebKit:** foreignObject under CSS transforms for markdown and live cards (.3, .5, each with a fallback); trackpad pointer capture (.3b); IME (.4); dropped custom clipboard types (.4c, in-memory fallback); the native Edit menu may take ⌘Z first (M55.10). Only packaged checks prove these.
 - **Performance:** no culling, since export needs every node; NodeView memo limits re-renders to what moved; 500+ foreignObject cards may lag at low zoom; nested previews fan out (the guard bounds depth, not breadth; reads cache per path and hash); each `.mmd` card renders mermaid.

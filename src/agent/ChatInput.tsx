@@ -1,3 +1,4 @@
+import { formatWikilink, linkTargetOf } from '@/engine/wikilink';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { useEscapeLayer } from '@/components/ui/Popover';
@@ -158,7 +159,9 @@ export function ChatInput({
   const complete = (entry: Entry) => {
     if (query === null) return;
     const caret = ref.current?.selectionStart ?? value.length;
-    onChange(`${value.slice(0, query.start)}[[${entry.title}]]${value.slice(caret)}`);
+    onChange(
+      `${value.slice(0, query.start)}${formatWikilink(linkTargetOf(entry))}${value.slice(caret)}`,
+    );
     setActive(0);
     requestAnimationFrame(() => ref.current?.focus());
   };

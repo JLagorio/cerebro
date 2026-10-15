@@ -1,3 +1,6 @@
+import { usePaneId } from '@/stores/navStore';
+import type { EntryStateKey } from '@/stores/navStore';
+import type { TimeSlot } from '@/engine/timeGrid';
 import React, { useEffect, useMemo } from 'react';
 import type { ColumnDef } from '@/engine/columns';
 import type { Zoom } from '@/engine/schedule';
@@ -21,6 +24,7 @@ import { TimelineView } from '@/views/TimelineView';
 import { WhiteboardView, type WhiteboardHost } from '@/views/WhiteboardView';
 import { buildRows, entryRows } from '@/engine/rows';
 import { hasBlocks, isCanvas } from '@/views/viewKinds';
+import { useVaultStore } from '@/stores/vaultStore';
 import { useUiStore } from '@/stores/uiStore';
 
 /**
@@ -33,6 +37,7 @@ import { useUiStore } from '@/stores/uiStore';
  * them the same way, and a new view kind is one case here.
  */
 export interface ViewCanvasProps {
+  entryScrollKey?: EntryStateKey;
   /** Filtered and sorted by the caller. */
   entries: Entry[];
   /** The whole vault, for resolving nested children outside the query. */
@@ -40,10 +45,8 @@ export interface ViewCanvasProps {
   presentation: Presentation;
   schema: Schema;
   fields: ColumnDef[];
-  /** Collapse-state namespace — `list:<id>`, `project:<path>`, `type:<name>`. */
+  /** Collapse-state namespace — `list:<id>`, `type:<name>`. */
   scope: string;
-  /** Project context enables the list's quick-add row. */
-  project?: Entry | null;
   /** Type new records get. */
   createType?: string;
   /**
@@ -61,7 +64,7 @@ export interface ViewCanvasProps {
   filtered: boolean;
   onCreate?: (title: string, band: { groupBy: string; groupValue: string }) => Promise<boolean>;
   /** Create dated to a calendar day. */
-  onCreateOn?: (title: string, day: string) => Promise<boolean>;
+  onCreateOn?: (title: string, day: string, slot?: TimeSlot) => Promise<boolean>;
   onColumnsChange?: (next: ColumnSpec[]) => void;
   /** M11: persists presentation-level layout state (the table's name width). */
   onPresentationChange?: (next: Presentation) => void;
@@ -104,7 +107,6 @@ export function ViewCanvas({
   schema,
   fields,
   scope,
-  project = null,
   createType,
   filtered,
   onCreate,
@@ -118,6 +120,7 @@ export function ViewCanvas({
   onSaveView,
   today,
   embedded = false,
+  entryScrollKey,
   whiteboardHost,
 }: ViewCanvasProps): React.ReactElement {
   // M16.11: the detail panel steps through the records THIS canvas is
@@ -128,12 +131,18 @@ export function ViewCanvas({
   // `buildRows` is the same pure function the table, list, timeline and gantt
   // each call to lay themselves out, so this is the display order rather than
   // an approximation of it.
+  const pane = usePaneId();
   const setDetailSiblings = useUiStore((s) => s.setDetailSiblings);
+  const vaultPath = useVaultStore((s) => s.vaultPath);
   const key = useMemo(
     () =>
-      entryRows(buildRows({ entries, group: presentation.group, schema, allEntries }))
-        .map((r) => r.entry.path)
-        .join('\n'),
+      [
+        ...new Set(
+          entryRows(buildRows({ entries, group: presentation.group, schema, allEntries })).map(
+            (r) => r.entry.path,
+          ),
+        ),
+      ].join('\n'),
     [entries, presentation.group, schema, allEntries],
   );
   // A dashboard shows no records of ITS OWN — each block shows a different
@@ -148,8 +157,12 @@ export function ViewCanvas({
   const composed = hasBlocks(presentation.type) || isCanvas(presentation.type);
   useEffect(() => {
     if (embedded) return;
-    setDetailSiblings(key === '' || composed ? [] : key.split('\n'));
-  }, [key, setDetailSiblings, embedded, composed]);
+    const paths = key === '' || composed ? [] : key.split('\n');
+    setDetailSiblings(paths, pane);
+    return () => {
+      if (useUiStore.getState().siblingsByPane[pane] === paths) setDetailSiblings([], pane);
+    };
+  }, [key, setDetailSiblings, embedded, composed, pane]);
 
   // The return type is the exhaustiveness check (M16.3). Without it, and with
   // no `default` below and no `noImplicitReturns` in tsconfig, adding a
@@ -158,6 +171,7 @@ export function ViewCanvas({
     case 'table':
       return (
         <TableView
+          entryScrollKey={embedded ? undefined : entryScrollKey}
           entries={entries}
           allEntries={allEntries}
           presentation={presentation}
@@ -191,8 +205,10 @@ export function ViewCanvas({
     // anything lands in it, so it has no records empty state to caption, and a
     // dashboard's blocks each answer the question for their own query below.
     case 'calendar':
+      // Pending slot titles and live gestures belong to this exact write target.
       return (
         <CalendarView
+          key={`${vaultPath}\0${scope}\0${presentation.dateField ?? ''}`}
           entries={entries}
           presentation={presentation}
           schema={schema}
@@ -276,12 +292,7 @@ export function ViewCanvas({
           allEntries={allEntries}
           presentation={presentation}
           schema={schema}
-          project={project}
           scope={scope}
-          createType={createType}
-          // M15: the list layout gets the same create + empty-state contract
-          // the table has. It was gated on `project`, which no ViewCanvas call
-          // site passes, so a List-layout tab could not create at all.
           onCreate={onCreate}
           filtered={filtered}
         />

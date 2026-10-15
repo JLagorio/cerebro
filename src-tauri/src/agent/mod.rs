@@ -7,6 +7,7 @@
 //! machine except through the CLI the user already installed and signed into.
 
 pub mod cli_writes;
+pub mod condition;
 mod connector_signals;
 pub mod failure;
 pub mod fold;
@@ -196,6 +197,7 @@ pub(crate) fn close_run(close: RunClose<'_>, emit: &mut dyn FnMut(AgentEvent)) {
     use crate::git::changeset::{self, RunChangeset, SettleRun};
     let changeset = match close.meter {
         None => RunChangeset::NotRecorded {
+            kept_out_of_git: 0,
             run_id: None,
             reason: NO_DURABLE_ID.into(),
             files: Vec::new(),
@@ -335,8 +337,9 @@ pub struct AgentRequest {
     /// attended run that names no connector, in `connector_names` or in its
     /// declared tools, may fall back to legacy open mode — the user's own MCP
     /// config — when the vault has no connectors.json (PR #5 security review,
-    /// M54.9), and only an attended run reaches connectors its record does
-    /// not name (M54.9). Absent reads as unattended: a missing field must
+    /// M54.9), while personal client access is off (M62.5c). Only an attended
+    /// run reaches connectors its record does not name (M54.9). Absent reads
+    /// as unattended: a missing field must
     /// never widen access.
     pub attended: Option<bool>,
     /// Does this run's agent ask before its page writes (M57.4)? The
@@ -420,8 +423,8 @@ pub struct AgentRequest {
     /// capped, and the prompt quotes it as data. An attended request is
     /// always recorded as attended, whatever this says.
     pub cause: Option<crate::runtime::cause::CauseRequest>,
-    /// True only for cerebro's own three internal runs (ingest, maintain,
-    /// assembly synthesis), whose spawn sites construct this struct directly
+    /// True only for cerebro's own internal runs (ingest, maintain,
+    /// assembly synthesis and pre-run checks), whose spawn sites construct this struct directly
     /// in Rust — nothing else CAN set it: `skip_deserializing` makes the
     /// field unreachable from the wire (it deserializes as
     /// `bool::default()`, false), so "internal" is a structural fact, not a
@@ -827,13 +830,26 @@ const STDERR_FAILURE_CHARS: usize = 2000;
 
 const QUITTING: &str = "Cerebro is quitting, so no new agent run can start.";
 
-/// One live run (M53.10).
+/// Serialize reading connector policy and registering a child with changing
+/// personal client access. The listener takes this before enabling, so it
+/// cannot open between a legacy run's config read and its slot becoming visible.
+pub(crate) fn connector_setup_lock() -> Result<MutexGuard<'static, ()>, String> {
+    static SETUP: Mutex<()> = Mutex::new(());
+    SETUP.lock().map_err(|_| "Connector setup is unavailable. Restart Cerebro before changing client access or starting a run.".into())
+}
+
+/// One live run (M53.10), attributed until the child is reaped (M63.5).
 struct RunSlot {
     /// The CLI, the leader of its own process group.
     handle: crate::spawn::Handle,
     /// The vault the run works in, canonical where the filesystem can say,
     /// so a vault switch can tell this vault's runs from the new one's.
     vault: PathBuf,
+    /// False means the CLI inherited the person's MCP config. Such a child
+    /// must finish before a personal listener can be enabled.
+    strict_mcp: bool,
+    /// The same actor carried by the request and its meter; bare chat is None.
+    actor: Option<String>,
     /// Set once the run is stopped: a person's Stop, a vault switch, quit, or
     /// the elapsed watchdog. The reader then books it `cancelled` rather than
     /// abandoned (the watchdog's abort outranks that), and reports no stderr
@@ -904,6 +920,31 @@ pub(crate) fn vault_key(vault: &Path) -> PathBuf {
 }
 
 impl AgentState {
+    /// A stopped child remains live until the reader reaps it and removes
+    /// its slot. Canonical vault identity prevents aliases bypassing this.
+    pub fn live_for(&self, vault: &Path, actor: &str) -> bool {
+        let vault = vault_key(vault);
+        lock(&self.slots)
+            .values()
+            .any(|slot| slot.vault == vault && slot.actor.as_deref() == Some(actor))
+    }
+
+    pub fn refuse_if_running(&self, vault: &Path, actor: &str) -> Result<(), String> {
+        if self.live_for(vault, actor) {
+            Err(format!("{actor} is already running, so Run now did not start another. Let that run finish, or stop it first."))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Called under `connector_setup_lock` before enabling the client port.
+    /// A cancelled slot still owns a child until reaping, so it counts too.
+    pub(crate) fn ensure_client_access_safe(&self) -> Result<(), String> {
+        if lock(&self.slots).values().any(|slot| !slot.strict_mcp) {
+            return Err("Wait for runs using your global MCP config to finish, or stop them, before turning on access for other apps.".into());
+        }
+        Ok(())
+    }
     /// The ask seam's book (M57.1).
     pub fn interactions(&self) -> &interaction::Interactions {
         &self.interactions
@@ -1518,6 +1559,7 @@ pub(crate) fn run_connectors(
 fn connector_reach(
     vault: &Path,
     req: &AgentRequest,
+    client_access: &crate::app_config::ClientAccessConfig,
 ) -> (serde_json::Map<String, Value>, bool, RunConnectors) {
     let context = crate::connectors::connector_context(
         vault,
@@ -1528,6 +1570,11 @@ fn connector_reach(
         req.connector_names.as_deref(),
         req.attended.unwrap_or(false),
         req.approved_stdio.as_deref().unwrap_or(&[]),
+    );
+    let context = crate::connectors::isolate_client_access(
+        context,
+        client_access,
+        req.connector_names.as_deref(),
     );
     let merged = context.servers;
     // Legacy open mode, the one unpinned case, loads the person's own MCP
@@ -1640,6 +1687,25 @@ pub(crate) fn build_args(
     let mut denied: Vec<&str> = approval.disallowed.iter().map(String::as_str).collect();
     if !req.internal {
         denied.extend(connectors.deny.iter().map(String::as_str));
+    }
+    let mail_denials: Vec<String> = if !req.internal && req.attended != Some(true) {
+        connectors
+            .servers
+            .iter()
+            .flat_map(|(_, cli)| {
+                crate::policy::mail::table()
+                    .unattended_denied_tools
+                    .iter()
+                    .map(move |tool| format!("mcp__{cli}__{tool}"))
+            })
+            .collect()
+    } else {
+        vec![]
+    };
+    for denial in &mail_denials {
+        if !denied.contains(&denial.as_str()) {
+            denied.push(denial);
+        }
     }
     if !denied.is_empty() {
         args.push("--disallowedTools".into());
@@ -1935,6 +2001,22 @@ pub fn stream(
         }
     };
 
+    // M69.5: only this run's granted connector spellings may supply page
+    // bytes. The reader owns the lease and drops it even on init refusal,
+    // cancellation, read failure or panic; a session replay never arms one.
+    let capture = meter.as_ref().and_then(|meter| {
+        let held = granted_cli_tools(&req, &approval, &connectors)
+            .iter()
+            .any(|name| name == "mcp__cerebro__import_notion_page");
+        let names = crate::import::capture::eligible_names(
+            held,
+            &connectors.servers,
+            &connectors.allow,
+            &connectors.deny,
+        );
+        crate::import::capture::arm(&meter.run_id, names)
+    });
+
     // M25.2: the elapsed watchdog. `live` goes false once the reader has
     // reaped the child, so a run that finishes in nine seconds does not leave
     // a thread parked for the remaining ten minutes, and a child that closes
@@ -2032,9 +2114,16 @@ pub fn stream(
         };
         // M54.5: a run whose tools failed to load is ended at its init, and
         // not booked cancelled, since nobody asked for that stop.
-        let mut tally = read_stream(stdout, gate, &mut observer, &mut emit, &mut || {
-            reaper.end(run, false);
-        });
+        let mut tally = read_stream_with_capture(
+            stdout,
+            gate,
+            &mut observer,
+            &mut emit,
+            &mut || {
+                reaper.end(run, false);
+            },
+            capture,
+        );
         // M57.2: the asks nobody could answer, which the run went without.
         tally.withhold(&approval.withheld);
         // M53.11: once the child has exited, its bearer resolves for the
@@ -2114,6 +2203,7 @@ pub fn stream(
             let _ = done.send(meter::RunEnd {
                 outcome,
                 usage,
+                facts: Some(tally.facts().clone()),
                 answer,
                 failure,
             });
@@ -2320,7 +2410,22 @@ fn spawn_run(
     sweep_run_configs(config_dir);
     let run = RUN_SEQ.fetch_add(1, Ordering::Relaxed);
     let config_path = config_dir.join(format!("mcp-config-{run}.json"));
-    let (extra_servers, strict_mcp, reach) = connector_reach(vault, req);
+    let _connector_setup = connector_setup_lock()?;
+    // M63.5: the first manual check runs before any bearer or lease. Check
+    // again under the spawn/registration lock: another start may have landed
+    // while this caller booked its budget, but cannot race past this check.
+    if req.attended != Some(true)
+        && req
+            .cause
+            .as_ref()
+            .is_some_and(|cause| cause.kind == "manual")
+    {
+        if let Some(actor) = req.actor.as_deref() {
+            state.refuse_if_running(vault, actor)?;
+        }
+    }
+    let client_access = crate::client_access::connector_config()?;
+    let (extra_servers, strict_mcp, reach) = connector_reach(vault, req, &client_access);
     write_run_config(&config_path, &mcp_config_json(url, token, &extra_servers))?;
     // M57.1: a seated run that asks gets its hook in a settings file beside
     // the config, owner-only, swept and removed the same way.
@@ -2408,6 +2513,8 @@ fn spawn_run(
     let slot = RunSlot {
         handle: supervised.handle(),
         vault: vault_key(vault),
+        strict_mcp,
+        actor: req.actor.clone(),
         cancelled: cancelled.clone(),
     };
     if let Err(refusal) = state.insert(run, slot) {
@@ -2456,15 +2563,31 @@ fn spawn_run(
 /// after this returns, and a child left blocked on a full stdout pipe never
 /// would. So a line that is not UTF-8 is decoded lossily rather than ending
 /// the read.
+#[cfg(test)]
 pub(crate) fn read_stream(
+    stdout: impl Read,
+    gate: InitGate,
+    observer: &mut connector_signals::Observer,
+    emit: &mut dyn FnMut(AgentEvent),
+    end_run: &mut dyn FnMut(),
+) -> meter::Tally {
+    read_stream_with_capture(stdout, gate, observer, emit, end_run, None)
+}
+
+fn read_stream_with_capture(
     stdout: impl Read,
     mut gate: InitGate,
     observer: &mut connector_signals::Observer,
     emit: &mut dyn FnMut(AgentEvent),
     end_run: &mut dyn FnMut(),
+    mut capture: Option<crate::import::capture::Lease>,
 ) -> meter::Tally {
     let mut reader = BufReader::new(stdout);
-    let mut fold = fold::TranscriptFold::default();
+    let mut fold = capture
+        .as_ref()
+        .map_or_else(fold::TranscriptFold::default, |lease| {
+            fold::TranscriptFold::with_capture(lease.handle())
+        });
     // M25.2: what this run cost, accumulated as the stream is read. It never
     // reaches the fold or the event channel — the panel has no business
     // knowing about tokens, and a number the renderer can see is a number
@@ -2501,6 +2624,7 @@ pub(crate) fn read_stream(
             emit(event);
         }
         if admitted.refuse {
+            capture.take();
             tally.refuse_init();
             end_run();
         }
@@ -3886,8 +4010,59 @@ mod tests {
         RunSlot {
             handle,
             vault: PathBuf::from(vault),
+            strict_mcp: true,
+            actor: None,
             cancelled: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn live_for_names_this_vaults_run_of_that_actor() {
+        let state = AgentState::default();
+        let mut reaped = Reaped(Vec::new());
+        let dir = crate::vault::testutil::temp_vault("run-now-identity");
+        let mut slot = sleeping(&vault_key(&dir).to_string_lossy(), &mut reaped);
+        slot.actor = Some("process:scout".into());
+        state.insert(1, slot).unwrap();
+        assert!(state.live_for(&dir, "process:scout"));
+        assert!(state.live_for(
+            &dir.join("..").join(dir.file_name().unwrap()),
+            "process:scout"
+        ));
+        assert!(!state.live_for(Path::new("/other-vault"), "process:scout"));
+        assert!(!state.live_for(&dir, "process:other"));
+        state.finish(1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stopped_run_counts_until_its_child_is_reaped() {
+        let state = AgentState::default();
+        let mut reaped = Reaped(Vec::new());
+        let mut slot = sleeping("/vault", &mut reaped);
+        slot.actor = Some("process:scout".into());
+        state.insert(1, slot).unwrap();
+        assert!(state.stop(1).unwrap());
+        assert!(state.live_for(Path::new("/vault"), "process:scout"));
+        state.finish(1);
+        assert!(!state.live_for(Path::new("/vault"), "process:scout"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuse_if_running_names_the_actor_and_passes_a_free_agent() {
+        let state = AgentState::default();
+        let mut reaped = Reaped(Vec::new());
+        let mut slot = sleeping("/vault", &mut reaped);
+        slot.actor = Some("process:scout".into());
+        state.insert(1, slot).unwrap();
+        assert_eq!(state.refuse_if_running(Path::new("/vault"), "process:scout"), Err("process:scout is already running, so Run now did not start another. Let that run finish, or stop it first.".into()));
+        assert!(state
+            .refuse_if_running(Path::new("/vault"), "process:other")
+            .is_ok());
+        state.finish(1);
     }
 
     /// Poll `done` until it holds or `limit` runs out.
@@ -4026,6 +4201,8 @@ mod tests {
                 RunSlot {
                     handle: supervised.handle(),
                     vault: PathBuf::from("/vaults/a"),
+                    strict_mcp: true,
+                    actor: None,
                     cancelled: Arc::new(AtomicBool::new(false)),
                 },
             )
@@ -4048,6 +4225,32 @@ mod tests {
         );
         let (status, _) = supervised.finish(TAIL_WAIT);
         assert!(!status.unwrap().success());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn client_access_waits_for_inherited_connectors_to_leave_even_after_stop() {
+        let state = AgentState::default();
+        let mut reaped = Reaped(Vec::new());
+        state.insert(1, sleeping("/vaults/a", &mut reaped)).unwrap();
+        assert!(
+            state.ensure_client_access_safe().is_ok(),
+            "strict runs keep running"
+        );
+        let mut legacy = sleeping("/vaults/a", &mut reaped);
+        legacy.strict_mcp = false;
+        state.insert(2, legacy).unwrap();
+        assert!(state
+            .ensure_client_access_safe()
+            .unwrap_err()
+            .contains("global MCP config"));
+        state.stop(2).unwrap();
+        assert!(
+            state.ensure_client_access_safe().is_err(),
+            "a stopping child may still connect"
+        );
+        state.finish(2);
+        assert!(state.ensure_client_access_safe().is_ok());
     }
 
     #[test]
@@ -4666,6 +4869,7 @@ mod tests {
             .chain([
                 crate::mcp::REPORT_TOOL.to_string(),
                 crate::assembly::prompt::SUBMIT_TOOL.to_string(),
+                crate::mcp::CONDITION_TOOL.to_string(),
             ])
             .collect();
         let granted = |declared: Option<&Vec<String>>| -> Vec<String> {
@@ -5133,7 +5337,7 @@ mod tests {
 
     /// The argv a run would get in this vault, and the servers it loads.
     fn reached(vault: &Path, req: &AgentRequest) -> (Vec<String>, Vec<String>) {
-        let (servers, strict, reach) = connector_reach(vault, req);
+        let (servers, strict, reach) = connector_reach(vault, req, &Default::default());
         let args = build_args(req, Path::new("/tmp/x.json"), strict, &reach);
         (args, servers.keys().cloned().collect())
     }
@@ -5144,6 +5348,33 @@ mod tests {
             .into_iter()
             .filter(|tool| tool.starts_with("mcp__") && !tool.starts_with(MCP_PREFIX))
             .collect()
+    }
+
+    #[test]
+    fn client_access_keeps_every_run_on_its_per_run_mcp_config() {
+        let (vault, keys) = connector_vault("client-access-strict", &["unrelated"]);
+        let access = crate::app_config::ClientAccessConfig {
+            enabled: true,
+            port: 37421,
+        };
+        for attended in [false, true] {
+            for internal in [false, true] {
+                let mut req = connector_turn(&keys);
+                req.attended = Some(attended);
+                req.internal = internal;
+                let (servers, strict, reach) = connector_reach(&vault, &req, &access);
+                let args = build_args(&req, Path::new("/tmp/run-config.json"), strict, &reach);
+                assert!(args.iter().any(|arg| arg == "--strict-mcp-config"));
+                assert_eq!(servers.contains_key("unrelated"), attended && !internal);
+            }
+        }
+        std::fs::remove_file(vault.join(crate::connectors::CONFIG_PATH)).unwrap();
+        let req = connector_turn(&[]);
+        let (servers, strict, reach) = connector_reach(&vault, &req, &access);
+        assert!(servers.is_empty());
+        let args = build_args(&req, Path::new("/tmp/run-config.json"), strict, &reach);
+        assert!(args.iter().any(|arg| arg == "--strict-mcp-config"));
+        assert!(connector_grants(&args).is_empty());
     }
 
     #[test]
@@ -5286,6 +5517,37 @@ mod tests {
     }
 
     #[test]
+    fn an_unattended_run_is_denied_mail_reading_connector_tools() {
+        let servers = owned(&["gmail", "work.mail"]);
+        let reach = run_connectors(&servers, None, Some(&owned(&["mcp__gmail__get_thread"])));
+        for attended in [true, false] {
+            let mut req = panel_style_request();
+            req.attended = Some(attended);
+            let args = build_args(&req, Path::new("/tmp/x.json"), true, &reach);
+            assert_eq!(
+                args.iter()
+                    .filter(|arg| *arg == "--disallowedTools")
+                    .count(),
+                1
+            );
+            let denied = flag_entries(&args, "--disallowedTools");
+            for (_, cli) in &reach.servers {
+                for tool in &crate::policy::mail::table().unattended_denied_tools {
+                    let name = format!("mcp__{cli}__{tool}");
+                    assert_eq!(
+                        denied.iter().filter(|value| **value == name).count(),
+                        usize::from(!attended || reach.deny.contains(&name)),
+                        "{name}"
+                    );
+                }
+            }
+            for rule in crate::policy::tool_approval::table().unattended_path_rules() {
+                assert_eq!(denied.contains(&rule), !attended, "{rule}");
+            }
+        }
+    }
+
+    #[test]
     fn connector_denials_ride_the_one_disallowed_flag() {
         // Live, `--disallowedTools mcp__toy__other` beat `--allowedTools
         // mcp__toy`, and beat the person's own allow rules too.
@@ -5401,7 +5663,7 @@ mod tests {
         // With connectors off it is pinned as ever, loading and granting none.
         req.connectors = Some(false);
         req.disallowed_tools = Some(owned(&["mcp__gmail__trash_thread"]));
-        let (servers, strict, reach) = connector_reach(&vault, &req);
+        let (servers, strict, reach) = connector_reach(&vault, &req, &Default::default());
         assert!(servers.is_empty() && strict);
         assert_eq!(reach, RunConnectors::default());
     }
@@ -5428,7 +5690,7 @@ mod tests {
                     &RunConnectors::default(),
                 );
                 req.disallowed_tools = Some(owned(&["mcp__gmail__trash_thread"]));
-                let (servers, strict, reach) = connector_reach(&vault, &req);
+                let (servers, strict, reach) = connector_reach(&vault, &req, &Default::default());
                 assert!(servers.is_empty());
                 assert_eq!(reach, RunConnectors::default());
                 assert_eq!(
@@ -5438,7 +5700,7 @@ mod tests {
                 );
 
                 req.connector_names = Some(owned(&["gmail"]));
-                let (servers, strict, reach) = connector_reach(&vault, &req);
+                let (servers, strict, reach) = connector_reach(&vault, &req, &Default::default());
                 assert!(servers.is_empty());
                 assert_eq!(
                     reach,
@@ -5470,7 +5732,7 @@ mod tests {
         let (vault, keys) = connector_vault("internal-none", &["gmail"]);
         let mut req = connector_turn(&keys);
         req.internal = true;
-        let (servers, strict, reach) = connector_reach(&vault, &req);
+        let (servers, strict, reach) = connector_reach(&vault, &req, &Default::default());
         assert!(servers.is_empty());
         assert!(strict);
         assert_eq!(reach, RunConnectors::default());
@@ -5489,7 +5751,7 @@ mod tests {
             "mcp__Cerebro__get_note",
             "mcp__gmail",
         ]));
-        let (servers, strict, reach) = connector_reach(&vault, &req);
+        let (servers, strict, reach) = connector_reach(&vault, &req, &Default::default());
         assert_eq!(
             servers.keys().map(String::as_str).collect::<Vec<_>>(),
             ["gmail"]
@@ -5614,7 +5876,7 @@ mod tests {
                 let mut req = connector_turn(&keys);
                 req.system_prompt = prompt.map(String::from);
                 req.connector_names = names.clone().map(|names| owned(&names));
-                let (servers, strict, reach) = connector_reach(&vault, &req);
+                let (servers, strict, reach) = connector_reach(&vault, &req, &Default::default());
                 assert!(reach.missing.is_empty(), "names={names:?}");
                 let args = build_args(&req, Path::new("/tmp/x.json"), strict, &reach);
                 assert_eq!(
@@ -5649,12 +5911,16 @@ mod tests {
                 &RunConnectors::default()
             )
         );
-        let (_, _, reach) = connector_reach(&vault, &{
-            let mut internal = connector_turn(&keys);
-            internal.internal = true;
-            internal.connector_names = Some(owned(&["linear"]));
-            internal
-        });
+        let (_, _, reach) = connector_reach(
+            &vault,
+            &{
+                let mut internal = connector_turn(&keys);
+                internal.internal = true;
+                internal.connector_names = Some(owned(&["linear"]));
+                internal
+            },
+            &Default::default(),
+        );
         assert!(reach.missing.is_empty(), "an internal run misses nothing");
     }
 
@@ -5874,6 +6140,7 @@ mod tests {
             "knowledge_about",
             crate::mcp::REPORT_TOOL,
             crate::assembly::prompt::SUBMIT_TOOL,
+            crate::mcp::CONDITION_TOOL,
         ]
         .into_iter()
         .collect();
@@ -5883,8 +6150,9 @@ mod tests {
             if !early.contains(name) {
                 continue;
             }
-            let held =
-                name == crate::mcp::REPORT_TOOL || name == crate::assembly::prompt::SUBMIT_TOOL;
+            let held = name == crate::mcp::REPORT_TOOL
+                || name == crate::assembly::prompt::SUBMIT_TOOL
+                || name == crate::mcp::CONDITION_TOOL;
             assert!(
                 tool["annotations"]["readOnlyHint"] == true || held,
                 "{name} loads early but is neither read-only nor held"
@@ -7209,6 +7477,7 @@ mod tests {
         assert_eq!(
             changeset_of(&events),
             &crate::git::changeset::RunChangeset::Nothing {
+                kept_out_of_git: 0,
                 run_id: "run-nothing".into(),
                 shell_unrecorded: false,
             }
@@ -7260,6 +7529,7 @@ mod tests {
         assert_eq!(
             changeset_of(&events),
             &crate::git::changeset::RunChangeset::Unavailable {
+                kept_out_of_git: 0,
                 run_id: "run-quitting".into(),
                 reason: crate::git::changeset::QUITTING.into(),
                 files: vec!["a.md".into()],

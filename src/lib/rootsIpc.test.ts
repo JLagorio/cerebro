@@ -9,7 +9,21 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({ open: openSpy }));
 
 import { initialRootsState, useRootsStore } from '@/stores/rootsStore';
 import { useUiStore } from '@/stores/uiStore';
-import { pickDirectory, rootGitFetch, rootGitPulse, rootGitRemoteStatus } from './rootsIpc';
+import {
+  fileUrl,
+  openFileOutside,
+  revealFile,
+  quickLookFile,
+  saveFileCopy,
+  probeFile,
+  readFileBytes,
+  pickDirectory,
+  rootGitFetch,
+  rootGitPulse,
+  rootGitRemoteStatus,
+} from './rootsIpc';
+import { fileRefusal } from '@/engine/fileBytes';
+import { seedBytes, reset as resetBytes } from './mockBytes';
 
 const TAURI = '__TAURI_INTERNALS__';
 
@@ -33,6 +47,73 @@ function remote(status: RemoteResult['status'], message = ''): RemoteResult {
 function asked(): string[] {
   return invokeSpy.mock.calls.map(([cmd]) => cmd as string);
 }
+
+describe('file bytes IPC', () => {
+  it('uses literal root and path keys and receives the raw response', async () => {
+    invokeSpy.mockResolvedValueOnce({ size: 5, mime: 'application/pdf' });
+    expect(await probeFile('0', 'a.pdf')).toMatchObject({ size: 5 });
+    expect(invokeSpy).toHaveBeenLastCalledWith('probe_file', { rootId: '0', path: 'a.pdf' });
+    invokeSpy.mockResolvedValueOnce(new Uint8Array([37, 80, 68, 70]).buffer);
+    expect(await readFileBytes('root-2', 'a.pdf')).toEqual(Uint8Array.from([37, 80, 68, 70]));
+    expect(invokeSpy).toHaveBeenLastCalledWith('read_file_bytes', {
+      rootId: 'root-2',
+      path: 'a.pdf',
+    });
+    invokeSpy.mockResolvedValueOnce([1, 2]);
+    expect(await readFileBytes('0', 'a.pdf')).toEqual(Uint8Array.from([1, 2]));
+  });
+  it('returns only typed refusals and rethrows transport failures', async () => {
+    for (const read of [probeFile, readFileBytes]) {
+      invokeSpy.mockRejectedValueOnce(fileRefusal('outside'));
+      expect(await read('0', 'a.pdf')).toEqual(fileRefusal('outside'));
+      invokeSpy.mockRejectedValueOnce('Command not found');
+      await expect(read('0', 'a.pdf')).rejects.toBe('Command not found');
+    }
+  });
+  it('changes native cache identity each read and uses data in a browser', async () => {
+    const first = await fileUrl('0', 'images/a b.png');
+    const second = await fileUrl('0', 'images/a b.png');
+    expect(first).toMatch(/^cerebro-file:\/\/localhost\/0\/images\/a%20b.png\?v=[A-Za-z0-9_-]+$/);
+    expect(first).not.toBe(second);
+    expect(invokeSpy).not.toHaveBeenCalled();
+    delete (window as unknown as Record<string, unknown>)[TAURI];
+    resetBytes();
+    seedBytes('0', 'a.png', { bytes: [1, 2] });
+    expect(await fileUrl('0', 'a.png')).toBe('data:image/png;base64,AQI=');
+    expect(await probeFile('0', 'a.png')).toMatchObject({ kind: 'image' });
+    expect(await readFileBytes('0', 'a.png')).toEqual(fileRefusal('wrong_door'));
+    resetBytes();
+  });
+});
+
+describe('desktop file action IPC', () => {
+  it.each([
+    [openFileOutside, 'open_file_outside'],
+    [revealFile, 'reveal_file'],
+    [quickLookFile, 'quick_look_file'],
+    [saveFileCopy, 'save_file_copy'],
+  ] as const)('keeps command and payload keys literal for %s', async (action, command) => {
+    invokeSpy.mockResolvedValueOnce({ state: 'cancelled' });
+    expect(await action('root-2', 'images/a b.png')).toEqual({ state: 'cancelled' });
+    expect(invokeSpy).toHaveBeenLastCalledWith(command, {
+      rootId: 'root-2',
+      path: 'images/a b.png',
+    });
+    invokeSpy.mockRejectedValueOnce({ code: 'changed', message: 'Reopen this file' });
+    expect(await action('0', 'a.png')).toEqual({ code: 'changed', message: 'Reopen this file' });
+    invokeSpy.mockRejectedValueOnce('Command not found');
+    await expect(action('0', 'a.png')).rejects.toBe('Command not found');
+    delete (window as unknown as Record<string, unknown>)[TAURI];
+    resetBytes();
+    seedBytes('0', 'a.png', { bytes: [1, 2] });
+    expect(await action('0', 'a.png')).toEqual({
+      code: 'desktop_only',
+      message: 'Desktop app only',
+    });
+    expect(await action('0', '../a.png')).toEqual(fileRefusal('bad_address'));
+    resetBytes();
+  });
+});
 
 /**
  * Inside Tauri a root git command's `Err` arrives as a rejection (M53.2). A

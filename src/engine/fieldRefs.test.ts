@@ -1,4 +1,5 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import YAML from 'yaml';
@@ -8,8 +9,10 @@ import {
   deleteBlockedWords,
   deleteBlockers,
   groupingUses,
+  formulaUses,
   listRefs,
   mapViewRefs,
+  planDatabaseRename,
   planFieldRename,
   refOwner,
   renameFlagWords,
@@ -18,6 +21,7 @@ import {
   typeDefRefs,
   viewRefs,
   type RefPosition,
+  type DatabaseRenameRead,
 } from './fieldRefs';
 import { humanize, splitFrontmatter } from './frontmatter';
 import { buildSchema, parseLayoutConfig } from './schema';
@@ -264,7 +268,7 @@ const maximalView = {
   presentation: {
     type: 'dashboard',
     group: [
-      { field: m('GroupSpec', 'field'), dir: 'asc', hideEmpty: true },
+      { field: m('GroupSpec', 'field'), dir: 'asc', hideEmpty: true, dateBucket: 'month' },
       {
         field: m('ForwardNest', 'field'),
         descend: { direction: 'forward', field: m('ForwardNest', 'field') },
@@ -325,6 +329,7 @@ const maximalView = {
 } as unknown as ViewDefinition;
 
 const maximalType = {
+  deadline: m('TypeDef', 'deadline'),
   name: m('TypeDef', 'name'),
   icon: m('TypeDef', 'icon'),
   color: m('TypeDef', 'color'),
@@ -498,6 +503,241 @@ function demoVault(): Entry[] {
 
 const DEMO = demoVault();
 
+const sourceRead = (content: string): DatabaseRenameRead => ({
+  content,
+  hash: createHash('sha256').update(content).digest('hex'),
+});
+const demoReads = () =>
+  new Map(
+    DEMO.map((entry) => [entry.path, sourceRead(readFileSync(join(VAULT, entry.path), 'utf8'))]),
+  );
+
+function databasePlan(
+  from: string,
+  to: string,
+  entries = DEMO,
+  reads = demoReads(),
+  lists: ListFile[] = [],
+) {
+  const result = planDatabaseRename(
+    { from, to },
+    { entries, schema: buildSchema(entries), lists, reads },
+  );
+  if (!result.ok) throw new Error(`refused: ${JSON.stringify(result.refusal)}`);
+  return result;
+}
+
+describe('planDatabaseRename (M60.11)', () => {
+  it('retags the demo’s 45 work items and rewrites every stored database reference in one plan', () => {
+    const reads = demoReads();
+    const result = databasePlan('Work item', 'Task', DEMO, reads);
+    expect(result.flagged).toEqual([]);
+    expect(result.counts).toEqual({
+      typeDocs: 4,
+      schemaReferences: 6,
+      records: 45,
+      pointers: 3,
+      views: 0,
+    });
+    const retags = result.ops.filter((op) => op.op === 'patch' && op.set.type === 'Task');
+    expect(retags).toHaveLength(45);
+    expect(retags.map((op) => op.path)).toEqual(
+      DEMO.filter((e) => e.type === 'Work item')
+        .map((e) => e.path)
+        .sort(),
+    );
+    expect(patchOf(result.ops, 'types/work-item.md').folder).toBeUndefined();
+    expect(fieldsOf(patchOf(result.ops, 'types/work-item.md')).blocked_by).toEqual({
+      kind: 'relation',
+      target: 'Task',
+    });
+    expect(fieldsOf(patchOf(result.ops, 'types/key-result.md')).deliverables).toEqual({
+      kind: 'relation',
+      target: 'Task',
+    });
+    expect(fieldsOf(patchOf(result.ops, 'types/epic.md')).progress).toMatchObject({
+      from: { type: 'Task', field: 'epic' },
+    });
+    expect(fieldsOf(patchOf(result.ops, 'types/project.md')).progress).toMatchObject({
+      from: { type: 'Task', field: 'project' },
+      calculate: 'percent_done',
+    });
+    expect(patchOf(result.ops, 'types/project.md').tabs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'tasks', source: { type: 'Task' }, scope: 'related' }),
+      ]),
+    );
+    expect(patchOf(result.ops, 'types/epic.md').tabs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'work-items', source: { type: 'Task' }, scope: 'related' }),
+      ]),
+    );
+    expect(result.ops.filter((op) => op.path === 'types/work-item.md').map((op) => op.op)).toEqual([
+      'patch',
+      'body',
+    ]);
+    const ownBody = result.ops.find((op) => op.path === 'types/work-item.md' && op.op === 'body');
+    expect(ownBody).toMatchObject({
+      body: splitFrontmatter(reads.get('types/work-item.md')!.content).body.replace(
+        '# Work item',
+        '# Task',
+      ),
+    });
+    const delivery = result.ops.filter((op) => op.path === 'delivery/delivery.md');
+    expect(delivery).toHaveLength(1);
+    expect(delivery[0]).toEqual({
+      op: 'replace_file',
+      path: 'delivery/delivery.md',
+      content: reads
+        .get('delivery/delivery.md')!
+        .content.replaceAll('database: Work item', 'database: Task'),
+      expectHash: reads.get('delivery/delivery.md')!.hash,
+    });
+    for (const op of result.ops) expect(op.expectHash).toBe(reads.get(op.path)!.hash);
+    expect(new Set(result.ops.map((op) => op.path)).size).toBe(50);
+  });
+
+  it('pins only an existing implicit record home, never moves the Type doc', () => {
+    const result = databasePlan('Epic', 'Programme');
+    expect(patchOf(result.ops, 'types/epic.md').folder).toBe('records/epics');
+    expect(result.ops.some((op) => op.path === 'types/programme.md')).toBe(false);
+    const own = makeEntry({ path: 'types/empty.md', title: 'Empty', type: 'Type' });
+    const reads = new Map([[own.path, sourceRead('---\ntype: Type\n---\n# Empty\n')]]);
+    const empty = databasePlan('Empty', 'Renamed', [own], reads);
+    expect(empty.ops).toHaveLength(1);
+    expect(empty.ops[0].op).toBe('body');
+  });
+
+  it('flags Lists and knowledge references without changing them or counting them as rewrites', () => {
+    const entry = makeEntry({ path: 'knowledge/concept.md', title: 'Concept', type: 'Work item' });
+    const reads = demoReads();
+    reads.set(
+      entry.path,
+      sourceRead(
+        '---\ntype: Work item\n---\n# Concept\n```cerebro-database\ndatabase: Work item\n```\n',
+      ),
+    );
+    const list = listOver('Work item', []);
+    const result = databasePlan('Work item', 'Task', [...DEMO, entry], reads, [list]);
+    expect(result.flagged).toEqual([
+      { kind: 'knowledge', path: entry.path },
+      { kind: 'list', path: list.path },
+    ]);
+    expect(result.ops.some((op) => op.path === entry.path || op.path === list.path)).toBe(false);
+    expect(result.counts.records).toBe(45);
+    expect(result.counts.pointers).toBe(3);
+  });
+
+  it('combines retag and pointer rewrite as patch then body, with exact source preconditions', () => {
+    const entry = makeEntry({ path: 'templates/work.md', type: 'Work item' });
+    const reads = demoReads();
+    const content =
+      '---\ntype: Work item\nother: keep\n---\n# Template\n```cerebro-database\ndatabase: Work item\nview: all\n```\n';
+    reads.set(entry.path, sourceRead(content));
+    const result = databasePlan('Work item', 'Task', [...DEMO, entry], reads);
+    expect(result.ops.filter((op) => op.path === entry.path)).toEqual([
+      {
+        op: 'patch',
+        path: entry.path,
+        set: { type: 'Task' },
+        expectHash: reads.get(entry.path)!.hash,
+      },
+      {
+        op: 'body',
+        path: entry.path,
+        body: splitFrontmatter(content).body.replace('database: Work item', 'database: Task'),
+        expectHash: reads.get(entry.path)!.hash,
+      },
+    ]);
+  });
+
+  it('preserves raw field additions and uses the read’s fields instead of an earlier scan', () => {
+    const reads = demoReads();
+    const path = 'types/work-item.md';
+    const old = reads.get(path)!.content;
+    reads.set(
+      path,
+      sourceRead(
+        old.replace(
+          'blocked_by: { kind: relation, target: Work item }',
+          'blocked_by: { kind: relation, target: Work item, future: kept }\n  custom: { kind: future, from: { type: Work item, field: edge, other: kept } }',
+        ),
+      ),
+    );
+    const result = databasePlan('Work item', 'Task', DEMO, reads);
+    const fields = fieldsOf(patchOf(result.ops, path));
+    expect(fields.blocked_by).toEqual({ kind: 'relation', target: 'Task', future: 'kept' });
+    expect(fields.custom).toEqual({
+      kind: 'future',
+      from: { type: 'Task', field: 'edge', other: 'kept' },
+    });
+    expect(result.counts.schemaReferences).toBe(7);
+  });
+
+  it('walks reverse nests and tab sources while leaving ordinary text and view ids alone', () => {
+    const own = makeEntry({ path: 'types/a.md', title: 'A', type: 'Type' });
+    const other = makeEntry({ path: 'types/b.md', title: 'B', type: 'Type' });
+    const reads = new Map([
+      [own.path, sourceRead('---\ntype: Type\n---\n# A\n')],
+      [
+        other.path,
+        sourceRead(
+          '---\ntype: Type\nviews:\n- id: A\n  name: A\n  presentation:\n    type: table\n    group:\n    - field: link\n      descend: { direction: reverse, type: A, field: link }\ntabs:\n- { id: A, name: A, content: view, source: { type: A }, view: A }\n---\n# B\nA stays prose.\n',
+        ),
+      ],
+    ]);
+    const result = databasePlan('A', 'Next', [own, other], reads);
+    expect(result.counts.schemaReferences).toBe(2);
+    expect(result.counts.views).toBe(1);
+    const patch = patchOf(result.ops, other.path);
+    expect(parseViewList(patch.views)[0]).toMatchObject({
+      id: 'A',
+      name: 'A',
+      presentation: { group: [{ descend: { type: 'Next', field: 'link' } }] },
+    });
+    expect(patch.tabs).toEqual([
+      expect.objectContaining({ id: 'A', name: 'A', source: { type: 'Next' }, view: 'A' }),
+    ]);
+  });
+
+  it('flags missing reads, changed scan snapshots and broken YAML, and refuses an unavailable own doc', () => {
+    const reads = demoReads();
+    reads.delete('types/key-result.md');
+    reads.set('types/epic.md', sourceRead('---\ntype: Type\nfields: [\n---\n# Epic\n'));
+    const record = DEMO.find((entry) => entry.type === 'Work item')!;
+    const entries = DEMO.map((entry) =>
+      entry === record ? { ...entry, hash: 'old-scan-hash' } : entry,
+    );
+    const result = databasePlan('Work item', 'Task', entries, reads);
+    expect(result.flagged).toEqual(
+      expect.arrayContaining([
+        { kind: 'readFailed', path: 'types/key-result.md' },
+        { kind: 'yamlError', path: 'types/epic.md' },
+        { kind: 'readFailed', path: record.path, detail: 'Changed since the scan' },
+      ]),
+    );
+    expect(
+      result.ops.some((op) =>
+        ['types/key-result.md', 'types/epic.md', record.path].includes(op.path),
+      ),
+    ).toBe(false);
+    reads.delete('types/work-item.md');
+    expect(
+      planDatabaseRename(
+        { from: 'Work item', to: 'Task' },
+        { entries, schema: buildSchema(entries), lists: [], reads },
+      ),
+    ).toEqual({ ok: false, refusal: { code: 'sourceUnavailable', path: 'types/work-item.md' } });
+    reads.set('types/work-item.md', sourceRead('---\ntype: Type\nfields: [\n---\n# Work item\n'));
+    expect(
+      planDatabaseRename(
+        { from: 'Work item', to: 'Task' },
+        { entries, schema: buildSchema(entries), lists: [], reads },
+      ),
+    ).toEqual({ ok: false, refusal: { code: 'sourceInvalid', path: 'types/work-item.md' } });
+  });
+});
+
 function plan(type: string, from: string, to: string, entries = DEMO, lists: ListFile[] = []) {
   const result = planFieldRename(
     { type, from, to },
@@ -508,7 +748,7 @@ function plan(type: string, from: string, to: string, entries = DEMO, lists: Lis
 }
 
 const patchOf = (ops: BatchOp[], path: string): Record<string, unknown> => {
-  const op = ops.find((o) => o.path === path);
+  const op = ops.find((o) => o.op === 'patch' && o.path === path);
   if (op === undefined || op.op !== 'patch') throw new Error(`no patch on ${path}`);
   return op.set;
 };
@@ -540,6 +780,7 @@ describe('planFieldRename on the demo vault', () => {
       'estimate',
       'epic',
       'blocked_by',
+      'project',
     ]);
     const views = parseViewList(doc.views);
     expect(views.map((v) => v.id)).toEqual([
@@ -878,5 +1119,73 @@ describe('refOwner', () => {
       owner: 'Objective',
     });
     expect(refOwner({ name: 'title', holds: 'field', position: 'sort' }, scope, schema)).toBeNull();
+  });
+});
+
+it('renames a declared deadline in the same Type-doc patch (M61.3b)', () => {
+  const doc = makeEntry({
+    path: 'types/dated.md',
+    title: 'Dated',
+    type: 'Type',
+    properties: { deadline: 'due', fields: { due: { kind: 'date' } } } as never,
+  });
+  const result = planFieldRename(
+    { type: 'Dated', from: 'due', to: 'finish' },
+    { entries: [doc], schema: buildSchema([doc]), lists: [] },
+  );
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  expect(patchOf(result.ops, doc.path)).toEqual({
+    fields: { finish: { kind: 'date' } },
+    deadline: 'finish',
+  });
+});
+
+describe('formula references (M61.4)', () => {
+  const doc = makeEntry({
+    path: 'types/metric.md',
+    title: 'Metric',
+    type: 'Type',
+    properties: {
+      fields: {
+        target_value: { kind: 'number' },
+        current: { kind: 'number' },
+        gap: { kind: 'formula', formula: '{Target value} - current' },
+        broken: { kind: 'formula', formula: 'target_value +' },
+        prose: { kind: 'text', formula: 'target_value' },
+      },
+    } as never,
+  });
+  const schema = buildSchema([doc]);
+
+  it('classifies formula inputs and finds the formula that holds an input', () => {
+    expect(formulaUses([doc], 'Metric', 'target_value')).toEqual([
+      { path: doc.path, field: 'gap' },
+    ]);
+    expect(
+      typeDefRefs(schema.types.get('Metric')!).filter((ref) => ref.position === 'formulaRef'),
+    ).toEqual([
+      expect.objectContaining({ name: 'target_value', field: 'gap' }),
+      expect.objectContaining({ name: 'current', field: 'gap' }),
+    ]);
+  });
+
+  it('renames canonical formula references in the same patch and flags unreadable expressions', () => {
+    const plan = planFieldRename(
+      { type: 'Metric', from: 'target_value', to: 'Target' },
+      { entries: [doc], schema, lists: [] },
+    );
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(plan.ops[0].set?.fields).toMatchObject({
+      Target: { kind: 'number' },
+      gap: { kind: 'formula', formula: 'Target - current' },
+      broken: { kind: 'formula', formula: 'target_value +' },
+      prose: { kind: 'text', formula: 'target_value' },
+    });
+    expect(plan.flagged).toContainEqual({ kind: 'formula', path: doc.path, detail: 'broken' });
+    expect(renameFlagWords(plan.flagged, 'target_value')).toBe(
+      "Not changed: the formula “Broken” couldn't be read.",
+    );
   });
 });

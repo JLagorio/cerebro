@@ -1,13 +1,52 @@
+import { sheetRestructure, sheetFill, sheetComplete } from './ipc';
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const { invokeSpy } = vi.hoisted(() => ({ invokeSpy: vi.fn(async () => [] as unknown) }));
+it('passes fill and completion coordinates unchanged through literal command keys', async () => {
+  (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+  const sheets = [{ name: 'Sheet1', cells: [{ row: 1, col: 1, source: '1' }] }];
+  const area = { row: 0, column: 0, width: 1, height: 1 };
+  invokeSpy.mockResolvedValueOnce({ source: [['1']], target: [['1']] });
+  await sheetFill(sheets, 0, area, 'rows', 1);
+  expect(invokeSpy).toHaveBeenLastCalledWith('sheet_fill', {
+    sheets,
+    sheet: 0,
+    area,
+    axis: 'rows',
+    to: 1,
+  });
+  invokeSpy.mockResolvedValueOnce({ expecting: [], replace_from: 0 });
+  await sheetComplete(['Sheet1'], 0, 0, 0, '=SU', 3);
+  expect(invokeSpy).toHaveBeenLastCalledWith('sheet_complete', {
+    names: ['Sheet1'],
+    sheet: 0,
+    row: 0,
+    column: 0,
+    text: '=SU',
+    cursor: 3,
+  });
+});
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeSpy }));
 const { listenSpy } = vi.hoisted(() => ({ listenSpy: vi.fn() }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: listenSpy }));
+const { dragSpy } = vi.hoisted(() => ({ dragSpy: vi.fn() }));
+vi.mock('@tauri-apps/api/webview', () => ({
+  getCurrentWebview: () => ({ onDragDropEvent: dragSpy }),
+}));
 
 import {
   __resetPageWrites,
+  appLink,
+  calculateSheets,
+  readCanvasFile,
+  saveCanvasFile,
+  createCanvasFile,
+  takeDeepLink,
+  listenDeepLinks,
+  starterMarker,
+  installStarterKit,
+  declineStarterKit,
   applyBatch,
   askQuestion,
   cancelQuit,
@@ -18,6 +57,11 @@ import {
   deleteNote,
   finishQuit,
   importAttachment,
+  importAttachmentBytes,
+  inspectDropped,
+  extractDocument,
+  readDroppedText,
+  listenOsFileDrop,
   ingestItemState,
   ledgerHead,
   ledgerStatus,
@@ -47,10 +91,101 @@ import {
 afterEach(() => {
   invokeSpy.mockClear();
   listenSpy.mockReset();
+  dragSpy.mockReset();
   delete (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'];
 });
 
 describe('ipc backend detection', () => {
+  it('extracts only the named kept document through literal command keys', async () => {
+    (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+    const result = {
+      format: 'docx',
+      sha256: 'a'.repeat(64),
+      bytes: 8,
+      outcome: { state: 'encrypted' },
+    };
+    invokeSpy.mockResolvedValueOnce(result);
+    expect(await extractDocument('/my-vault', 'attachments/Plan.docx')).toEqual(result);
+    expect(invokeSpy).toHaveBeenLastCalledWith('extract_document', {
+      vault: '/my-vault',
+      path: 'attachments/Plan.docx',
+    });
+  });
+  it('passes dropped paths literally and maps physical event coordinates to CSS pixels', async () => {
+    (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+    await inspectDropped(['/outside/a.md']);
+    expect(invokeSpy).toHaveBeenLastCalledWith('inspect_dropped', { paths: ['/outside/a.md'] });
+    await readDroppedText('/outside/a.md');
+    expect(invokeSpy).toHaveBeenLastCalledWith('read_dropped_text', { path: '/outside/a.md' });
+    const oldRatio = window.devicePixelRatio;
+    Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 2 });
+    const handler = vi.fn();
+    const stop = vi.fn();
+    dragSpy.mockResolvedValue(stop);
+    expect(await listenOsFileDrop(handler)).toBe(stop);
+    const receive = dragSpy.mock.calls[0][0];
+    receive({ payload: { type: 'enter', paths: ['/outside/a.md'], position: { x: 20, y: 40 } } });
+    receive({ payload: { type: 'over', position: { x: 22, y: 44 } } });
+    receive({ payload: { type: 'drop', paths: ['/outside/a.md'], position: { x: 24, y: 48 } } });
+    receive({ payload: { type: 'leave' } });
+    expect(handler.mock.calls.map(([event]) => event)).toEqual([
+      { type: 'enter', paths: ['/outside/a.md'], position: { x: 10, y: 20 } },
+      { type: 'over', position: { x: 11, y: 22 } },
+      { type: 'drop', paths: ['/outside/a.md'], position: { x: 12, y: 24 } },
+      { type: 'leave' },
+    ]);
+    Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: oldRatio });
+  });
+  it('sends only sheet source cells to the calculation command', async () => {
+    (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+    const sheets = [{ name: 'Budget', cells: [{ row: 1, col: 1, source: '=1+2' }] }];
+    invokeSpy.mockResolvedValueOnce([
+      {
+        ok: true,
+        name: 'Budget',
+        rows: 1,
+        cols: 1,
+        cells: [{ row: 1, col: 1, kind: 'number', display: '3' }],
+      },
+    ]);
+    expect(await calculateSheets(sheets)).toMatchObject([{ ok: true, cells: [{ display: '3' }] }]);
+    expect(invokeSpy).toHaveBeenLastCalledWith('calculate_sheets', { sheets });
+  });
+  it('sends the structural grid operation with literal command keys', async () => {
+    (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+    const sheets = [{ name: 'Budget', cells: [] }];
+    invokeSpy.mockResolvedValueOnce({ before: [], after: [] });
+    expect(await sheetRestructure(sheets, 0, 'insert_columns', 0, 2)).toEqual({
+      before: [],
+      after: [],
+    });
+    expect(invokeSpy).toHaveBeenLastCalledWith('sheet_restructure', {
+      sheets,
+      sheet: 0,
+      change: 'insert_columns',
+      at: 0,
+      count: 2,
+    });
+  });
+  it('passes the optional save version and returns the written hash', async () => {
+    (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+    invokeSpy.mockResolvedValueOnce('new-hash');
+    expect(await saveNote('/vault', 'a.md', 'New body', 'loaded-hash')).toBe('new-hash');
+    expect(invokeSpy).toHaveBeenLastCalledWith('save_note', {
+      vault: '/vault',
+      path: 'a.md',
+      body: 'New body',
+      expectHash: 'loaded-hash',
+    });
+    invokeSpy.mockResolvedValueOnce(null);
+    expect(await saveNote('/vault', 'knowledge/a.md', 'Capture')).toBeNull();
+    expect(invokeSpy).toHaveBeenLastCalledWith('save_note', {
+      vault: '/vault',
+      path: 'knowledge/a.md',
+      body: 'Capture',
+      expectHash: undefined,
+    });
+  });
   it('delegates to the mock when not running inside Tauri', async () => {
     const entries = await scanVault('/demo-vault');
     expect(Array.isArray(entries)).toBe(true);
@@ -173,6 +308,16 @@ describe('page comment IPC', () => {
 });
 
 describe('attachment IPC', () => {
+  it('passes bytes and a display name through the bounded attachment door', async () => {
+    (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+    await importAttachmentBytes('/my-vault', 'image.png', 'AQID');
+    expect(invokeSpy).toHaveBeenCalledWith('import_attachment_bytes', {
+      vault: '/my-vault',
+      name: 'image.png',
+      bytesBase64: 'AQID',
+    });
+  });
+
   it('reports no native picker outside Tauri, and one inside it', () => {
     expect(canPickFiles()).toBe(false);
     (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
@@ -490,5 +635,103 @@ describe('the vault Trash (M60.8)', () => {
     expect((await listTrash('/demo-vault'))[0]).toEqual(item);
     expect(await restoreFromTrash('/demo-vault', item.stamp)).toBe(item.path);
     expect(invokeSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('starter IPC', () => {
+  it('passes the vault through each literal command', async () => {
+    (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+    await starterMarker('/empty');
+    await installStarterKit('/empty');
+    await declineStarterKit('/empty');
+    expect(invokeSpy.mock.calls).toEqual([
+      ['starter_marker', { vault: '/empty' }],
+      ['install_starter_kit', { vault: '/empty' }],
+      ['decline_starter_kit', { vault: '/empty' }],
+    ]);
+  });
+});
+
+it('app links use the guarded command spelling and delivered event', async () => {
+  (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+  invokeSpy.mockResolvedValueOnce('cerebro://open?path=a.md');
+  expect(await appLink('/vault', 'a.md')).toBe('cerebro://open?path=a.md');
+  expect(invokeSpy).toHaveBeenLastCalledWith('app_link', { vault: '/vault', path: 'a.md' });
+  invokeSpy.mockResolvedValueOnce(null);
+  expect(await takeDeepLink()).toBeNull();
+  expect(invokeSpy).toHaveBeenLastCalledWith('take_deep_link', {});
+  const stop = vi.fn();
+  listenSpy.mockResolvedValueOnce(stop);
+  const handler = vi.fn();
+  expect(await listenDeepLinks(handler)).toBe(stop);
+  expect(listenSpy.mock.calls[0][0]).toBe('cerebro://deep-link');
+  listenSpy.mock.calls[0][1]({ payload: { kind: 'refused', reason: 'no page' } });
+  expect(handler).toHaveBeenCalledWith({ kind: 'refused', reason: 'no page' });
+});
+it('browser app links use the mock and its disposable listener', async () => {
+  window.__cerebroPendingDeepLink = { kind: 'open', path: 'a.md', vault: null };
+  expect(await takeDeepLink()).toEqual({ kind: 'open', path: 'a.md', vault: null });
+  expect(await takeDeepLink()).toBeNull();
+  const handler = vi.fn();
+  const stop = await listenDeepLinks(handler);
+  window.__cerebroDeepLink?.({ kind: 'refused', reason: 'bad' });
+  expect(handler).toHaveBeenCalledTimes(1);
+  stop();
+  window.__cerebroDeepLink?.(null);
+  expect(handler).toHaveBeenCalledTimes(1);
+  expect(await appLink('/vault', 'a & b.md')).toBe(
+    `cerebro://open?vault=${'0'.repeat(32)}&path=a%20%26%20b.md`,
+  );
+  expect(invokeSpy).not.toHaveBeenCalled();
+});
+
+describe('whiteboard IPC', () => {
+  it('uses literal command keys and wraps source, written hash and preview result', async () => {
+    (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+    invokeSpy.mockResolvedValueOnce({ content: '{}', hash: 'read-hash' });
+    expect(await readCanvasFile('/vault', 'boards/a.canvas')).toEqual({
+      ok: true,
+      content: '{}',
+      hash: 'read-hash',
+    });
+    expect(invokeSpy).toHaveBeenLastCalledWith('read_canvas_file', {
+      vault: '/vault',
+      path: 'boards/a.canvas',
+    });
+    invokeSpy.mockResolvedValueOnce({ hash: 'saved-hash' });
+    expect(await saveCanvasFile('/vault', 'boards/a.canvas', '{}')).toEqual({
+      ok: true,
+      hash: 'saved-hash',
+    });
+    expect(invokeSpy).toHaveBeenLastCalledWith('save_canvas_file', {
+      vault: '/vault',
+      path: 'boards/a.canvas',
+      content: '{}',
+    });
+    invokeSpy.mockResolvedValueOnce({ path: 'boards/a-2.canvas', hash: null });
+    expect(await createCanvasFile('/vault', 'boards/a.canvas', '{}', 'preview')).toEqual({
+      ok: true,
+      path: 'boards/a-2.canvas',
+      hash: null,
+    });
+    expect(invokeSpy).toHaveBeenLastCalledWith('create_canvas_file', {
+      vault: '/vault',
+      path: 'boards/a.canvas',
+      content: '{}',
+      mode: 'preview',
+    });
+  });
+  it('returns typed refusals while preserving transport and malformed errors', async () => {
+    (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+    const refusal = { code: 'missing', message: 'This whiteboard could not be found or read.' };
+    invokeSpy.mockRejectedValueOnce(refusal);
+    expect(await readCanvasFile('/vault', 'missing.canvas')).toEqual({ ok: false, refusal });
+    invokeSpy.mockRejectedValueOnce(new Error('transport closed'));
+    await expect(saveCanvasFile('/vault', 'a.canvas', '{}')).rejects.toThrow('transport closed');
+    invokeSpy.mockRejectedValueOnce({ code: 'something_else', message: 'unknown' });
+    await expect(readCanvasFile('/vault', 'a.canvas')).rejects.toEqual({
+      code: 'something_else',
+      message: 'unknown',
+    });
   });
 });

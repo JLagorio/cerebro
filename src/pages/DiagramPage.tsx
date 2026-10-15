@@ -1,3 +1,6 @@
+import { useMemo, useRef, useState } from 'react';
+import { ConvertBoardDialog } from '@/whiteboard/ConvertBoardDialog';
+import { readMermaidBoard } from '@/whiteboard/mermaidBoard';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
@@ -47,6 +50,9 @@ export type DiagramSelection = Extract<Selection, { kind: 'diagram' }>;
  * the old file's bytes into the new one and dropped the pending edit.
  */
 export function DiagramPage({ selection }: { selection: DiagramSelection }) {
+  const host = useRef<HTMLDivElement>(null);
+  const [converting, setConverting] = useState(false);
+  const openBoard = useOpenPath('navigate');
   const entry = useEntry(selection.path);
   const navigate = useNavStore((s) => s.navigate);
   // M29.38 — the link popover's record search and what a link badge opens.
@@ -61,6 +67,10 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
   // load's result, so the M29.21 rule is unchanged.
   const { code, loadFailed, saveState, handleChange, undo, redo, canUndo, canRedo } =
     useDiagramFile(selection.path);
+  const convertible = useMemo(
+    () => code !== null && readMermaidBoard(code, entries).ok,
+    [code, entries],
+  );
 
   // Only a FAILED READ tombstones the page (see loadFailed above): an entry
   // the scanner has not adopted yet still opens, and an entry that lingers
@@ -90,7 +100,7 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
     humanize((selection.path.split('/').pop() ?? selection.path).replace(/\.mmd$/, ''));
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="diagram-page">
+    <div ref={host} className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="diagram-page">
       <div className="flex h-11 flex-none items-center gap-1.5 border-b border-n-200 px-3">
         <Icon name="waypoints" size={14} color="var(--n-500)" />
         <span className="truncate text-sm font-medium text-n-900" data-testid="diagram-title">
@@ -100,6 +110,16 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
           {detectDiagramType(code ?? '')}
         </span>
         <span className="flex-1" />
+        {convertible && (
+          <button
+            type="button"
+            data-testid="diagram-convert"
+            className="rounded-md border border-n-200 px-2 py-1 text-xs text-n-700 hover:bg-n-50"
+            onClick={() => setConverting(true)}
+          >
+            Convert to whiteboard
+          </button>
+        )}
         {SAVE_LABEL[saveState] !== null && (
           <span
             data-testid="diagram-save-state"
@@ -114,6 +134,15 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
         )}
       </div>
 
+      {converting && code !== null && (
+        <ConvertBoardDialog
+          path={selection.path}
+          code={code}
+          container={host.current}
+          onClose={() => setConverting(false)}
+          onConverted={openBoard}
+        />
+      )}
       {code !== null && (
         /* Every edit — structural op, overlay keystroke — commits through
            handleChange, the same channel the old panes used, so the keyed

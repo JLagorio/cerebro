@@ -711,6 +711,7 @@ mod tests {
             &vault,
             "items/a.md",
             "\n# A\n\nEdited.\n",
+            None,
             &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
         )
         .unwrap();
@@ -746,6 +747,7 @@ mod tests {
             &vault,
             "items/a.md",
             "\n# A\n\nStill works.\n",
+            None,
             &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
         )
         .unwrap();
@@ -943,6 +945,7 @@ mod tests {
             &vault,
             &rel,
             "\n# Soak note\n\nEdited body.\n",
+            None,
             &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
         )
         .unwrap();

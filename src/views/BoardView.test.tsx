@@ -50,6 +50,76 @@ function dropTargets(
 
 afterEach(cleanup);
 
+describe('a multi-value board card (M61.1)', () => {
+  const doc = makeEntry({
+    path: 'types/decision.md',
+    title: 'Decision',
+    type: 'Type',
+    properties: { fields: { deciders: { kind: 'person' } } } as unknown as Entry['properties'],
+  });
+  const people = ['a', 'b', 'c'].map((name) =>
+    makeEntry({
+      path: `people/${name}.md`,
+      filename: `${name}.md`,
+      title: name.toUpperCase(),
+      type: 'Person',
+    }),
+  );
+  const shared = makeEntry({
+    path: 'shared.md',
+    title: 'Shared',
+    type: 'Decision',
+    relationships: { deciders: ['a', 'b'] },
+  });
+  const target = makeEntry({
+    path: 'target.md',
+    type: 'Decision',
+    relationships: { deciders: ['c'] },
+  });
+  const absent = makeEntry({ path: 'absent.md', type: 'Decision' });
+  const entries = [doc, ...people, shared, target, absent];
+  const schema = buildSchema(entries);
+  const columns = dropTargets([shared, target, absent], 'deciders', schema);
+  it('gives each rendered membership its own drag identity and keeps the record path', async () => {
+    render(
+      <BoardView
+        filtered={false}
+        entries={[shared]}
+        presentation={{ ...presentation, group: [{ field: 'deciders' }] }}
+        schema={schema}
+      />,
+    );
+    const cards = screen.getAllByTestId('board-card');
+    expect(cards).toHaveLength(2);
+    expect(cards.map((card) => card.getAttribute('data-path'))).toEqual([shared.path, shared.path]);
+    expect(cards.map((card) => card.getAttribute('data-drag-id'))).toEqual([
+      JSON.stringify(['a', shared.path]),
+      JSON.stringify(['b', shared.path]),
+    ]);
+  });
+  it.each([
+    ['a', 'c', ['[[c]]', '[[b]]'], 'Moved from A to C'],
+    ['b', 'c', ['[[a]]', '[[c]]'], 'Moved from B to C'],
+    ['a', '__none__', ['[[b]]'], 'Moved from A to No deciders'],
+  ])(
+    'moving the membership grabbed in %s keeps every other value',
+    async (from, to, value, words) => {
+      const patchFrontmatter = vi.fn().mockResolvedValue(true);
+      const toast = vi.fn();
+      const event = {
+        active: {
+          id: JSON.stringify([from, shared.path]),
+          data: { current: { path: shared.path, column: from } },
+        },
+        over: { id: to },
+      } as unknown as DragEndEvent;
+      await handleDragEnd(event, { groupBy: 'deciders', columns, schema, patchFrontmatter, toast });
+      expect(patchFrontmatter).toHaveBeenCalledWith(shared.path, { deciders: value });
+      expect(toast).toHaveBeenCalledExactlyOnceWith(words);
+    },
+  );
+});
+
 describe('BoardView', () => {
   it('renders one column per group and a muted footer counting unparseable entries', () => {
     const entries = fixtureVault();
@@ -460,33 +530,39 @@ describe('handleDragEnd', () => {
   );
   const columns = dropTargets(items, 'status', schema);
 
-  it('patches the dragged entry frontmatter and toasts the target label', () => {
-    const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
+  it('patches the dragged entry frontmatter and toasts the target label', async () => {
+    const patchFrontmatter = vi.fn().mockResolvedValue(true);
     const toast = vi.fn();
     const event = {
-      active: { id: 'projects/onboarding/items/fld-1.md' },
+      active: {
+        id: 'projects/onboarding/items/fld-1.md',
+        data: { current: { path: 'projects/onboarding/items/fld-1.md', column: 'todo' } },
+      },
       over: { id: 'doing' },
     } as unknown as DragEndEvent;
-    handleDragEnd(event, { groupBy: 'status', columns, schema, patchFrontmatter, toast });
+    await handleDragEnd(event, { groupBy: 'status', columns, schema, patchFrontmatter, toast });
     expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-1.md', {
       status: 'doing',
     });
-    expect(toast).toHaveBeenCalledWith('Moved to Doing');
+    expect(toast).toHaveBeenCalledWith('Moved from Todo to Doing');
   });
 
-  it('is a no-op when dropped on the source column', () => {
+  it('is a no-op when dropped on the source column', async () => {
     const patchFrontmatter = vi.fn();
     const toast = vi.fn();
     const event = {
-      active: { id: 'projects/onboarding/items/fld-1.md' },
+      active: {
+        id: 'projects/onboarding/items/fld-1.md',
+        data: { current: { path: 'projects/onboarding/items/fld-1.md', column: 'todo' } },
+      },
       over: { id: 'todo' },
     } as unknown as DragEndEvent;
-    handleDragEnd(event, { groupBy: 'status', columns, schema, patchFrontmatter, toast });
+    await handleDragEnd(event, { groupBy: 'status', columns, schema, patchFrontmatter, toast });
     expect(patchFrontmatter).not.toHaveBeenCalled();
     expect(toast).not.toHaveBeenCalled();
   });
 
-  it('writes null when dropped on the no-value column', () => {
+  it('writes null when dropped on the no-value column', async () => {
     // The fixture items all carry a status, so groupEntries emits no
     // '__none__' group here; append a hand-built one so the no-value drop
     // target exists (boards render it whenever present).
@@ -499,13 +575,16 @@ describe('handleDragEnd', () => {
       entries: [],
       lane: null,
     };
-    const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
+    const patchFrontmatter = vi.fn().mockResolvedValue(true);
     const toast = vi.fn();
     const event = {
-      active: { id: 'projects/onboarding/items/fld-1.md' },
+      active: {
+        id: 'projects/onboarding/items/fld-1.md',
+        data: { current: { path: 'projects/onboarding/items/fld-1.md', column: 'todo' } },
+      },
       over: { id: '__none__' },
     } as unknown as DragEndEvent;
-    handleDragEnd(event, {
+    await handleDragEnd(event, {
       groupBy: 'status',
       columns: [...columns, noneColumn],
       schema,
@@ -517,22 +596,30 @@ describe('handleDragEnd', () => {
     });
   });
 
-  it('is a no-op when dropped outside any column', () => {
+  it('is a no-op when dropped outside any column', async () => {
     const patchFrontmatter = vi.fn();
     const event = {
-      active: { id: 'projects/onboarding/items/fld-1.md' },
+      active: {
+        id: 'projects/onboarding/items/fld-1.md',
+        data: { current: { path: 'projects/onboarding/items/fld-1.md', column: 'todo' } },
+      },
       over: null,
     } as unknown as DragEndEvent;
-    handleDragEnd(event, { groupBy: 'status', columns, schema, patchFrontmatter, toast: vi.fn() });
+    await handleDragEnd(event, {
+      groupBy: 'status',
+      columns,
+      schema,
+      patchFrontmatter,
+      toast: vi.fn(),
+    });
     expect(patchFrontmatter).not.toHaveBeenCalled();
   });
 
-  // M1.x interim: a drop on a multi-select-grouped board would overwrite the
-  // whole array with one scalar — refuse with a toast until add/remove exists.
-  it('refuses drops when grouping by a multi-select field', () => {
-    const patchFrontmatter = vi.fn();
+  it('moves multi-select membership as a list', async () => {
+    const patchFrontmatter = vi.fn().mockResolvedValue(true);
     const toast = vi.fn();
     const multiSchema = {
+      fieldValue: () => ['a', 'kept'],
       resolveField: () => ({
         def: { name: 'tags', kind: 'multiselect' },
         raw: ['a'],
@@ -554,31 +641,34 @@ describe('handleDragEnd', () => {
       },
       { path: 'b', key: 'b', label: 'B', color: null, ghost: false, entries: [], lane: null },
     ];
-    const event = { active: { id: dragged.path }, over: { id: 'b' } } as unknown as DragEndEvent;
-    handleDragEnd(event, {
+    const event = {
+      active: { id: dragged.path, data: { current: { path: dragged.path, column: 'a' } } },
+      over: { id: 'b' },
+    } as unknown as DragEndEvent;
+    await handleDragEnd(event, {
       groupBy: 'tags',
       columns: msColumns,
       schema: multiSchema,
       patchFrontmatter,
       toast,
     });
-    expect(patchFrontmatter).not.toHaveBeenCalled();
-    expect(toast).toHaveBeenCalledWith("Can't move cards grouped by a multi-select field");
+    expect(patchFrontmatter).toHaveBeenCalledWith(dragged.path, { tags: ['b', 'kept'] });
+    expect(toast).toHaveBeenCalledWith('Moved from A to B');
   });
 
   // M60.1: a derived relation's band is the linking records' to change, not
   // the card's. A write would plant a mirror key nothing reads.
-  it('refuses a drop between bands of a derived relation, with one toast', () => {
+  it('refuses a drop between bands of a derived relation, with one toast', async () => {
     const vault = computedVault();
     const computed = buildSchema(vault);
     const derivedColumns = dropTargets(computedEpics(), 'tasks', computed);
     const patchFrontmatter = vi.fn();
     const toast = vi.fn();
     const event = {
-      active: { id: 'epics/big.md' },
+      active: { id: 'epics/big.md', data: { current: { path: 'epics/big.md', column: 'big-1' } } },
       over: { id: 'small-1' },
     } as unknown as DragEndEvent;
-    handleDragEnd(event, {
+    await handleDragEnd(event, {
       groupBy: 'tasks',
       columns: derivedColumns,
       schema: computed,
@@ -590,13 +680,16 @@ describe('handleDragEnd', () => {
     expect(toast).toHaveBeenCalledWith("Can't move cards grouped by a computed property");
   });
 
-  it('refuses a drop between bands of a rollup too', () => {
+  it('refuses a drop between bands of a rollup too', async () => {
     const computed = buildSchema(computedVault());
     const rollupColumns = dropTargets(computedEpics(), 'task_count', computed);
     const patchFrontmatter = vi.fn();
     const toast = vi.fn();
-    const event = { active: { id: 'epics/big.md' }, over: { id: '9' } } as unknown as DragEndEvent;
-    handleDragEnd(event, {
+    const event = {
+      active: { id: 'epics/big.md', data: { current: { path: 'epics/big.md', column: '10' } } },
+      over: { id: '9' },
+    } as unknown as DragEndEvent;
+    await handleDragEnd(event, {
       groupBy: 'task_count',
       columns: rollupColumns,
       schema: computed,
@@ -608,17 +701,20 @@ describe('handleDragEnd', () => {
     expect(toast).toHaveBeenCalledWith("Can't move cards grouped by a computed property");
   });
 
-  it('wraps the written value as a wikilink when the grouped field is person/relation-kind', () => {
+  it('wraps the written value as a wikilink when the grouped field is person/relation-kind', async () => {
     // Execution-log note 18: a bare-stem write (`assignee: ana-rios`) destroys
     // the wikilink on disk — relationships.assignee is gone after rescan.
     const personColumns = dropTargets(items, 'assignee', schema);
-    const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
+    const patchFrontmatter = vi.fn().mockResolvedValue(true);
     const toast = vi.fn();
     const event = {
-      active: { id: 'projects/onboarding/items/fld-2.md' },
+      active: {
+        id: 'projects/onboarding/items/fld-2.md',
+        data: { current: { path: 'projects/onboarding/items/fld-2.md', column: '__none__' } },
+      },
       over: { id: 'ana-rios' },
     } as unknown as DragEndEvent;
-    handleDragEnd(event, {
+    await handleDragEnd(event, {
       groupBy: 'assignee',
       columns: personColumns,
       schema,
@@ -626,15 +722,15 @@ describe('handleDragEnd', () => {
       toast,
     });
     expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-2.md', {
-      assignee: '[[ana-rios]]',
+      assignee: ['[[ana-rios]]'],
     });
-    expect(toast).toHaveBeenCalledWith('Moved to Ana Rios');
+    expect(toast).toHaveBeenCalledWith('Moved from No assignee to Ana Rios');
   });
 
   // M16.19: a lane is the second band level, so a card dropped in another lane
   // has changed two values. Writing only the column's meant the card visibly
   // snapped back into the lane it came from.
-  it('writes the lane field too when the drop crosses a swimlane', () => {
+  it('writes the lane field too when the drop crosses a swimlane', async () => {
     const withPerson = makeEntry({
       path: 'projects/onboarding/items/fld-9.md',
       type: 'Work item',
@@ -665,13 +761,16 @@ describe('handleDragEnd', () => {
         lane: laneB,
       },
     ];
-    const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
+    const patchFrontmatter = vi.fn().mockResolvedValue(true);
     const toast = vi.fn();
     const event = {
-      active: { id: withPerson.path },
+      active: {
+        id: withPerson.path,
+        data: { current: { path: withPerson.path, column: 'ana-rios/todo' } },
+      },
       over: { id: '__none__/doing' },
     } as unknown as DragEndEvent;
-    handleDragEnd(event, {
+    await handleDragEnd(event, {
       groupBy: 'status',
       columns: laneColumns,
       schema,
@@ -906,7 +1005,10 @@ describe('a live board drag owns Escape (M46.2)', () => {
   it('sends a 40% clone and leaves the card where it was (M46.2)', async () => {
     board();
     const card = screen.getAllByTestId('board-card')[0];
-    expect(card.getAttribute('data-drag-id')).toBe(card.getAttribute('data-path'));
+    expect(JSON.parse(card.getAttribute('data-drag-id')!)).toEqual([
+      'todo',
+      card.getAttribute('data-path'),
+    ]);
     expect(screen.queryByTestId('drag-layer')).toBeNull();
 
     await pickUp();
@@ -1057,5 +1159,119 @@ describe('BoardView drop indicator (M46.2)', () => {
       .filter((bg) => bg !== undefined && bg !== '' && bg !== 'transparent');
     expect(tinted.length).toBeGreaterThan(0);
     fireEvent.keyDown(card, { key: 'Escape', code: 'Escape' });
+  });
+});
+
+describe('date columns (M61.3)', () => {
+  const doc = makeEntry({
+    path: 'types/dated.md',
+    title: 'Dated',
+    type: 'Type',
+    properties: { fields: { due: { kind: 'date' } } } as never,
+  });
+  const card = makeEntry({
+    path: 'dated.md',
+    type: 'Dated',
+    properties: { due: '2026-07-29 14:30' },
+  });
+  const junk = makeEntry({ path: 'junk.md', type: 'Dated', properties: { due: 'sometime' } });
+  const entries = [card, junk];
+  const schema = buildSchema([doc, ...entries]);
+  const context = { today: '2026-07-28', weekStart: 0 as const };
+  const columns: BoardColumnNode[] = groupEntries(entries, 'due', schema, { ctx: context }).map(
+    (g) => ({ ...g, path: g.key, lane: null }),
+  );
+  const drag = (to: string) =>
+    ({
+      active: { id: card.path, data: { current: { path: card.path, column: '2026-07-29' } } },
+      over: { id: to },
+    }) as unknown as DragEndEvent;
+
+  it('moves onto Today without losing the time, and reports success only after a saved write', async () => {
+    const patchFrontmatter = vi.fn().mockResolvedValue(true);
+    const toast = vi.fn();
+    await handleDragEnd(drag(context.today), {
+      groupBy: 'due',
+      columns,
+      schema,
+      patchFrontmatter,
+      toast,
+    });
+    expect(patchFrontmatter).toHaveBeenCalledWith(card.path, { due: '2026-07-28 14:30' });
+    expect(toast).toHaveBeenCalledWith('Moved from Tomorrow to Today');
+    toast.mockClear();
+    patchFrontmatter.mockResolvedValue(false);
+    await handleDragEnd(drag(context.today), {
+      groupBy: 'due',
+      columns,
+      schema,
+      patchFrontmatter,
+      toast,
+    });
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it.each(['rel:this-week', 'invalid:sometime'])(
+    'refuses a drop on %s before writing',
+    async (to) => {
+      const patchFrontmatter = vi.fn();
+      const toast = vi.fn();
+      await handleDragEnd(drag(to), { groupBy: 'due', columns, schema, patchFrontmatter, toast });
+      expect(patchFrontmatter).not.toHaveBeenCalled();
+      expect(toast).toHaveBeenCalledExactlyOnceWith(
+        "Choose a day to move this record; this band doesn't name one date",
+      );
+    },
+  );
+
+  it('offers New only on the day columns', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 28, 12));
+    try {
+      render(
+        <BoardView
+          filtered={false}
+          entries={entries}
+          schema={schema}
+          presentation={{ ...presentation, group: [{ field: 'due' }] }}
+          onCreate={vi.fn()}
+        />,
+      );
+      expect(screen.getByRole('button', { name: 'New record in Today' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'New record in Tomorrow' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'New record in This week' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'New record in sometime' })).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+it('moves a deadline range by its end and retains its length (M61.3b)', async () => {
+  const doc = makeEntry({
+    path: 'types/dated.md',
+    title: 'Dated',
+    type: 'Type',
+    properties: { deadline: 'window', fields: { window: { kind: 'daterange' } } } as never,
+  });
+  const record = makeEntry({
+    path: 'range.md',
+    type: 'Dated',
+    properties: { window: { start: '2026-07-20 14:30', end: '2026-07-29 16:00' } } as never,
+  });
+  const schema = buildSchema([doc, record]);
+  const columns = groupEntries([record], 'window', schema, {
+    ctx: { today: '2026-07-28', weekStart: 0 },
+  }).map((g) => ({ ...g, path: g.key, lane: null }));
+  const patchFrontmatter = vi.fn().mockResolvedValue(true);
+  await handleDragEnd(
+    {
+      active: { id: record.path, data: { current: { path: record.path, column: '2026-07-29' } } },
+      over: { id: '2026-07-28' },
+    } as unknown as DragEndEvent,
+    { groupBy: 'window', columns, schema, patchFrontmatter, toast: vi.fn() },
+  );
+  expect(patchFrontmatter).toHaveBeenCalledWith(record.path, {
+    window: { start: '2026-07-19 14:30', end: '2026-07-28 16:00' },
   });
 });

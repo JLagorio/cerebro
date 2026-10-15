@@ -1,0 +1,11 @@
+{
+  "format": "docx",
+  "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "bytes": 12,
+  "outcome": {
+    "state": "extracted",
+    "markdown": "Text",
+    "not_carried": ["headers"],
+    "truncated": false
+  }
+}

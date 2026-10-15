@@ -1,0 +1,7 @@
+/* Read-only boards clip their scene but must let wheel scrolling reach the
+   containing page. The app-wide overscroll reset otherwise stops that chain
+   at the viewport, card or text clipping box even without a wheel listener. */
+.cb-whiteboard-embed,
+.cb-whiteboard-embed * {
+  overscroll-behavior: auto;
+}

@@ -9,6 +9,7 @@ import { useVaultStore } from '@/stores/vaultStore';
 const tasks: DocTask[] = [
   {
     sourcePath: 'projects/alpha/brief.md',
+    version: null,
     line: 3,
     text: 'Assign owners',
     done: false,
@@ -17,6 +18,7 @@ const tasks: DocTask[] = [
   },
   {
     sourcePath: 'projects/beta/brief.md',
+    version: null,
     line: 3,
     text: 'Assign owners',
     done: false,
@@ -25,6 +27,7 @@ const tasks: DocTask[] = [
   },
   {
     sourcePath: 'projects/alpha/brief.md',
+    version: null,
     line: 4,
     text: 'Confirm scope',
     done: true,
@@ -39,7 +42,10 @@ vi.mock('@/hooks/useDocTasks', () => ({
   useDocTasks: () => ({ tasks, loading: false, toggle }),
 }));
 
-const { HomeTasks } = await import('./HomePage');
+const { MyWorkLane } = await import('./MyWorkLane');
+const HomeTasks = () => (
+  <MyWorkLane now={new Date('2026-07-28T12:00:00Z')} ctx={{ today: '2026-07-28', weekStart: 0 }} />
+);
 
 function mkEntry(path: string, title: string): Entry {
   return {
@@ -113,6 +119,6 @@ describe('HomeTasks', () => {
   it('keeps the open count on the open tasks when done rows are shown', () => {
     render(<HomeTasks />);
     fireEvent.click(screen.getByTestId('home-tasks-show-done'));
-    expect(screen.getByText('2 open')).toBeTruthy();
+    expect(screen.getByTestId('home-lane-line').textContent).toBe('2 open tasks');
   });
 });

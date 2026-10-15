@@ -1,0 +1,277 @@
+{
+  "defaults": {
+    "now": "2026-10-15T12:00:00.000Z",
+    "actor": "process:release-scout",
+    "run": "requesting-run"
+  },
+  "schedule": [
+    {
+      "name": "the five minute edge is admitted",
+      "at": "2026-10-15T12:05:00Z",
+      "note": "Check the reply",
+      "expect": {
+        "dueAt": "2026-10-15T12:05:00.000Z",
+        "note": "Check the reply"
+      }
+    },
+    {
+      "name": "one millisecond before five minutes is refused",
+      "at": "2026-10-15T12:04:59.999Z",
+      "note": "Check the reply",
+      "expect": {
+        "error": "A follow-up must be at least 5 minutes from now."
+      }
+    },
+    {
+      "name": "a past time is refused",
+      "at": "2026-10-15T11:00:00Z",
+      "note": "Check the reply",
+      "expect": {
+        "error": "A follow-up must be at least 5 minutes from now."
+      }
+    },
+    {
+      "name": "the thirty day edge is admitted",
+      "at": "2026-11-14T12:00:00Z",
+      "note": "Check the reply",
+      "expect": {
+        "dueAt": "2026-11-14T12:00:00.000Z",
+        "note": "Check the reply"
+      }
+    },
+    {
+      "name": "one millisecond after thirty days is refused",
+      "at": "2026-11-14T12:00:00.001Z",
+      "note": "Check the reply",
+      "expect": {
+        "error": "A follow-up can be at most 30 days from now."
+      }
+    },
+    {
+      "name": "a time without an offset is refused",
+      "at": "2026-10-15T12:05:00",
+      "note": "Check the reply",
+      "expect": {
+        "error": "Use an RFC 3339 time with an offset for the follow-up."
+      }
+    },
+    {
+      "name": "an invalid date is refused",
+      "at": "2026-02-30T12:05:00Z",
+      "note": "Check the reply",
+      "expect": {
+        "error": "Use an RFC 3339 time with an offset for the follow-up."
+      }
+    },
+    {
+      "name": "an offset is stored as UTC",
+      "at": "2026-10-15T14:05:00+02:00",
+      "note": "Check the reply",
+      "expect": {
+        "dueAt": "2026-10-15T12:05:00.000Z",
+        "note": "Check the reply"
+      }
+    },
+    {
+      "name": "an empty note is refused",
+      "at": "2026-10-15T12:05:00Z",
+      "note": "",
+      "expect": {
+        "error": "A follow-up needs a note of 1 to 500 characters."
+      }
+    },
+    {
+      "name": "a blank note is refused",
+      "at": "2026-10-15T12:05:00Z",
+      "note": " \n\t ",
+      "expect": {
+        "error": "A follow-up needs a note of 1 to 500 characters."
+      }
+    },
+    {
+      "name": "five hundred characters fit",
+      "at": "2026-10-15T12:05:00Z",
+      "note": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expect": {
+        "dueAt": "2026-10-15T12:05:00.000Z",
+        "note": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "five hundred and one characters do not fit",
+      "at": "2026-10-15T12:05:00Z",
+      "note": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expect": {
+        "error": "A follow-up needs a note of 1 to 500 characters."
+      }
+    },
+    {
+      "name": "unicode characters are counted once",
+      "at": "2026-10-15T12:05:00Z",
+      "note": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+      "expect": {
+        "dueAt": "2026-10-15T12:05:00.000Z",
+        "note": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+      }
+    },
+    {
+      "name": "control characters become spaces",
+      "at": "2026-10-15T12:05:00Z",
+      "note": "  Check\u0000the\u007freply\nnow\tplease  ",
+      "expect": {
+        "dueAt": "2026-10-15T12:05:00.000Z",
+        "note": "Check the reply now please"
+      }
+    },
+    {
+      "name": "too many characters are refused before cleaning",
+      "at": "2026-10-15T12:05:00Z",
+      "note": "                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     ",
+      "expect": {
+        "error": "A follow-up needs a note of 1 to 500 characters."
+      }
+    },
+    {
+      "name": "leap seconds are refused",
+      "at": "2026-10-15T12:05:60Z",
+      "note": "Check the reply",
+      "expect": {
+        "error": "Use an RFC 3339 time with an offset for the follow-up."
+      }
+    },
+    {
+      "name": "a space is not the RFC3339 separator",
+      "at": "2026-10-15 12:05:00Z",
+      "note": "Check the reply",
+      "expect": {
+        "error": "Use an RFC 3339 time with an offset for the follow-up."
+      }
+    },
+    {
+      "name": "more than nine fractional digits are refused",
+      "at": "2026-10-15T12:05:00.0000000001Z",
+      "note": "Check the reply",
+      "expect": {
+        "error": "Use an RFC 3339 time with an offset for the follow-up."
+      }
+    },
+    {
+      "name": "lowercase RFC3339 separators are admitted",
+      "at": "2026-10-15t12:05:00z",
+      "note": "Check the reply",
+      "expect": {
+        "dueAt": "2026-10-15T12:05:00.000Z",
+        "note": "Check the reply"
+      }
+    },
+    {
+      "name": "a BOM is text rather than Rust whitespace",
+      "at": "2026-10-15T12:05:00Z",
+      "note": "\ufeff",
+      "expect": {
+        "dueAt": "2026-10-15T12:05:00.000Z",
+        "note": "\ufeff"
+      }
+    }
+  ],
+  "claims": [
+    {
+      "name": "a due pending row is claimed",
+      "state": "pending",
+      "dueAt": "2026-10-15T12:00:00.000Z",
+      "claimedAt": null,
+      "standing": "active",
+      "expect": "claimed"
+    },
+    {
+      "name": "a future row waits",
+      "state": "pending",
+      "dueAt": "2026-10-15T12:00:00.001Z",
+      "claimedAt": null,
+      "standing": "active",
+      "expect": "not_waiting"
+    },
+    {
+      "name": "a fresh claim is not stolen",
+      "state": "claimed",
+      "dueAt": "2026-10-15T12:00:00.000Z",
+      "claimedAt": "2026-10-15T11:50:00.001Z",
+      "standing": "active",
+      "expect": "not_waiting"
+    },
+    {
+      "name": "a claim at ten minutes is stale",
+      "state": "claimed",
+      "dueAt": "2026-10-15T12:00:00.000Z",
+      "claimedAt": "2026-10-15T11:50:00.000Z",
+      "standing": "active",
+      "expect": "claimed"
+    },
+    {
+      "name": "a stale claim is reclaimed",
+      "state": "claimed",
+      "dueAt": "2026-10-15T12:00:00.000Z",
+      "claimedAt": "2026-10-15T11:49:00.000Z",
+      "standing": "active",
+      "expect": "claimed"
+    },
+    {
+      "name": "a missing agent cancels a due row",
+      "state": "pending",
+      "dueAt": "2026-10-15T12:00:00.000Z",
+      "claimedAt": null,
+      "standing": "gone",
+      "expect": "agent_gone"
+    },
+    {
+      "name": "a paused agent cancels a due row",
+      "state": "pending",
+      "dueAt": "2026-10-15T12:00:00.000Z",
+      "claimedAt": null,
+      "standing": "paused",
+      "expect": "paused"
+    },
+    {
+      "name": "a missing agent does not cancel a future row",
+      "state": "pending",
+      "dueAt": "2026-10-15T12:00:00.001Z",
+      "claimedAt": null,
+      "standing": "gone",
+      "expect": "not_waiting"
+    },
+    {
+      "name": "a paused agent does not cancel another fresh claim",
+      "state": "claimed",
+      "dueAt": "2026-10-15T12:00:00.000Z",
+      "claimedAt": "2026-10-15T11:59:00.000Z",
+      "standing": "paused",
+      "expect": "not_waiting"
+    },
+    {
+      "name": "a fired row never claims again",
+      "state": "fired",
+      "dueAt": "2026-10-15T12:00:00.000Z",
+      "claimedAt": "2026-10-15T11:59:00.000Z",
+      "standing": "active",
+      "expect": "not_waiting"
+    },
+    {
+      "name": "a cancelled row never claims again",
+      "state": "cancelled",
+      "dueAt": "2026-10-15T12:00:00.000Z",
+      "claimedAt": null,
+      "standing": "active",
+      "expect": "not_waiting"
+    }
+  ],
+  "cap": {
+    "at": "2026-10-15T13:00:00Z",
+    "note": "Check the reply",
+    "expected": "You already have 3 follow-ups waiting:\n- 2026-10-15T13:00:00.000Z: \"Check the reply\"\n- 2026-10-15T13:00:00.000Z: \"Check the reply\"\n- 2026-10-15T13:00:00.000Z: \"Check the reply\""
+  },
+  "cancelWords": {
+    "person": "cancelled by you",
+    "agent_gone": "its agent is gone",
+    "paused": "its agent was paused when it came due"
+  }
+}

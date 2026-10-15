@@ -3,6 +3,7 @@ name = "cerebro"
 version = "0.1.0"
 description = "Cerebro — files-first work management"
 edition = "2021"
+resolver = "2"
 # Declared so the crate is not the one unlicensed node in its own dependency
 # graph (M32.6). Matches the Apache-2.0 LICENSE the DMG bundles and ships.
 license = "Apache-2.0"
@@ -15,19 +16,20 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# D12 (M64.5): current plugins need Tauri 2.12. The crate and JS API
+# move together because the CLI checks their minor version.
+tauri = { version = "~2.12", features = [] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
+serde_json = { version = "1", features = ["preserve_order", "raw_value"] }
 serde_yaml = "0.9"
 walkdir = "2"
 notify = "6"
 chrono = "0.4"
 trash = "5"
-# Loopback MCP endpoint (M6). tiny_http over axum on purpose: the endpoint
-# answers a handful of JSON-RPC methods on 127.0.0.1 from a small fixed pool
-# of threads (M54.6), which needs a socket and a body parser, not an async
-# web framework and its ~100 transitive crates.
+# Loopback MCP transports: per-run bearers (M6) and opt-in personal tokens
+# (M62.5b). Fixed thread pools on 127.0.0.1 need a socket and a body parser,
+# not an async web framework and its ~100 transitive crates.
 tiny_http = "0.12"
 rand = "0.8"
 # stdio connector approval keys (PR #5 security review): the ledger stores
@@ -35,6 +37,8 @@ rand = "0.8"
 sha2 = "0.10"
 # Decodes PNG bytes sent over the JSON invoke channel for export_png (M29.4).
 base64 = "0.22"
+# Local media addresses encode each relative-path segment (already locked through url).
+percent-encoding = "2"
 # The ledger's disposable materialized index (M21.5): rebuildable from
 # segments, lives in app-data, never synced, never authoritative. `bundled`
 # compiles SQLite in — no system dependency, and one pinned SQLite version
@@ -50,8 +54,8 @@ indexmap = { version = "2", features = ["serde"] }
 # between consecutive LOCAL midnights converted to UTC, which needs the IANA
 # database to stay honest across DST (23- and 25-hour days are real) and to
 # honour a timezone the owner set that is not this machine's.
-# `iana-time-zone` reads the system zone ID once, at the first settings
-# version; `chrono-tz` resolves that ID's transitions.
+# `iana-time-zone` supplies the budget's first settings version and each
+# structured database read and list_agenda call; `chrono-tz` resolves that ID's transitions.
 chrono-tz = "0.10"
 iana-time-zone = "0.1"
 # The diagnostic log (M53.24, src/diagnostics.rs). The facade only: tauri,
@@ -59,12 +63,37 @@ iana-time-zone = "0.1"
 # as ours. The appender is ours, so there is no tracing-subscriber and no
 # plugin-log. Already in the lock through tauri.
 log = "0.4"
+# Upstream, never Macro's fork or a git revision. Paired with npm wasm
+# 0.8.3 at gitHead 9bed9ec; both engines move together by hand (M67.1).
+ironcalc_base = "=0.8.3"
+# XLSX in/out, the exact crates.io release of the calculation engine.
+ironcalc = "=0.8.3"
+# M66.7: bounded Office extraction only; calamine's picture feature is off.
+zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
+quick-xml = "=0.41.0"
+calamine = { version = "=0.36.1", default-features = false, features = ["dates"] }
+# M66.8: document pictures decode only through files/images.rs, inside Limits.
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+# M69.3: execute the shared import URL grammar (already locked transitively).
+regex = "=1.13.1"
+
+[dev-dependencies]
+ironcalc_base = { version = "=0.8.3", features = ["mock_time"] }
 
 [target.'cfg(unix)'.dependencies]
 # Ending a run (M53.10, spawn.rs): std can neither send SIGTERM nor signal a
 # process group, and a run is the CLI plus everything it started. One killpg
 # call, behind one SAFETY comment. Already in the lock through tauri.
 libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# M64.6: already locked through Tauri. Its notification plugin reports a
+# desktop permission as granted and identifies dev posts as Terminal; use
+# UNUserNotificationCenter directly, guarded by the installed bundle id.
+objc2 = "0.6.4"
+block2 = "0.6.2"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSBundle", "NSString", "NSError", "NSURL"] }
+objc2-user-notifications = { version = "0.3.2", default-features = false, features = ["std", "block2", "UNUserNotificationCenter", "UNNotificationSettings", "UNNotificationContent", "UNNotificationRequest", "UNNotificationTrigger", "UNNotificationSound"] }
 
 # The Rust rails (M53.21). A suppression is #[expect(lint, reason = "...")],
 # which fails the gate once its lint stops firing; an #[allow] would not.

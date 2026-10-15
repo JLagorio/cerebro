@@ -45,7 +45,7 @@ M42.2 shape. **Agents leaves this list** (becomes a section, §4).
 FAVORITES. All five share one section-header anatomy (§4).
 
 **Footer**: SyncBadge · Theme toggle (cycles system → light → dark, icon
-matches the mode) · Settings. No notifications bell — there is no feed, and
+matches the mode) · Settings. No notifications bell — Home’s pull-only lanes follow the M64.4 amendment below, and
 a dot promising nothing is a lie.
 
 **Collapsed**: the w-8 hairline is replaced by the design's floating cluster
@@ -129,3 +129,13 @@ group keys). Open by default.
   Collections, per-surface header redesigns, the design's Docs drag ghost.
 - Any change to selection KINDS beyond adding `mywork` — labels spend, kinds
   stay (M37.2 rule).
+
+
+## Amendment — M64.4 (D9 b, default taken)
+
+Home now gathers near-term work, waiting proposals, agent runs, captures,
+reminders, knowledge changes, recent edits and upcoming dates in quiet lanes.
+Each lane is pull-only and silent when empty; Home has no sidebar count or bell.
+State rows open their pages. Proposals are decided in Review or on their own
+pages. Only event rows receive Done. OS banners are reserved for reminders the
+person sets, through the reminder permission flow.

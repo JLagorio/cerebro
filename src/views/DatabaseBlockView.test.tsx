@@ -87,6 +87,80 @@ const show = (database: string, view = '') =>
   render(<DatabaseBlockView database={database} view={view} schema={schema} entries={entries} />);
 
 describe('DatabaseBlockView', () => {
+  it('names broken filters in the resolved fallback view above its canvas', () => {
+    const broken = entries.map((entry) =>
+      entry.type !== 'Type'
+        ? entry
+        : typeDoc('Reading list', {
+            fields: { rating: { kind: 'select', options: [{ id: 'great' }] } },
+            views: [
+              {
+                id: 'shelf',
+                name: 'Shelf',
+                filters: {
+                  all: [
+                    { field: 'rating', op: 'equals', value: 'retired' },
+                    { field: 'ghost_field', op: 'equals', value: 'yes' },
+                  ],
+                },
+                presentation: { type: 'table' },
+              },
+            ],
+          }),
+    );
+    render(
+      <DatabaseBlockView
+        database="Reading list"
+        view="missing"
+        schema={buildSchema(broken)}
+        entries={broken}
+      />,
+    );
+    expect(screen.getByTestId('database-block-view-missing').textContent).toContain('Shelf');
+    expect(screen.getByTestId('view-problems').textContent).toContain(
+      '“retired” is not an option of Rating.',
+    );
+    expect(screen.getByTestId('view-problems').textContent).toContain(
+      '“ghost_field” in the filter: Reading list has no property by that name.',
+    );
+    expect(
+      screen.getByTestId('view-problems').compareDocumentPosition(screen.getByTestId('table-view')),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it('keeps held ghost choices valid even when another filter excludes their record', () => {
+    const ghost = entries.map((entry) =>
+      entry.type !== 'Type'
+        ? entry
+        : typeDoc('Reading list', {
+            fields: { rating: { kind: 'select', options: [{ id: 'great' }] } },
+            views: [
+              {
+                id: 'shelf',
+                name: 'Shelf',
+                filters: {
+                  all: [
+                    { field: 'rating', op: 'equals', value: 'hard' },
+                    { field: 'title', op: 'equals', value: 'Dune' },
+                  ],
+                },
+                presentation: { type: 'table' },
+              },
+            ],
+          }),
+    );
+    render(
+      <DatabaseBlockView
+        database="Reading list"
+        view="shelf"
+        schema={buildSchema(ghost)}
+        entries={ghost}
+      />,
+    );
+    expect(screen.getByText('Nothing matches these filters')).toBeTruthy();
+    expect(screen.queryByTestId('view-problems')).toBeNull();
+  });
+
   it('names the database and the view it is showing', () => {
     show('Reading list', 'stack');
     const block = screen.getByTestId('database-block');
@@ -480,4 +554,38 @@ describe('DatabaseBlockView creates on a calendar day (M53.16)', () => {
       window: { start: day, end: null },
     });
   });
+});
+
+it('forwards a selected hours slot with its embedded calendar date field', async () => {
+  const docs = [
+    typeDoc('Sprint', {
+      fields: { window: { kind: 'daterange' } },
+      views: [
+        { id: 'hours', name: 'Hours', presentation: { type: 'calendar', calendarSpan: 'day' } },
+      ],
+    }),
+  ];
+  const onCreateOn = vi.fn(async () => true);
+  render(
+    <DatabaseBlockView
+      database="Sprint"
+      view="hours"
+      schema={buildSchema(docs)}
+      entries={docs}
+      onCreateOn={onCreateOn}
+    />,
+  );
+  const day = toIsoDate(new Date());
+  const column = screen.getByTestId('calendar-hours-day');
+  const pointer = (type: string, y: number) =>
+    new MouseEvent(type, { bubbles: true, button: 0, clientY: y });
+  fireEvent(column, pointer('pointerdown', 672));
+  fireEvent(window, pointer('pointermove', 696));
+  fireEvent(window, pointer('pointerup', 696));
+  const input = screen.getByRole('textbox', { name: 'New record title' });
+  fireEvent.change(input, { target: { value: 'Review' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+  await waitFor(() =>
+    expect(onCreateOn).toHaveBeenCalledWith('Review', day, 'window', { start: 840, end: 900 }),
+  );
 });

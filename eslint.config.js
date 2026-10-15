@@ -25,16 +25,20 @@ const ENGINE_IMPORTS = new RegExp(
     '\\./',
     '@/engine/',
     'yaml$',
+    // M61.10: checked recurrence options in engine/recurrence.ts alone.
+    'rrule$',
     // Pure leaves: no DOM, no store, no IPC. tsconfig.engine.json typechecks
     // them through these imports, which is the only check that reaches them.
-    '@/lib/(?:slug|templates|sha256|policy/(?:table|tools|toolApproval))$',
+    '@/lib/(?:deepEqual|slug|templates|sha256|policy/(?:table|tools|toolApproval))$',
     // viewTab.ts's one edge into views, deliberate: capability data over
     // engine types with no React in it (its comment says why).
     '@/views/viewKinds$',
     // Tables the backends share: okf.ts reads staleness, M60.3's readers the
     // field kinds (shared/schema) and the date grammar (shared/calendar), and
     // fileKinds.ts the file kinds (shared/files, M66.1).
-    '\\.\\./\\.\\./shared/(?:policy|schema|calendar|files)/[\\w.-]+\\.json$',
+    '\\.\\./\\.\\./shared/(?:policy|schema|calendar|files|import)/[\\w.-]+\\.json$',
+    // JSON Canvas's shared format; the scene boundary pins its one reader.
+    '\\.\\./\\.\\./\\.\\./shared/canvas/[\\w.-]+\\.json$',
     // The whiteboard scene core's two pinned upstream libraries (M68.1), bare
     // names only; src/engine/scene/boundary.test.ts pins the one file that
     // loads each (ink.ts, order.ts).
@@ -54,6 +58,18 @@ const RAILS = {
     message:
       "Only src/mermaid/render.ts and *.mermaid.test.ts load mermaid: render through renderMermaid, and mock '@/mermaid/render' with a fixture svg in a test.",
   },
+  pdfjs: {
+    pattern: /^pdfjs-dist(?:\/|$)/,
+    types: true,
+    message:
+      'Only src/workspace/viewers/pdf/pdfjs.ts and *.pdf.test.ts load pdfjs-dist: use the PDF loader and mock it in other tests.',
+  },
+  ironcalc: {
+    pattern: /(?:^@ironcalc\/|(?:^|\/)sheetValues\/.*\.wasm)/,
+    types: true,
+    message:
+      "Only src/lib/mockSheet.ts and *.ironcalc.test.ts load @ironcalc/wasm: use calculateSheets from '@/lib/ipc', and mock it in component tests.",
+  },
   comments: {
     // M70.1: BlockNote's comments keep threads in the document as marks, which
     // reach the undo history, the save and the clipboard. Comments are drawn
@@ -72,7 +88,7 @@ const RAILS = {
     // `typeof import('…')` names a module too, so the engine checks types.
     types: true,
     message:
-      'engine/ is the pure core: it imports engine modules, yaml, the lib leaves slug, templates, sha256, policy/table, policy/tools and policy/toolApproval, views/viewKinds, JSON tables under shared/policy, shared/schema, shared/calendar and shared/files, and the scene libraries perfect-freehand and fractional-indexing. Move the code into engine/, or have the caller pass the value in.',
+      'engine/ is the pure core: it imports engine modules, yaml, the lib leaves deepEqual, slug, templates, sha256, policy/table, policy/tools and policy/toolApproval, views/viewKinds, JSON tables under shared/policy, shared/schema, shared/calendar, shared/files and shared/import, and the scene libraries perfect-freehand and fractional-indexing. Move the code into engine/, or have the caller pass the value in.',
   },
 };
 
@@ -174,34 +190,42 @@ export default tseslint.config(
     },
   },
   // The rails' file classes. Each later object replaces the rail rules of the
-  // ones before it, and the five after the first never overlap.
+  // ones before it, and the specialized classes below never overlap.
   {
     files: ['src/**/*.{ts,tsx}'],
-    rules: rails('tauri', 'mermaid', 'mockParse', 'comments'),
+    rules: rails('pdfjs', 'ironcalc', 'tauri', 'mermaid', 'mockParse', 'comments'),
   },
   {
     files: ADAPTERS,
-    rules: rails('mermaid', 'mockParse', 'comments'),
+    rules: rails('pdfjs', 'ironcalc', 'mermaid', 'mockParse', 'comments'),
   },
   {
     files: ['src/mermaid/render.ts', 'src/**/*.mermaid.test.ts'],
-    rules: rails('tauri', 'mockParse', 'comments'),
+    rules: rails('pdfjs', 'ironcalc', 'tauri', 'mockParse', 'comments'),
   },
   {
     // The mock backend and the two tests that hold its parser to Rust.
     files: ['src/lib/mockIpc.ts', 'src/lib/mockParse.test.ts', 'src/lib/scanGolden.test.ts'],
-    rules: rails('tauri', 'mermaid', 'comments'),
+    rules: rails('pdfjs', 'ironcalc', 'tauri', 'mermaid', 'comments'),
   },
   {
     // Engine tests may import a fixture or a store; the engine itself may not.
     files: ['src/engine/**/*.{ts,tsx}'],
     ignores: ['src/engine/**/*.test.{ts,tsx}'],
-    rules: rails('tauri', 'mermaid', 'mockParse', 'comments', 'engine'),
+    rules: rails('pdfjs', 'ironcalc', 'tauri', 'mermaid', 'mockParse', 'comments', 'engine'),
+  },
+  {
+    files: ['src/lib/mockSheet.ts', 'src/**/*.ironcalc.test.ts'],
+    rules: rails('pdfjs', 'tauri', 'mermaid', 'mockParse', 'comments'),
+  },
+  {
+    files: ['src/workspace/viewers/pdf/pdfjs.ts', 'src/**/*.pdf.test.ts'],
+    rules: rails('ironcalc', 'tauri', 'mermaid', 'mockParse', 'comments'),
   },
   {
     // The M70.1 spike measures BlockNote's comments extension; nothing else
     // loads it.
     files: ['src/editor/commentSpike.test.ts'],
-    rules: rails('tauri', 'mermaid', 'mockParse'),
+    rules: rails('pdfjs', 'ironcalc', 'tauri', 'mermaid', 'mockParse'),
   },
 );

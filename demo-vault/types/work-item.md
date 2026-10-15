@@ -2,6 +2,7 @@
 type: Type
 icon: square-check
 color: '#3D8BE8'
+deadline: due
 statuses:
   - { id: backlog, group: active, color: '#A8AFC2', hollow: true }
   - { id: todo, group: active, color: '#7E8699' }
@@ -32,6 +33,8 @@ fields:
       - { id: XL }
   epic: { kind: relation, target: Epic }
   blocked_by: { kind: relation, target: Work item }
+  project: { kind: relation, target: Project, limit: 1 }
+  agent: { kind: relation, target: Agent }
 layout:
   heading: [status, priority]
   groups:
@@ -133,3 +136,5 @@ views:
 Work items are the unit of delivery: tasks, bugs, and milestones tracked on project boards.
 
 `blocked_by` is how blocking is modelled — a relation between two items, not a separate Blocker record. A blockage is a fact about a pair of items, and giving it its own note would mean maintaining a third thing that goes stale the moment either end moves.
+
+Linking an agent in `agent` hands it the item; it wakes only if its own page says it wakes when assigned via agent.

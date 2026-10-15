@@ -2,7 +2,9 @@ import { configure } from '@testing-library/react';
 import { afterEach, expect, vi } from 'vitest';
 import { resetKeymap } from '@/lib/keys/registry';
 import { installKeyRoot, resetKeyRoot } from '@/lib/keys/root';
+import { installPdfGuard } from './pdfGuard';
 import { installMermaidGuard } from './mermaidGuard';
+import { installIronCalcGuard } from './ironcalcGuard';
 
 // waitFor's 1s default is calibrated for a developer machine; CI runs on
 // shared macos-14 runners where a BlockNote serialize that takes ~100ms
@@ -94,6 +96,8 @@ if (typeof document !== 'undefined' && !document.elementFromPoint) {
 // CV-14: a test file that reaches the real mermaid renderer fails, naming the
 // fix (mermaidGuard.ts). vitest sets the file's path before setup runs.
 installMermaidGuard(expect.getState().testPath ?? '');
+installIronCalcGuard(expect.getState().testPath ?? '');
+installPdfGuard(expect.getState().testPath ?? '');
 
 // M65.1: the keymap's one capture-phase listener, installed once as the app
 // installs it, so a component test that dispatches a key on window or

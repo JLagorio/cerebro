@@ -3,6 +3,7 @@ import { RecordTabs } from '@/detail/RecordTabs';
 import { agentRef } from '@/engine/agents';
 import type { Entry, TabDef } from '@/engine/types';
 import { AgentRunHistory } from '@/status/AgentRunHistory';
+import { FollowupList } from '@/status/FollowupList';
 import { WakesSection } from '@/status/WakesSection';
 import { useVaultStore } from '@/stores/vaultStore';
 import { AgentDossier } from './AgentDossier';
@@ -68,6 +69,9 @@ export function AgentPageBody({
           {/* M63.1b: what is waiting to wake it, above what it ran. */}
           <div className="mb-4">
             <WakesSection vaultPath={vaultPath} actor={actor} />
+          </div>
+          <div className="mb-4">
+            <FollowupList actor={actor} />
           </div>
           <AgentRunHistory actor={actor} />
         </>

@@ -46,6 +46,7 @@ export function HeadingProperties({
   detailsShown,
   onToggleDetails,
   showEmpty,
+  onPatch,
 }: {
   entry: Entry;
   schema: Schema;
@@ -55,6 +56,8 @@ export function HeadingProperties({
   /** Overrides the live type's show-empty bit — the layout editor's preview
    * passes its draft's; hosts omit it (see stripCells). */
   showEmpty?: boolean;
+  /** Caller-owned draft, keyed so every strip cell edits the same record. */
+  onPatch?: (patch: Record<string, unknown>) => void;
 }) {
   const shown = stripCells(entry, schema, fields, showEmpty);
   if (shown.length === 0) return null;
@@ -83,7 +86,14 @@ export function HeadingProperties({
               {humanize(f.name)}
             </span>
           </span>
-          <FieldEditor entry={entry} def={f} schema={schema} compact chrome="strip" />
+          <FieldEditor
+            entry={entry}
+            def={f}
+            schema={schema}
+            compact
+            chrome="strip"
+            onPatch={onPatch === undefined ? undefined : (value) => onPatch({ [f.name]: value })}
+          />
         </div>
       ))}
       {onToggleDetails !== undefined && (

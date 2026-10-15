@@ -15,6 +15,7 @@ import { SHELL_CEILINGS, WEB_CEILINGS } from '@/lib/policy/toolApproval';
 import {
   addressedAgentPrompt,
   agentRunPrompt,
+  type AssignmentBrief,
   askBasePrompt,
   augmentDocPrompt,
   distillPrompt,
@@ -28,6 +29,7 @@ import {
   scheduledSkillPrompt,
   schemaRecheckPrompt,
   studioBuildPrompt,
+  sheetAskPrompt,
 } from '@/lib/prompts';
 import { templateFillPrompt } from '@/lib/templates';
 
@@ -64,6 +66,11 @@ const TRIGGERS = [
     do: 'Check the release date before writing anything.',
   },
 ];
+const ASSIGNMENTS: (AssignmentBrief | undefined)[] = [
+  undefined,
+  { field: 'agent', canWrite: true, host: { title: 'Launch', path: 'projects/launch.md' } },
+  { field: 'agent', canWrite: false, host: null },
+];
 const MEMORY = { recent: 'NOTES', preferences: 'CORRECTION' };
 const AGENT = 'records/agents/scout.md';
 
@@ -81,19 +88,22 @@ function agentPrompts(grant: PromptGrant): { label: string; text: string }[] {
     for (const readScope of SCOPES) {
       const where = `scope ${JSON.stringify(scope)}, read scope ${JSON.stringify(readScope)}`;
       for (const trigger of TRIGGERS) {
-        out.push({
-          label: `agentRunPrompt, ${trigger === null ? 'scheduled' : 'woken'}, ${where}`,
-          text: agentRunPrompt(
-            grant,
-            AGENT,
-            'Scout',
-            'process:scout',
-            MEMORY,
-            trigger,
-            scope,
-            readScope,
-          ),
-        });
+        for (const assignment of ASSIGNMENTS) {
+          out.push({
+            label: `agentRunPrompt, ${trigger === null ? 'scheduled' : 'woken'}, ${where}, assignment ${JSON.stringify(assignment)}`,
+            text: agentRunPrompt(
+              grant,
+              AGENT,
+              'Scout',
+              'process:scout',
+              MEMORY,
+              trigger,
+              scope,
+              readScope,
+              assignment,
+            ),
+          });
+        }
       }
       out.push({
         label: `addressedAgentPrompt, ${where}`,
@@ -150,24 +160,27 @@ function heard(text: string): string[] {
   return named;
 }
 
-/** The tools any composer names, read off their output under a full grant
- * with every branch on: attended, shell, connectors, the knowledge capability,
- * a skill catalogue over budget, and every scope, read scope and trigger. */
-const NAMED: readonly string[] = (() => {
+/** Discover preferred and fallback names separately for each composer family.
+ * A newly named tool must not double the unrelated family's exhaustive matrix. */
+function namesOf(compose: (grant: PromptGrant) => { text: string }[]): readonly string[] {
   const full: PromptGrant = { tools: HOLDABLE, shell: true, web: true, attended: true };
   const named = new Set<string>();
-  for (const { text } of [...systemPrompts(full, true, ['knowledge']), ...agentPrompts(full)]) {
-    for (const tool of mentionedTools(text)) named.add(tool);
+  for (const omitted of [null, ...HOLDABLE]) {
+    const grant = { ...full, tools: new Set([...HOLDABLE].filter((tool) => tool !== omitted)) };
+    for (const { text } of compose(grant)) for (const tool of mentionedTools(text)) named.add(tool);
   }
   return [...named].sort();
-})();
+}
+const AGENT_NAMED = namesOf(agentPrompts);
+const SYSTEM_NAMED = namesOf((grant) => systemPrompts(grant, true, ['knowledge']));
+const NAMED = [...new Set([...AGENT_NAMED, ...SYSTEM_NAMED])];
 
-/** Every subset of NAMED, each with every tool no composer names. */
-function grantsOfNamed(): ReadonlySet<string>[] {
-  const unnamed = [...HOLDABLE].filter((tool) => !NAMED.includes(tool));
+/** Every subset of a family's names, each with every tool it does not name. */
+function grantsOfNamed(names: readonly string[]): ReadonlySet<string>[] {
+  const unnamed = [...HOLDABLE].filter((tool) => !names.includes(tool));
   return Array.from(
-    { length: 2 ** NAMED.length },
-    (_, mask) => new Set([...NAMED.filter((_, at) => (mask & (1 << at)) !== 0), ...unnamed]),
+    { length: 2 ** names.length },
+    (_, mask) => new Set([...names.filter((_, at) => (mask & (1 << at)) !== 0), ...unnamed]),
   );
 }
 
@@ -190,7 +203,8 @@ describe('no prompt names a tool its run lacks', () => {
     for (const tool of NAMED) expect(HOLDABLE.has(tool), tool).toBe(true);
     // 2^12 subsets times every composer is the budget; past it, split the
     // matrix by composer.
-    expect(NAMED.length).toBeLessThanOrEqual(12);
+    expect(AGENT_NAMED.length).toBeLessThanOrEqual(12);
+    expect(SYSTEM_NAMED.length).toBeLessThanOrEqual(12);
   });
 
   it('holds for every subset of them, on every composer, under every axis', () => {
@@ -199,24 +213,26 @@ describe('no prompt names a tool its run lacks', () => {
     // by name: no prompt names them to a run that does not hold WebFetch.
     const webMisses: string[] = [];
     let composed = 0;
-    for (const tools of grantsOfNamed()) {
-      const check = (grant: PromptGrant, prompts: { label: string; text: string }[]) => {
-        for (const { label, text } of prompts) {
-          composed += 1;
-          const lacked = heard(text).filter((tool) => !grant.tools.has(tool));
-          if (lacked.length > 0) {
-            misses.push(`${label}, holding [${[...grant.tools].sort().join(', ')}]: ${lacked}`);
-          }
-          if (grant.web !== true && /WebFetch|WebSearch/.test(`${SERVER_INSTRUCTIONS}\n${text}`)) {
-            webMisses.push(label);
-          }
+    const check = (grant: PromptGrant, prompts: { label: string; text: string }[]) => {
+      for (const { label, text } of prompts) {
+        composed += 1;
+        const lacked = heard(text).filter((tool) => !grant.tools.has(tool));
+        if (lacked.length > 0) {
+          misses.push(`${label}, holding [${[...grant.tools].sort().join(', ')}]: ${lacked}`);
         }
-      };
+        if (grant.web !== true && /WebFetch|WebSearch/.test(`${SERVER_INSTRUCTIONS}\n${text}`)) {
+          webMisses.push(label);
+        }
+      }
+    };
+    for (const tools of grantsOfNamed(AGENT_NAMED)) {
       // The agent prompts read only the grant's tools.
       check(
         { tools, shell: false, attended: false },
         agentPrompts({ tools, shell: false, attended: false }),
       );
+    }
+    for (const tools of grantsOfNamed(SYSTEM_NAMED)) {
       for (const attended of [true, false]) {
         for (const shell of [true, false]) {
           for (const web of [true, false]) {
@@ -230,13 +246,13 @@ describe('no prompt names a tool its run lacks', () => {
         }
       }
     }
-    expect(composed).toBe(2 ** NAMED.length * (36 + 64));
+    expect(composed).toBe(2 ** AGENT_NAMED.length * 72 + 2 ** SYSTEM_NAMED.length * 64);
     expect(misses.slice(0, 5)).toEqual([]);
     expect(webMisses.slice(0, 5)).toEqual([]);
   });
 
   it('never tells an unattended run to call open_note', () => {
-    for (const tools of grantsOfNamed()) {
+    for (const tools of grantsOfNamed(SYSTEM_NAMED)) {
       for (const shell of [true, false]) {
         for (const { label, text } of systemPrompts({ tools, shell, attended: false }, true, [
           'knowledge',
@@ -276,6 +292,12 @@ describe('the surface prompts', () => {
       organizePrompt('inbox/standup.md', { title: 'Standup', speakers: [] }),
     ],
     ['studioBuild', studioBuildPrompt('Checkout', 'studio/checkout')],
+    [
+      'sheetAsk',
+      sheetAskPrompt('What is the total?', 'notes/budget.md', 'Budget', 'Sheet1!A1:B2', [
+        { address: 'A1', source: '12', shown: '12' },
+      ]),
+    ],
     ['refreshSource', refreshSourcePrompt('sources/kes-421.md', 'KES-421')],
     ['fetchRefs', fetchRefsPrompt('docs/prd.md', ['KES-421', 'OPS-7'])],
     [

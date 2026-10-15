@@ -1,6 +1,7 @@
 ---
 type: Work item
 key: SYN-10
+project: "[[offline-sync-hardening]]"
 status: backlog
 priority: high
 assignee: "[[tom-keller]]"

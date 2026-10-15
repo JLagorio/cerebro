@@ -1,3 +1,5 @@
+import { ConvertBoardDialog } from '@/whiteboard/ConvertBoardDialog';
+import { readMermaidBoard } from '@/whiteboard/mermaidBoard';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useOpenPath } from '@/app/useOpenPath';
 import { Button } from '@/components/ui/Button';
@@ -5,7 +7,14 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { Popover } from '@/components/ui/Popover';
 import type { Entry, Presentation, Schema } from '@/engine/types';
-import { writeTextFile } from '@/lib/ipc';
+import { newBoardFile } from '@/whiteboard/newBoardFile';
+import { BoardCanvas, type BoardCanvasHandle } from '@/whiteboard/BoardCanvas';
+import { useCanvasFile, type CanvasFile } from '@/whiteboard/useCanvasFile';
+import { CanvasUnavailable, CanvasHeldFace, CanvasReadOnly } from '@/whiteboard/CanvasFaces';
+import { useScene } from '@/whiteboard/useScene';
+import { WhiteboardAncestry } from '@/whiteboard/ancestry';
+import { placedPaths } from '@/engine/boardCards';
+import { useVaultActionGuard } from '@/hooks/useVaultActionGuard';
 import { rankNames } from '@/lib/nameRank';
 import { slugify } from '@/lib/slug';
 import { FullScreenDiagramEditor } from '@/mermaid/FullScreenDiagramEditor';
@@ -52,27 +61,8 @@ export interface WhiteboardViewProps {
   onPresentationChange?: (next: Presentation) => void;
 }
 
-/**
- * What a fresh canvas holds. A bare `flowchart TD` is a valid, empty mermaid
- * flowchart — the structural editor opens on it with its add-node affordances
- * and nothing else, which is what "blank whiteboard" means.
- *
- * The manual-layout marker (M29.41) is part of the seed because this is a
- * WHITEBOARD: a node lands where it was dropped, and the toolbar's placer is
- * only armed in manual mode. A diagram file made anywhere else still defaults
- * to auto layout; only this surface asks for free-drag up front.
- */
-const WHITEBOARD_SEED = 'flowchart TD\n  %% cerebro:layout manual\n';
-
-/**
- * A whiteboard tab (M29.45–M29.47, spec D8): a `.mmd` canvas owned by the
- * view, created on first open, rendered through the shared full-screen editor,
- * with the view's own records placeable on it as bound, badged, clickable
- * cards.
- *
- * `EmptyState` takes a fixed prop list and spreads nothing, so each face is
- * wrapped in the div that carries its test id.
- */
+/** A tab creates a JSON Canvas file once. Existing Mermaid pointers keep their
+ * diagram editor; no pointer changes merely because the tab renders. */
 export function WhiteboardView({
   entries,
   presentation,
@@ -80,8 +70,10 @@ export function WhiteboardView({
   host,
   onPresentationChange,
 }: WhiteboardViewProps) {
+  // Tab changes still publish through their pinned callback. A vault change,
+  // including an A→B→A round trip batched by React, retires the old action.
+  const capture = useVaultActionGuard('whiteboard-view');
   const vaultPath = useVaultStore((s) => s.vaultPath);
-  const rescan = useVaultStore((s) => s.rescan);
   const toast = useUiStore((s) => s.toast);
   const file = presentation.whiteboard?.file ?? null;
   // Primitives, not the host object: ViewCanvas builds `host` fresh on every
@@ -125,7 +117,7 @@ export function WhiteboardView({
   useEffect(() => {
     if (file !== null || folder === null || viewName === null) return;
     if (vaultPath === null || !canPersist) return;
-    const target = `${folder}\0${viewName}`;
+    const target = JSON.stringify([vaultPath, folder, viewName]);
     if (inFlight.current.has(target)) return;
     inFlight.current.add(target);
     // PINNED at fire time, not read at resolve time. `ListPage`'s
@@ -137,19 +129,22 @@ export function WhiteboardView({
     // is a last-write-wins on one tab instead of corruption across two, and
     // is the same shape every other presentation writer here already has.
     const pinned = latest.current;
+    const current = capture();
     void (async () => {
       let written = false;
       try {
-        // <host folder>/whiteboards/<view-name-slug>.mmd. `folder` is '' for a
+        // <host folder>/whiteboards/<view-name-slug>.canvas. `folder` is '' for a
         // root-level List — no collection folder — so the canvas lands in a
         // top-level whiteboards/.
         const stem = slugify(viewName) || 'whiteboard';
-        const rel = `${folder === '' ? '' : `${folder}/`}whiteboards/${stem}.mmd`;
-        const actual = await writeTextFile(vaultPath, rel, WHITEBOARD_SEED);
+        const rel = `${folder === '' ? '' : `${folder}/`}whiteboards/${stem}.canvas`;
+        const actual = await newBoardFile(vaultPath, rel);
         written = true;
-        // The mock backend has no watcher and Tauri's arrives late; the tree
-        // and the entry list should know about the canvas before the tab does.
-        await rescan();
+        // Creation has rescanned its own vault before publishing the pointer.
+        if (!current()) {
+          inFlight.current.delete(target);
+          return;
+        }
         // The pointer is presentation state, so it persists through the same
         // channel every view setting does — one write to the List's YAML.
         pinned.onPresentationChange?.({
@@ -166,17 +161,14 @@ export function WhiteboardView({
         // and orphan the first: the very litter `canPersist` exists to
         // prevent, one step later.
         if (!written) inFlight.current.delete(target);
-        toast(`Couldn't create whiteboard: ${err instanceof Error ? err.message : String(err)}`);
+        if (current())
+          toast(`Couldn't create whiteboard: ${err instanceof Error ? err.message : String(err)}`);
       }
     })();
-  }, [file, folder, viewName, vaultPath, canPersist, rescan, toast]);
+  }, [file, folder, viewName, vaultPath, canPersist, toast, capture]);
 
   if (host === null) {
-    // A dashboard block reaches here (M29.48 wires the page hosts and leaves
-    // the dashboard out): recursion aside, a whiteboard is an EDITOR, and a
-    // 300px read-only tile of one would be a picture pretending to be a
-    // canvas. `hasBlocks` guards view-in-view nesting; this face guards
-    // canvas-in-block.
+    // A dashboard tile sends the person to the list that owns the board.
     return (
       <div data-testid="whiteboard-unavailable" className="flex min-h-0 flex-1">
         <EmptyState
@@ -197,18 +189,38 @@ export function WhiteboardView({
   }
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="whiteboard-view">
-      {/* KEYED on the file (M29.23): the canvas's useDiagramFile flushes on
-          unmount, and only a true unmount keeps that flush aimed at the file
-          it was editing. Re-pointing the tab at a new file must remount. */}
-      <WhiteboardCanvas
-        key={file}
-        file={file}
-        entries={entries}
-        schema={schema}
-        presentation={presentation}
-        onPresentationChange={onPresentationChange}
-        viewName={host.viewName}
-      />
+      {/* A changed file owns a new save lifetime. */}
+      {/\.canvas$/i.test(file) ? (
+        <CanvasBoard
+          key={`${vaultPath}:${file}`}
+          file={file}
+          entries={entries}
+          presentation={presentation}
+          onPresentationChange={onPresentationChange}
+          viewName={host.viewName}
+        />
+      ) : /\.mmd$/i.test(file) ? (
+        <MermaidBoard
+          key={file}
+          file={file}
+          entries={entries}
+          schema={schema}
+          presentation={presentation}
+          onPresentationChange={onPresentationChange}
+          viewName={host.viewName}
+        />
+      ) : (
+        <div data-testid="whiteboard-not-a-board" className="flex-1 p-6 text-sm text-n-500">
+          <p>This tab points at {file}, which isn't a whiteboard.</p>
+          {onPresentationChange && (
+            <Button
+              onClick={() => onPresentationChange({ ...presentation, whiteboard: { file: null } })}
+            >
+              Start a new canvas
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -216,7 +228,117 @@ export function WhiteboardView({
 /** How many records the picker shows at once — quick open's own ceiling. */
 const MAX_OFFERED = 25;
 
-function WhiteboardCanvas({
+type CanvasProps = Pick<
+  WhiteboardViewProps,
+  'entries' | 'presentation' | 'onPresentationChange'
+> & { file: string; viewName: string };
+function CanvasBoard(props: CanvasProps) {
+  const file = useCanvasFile(props.file);
+  if (file.state === 'loading')
+    return <div data-testid="whiteboard-loading" className="flex-1" aria-busy="true" />;
+  if (file.state === 'missing')
+    return (
+      <div data-testid="whiteboard-tombstone" className="flex min-h-0 flex-1">
+        <EmptyState
+          icon="file-x"
+          title="This whiteboard's file is gone"
+          description={`${props.file} was renamed, moved, or deleted outside this tab.`}
+          className="flex-1"
+          action={
+            props.onPresentationChange && (
+              <Button
+                onClick={() =>
+                  props.onPresentationChange?.({
+                    ...props.presentation,
+                    whiteboard: { file: null },
+                  })
+                }
+              >
+                Start a new canvas
+              </Button>
+            )
+          }
+        />
+      </div>
+    );
+  if (file.state === 'unavailable')
+    return <CanvasUnavailable reason={file.reason} preview={file.preview} />;
+  return <CanvasReady {...props} ready={file} />;
+}
+function CanvasReady({
+  file,
+  entries,
+  viewName,
+  ready,
+}: CanvasProps & { ready: Extract<CanvasFile, { state: 'ready' }> }) {
+  const board = useScene(ready.editor),
+    vault = useVaultStore((s) => s.vaultPath);
+  const handle = useRef<BoardCanvasHandle>(null),
+    addRef = useRef<HTMLButtonElement>(null);
+  const [adding, setAdding] = useState(false);
+  const placed = placedPaths(board),
+    offered = entries.filter((entry) => !placed.has(entry.path));
+  return (
+    <>
+      {ready.readOnly && <CanvasReadOnly />}
+      {ready.held && <CanvasHeldFace held={ready.held} reload={ready.reload} />}
+      <div className="flex h-9 flex-none items-center gap-1.5 border-b border-n-200 px-3">
+        {!ready.readOnly && (
+          <button
+            ref={addRef}
+            type="button"
+            data-testid="whiteboard-add-record"
+            aria-haspopup="dialog"
+            aria-expanded={adding}
+            onClick={() => setAdding((v) => !v)}
+            className="rounded-md border border-n-200 bg-transparent px-2 py-0.5 text-xs text-n-700 hover:bg-n-50"
+          >
+            Add record
+          </button>
+        )}
+        {SAVE_LABEL[ready.saveState] !== null && (
+          <span
+            data-testid="whiteboard-save-state"
+            className={
+              ready.saveState === 'failed'
+                ? 'ml-auto text-xs text-danger-600'
+                : 'ml-auto text-xs text-n-500'
+            }
+          >
+            {SAVE_LABEL[ready.saveState]}
+          </span>
+        )}
+        {adding && (
+          <AddRecordPopover
+            anchorRef={addRef}
+            entries={offered}
+            emptyLabel={
+              entries.length === 0
+                ? 'This view has no records yet'
+                : 'Every record is already on the canvas'
+            }
+            onPick={(entry) => {
+              setAdding(false);
+              if (!handle.current?.insertCard({ kind: 'file', file: entry.path }))
+                useUiStore.getState().toast(`Couldn't place ${entry.title}`);
+            }}
+            onClose={() => setAdding(false)}
+          />
+        )}
+      </div>
+      <WhiteboardAncestry.Provider value={[file]}>
+        <BoardCanvas
+          ref={handle}
+          source={ready.readOnly ? board : ready.editor}
+          name={viewName}
+          cameraKey={JSON.stringify([vault, file])}
+        />
+      </WhiteboardAncestry.Provider>
+    </>
+  );
+}
+
+function MermaidBoard({
   file,
   entries,
   schema,
@@ -236,11 +358,17 @@ function WhiteboardCanvas({
   // Shared with the editor inside FullScreenDiagramEditor, so "Add record"
   // places a node exactly as `+ Node` does (M29.52).
   const placerRef = useRef<NodePlacer | null>(null);
+  const diagramHost = useRef<HTMLDivElement>(null);
+  const [converting, setConverting] = useState(false);
   // The link popover's record search and what a link badge opens (M29.38) —
   // the same wiring DiagramPage gives the shared editor, so a whiteboard can
   // bind a node to a record instead of being URL-only. `in-place`, not
   // `navigate`: this tab IS the backdrop the user is standing on (M9.3).
   const vaultEntries = useVaultStore((s) => s.entries);
+  const convertible = useMemo(
+    () => code !== null && readMermaidBoard(code, vaultEntries).ok,
+    [code, vaultEntries],
+  );
   const openPath = useOpenPath('in-place');
   const toast = useUiStore((s) => s.toast);
   const [adding, setAdding] = useState(false);
@@ -344,10 +472,9 @@ function WhiteboardCanvas({
     return <div data-testid="whiteboard-loading" className="flex-1" aria-busy="true" />;
   }
   return (
-    <>
+    <div ref={diagramHost} className="flex min-h-0 flex-1 flex-col">
       {/* The whiteboard's own bar — NOT part of FullScreenDiagramEditor.
-          "Add record" lists the VIEW's entries (spec D8), and the shared
-          editor must not learn what a record is. */}
+          Add record lists the view's entries; conversion creates a separate file. */}
       {/* No `relative`: the picker anchors through `anchorRef` and portals to
           the body, so a positioned bar would only be an unused containing
           block for nothing. */}
@@ -363,6 +490,16 @@ function WhiteboardCanvas({
         >
           Add record
         </button>
+        {convertible && onPresentationChange && (
+          <button
+            type="button"
+            data-testid="whiteboard-convert"
+            onClick={() => setConverting(true)}
+            className="rounded-md border border-n-200 px-2 py-0.5 text-xs text-n-700 hover:bg-n-50"
+          >
+            Convert to whiteboard
+          </button>
+        )}
         {SAVE_LABEL[saveState] !== null && (
           <span
             data-testid="whiteboard-save-state"
@@ -393,6 +530,17 @@ function WhiteboardCanvas({
           />
         )}
       </div>
+      {converting && (
+        <ConvertBoardDialog
+          path={file}
+          code={code}
+          container={diagramHost.current}
+          onClose={() => setConverting(false)}
+          onConverted={(path) =>
+            onPresentationChange?.({ ...presentation, whiteboard: { file: path } })
+          }
+        />
+      )}
       <FullScreenDiagramEditor
         code={code}
         onChangeCode={handleChange}
@@ -409,7 +557,7 @@ function WhiteboardCanvas({
         onOpenPath={openPath}
         overlay={<RecordChipOverlay code={code} entries={vaultEntries} schema={schema} />}
       />
-    </>
+    </div>
   );
 }
 

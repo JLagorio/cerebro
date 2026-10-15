@@ -1,4 +1,10 @@
 import { resolveOptionColor } from '@/lib/swatch';
+import { useState } from 'react';
+import { FileImage } from '@/components/FileImage';
+import { FileThumb } from '@/components/FileThumb';
+import { thumbReason } from '@/engine/thumbs';
+import { kindFor } from '@/engine/fileKinds';
+import { useVaultStore } from '@/stores/vaultStore';
 import { useOpenPath } from '@/app/useOpenPath';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
@@ -23,14 +29,8 @@ import type { CardSize, Entry, GroupNode, Presentation, Schema } from '@/engine/
  * are ignored here rather than faked — `groupTree` reads band levels only, and
  * a card grid has nowhere to put an outline.
  *
- * COVERS DO NOT RENDER IMAGES YET, on purpose. Since M16.13c a files property
- * stores a vault-relative path (`attachments/cover.png`), and the webview
- * cannot load one: that needs Tauri's `assetProtocol` enabled AND the CSP
- * widened past `img-src 'self' data:` — a deliberate change to what the app may
- * load, which belongs in its own commit. A remote https:// value is blocked by
- * the same line. So a cover tile names the file it would show instead of
- * rendering a broken image, and the setting still round-trips, so galleries
- * configured today light up the day that commit lands.
+ * Local covers use bounded thumbnails, with original-image fallback. Remote
+ * URLs keep named tiles, so browsing a gallery never loads a remote image.
  */
 
 export interface GalleryViewProps {
@@ -94,19 +94,47 @@ function CoverTile({
   fit: boolean;
 }) {
   const style = typeStyle(entry.type, schema);
+  const vault = useVaultStore((s) => s.vaultPath);
+  const imageKey = JSON.stringify([vault, cover?.value]);
+  const [failed, setFailed] = useState<string | null>(null);
+  const image = cover?.kind === 'file' && kindFor(cover.value).kind === 'image';
   return (
     <div
       data-testid="gallery-cover"
       data-cover={cover?.value ?? ''}
-      // `fit` has no visual job while there is no image to letterbox, but it
-      // is the setting the user chose and the tile is where it will apply —
-      // so it is reported here rather than silently dropped.
       data-fit={fit ? 'contain' : 'cover'}
       style={{ height }}
-      className="flex flex-col items-center justify-center gap-1 overflow-hidden rounded-t-lg border-b border-n-100 bg-n-50 px-2"
+      className="relative flex flex-col items-center justify-center gap-1 overflow-hidden rounded-t-lg border-b border-n-100 bg-n-50"
     >
       {cover === null ? (
         <Icon name={style.icon} size={20} strokeWidth={1.5} color={style.color ?? 'var(--n-300)'} />
+      ) : cover.kind === 'file' && (!image || failed !== imageKey) ? (
+        <FileThumb
+          rootId="0"
+          path={cover.value}
+          size={height > 128 ? 512 : 256}
+          alt={cover.label}
+          fit={fit ? 'contain' : 'cover'}
+          className="h-full w-full"
+          fallback={(reason) =>
+            image ? (
+              <FileImage
+                rootId="0"
+                path={cover.value}
+                alt={cover.label}
+                fit={fit ? 'contain' : 'cover'}
+                className="h-full w-full"
+                onError={() => setFailed(imageKey)}
+              />
+            ) : (
+              <span className="flex h-full flex-col items-center justify-center gap-1 px-2 text-center text-xs text-n-500">
+                <Icon name={kindFor(cover.value).icon} size={20} />
+                {cover.label}
+                <span>{thumbReason(reason)}</span>
+              </span>
+            )
+          }
+        />
       ) : (
         <>
           <Icon
@@ -116,6 +144,9 @@ function CoverTile({
             color="var(--n-400)"
           />
           <span className="max-w-full truncate text-2xs text-n-400">{cover.label}</span>
+          {image && failed === imageKey && (
+            <span className="text-2xs text-n-500">Couldn't show this image</span>
+          )}
         </>
       )}
     </div>

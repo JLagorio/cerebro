@@ -1,0 +1,9 @@
+{
+  "format": 1,
+  "artifact_version": 1,
+  "read": {
+    "nodes": 500,
+    "bytes": 100000,
+    "ids": 500
+  }
+}

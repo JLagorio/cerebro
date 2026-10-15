@@ -27,7 +27,10 @@ export interface ChangedFile {
 }
 
 /** What a run changed, as Rust's `RunChangeset` serializes it. */
-export type RunChangeset =
+export type RunChangeset = {
+  /** Absent on older persisted events; never inferred from their file list. */
+  kept_out_of_git?: number;
+} & (
   | {
       state: 'committed';
       run_id: string;
@@ -49,7 +52,15 @@ export type RunChangeset =
       reason: string;
       files: string[];
       shell_unrecorded: boolean;
-    };
+    }
+);
+
+export function keptOutOfGitWords(changeset: RunChangeset): string | null {
+  const count = changeset.kept_out_of_git;
+  return count !== undefined && count > 0
+    ? `Kept ${count} mail ${count === 1 ? 'file' : 'files'} out of git.`
+    : null;
+}
 
 export const CHANGESET_WORDS = {
   notRecorded: 'Changes not recorded for this turn.',
@@ -167,6 +178,11 @@ function isChangedFile(raw: unknown): raw is ChangedFile {
 export function isChangeset(raw: unknown): raw is RunChangeset {
   if (typeof raw !== 'object' || raw === null) return false;
   const c = raw as Record<string, unknown>;
+  if (
+    c.kept_out_of_git !== undefined &&
+    (!Number.isSafeInteger(c.kept_out_of_git) || (c.kept_out_of_git as number) < 0)
+  )
+    return false;
   const shell = typeof c.shell_unrecorded === 'boolean';
   switch (c.state) {
     case 'committed':

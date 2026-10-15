@@ -177,7 +177,7 @@ fn request(prompt: &str, token: &str, url: &str) -> AgentRequest {
         lane: None,
         // Cerebro's own run: attended means a person awaits the ANSWER, not
         // that anybody supervises the child, so the CLI built-ins are
-        // denied here too (the tool-approval table's internal run kind). Only the three internal spawn sites set this.
+        // denied here too (the tool-approval table's internal run kind). Only internal spawn sites set this.
         internal: true,
     }
 }

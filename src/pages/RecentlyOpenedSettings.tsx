@@ -1,3 +1,4 @@
+import { keycapText } from '@/components/ui/Keycaps';
 import { useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
 import { pruneOpenLogToSnapshot, useOpenLogStore } from '@/stores/openLogStore';
@@ -38,8 +39,9 @@ export function RecentlyOpenedSettings() {
     >
       <h2 className="mb-1 text-md font-semibold text-n-900">Recently opened</h2>
       <p className="mb-4 text-sm leading-[18px] text-n-500">
-        Pages you open yourself, kept for this vault on this Mac to rank ⌘K and the pickers. An
-        agent&apos;s opens never count, and nothing is written to the vault.
+        Pages you open yourself, kept for this vault on this Mac to rank{' '}
+        {keycapText('palette.open')} and the pickers. An agent&apos;s opens never count, and nothing
+        is written to the vault.
       </p>
       {!saved && (
         <p className="mb-3 text-xs text-warn-700" data-testid="open-log-unsaved">

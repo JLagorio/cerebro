@@ -170,7 +170,8 @@ describe('ConnectorSettings approval surface', () => {
     expect(note).not.toContain('inherit your global MCP config');
     // A turn that names a connector is pinned instead (M54.9): no deny or
     // narrowing could bind a server only your global config names.
-    expect(note).toContain('a turn whose agent or skill names a connector loads none of it');
+    expect(note).toContain('A turn whose agent or skill names a connector loads none of it');
+    expect(note).toContain('While access for other apps is on, runs use only this explicit list');
   });
 
   it('a blocked read says BLOCKED — never "no explicit list"', async () => {

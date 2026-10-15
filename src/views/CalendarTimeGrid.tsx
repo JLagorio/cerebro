@@ -1,14 +1,28 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { exceptionStamp, type CalendarItem } from '@/engine/recurrence';
 import { useOpenPath } from '@/app/useOpenPath';
+import { ownsEscape, useLayer } from '@/components/ui/layers';
+import { useTimeDrag } from '@/views/useTimeDrag';
+import { useVaultStore } from '@/stores/vaultStore';
+import { canReschedule, dateKindOf, dayOffset, retimeValue } from '@/engine/schedule';
 import { Icon } from '@/components/ui/Icon';
 import {
+  addDays,
   formatDate,
   formatTime,
   fromIsoDate,
   localTimezone,
   type TimeDisplayFormat,
 } from '@/engine/dates';
-import { clockOf, packDay, type Placement } from '@/engine/timeGrid';
+import {
+  clockOf,
+  movePoint,
+  moveTimed,
+  packDay,
+  resizeTimed,
+  type Placement,
+  type TimeSlot,
+} from '@/engine/timeGrid';
 import { typeStyle } from '@/engine/typeCatalog';
 import type { Entry, Schema } from '@/engine/types';
 
@@ -26,10 +40,12 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 /** A record placed in the hours: a timed block or a point chip. */
 export interface TimeGridItem {
   entry: Entry;
+  calendar?: CalendarItem;
   placement: Extract<Placement, { kind: 'timed' | 'point' }>;
 }
 
 export interface CalendarTimeGridProps {
+  onOccurrence?: (item: CalendarItem, anchor: HTMLElement) => void;
   /** The visible days, one column each. */
   days: string[];
   items: TimeGridItem[];
@@ -39,6 +55,8 @@ export interface CalendarTimeGridProps {
   /** The date property's clock (12h or 24h) for labels. */
   timeFormat: TimeDisplayFormat;
   schema?: Schema;
+  dateField?: string | null;
+  onCreateOn?: (title: string, day: string, slot?: TimeSlot) => Promise<boolean>;
 }
 
 /** The zone the hours are shown in, for the corner above the gutter. */
@@ -57,12 +75,13 @@ export function ZoneCorner() {
 }
 
 /**
- * The hours of a Week or Day calendar (M61.8), read-only.
+ * The hours of a Week or Day calendar (M61.8–9).
  *
  * A gutter of 24 hour rows, one column per day, timed records as blocks and
  * open-ended ones as point chips, side by side where they overlap
  * (`packDay`), and a now line in today's column. Every item opens its record
- * as a page; nothing here drags or writes (editing by the minute is M61.9).
+ * as a page; floating times move and resize by half hours. Empty hours select
+ * a slot for a new record. Exact instants stay fixed in their local display.
  *
  * The grid opens at 07:00 once, and never moves after that: paging days or
  * weeks keeps the reader where they scrolled to, which is Macro's rule.
@@ -74,11 +93,75 @@ export function CalendarTimeGrid({
   now,
   timeFormat,
   schema,
+  dateField = null,
+  onCreateOn,
+  onOccurrence,
 }: CalendarTimeGridProps) {
   const openPath = useOpenPath('in-place');
   const scroller = useRef<HTMLDivElement | null>(null);
   const opened = useRef(false);
   const clock = timeFormat === '24' ? '24' : '12';
+  const patchFrontmatter = useVaultStore((state) => state.patchFrontmatter);
+  const [newSlot, setNewSlot] = useState<(TimeSlot & { day: string }) | null>(null);
+  const drag = useTimeDrag({
+    pxPerMinute: PX_PER_MINUTE,
+    snapMinutes: 30,
+    dayLocked: days.length === 1,
+    disabled: dateField === null,
+    onSelect: onCreateOn === undefined ? undefined : (day, slot) => setNewSlot({ day, ...slot }),
+    onCommit: (path, edge, dayDelta, minutes) => {
+      if (dateField === null || schema === undefined) return;
+      const item = items.find((candidate) => candidate.entry.path === path);
+      if (
+        item === undefined ||
+        item.placement.fixed ||
+        !canReschedule(item.entry, dateField, schema) ||
+        (item.calendar !== undefined && item.calendar.repeat !== 'none')
+      )
+        return;
+      const { entry, placement } = item;
+      if (placement.kind === 'point' && edge !== 'move') return;
+      const day = edge === 'move' ? addDays(placement.day, dayDelta) : placement.day;
+      const slot =
+        placement.kind === 'point'
+          ? { at: movePoint(placement.at, minutes) }
+          : edge === 'move'
+            ? moveTimed(placement, minutes)
+            : resizeTimed(placement, edge, minutes);
+      void patchFrontmatter(path, {
+        [dateField]: retimeValue(
+          entry.properties[dateField],
+          dateKindOf(entry, dateField, schema),
+          day,
+          slot,
+        ),
+      });
+    },
+  });
+  const shownItems = items.map((item): TimeGridItem => {
+    const active = drag.drag;
+    const p = item.placement;
+    if (
+      active?.id !== item.entry.path ||
+      p.fixed ||
+      !canReschedule(item.entry, dateField, schema) ||
+      (item.calendar !== undefined && item.calendar.repeat !== 'none') ||
+      (p.kind === 'point' && active.edge !== 'move')
+    )
+      return item;
+    const day = active.edge === 'move' ? addDays(p.day, active.days) : p.day;
+    const placement =
+      p.kind === 'point'
+        ? { ...p, day, at: movePoint(p.at, active.minutes) }
+        : {
+            ...p,
+            day,
+            ...(active.edge === 'move'
+              ? moveTimed(p, active.minutes)
+              : resizeTimed(p, active.edge, active.minutes)),
+          };
+    return { ...item, placement };
+  });
 
   // The opening scroll, once a height exists to scroll within: a calendar
   // mounted in a collapsed tab or an embed that has not laid out yet has a
@@ -112,13 +195,13 @@ export function CalendarTimeGrid({
 
   const byDay = useMemo(() => {
     const out = new Map<string, TimeGridItem[]>();
-    for (const item of items) {
+    for (const item of shownItems) {
       const list = out.get(item.placement.day) ?? [];
       list.push(item);
       out.set(item.placement.day, list);
     }
     return out;
-  }, [items]);
+  }, [shownItems]);
 
   const label = (item: TimeGridItem): string => {
     const p = item.placement;
@@ -129,7 +212,7 @@ export function CalendarTimeGrid({
       p.kind === 'timed'
         ? `${formatTime(clockOf(p.start), clock)} to ${formatTime(clockOf(p.end), clock)}`
         : formatTime(clockOf(p.at), clock);
-    return `${item.entry.title}, ${weekday} ${day}, ${when}${p.fixed ? ', shown in your time' : ''}`;
+    return `${item.entry.title}, ${weekday} ${day}, ${when}${p.fixed ? ', shown in your time' : ''}${item.calendar?.repeat === 'occurrence' ? ', repeats' : item.calendar?.repeat === 'unknown' ? ', Repeat rule not understood' : ''}`;
   };
 
   return (
@@ -160,8 +243,8 @@ export function CalendarTimeGrid({
           {days.map((day) => {
             const dayItems = byDay.get(day) ?? [];
             const slots = packDay(
-              dayItems.map(({ entry, placement: p }) => ({
-                key: entry.path,
+              dayItems.map(({ entry, placement: p, calendar }) => ({
+                key: calendar?.key ?? entry.path,
                 start: p.kind === 'timed' ? p.start : p.at,
                 end: p.kind === 'timed' ? p.end : p.at,
               })),
@@ -171,6 +254,16 @@ export function CalendarTimeGrid({
                 key={day}
                 data-testid="calendar-hours-day"
                 data-day={day}
+                {...drag.slotProps(day)}
+                onPointerEnter={() => {
+                  const origin = items.find((item) => item.entry.path === drag.drag?.id)?.placement
+                    .day;
+                  if (origin !== undefined)
+                    drag.hover(dayOffset({ start: origin, end: origin }, day));
+                }}
+                onClick={() => {
+                  drag.consumeClick();
+                }}
                 className="relative border-l border-n-100"
               >
                 {Array.from({ length: 23 }, (_, i) => i + 1).map((hour) => (
@@ -183,7 +276,8 @@ export function CalendarTimeGrid({
                 ))}
                 {dayItems.map((item) => {
                   const { entry, placement: p } = item;
-                  const slot = slots.get(entry.path) ?? { col: 0, cols: 1 };
+                  const repeated = item.calendar !== undefined && item.calendar.repeat !== 'none';
+                  const slot = slots.get(item.calendar?.key ?? entry.path) ?? { col: 0, cols: 1 };
                   const style = schema === undefined ? null : typeStyle(entry.type, schema);
                   const start = p.kind === 'timed' ? p.start : p.at;
                   const height =
@@ -199,15 +293,32 @@ export function CalendarTimeGrid({
                   const timed = p.kind === 'timed';
                   return (
                     <button
-                      key={entry.path}
+                      key={item.calendar?.key ?? entry.path}
                       type="button"
                       data-testid={timed ? 'calendar-block' : 'calendar-point'}
                       data-path={entry.path}
+                      data-occurrence={
+                        item.calendar?.repeat === 'occurrence' && item.calendar.value !== null
+                          ? exceptionStamp(item.calendar.value)
+                          : undefined
+                      }
+                      data-repeat={
+                        item.calendar?.repeat === 'unknown' ? 'not-understood' : undefined
+                      }
                       data-day={day}
                       {...(timed
                         ? { 'data-start': p.start, 'data-end': p.end }
                         : { 'data-at': p.at })}
-                      onClick={() => openPath(entry.path)}
+                      {...(!repeated && !p.fixed && canReschedule(entry, dateField, schema)
+                        ? drag.handleProps(entry.path)
+                        : {})}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (drag.consumeClick()) return;
+                        if (item.calendar?.repeat === 'occurrence' && onOccurrence !== undefined)
+                          onOccurrence(item.calendar, event.currentTarget);
+                        else openPath(entry.path);
+                      }}
                       title={entry.title}
                       aria-label={label(item)}
                       className={[
@@ -219,12 +330,62 @@ export function CalendarTimeGrid({
                       style={geometry}
                     >
                       {style !== null && (
-                        <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-400)'} />
+                        <Icon
+                          name={
+                            item.calendar?.repeat === 'occurrence'
+                              ? 'repeat'
+                              : item.calendar?.repeat === 'unknown'
+                                ? 'circle-alert'
+                                : style.icon
+                          }
+                          size={10}
+                          color={style.color ?? 'var(--n-400)'}
+                        />
                       )}
-                      <span className="min-w-0 flex-1 truncate">{entry.title}</span>
+                      <span className="pointer-events-none min-w-0 flex-1 truncate">
+                        {entry.title}
+                      </span>
+                      {timed &&
+                        !repeated &&
+                        !p.fixed &&
+                        canReschedule(entry, dateField, schema) &&
+                        (['start', 'end'] as const).map((edge) => (
+                          <span
+                            key={edge}
+                            data-testid={`calendar-block-grip-${edge}`}
+                            data-calendar-handle
+                            aria-hidden
+                            {...drag.handleProps(entry.path, edge)}
+                            className={`absolute inset-x-0 z-10 h-[6px] cursor-ns-resize ${edge === 'start' ? 'top-0' : 'bottom-0'}`}
+                          />
+                        ))}
                     </button>
                   );
                 })}
+                {drag.selection?.day === day && (
+                  <div
+                    data-testid="calendar-slot-preview"
+                    className="pointer-events-none absolute inset-x-0 border border-cortex-500 bg-cortex-100/60"
+                    style={{
+                      top: drag.selection.start * PX_PER_MINUTE,
+                      height: (drag.selection.end - drag.selection.start) * PX_PER_MINUTE,
+                    }}
+                  />
+                )}
+                {newSlot?.day === day && onCreateOn !== undefined && (
+                  <NewSlot
+                    slot={newSlot}
+                    onCancel={() => setNewSlot(null)}
+                    onCreate={async (title) => {
+                      const ok = await onCreateOn(title, day, {
+                        start: newSlot.start,
+                        end: newSlot.end,
+                      });
+                      if (ok) setNewSlot(null);
+                      return ok;
+                    }}
+                  />
+                )}
                 {day === today && (
                   <div
                     data-testid="calendar-now"
@@ -239,6 +400,71 @@ export function CalendarTimeGrid({
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+function NewSlot({
+  slot,
+  onCancel,
+  onCreate,
+}: {
+  slot: TimeSlot;
+  onCancel: () => void;
+  onCreate: (title: string) => Promise<boolean>;
+}) {
+  const [title, setTitle] = useState('');
+  const [saving, setSaving] = useState(false);
+  const busy = useRef(false);
+  const root = useRef<HTMLDivElement>(null);
+  const layer = useLayer({ contains: (node) => root.current?.contains(node) ?? false });
+  useEffect(() => {
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || !ownsEscape(layer)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      onCancel();
+    };
+    window.addEventListener('keydown', escape, true);
+    return () => window.removeEventListener('keydown', escape, true);
+  }, [layer, onCancel]);
+  const submit = async () => {
+    if (busy.current || title.trim() === '') return;
+    busy.current = true;
+    setSaving(true);
+    try {
+      await onCreate(title.trim());
+    } finally {
+      busy.current = false;
+      setSaving(false);
+    }
+  };
+  return (
+    <div
+      ref={root}
+      data-testid="calendar-new-slot"
+      className="absolute inset-x-0 z-20 rounded-sm border border-cortex-500 bg-cortex-50 p-1"
+      style={{
+        top: slot.start * PX_PER_MINUTE,
+        minHeight: Math.max(30, (slot.end - slot.start) * PX_PER_MINUTE),
+      }}
+    >
+      <input
+        autoFocus
+        aria-label="New record title"
+        placeholder="Title — Enter to create"
+        value={title}
+        disabled={saving}
+        onChange={(event) => setTitle(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            event.stopPropagation();
+            void submit();
+          }
+        }}
+        className="w-full border-0 bg-transparent text-xs text-n-900 outline-none"
+      />
     </div>
   );
 }

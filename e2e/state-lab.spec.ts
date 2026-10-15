@@ -23,14 +23,25 @@ async function expectPreset(page: Page, preset: E2eLabPreset): Promise<void> {
   }
 }
 
-test('every preset renders the state it names', async ({ page }) => {
+test('every preset renders the state it names', async ({ page, context }) => {
   await openStateLab(page, 'agent-spend', 'ready');
   const presets = await page.evaluate(() => window.__cerebroLabPresets);
   expect(presets.length).toBeGreaterThanOrEqual(10);
+  // Every preset opens its own document. Keep each assertion's deadline,
+  // while the whole-loop budget grows with the registered corpus.
+  test.setTimeout(Math.max(30_000, presets.length * 1_000));
+  await page.close();
   for (const preset of presets) {
     await test.step(`${preset.section} · ${preset.state}`, async () => {
-      await openStateLab(page, preset.section, preset.state);
-      await expectPreset(page, preset);
+      // Each preset is an isolated page, just like the lab's unit replay.
+      // Close its document and dev-server connection before the next one.
+      const isolated = await context.newPage();
+      try {
+        await openStateLab(isolated, preset.section, preset.state);
+        await expectPreset(isolated, preset);
+      } finally {
+        await isolated.close();
+      }
     });
   }
 });

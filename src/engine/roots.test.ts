@@ -7,7 +7,6 @@ import {
   parentPath,
   syncLanded,
   syncNotice,
-  viewerKindFor,
 } from './roots';
 
 describe('isMarkdownPath', () => {
@@ -19,17 +18,6 @@ describe('isMarkdownPath', () => {
   it('rejects everything else', () => {
     expect(isMarkdownPath('src/main.rs')).toBe(false);
     expect(isMarkdownPath('mdfile')).toBe(false);
-  });
-});
-
-describe('viewerKindFor', () => {
-  it('routes markdown to the doc viewer', () => {
-    expect(viewerKindFor('README.md')).toBe('doc');
-  });
-
-  it('routes anything else to the code viewer', () => {
-    expect(viewerKindFor('src/main.rs')).toBe('code');
-    expect(viewerKindFor('Dockerfile.dev')).toBe('code');
   });
 });
 

@@ -1,6 +1,7 @@
 ---
 type: Work item
 key: LNC-4
+project: "[[field-app-launch-campaign]]"
 status: backlog
 priority: medium
 assignee: "[[josef-lang]]"

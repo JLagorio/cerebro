@@ -111,6 +111,14 @@ function toNumber(cell: AggregateCell): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Numeric totals name the cells they could not include (CV-05). Counting
+ * calculations intentionally include or count absent cells and skip none. */
+export function aggregateSkipped(calc: AggregateCalc, cells: AggregateCell[]): number {
+  return aggregateMeta(calc).numeric
+    ? cells.filter((cell) => cell.display === '' || toNumber(cell) === null).length
+    : 0;
+}
+
 /** A computed total, in the field's own number format where it has one — a
  * column of dollars sums to dollars. */
 function formatResult(value: number, def?: FieldDef): string {

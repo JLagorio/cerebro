@@ -567,7 +567,7 @@ export function LayoutCanvas({
                 onChange={(next) => update({ tabs: next })}
                 hostType={typeDef.name}
               />
-              {/* The tab's OWN content, for the two kinds that ARE their
+              {/* The tab's OWN content, for the kinds that ARE their
                   content. M45.4's ruling holds for the view arm — the canvas
                   does not live-embed a view tab (weight without fidelity), so
                   it names the source instead — and the `sections` arm is the
@@ -582,13 +582,21 @@ export function LayoutCanvas({
                     data-testid={
                       activeTab.content === 'view'
                         ? 'layout-preview-viewtab'
-                        : 'layout-preview-sectionstab'
+                        : activeTab.content === 'runs'
+                          ? 'layout-preview-runstab'
+                          : activeTab.content === 'agents'
+                            ? 'layout-preview-agentstab'
+                            : 'layout-preview-sectionstab'
                     }
                     className="px-1 pb-1.5 pt-2 text-xs text-n-400"
                   >
                     {activeTab.content === 'view'
                       ? viewTabPlaceholder(activeTab)
-                      : 'Free text, written on each record — shown on the record'}
+                      : activeTab.content === 'runs'
+                        ? 'Runs about this page and the pages filed under it'
+                        : activeTab.content === 'agents'
+                          ? 'The agents this page lists, and what its work inherits'
+                          : 'Free text, written on each record — shown on the record'}
                   </div>
                 </InertContent>
               )}

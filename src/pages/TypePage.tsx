@@ -1,5 +1,10 @@
+import { IcsImportDialog } from '@/app/IcsImportDialog';
+import { icsTargets } from '@/engine/icsImport';
+import { useEntryState } from '@/app/useEntryState';
+import type { TimeSlot } from '@/engine/timeGrid';
 import { useEffect, useMemo, useState } from 'react';
 import { DeleteTypeDialog, RenameTypeDialog, TypeStyleDialog } from '@/app/TypeDialogs';
+import { exportViewCsv } from '@/app/csvActions';
 import {
   addFieldToType,
   addRelationProperty,
@@ -24,10 +29,12 @@ import { ViewTabs } from '@/views/ViewTabs';
 import { ViewToolbar } from '@/views/ViewToolbar';
 import { ViewLimitNotice } from '@/views/ViewLimitNotice';
 import { limitEntries, searchEntries } from '@/engine/viewFilters';
+import { checkView } from '@/engine/viewCheck';
+import { ViewProblems } from '@/views/ViewProblems';
 
 export type TypeSelection = Extract<Selection, { kind: 'type' }>;
 
-type TypeDialog = 'rename' | 'style' | 'delete';
+type TypeDialog = 'rename' | 'style' | 'delete' | 'calendar';
 
 /**
  * M3 type screen: the record list for one type (rows open in the right-hand
@@ -76,18 +83,16 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
 
   const [dialog, setDialog] = useState<TypeDialog | null>(null);
   // M12.8: the chip bar below the tabs, engaged from the tab-row icons.
-  const [controlsOpen, setControlsOpen] = useState(false);
+  const [controlsOpen, setControlsOpen] = useEntryState('view.controls', false);
   // M12.8: the view-settings menu, floating from the tab row's sliders icon.
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [presentation, setPresentation] = useState<Presentation>(collection.presentation);
-  // M16.26: ephemeral, unlike a filter — it is where you are looking right
-  // now, so it never reaches the Type doc and clears with the tab.
-  const [search, setSearch] = useState('');
+  // Search never reaches the Type doc; it rides this Back entry.
+  const [search, setSearch] = useEntryState('view.search', '');
   // Re-seed when the TYPE or the TAB changes — a tab carries its own
   // configuration, so switching tabs must not inherit the last one's.
   useEffect(() => {
     setPresentation(clonePresentation(collection.presentation));
-    setSearch('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection.name, activeId]);
   // Re-seed, keeping search, when the STORED view changes under the open tab
@@ -112,6 +117,10 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
         presentation.group,
       ),
     [schema, listing.name, collection.entries, presentation.group],
+  );
+  const problems = useMemo(
+    () => checkView({ ...activeView, presentation }, listing.name, schema, entries),
+    [activeView, presentation, listing.name, schema, entries],
   );
 
   const openTab = (id: string) => navigate({ kind: 'type', name: selection.name, view: id });
@@ -227,7 +236,10 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
   const onCreateOn =
     dateField === null
       ? undefined
-      : (title: string, day: string) => createOnDay(title, day, dateField);
+      : (title: string, day: string, slot?: TimeSlot) =>
+          slot === undefined
+            ? createOnDay(title, day, dateField)
+            : createOnDay(title, day, dateField, slot);
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1" data-testid="type-page">
@@ -306,6 +318,7 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
             )
           }
           onDuplicate={duplicateTab}
+          onExport={(view) => void exportViewCsv({ ...selection, view }, views)}
           onDelete={removeView}
           onReorder={(id, to) => changeViews(moveView(savedViews, id, to))}
           onChangeIcon={(id, icon) =>
@@ -342,6 +355,14 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
                   fields={typeFields}
                   schema={schema}
                   surface="type"
+                  onImportCalendar={
+                    icsTargets(schema).some((type) => type.name === listing.name)
+                      ? () => {
+                          setSettingsOpen(false);
+                          setDialog('calendar');
+                        }
+                      : undefined
+                  }
                   onAddProperty={addProperty}
                   onClose={() => setSettingsOpen(false)}
                   onDeleteView={savedViews.length > 1 ? () => removeView(activeId) : undefined}
@@ -369,10 +390,13 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
             schema={schema}
             showLayout={false}
             filters={activeView.filters}
+            problems={problems}
             onFiltersChange={(filters) => changeView({ ...activeView, filters })}
           />
         )}
+        <ViewProblems problems={problems} source={listing.name} />
         <ViewCanvas
+          entryScrollKey="canvas.scroll"
           entries={shownEntries}
           allEntries={entries}
           presentation={presentation}
@@ -445,6 +469,9 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
           onShowAll={() => changePresentation({ ...presentation, limit: undefined })}
         />
       </div>
+      {dialog === 'calendar' && (
+        <IcsImportDialog initialType={listing.name} onClose={() => setDialog(null)} />
+      )}
       {dialog === 'style' && <TypeStyleDialog listing={listing} onClose={() => setDialog(null)} />}
       {dialog === 'rename' && (
         <RenameTypeDialog listing={listing} onClose={() => setDialog(null)} />

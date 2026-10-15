@@ -71,8 +71,8 @@ pub fn own_write_suppresses(
     }
 }
 
-/// Vault-relative paths that should trigger a rescan: `.md`, `.mmd`, or
-/// `.yml` files with no dot-prefixed component.
+/// Pages, diagrams, whiteboards and YAML sidecars trigger a rescan when
+/// their path has no dot-prefixed component.
 pub fn is_relevant_path(path: &Path) -> bool {
     let hidden = path
         .components()
@@ -83,7 +83,7 @@ pub fn is_relevant_path(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|e| e.to_str()),
         Some("md") | Some("mmd") | Some("yml")
-    )
+    ) || crate::files::kinds::is_whiteboard(&path.to_string_lossy())
 }
 
 fn own_writes() -> &'static Mutex<HashMap<PathBuf, OwnWrite>> {

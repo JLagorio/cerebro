@@ -1,6 +1,7 @@
-import { parse, stringify } from 'yaml';
-import type { Schema, ViewDefinition } from './types';
+import { isScalar, parse, parseDocument, stringify } from 'yaml';
+import type { Entry, Schema, ViewDefinition } from './types';
 import { typeViews } from './typeCatalog';
+import { isKnowledgePath } from './okf';
 
 /**
  * The database block's pointer (M47.2).
@@ -88,6 +89,111 @@ export function serializeDatabaseRef(ref: DatabaseRef): string {
   const body =
     ref.view === null ? { database: ref.database } : { database: ref.database, view: ref.view };
   return stringify(body, { lineWidth: 0 }).trimEnd();
+}
+
+/** A database embed is page content, never an agent grant, schema or Skill. */
+export function canHoldDatabaseBlock(entry: Entry): boolean {
+  return (
+    /\.md$/i.test(entry.path) &&
+    entry.parseError === null &&
+    !isKnowledgePath(entry.path) &&
+    !['type', 'agent', 'skill'].includes(entry.type?.toLowerCase() ?? '')
+  );
+}
+
+/** Append without reserializing the page. An unclosed fence would swallow
+ * the pointer, so it refuses before either file in the batch is written. */
+export function appendDatabaseFence(content: string, ref: DatabaseRef): string | null {
+  let open: { char: string; length: number } | null = null;
+  for (const line of content.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+    const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (match === null) continue;
+    if (open === null) {
+      if (match[1][0] === '`' && match[2].includes('`')) continue;
+      open = { char: match[1][0], length: match[1].length };
+    } else if (
+      match[1][0] === open.char &&
+      match[1].length >= open.length &&
+      match[2].trim() === ''
+    )
+      open = null;
+  }
+  if (open !== null) return null;
+  const eol = /\r?\n/.exec(content)?.[0] ?? '\n';
+  const separator =
+    content === '' || content === '\uFEFF' || content.endsWith(eol + eol)
+      ? ''
+      : content.endsWith(eol)
+        ? eol
+        : eol + eol;
+  const body = serializeDatabaseRef(ref).replaceAll('\n', eol);
+  return `${content}${separator}\`\`\`${DATABASE_FENCE}${eol}${body}${eol}\`\`\`${eol}`;
+}
+
+/** Rewrite actual database fences, never prose or an example inside another
+ * fence (M60.11). The YAML writer quotes the new name; only that scalar's
+ * bytes change, so comments, extra keys, indentation and line endings stay. */
+export function renameDatabasePointers(
+  body: string,
+  from: string,
+  to: string,
+): { body: string; count: number } {
+  if (from === to) return { body, count: 0 };
+  const lines = [...body.matchAll(/[^\n]*(?:\n|$)/g)].filter((m) => m[0] !== '');
+  const edits: { start: number; end: number; text: string }[] = [];
+  let fence: { char: string; length: number; pointer: boolean; start: number } | null = null;
+  for (const match of lines) {
+    const line = match[0].replace(/\r?\n$/, '');
+    if (fence === null) {
+      const opening = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+      if (opening === null || (opening[1][0] === '`' && opening[2].includes('`'))) continue;
+      fence = {
+        char: opening[1][0],
+        length: opening[1].length,
+        pointer: opening[2].trim() === DATABASE_FENCE,
+        start: match.index + match[0].length,
+      };
+      continue;
+    }
+    const closing = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line);
+    if (closing === null || closing[1][0] !== fence.char || closing[1].length < fence.length) {
+      continue;
+    }
+    if (fence.pointer) {
+      const inner = body.slice(fence.start, match.index);
+      const ref = parseDatabaseRef(inner);
+      if (ref?.database === from) {
+        const doc = parseDocument(inner);
+        const value = doc.get('database', true);
+        if (doc.errors.length === 0 && isScalar(value) && value.range != null) {
+          // Database names accepted by the rename action are single-line.
+          // Quote multiline input too so this pure helper stays valid in a
+          // flow mapping instead of inserting a block scalar into it.
+          const serialized = serializeDatabaseRef({ database: to, view: null });
+          let text =
+            /[\r\n]/.test(to) || (doc.contents && 'flow' in doc.contents && doc.contents.flow)
+              ? stringify(to, { defaultStringType: 'QUOTE_DOUBLE', lineWidth: 0 }).trimEnd()
+              : serialized.slice('database: '.length);
+          if (value.type === 'BLOCK_FOLDED' || value.type === 'BLOCK_LITERAL') {
+            // A block scalar's range includes its final line terminator.
+            // Keep it so the next YAML key or closing fence stays a line.
+            text += /\r?\n$/.exec(inner.slice(value.range[0], value.range[1]))?.[0] ?? '';
+          }
+          edits.push({
+            start: fence.start + value.range[0],
+            end: fence.start + value.range[1],
+            text,
+          });
+        }
+      }
+    }
+    fence = null;
+  }
+  let next = body;
+  for (const edit of edits.reverse()) {
+    next = next.slice(0, edit.start) + edit.text + next.slice(edit.end);
+  }
+  return { body: next, count: edits.length };
 }
 
 /** The slice of an editor block `pointerOccurrence` reads. */

@@ -1,3 +1,4 @@
+import { isDateKind } from '@/engine/dateBuckets';
 import React, { useEffect, useState } from 'react';
 import { Grip } from '@/components/ui/Grip';
 import { Icon } from '@/components/ui/Icon';
@@ -31,6 +32,7 @@ import {
   CHART_KINDS,
   CHART_SORTS,
   ROW_HEIGHTS,
+  DATE_BUCKETINGS,
   bandLevels,
   nestLevels,
 } from '@/engine/types';
@@ -45,6 +47,7 @@ import type {
   ChipStyle,
   ColumnSpec,
   DashboardSpec,
+  DateBucketing,
   FieldDef,
   GallerySpec,
   GroupSpec,
@@ -182,6 +185,7 @@ export interface ViewSettingsPanelProps {
   /** M12.8: 'type' = the panel configures a Type's saved views — there is no
    * List behind it, so the "This list" section is absent. */
   surface?: 'list' | 'type';
+  onImportCalendar?: () => void;
 }
 
 const CHIP_STYLES: { value: ChipStyle; label: string; hint: string }[] = [
@@ -204,6 +208,7 @@ export function ViewSettingsPanel({
   onDeleteView,
   onAddProperty,
   surface = 'list',
+  onImportCalendar,
 }: ViewSettingsPanelProps) {
   const [page, setPage] = useState<Page>('root');
   // The property the 'field' page is editing (M12.8).
@@ -462,6 +467,14 @@ export function ViewSettingsPanel({
                     onClick={() => setPage('list')}
                   />
                 </>
+              )}
+              {onImportCalendar && (
+                <Row
+                  icon="calendar"
+                  label="Import calendar file…"
+                  value=""
+                  onClick={onImportCalendar}
+                />
               )}
               {onDeleteView !== undefined && (
                 <button
@@ -1156,7 +1169,7 @@ function CardsPage({
             <p className="m-0 pt-1 text-2xs leading-[15px] text-n-400">
               {covers.length === 0
                 ? 'No files property on this type yet — add one and it becomes a cover.'
-                : 'The first file on each record. Images are not drawn yet: the webview cannot load a vault file until the asset protocol is enabled, so a cover names its file instead of showing a broken one.'}
+                : 'The first file on each record. Images show as covers; other files show their name.'}
             </p>
           </div>
           <div className="border-t border-n-100 pt-2">
@@ -1877,10 +1890,17 @@ function GroupPage({
 }) {
   const bandTaken = new Set(bandLevels(group).map((g) => g.field));
 
-  const optionsAt = (index: number) => {
+  const fieldsAt = (index: number) => {
     const before = group.slice(0, index);
     const typeHere = chainTypes(sourceType, nestLevels(before), schema).pop() ?? null;
-    const fieldsHere = typeHere === null ? fields : (schema.types.get(typeHere)?.fields ?? fields);
+    return {
+      typeHere,
+      before,
+      fieldsHere: typeHere === null ? fields : (schema.types.get(typeHere)?.fields ?? fields),
+    };
+  };
+  const optionsAt = (index: number) => {
+    const { typeHere, before, fieldsHere } = fieldsAt(index);
     const own = group[index];
     const properties = fieldsHere
       .filter((f) => GROUPABLE_KINDS.has(f.kind))
@@ -1953,6 +1973,52 @@ function GroupPage({
         </div>
       ))}
 
+      {group.some(
+        (level, i) =>
+          level.descend === undefined &&
+          isDateKind(fieldsAt(i).fieldsHere.find((field) => field.name === level.field)?.kind),
+      ) && (
+        <div className="mt-1 flex flex-col gap-1 border-t border-n-100 pt-2">
+          <div className="px-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
+            Dates
+          </div>
+          {group.map((level, i) =>
+            level.descend !== undefined ||
+            !isDateKind(
+              fieldsAt(i).fieldsHere.find((field) => field.name === level.field)?.kind,
+            ) ? null : (
+              <label
+                key={`date:${i}:${level.field}`}
+                className="flex items-center gap-2 px-1 py-1 text-xs text-n-700"
+              >
+                <span className="min-w-0 flex-1 truncate">{humanize(level.field)}</span>
+                <Select
+                  size="sm"
+                  testId={`group-date-bucket-${i}`}
+                  ariaLabel={`${humanize(level.field)} date grouping`}
+                  value={level.dateBucket ?? 'relative'}
+                  options={[
+                    { value: 'relative', label: 'Relative' },
+                    ...DATE_BUCKETINGS.map((value) => ({ value, label: humanize(value) })),
+                  ]}
+                  onChange={(event) =>
+                    onChange(
+                      group.map((g, j) => {
+                        if (i !== j) return g;
+                        const { dateBucket: _old, ...rest } = g;
+                        return event.target.value === 'relative'
+                          ? rest
+                          : { ...rest, dateBucket: event.target.value as DateBucketing };
+                      }),
+                    )
+                  }
+                />
+              </label>
+            ),
+          )}
+        </div>
+      )}
+
       {/* M16.26: `hideEmpty` has been honoured by `grouping.ts:140` since M9.1
           and no UI ever set it, so the only way to drop the empty bands a
           twelve-option select produces was to hand-edit the YAML.
@@ -2011,7 +2077,8 @@ function GroupPage({
       )}
 
       <p className="m-0 border-t border-n-100 px-1 pt-2 text-2xs leading-[15px] text-n-400">
-        A property bands records by its value. A relation (↳) nests them under what they link to.
+        Properties group records by value; dates use relative or calendar bands. A relation (↳)
+        nests records under what they link to.
       </p>
     </div>
   );

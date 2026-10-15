@@ -23,23 +23,25 @@ import type { Entry, FieldKind, ListFile, ViewDefinition } from './types';
  * FIELD_KINDS order; the diagonal is S by `castRule` whatever the row says.
  */
 const EXPECTED: Record<FieldKind, string> = {
-  text: 'S C C C C S S C C C C S S N N N N',
-  number: 'S S N N N S S C N N N N S N N N N',
-  checkbox: 'S N S N N N N N N N N N N N N N N',
-  date: 'S N N S S N N N N N N N N N N N N',
-  daterange: 'S N N C S N N N N N N N N N N N N',
-  select: 'S C C C N S S C C C C S S N N N N',
-  multiselect: 'S C C C N C S C C C C C C N N N N',
-  status: 'S N N N N S S S N N N N N N N N N',
-  person: 'N N N N N N N N S S N N N N N N N',
-  relation: 'N N N N N N N N S S N N N N N N N',
-  url: 'S N N N N S S C N N S S S N N N N',
-  email: 'S C C C C S S C C C C S S N N N N',
-  phone: 'S C C C C S S C C C C S S N N N N',
-  files: 'S N N N N N N N N N N N N S N N N',
-  rollup: 'S C C C C S S C C C C S S N S N N',
-  created_time: 'S C C C C S S C C C C S S N N S N',
-  last_edited_time: 'S C C C C S S C C C C S S N N N S',
+  text: 'S C C C C S S C C C C S S N N N N N C',
+  number: 'S S N N N S S C N N N N S N N N N N N',
+  checkbox: 'S N S N N N N N N N N N N N N N N N N',
+  date: 'S N N S S N N N N N N N N N N N N N N',
+  daterange: 'S N N C S N N N N N N N N N N N N N N',
+  select: 'S C C C N S S C C C C S S N N N N N N',
+  multiselect: 'S C C C N C S C C C C C C N N N N N N',
+  status: 'S N N N N S S S N N N N N N N N N N N',
+  person: 'N N N N N N N N S S N N N N N N N N N',
+  relation: 'N N N N N N N N S S N N N N N N N N N',
+  url: 'S N N N N S S C N N S S S N N N N N N',
+  email: 'S C C C C S S C C C C S S N N N N N C',
+  phone: 'S C C C C S S C C C C S S N N N N N C',
+  files: 'S N N N N N N N N N N N N S N N N N N',
+  rollup: 'S C C C C S S C C C C S S N S N N N C',
+  created_time: 'S C C C C S S C C C C S S N N S N N C',
+  last_edited_time: 'S C C C C S S C C C C S S N N N S N C',
+  formula: 'S C C C C S S C C C C S S N N N N S C',
+  repeat: 'S N N N N N N N N N N N N N N N N N S',
 };
 const LETTER = { safe: 'S', checked: 'C', never: 'N' } as const;
 
@@ -56,7 +58,8 @@ describe('the cast table', () => {
     for (const from of FIELD_KINDS) {
       for (const to of FIELD_KINDS) {
         if (from === to) continue;
-        const computed = to === 'rollup' || to === 'created_time' || to === 'last_edited_time';
+        const computed =
+          to === 'rollup' || to === 'created_time' || to === 'last_edited_time' || to === 'formula';
         expect(castRule(from, to, false)).toBe(computed ? 'never' : 'safe');
       }
     }
@@ -119,6 +122,7 @@ const convert = (from: FieldKind, value: unknown, to: FieldKind) => {
 /** A value valid for each stored kind. */
 const SAMPLES: Partial<Record<FieldKind, unknown>> = {
   text: 'hello',
+  repeat: 'FREQ=DAILY',
   number: 12,
   checkbox: true,
   date: '2026-07-28',
@@ -561,7 +565,39 @@ describe('hints and the menu', () => {
     expect(menu.map((p) => p.to)).not.toContain('text');
     expect(menu.map((p) => p.to)).not.toContain('rollup');
     expect(menu.map((p) => p.to)).not.toContain('daterange');
-    expect(menu).toHaveLength(12);
+    expect(menu).toHaveLength(13);
     expect(kindChangeMenu({ ...ctx })).toBe(menu);
+  });
+});
+
+it('refuses retyping a formula input in place but retains every converted value for a copy', () => {
+  const { ctx } = betVault(['12', '7']);
+  const fields = ctx.entries[0].properties.fields as unknown as Record<string, unknown>;
+  fields.projection = { kind: 'formula', formula: 'stake + 1' };
+  ctx.schema = buildSchema(ctx.entries);
+  const preview = dryRunKindChange(ctx, 'number');
+  expect(preview).toMatchObject({
+    cast: 'never',
+    copyOnly: true,
+    lossless: false,
+    converts: 2,
+    failures: 0,
+    reason: 'The formula “Projection” reads Stake; change that formula first.',
+    writes: [
+      { path: 'bets/bet-1.md', value: 12 },
+      { path: 'bets/bet-2.md', value: 7 },
+    ],
+  });
+});
+
+it('checks RRULE text before converting a stored field to Repeat', () => {
+  expect(convert('text', 'FREQ=WEEKLY;BYDAY=TU', 'repeat')).toEqual({
+    ok: true,
+    value: 'FREQ=WEEKLY;BYDAY=TU',
+  });
+  expect(convert('text', 'every Tuesday', 'repeat').ok).toBe(false);
+  expect(convert('repeat', 'FREQ=WEEKLY;BYDAY=TU', 'text')).toEqual({
+    ok: true,
+    value: 'FREQ=WEEKLY;BYDAY=TU',
   });
 });

@@ -20,8 +20,9 @@
 //! the run's record, merged beside cerebro's own loopback (M54.9). Cerebro
 //! still holds no credentials — the entries here are the user's own, per
 //! vault, on disk they control. A vault without the file keeps the legacy
-//! behavior for a person's own turns that name no connector, so nobody's
-//! working setup breaks.
+//! behavior for a person's own turns that name no connector, while personal
+//! client access is off. Enabling that listener pins every run to its own
+//! config: an inherited personal token must never widen a run's grant.
 //!
 //! One boundary is NOT the file's to draw (PR #5 security review): the file
 //! travels WITH the vault, so a cloned or downloaded vault could carry a
@@ -137,7 +138,7 @@ pub fn save_raw(vault: &Path, json: &str) -> Result<(), String> {
 /// symlink rather than following it. So a save never lands half written, and
 /// re-saving a config an older build left 0644 leaves it 0600.
 #[cfg(unix)]
-fn write_owner_only(path: &Path, contents: &str) -> Result<(), String> {
+pub(crate) fn write_owner_only(path: &Path, contents: &str) -> Result<(), String> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -168,7 +169,7 @@ fn write_owner_only(path: &Path, contents: &str) -> Result<(), String> {
 }
 
 #[cfg(not(unix))]
-fn write_owner_only(path: &Path, contents: &str) -> Result<(), String> {
+pub(crate) fn write_owner_only(path: &Path, contents: &str) -> Result<(), String> {
     std::fs::write(path, contents).map_err(|e| e.to_string())
 }
 
@@ -313,6 +314,61 @@ pub fn connector_context(
                 pinned(servers, missing)
             }
         },
+    }
+}
+
+/// A personal client connection is never an in-app run's connector (M62.5c).
+/// The listener's switch pins even the legacy, absent-list case, including
+/// when its bind failed. A copied token is excluded under any name and even
+/// when access is currently off; it must not enter a run's config, argv or
+/// child environment. Check the whole normalized spec, including stdio args.
+///
+/// Treat the configured port and endpoint as reserved regardless of the URL's
+/// host. This also excludes a DNS alias, or a remote URL with an overridden
+/// Host header, without resolving untrusted DNS during a run's setup. Explicit
+/// approved connectors at other endpoints keep their ordinary grants.
+pub(crate) fn isolate_client_access(
+    mut context: ConnectorContext,
+    access: &crate::app_config::ClientAccessConfig,
+    named: Option<&[String]>,
+) -> ConnectorContext {
+    context.strict |= access.enabled;
+    let mut removed = Vec::new();
+    context.servers.retain(|name, spec| {
+        let endpoint = access.enabled
+            && spec.get("url").and_then(Value::as_str).is_some_and(|raw| {
+                tauri::Url::parse(raw).is_ok_and(|url| {
+                    url.port_or_known_default() == Some(access.port) && url.path() == "/mcp"
+                })
+            });
+        let keep = !endpoint && !contains_personal_token(spec);
+        if !keep && named.is_some_and(|names| names.contains(name)) {
+            removed.push(Missing {
+                name: name.clone(),
+                reason: "personal client connections cannot be used by Cerebro runs".into(),
+            });
+        }
+        keep
+    });
+    context.missing.extend(removed);
+    context
+}
+
+fn contains_personal_token(value: &Value) -> bool {
+    let in_text = |text: &str| {
+        text.match_indices("cbr_").any(|(offset, _)| {
+            text.as_bytes()[offset + 4..]
+                .get(..64)
+                .is_some_and(|bytes| bytes.iter().all(u8::is_ascii_hexdigit))
+        })
+    };
+    match value {
+        Value::String(text) => in_text(text),
+        Value::Array(items) => items.iter().any(contains_personal_token),
+        Value::Object(items) => items
+            .iter()
+            .any(|(key, value)| in_text(key) || contains_personal_token(value)),
+        _ => false,
     }
 }
 
@@ -898,6 +954,103 @@ mod tests {
     /// The names a merge kept, in the file's order.
     fn merged_names(servers: &Map<String, Value>) -> Vec<&str> {
         servers.keys().map(String::as_str).collect()
+    }
+
+    #[test]
+    fn personal_access_pins_legacy_runs_and_filters_every_copied_connection() {
+        let vault = temp_vault("personal-client-isolation");
+        let access = crate::app_config::ClientAccessConfig {
+            enabled: true,
+            port: 37500,
+        };
+        let legacy = connector_context(&vault, true, None, true, &[]);
+        assert!(!legacy.strict);
+        let pinned = isolate_client_access(legacy, &access, None);
+        assert!(pinned.strict && pinned.servers.is_empty());
+
+        let secret = format!("cbr_{}", "a".repeat(64));
+        let mut servers = Map::new();
+        let mut approved = Vec::new();
+        for (name, spec) in [
+            (
+                "renamed",
+                json!({"transport":"http","url":"http://127.0.0.1:37500/mcp"}),
+            ),
+            (
+                "localhost",
+                json!({"transport":"http","url":"http://localhost:37500/mcp"}),
+            ),
+            (
+                "alias",
+                json!({"transport":"http","url":"http://alias.test:37500/mcp","headers":{"Host":"127.0.0.1:37500"}}),
+            ),
+            (
+                "different-port",
+                json!({"transport":"http","url":"http://127.0.0.1:37421/mcp","headers":{"Authorization":format!("Bearer {secret}")}}),
+            ),
+            (
+                "remote-proxy",
+                json!({"transport":"http","url":"https://remote.test/mcp","headers":{"Authorization":format!("Bearer {secret}")}}),
+            ),
+            (
+                "stdio-args",
+                json!({"transport":"stdio","command":"proxy","args":["--bearer",secret]}),
+            ),
+            (
+                "stdio-env",
+                json!({"transport":"stdio","command":"proxy","env":{"TOKEN":secret}}),
+            ),
+            (
+                "unrelated-http",
+                json!({"transport":"http","url":"https://service.test/mcp","headers":{"Authorization":"Bearer unrelated"}}),
+            ),
+            (
+                "unrelated-stdio",
+                json!({"transport":"stdio","command":"tool","args":["serve"]}),
+            ),
+        ] {
+            let mut spec = spec;
+            spec["enabled"] = json!(true);
+            approved.push(spec_entry(name, &spec).unwrap().1);
+            servers.insert(name.into(), spec);
+        }
+        save_raw(&vault, &json!({"servers":servers}).to_string()).unwrap();
+        let named: Vec<String> = servers.keys().cloned().collect();
+        let context = connector_context(&vault, true, Some(&named), true, &approved);
+        assert_eq!(
+            context.servers.len(),
+            9,
+            "all fixtures have valid machine approvals"
+        );
+        let isolated = isolate_client_access(context, &access, Some(&named));
+        assert_eq!(
+            merged_names(&isolated.servers),
+            ["unrelated-http", "unrelated-stdio"]
+        );
+        assert_eq!(isolated.missing.len(), 7);
+        assert!(isolated
+            .missing
+            .iter()
+            .all(|row| row.reason == "personal client connections cannot be used by Cerebro runs"));
+        assert!(!serde_json::to_string(&isolated.servers)
+            .unwrap()
+            .contains(&secret));
+        assert!(!format!("{:?}", isolated.missing).contains(&secret));
+
+        // Access off never makes a copied credential safe to pass to a child.
+        let context = connector_context(&vault, true, None, true, &approved);
+        let isolated = isolate_client_access(context, &Default::default(), None);
+        assert_eq!(
+            merged_names(&isolated.servers),
+            [
+                "renamed",
+                "localhost",
+                "alias",
+                "unrelated-http",
+                "unrelated-stdio"
+            ]
+        );
+        assert!(isolated.missing.is_empty());
     }
 
     #[test]

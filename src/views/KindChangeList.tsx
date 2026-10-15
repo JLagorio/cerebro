@@ -42,6 +42,7 @@ export function KindChangeList({
         const preview = previews.find((p) => p.to === k.kind);
         const hint = preview === undefined ? '' : kindChangeHint(preview);
         const refused = preview?.cast === 'never';
+        const copyOnly = preview?.copyOnly === true && preview.converts > 0;
         return (
           <button
             key={k.kind}
@@ -49,14 +50,14 @@ export function KindChangeList({
             role={asMenu ? 'menuitem' : undefined}
             data-testid={`change-type-${k.kind}`}
             data-current={current ? 'true' : undefined}
-            disabled={refused}
+            disabled={refused && !copyOnly}
             title={refused ? (preview?.reason ?? undefined) : undefined}
             onClick={() => {
-              if (!current && preview !== undefined && !refused) onPick(preview);
+              if (!current && preview !== undefined && (!refused || copyOnly)) onPick(preview);
             }}
             className={[
               'motion-hover flex w-full items-start gap-2 rounded-sm border-0 bg-transparent px-2 py-1 text-left text-sm',
-              refused
+              refused && !copyOnly
                 ? 'cursor-default text-n-400'
                 : 'text-n-700 hover:bg-n-50 focus-visible:bg-n-50',
             ].join(' ')}
@@ -65,7 +66,10 @@ export function KindChangeList({
               <Icon name={k.icon} size={12} color="var(--n-500)" />
             </span>
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate">{k.label}</span>
+              <span className="truncate">
+                {k.label}
+                {copyOnly ? ' · Convert into a new property' : ''}
+              </span>
               {hint !== '' && (
                 <span data-testid={`change-type-hint-${k.kind}`} className="text-2xs text-n-400">
                   {hint}

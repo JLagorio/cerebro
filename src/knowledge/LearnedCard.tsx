@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useLedgerReview, useQuarantine } from '@/stores/ledgerStore';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
@@ -7,23 +7,25 @@ import { ReviewChip } from '@/knowledge/ReviewChip';
 import { todayIso } from '@/lib/templates';
 import { SECTION_HEADING } from '@/pages/HomePage';
 import { useNavStore } from '@/stores/navStore';
-import { useUiStore } from '@/stores/uiStore';
+import { useDoneMarksStore } from '@/stores/doneMarksStore';
+import { markId } from '@/engine/reminderState';
 import { useVaultStore } from '@/stores/vaultStore';
 
-/**
- * The one thing Home is allowed to volunteer (M8.3).
- *
- * Everything else in cerebro waits to be asked. This does not, so it is bound
- * tightly: at most three items, only concepts written in the last fortnight
- * that no human has confirmed, and each one dismissible forever. When there is
- * nothing that qualifies the card is not rendered at all — an empty
- * "no insights" box is still something to scroll past.
- */
+/** At most three recent concepts, each dismissible. An empty card stays silent. */
 export function LearnedCard() {
   const entries = useVaultStore((s) => s.entries);
   const navigate = useNavStore((s) => s.navigate);
-  const dismissed = useUiStore((s) => s.dismissedInsights);
-  const dismiss = useUiStore((s) => s.dismissInsight);
+  const vault = useVaultStore((s) => s.vaultPath);
+  const entriesVault = useVaultStore((s) => s.entriesVault);
+  const done = useDoneMarksStore();
+  const hydrate = done.hydrate;
+  useEffect(() => {
+    if (vault && entriesVault === vault) void hydrate(vault);
+  }, [vault, entriesVault, hydrate]);
+  const dismissed = done.marks;
+  const dismiss = (subject: string) => {
+    void done.markDone({ lane: 'insight', subject, until: 'forever', revision: null });
+  };
 
   // One clock, read once (M26.3e). This used to stage concepts against
   // `todayIso()` and then window them against a second, raw `new Date()` that
@@ -34,11 +36,18 @@ export function LearnedCard() {
   const today = todayIso();
   const learned = useMemo(() => {
     const concepts = listConcepts(entries, today, quarantine, ledgerReview).filter(
-      (c) => !dismissed.includes(c.entry.path),
+      (c) => !dismissed[markId({ lane: 'insight', subject: c.entry.path })],
     );
     return recentlyLearned(concepts, today);
   }, [dismissed, entries, today, quarantine, ledgerReview]);
 
+  if (done.vault !== vault || done.status === 'idle' || done.status === 'loading') return null;
+  if (done.status === 'error')
+    return (
+      <section data-testid="section-unavailable" role="status">
+        What you dismissed here could not be read, so these are held back.
+      </section>
+    );
   if (learned.length === 0) return null;
 
   return (

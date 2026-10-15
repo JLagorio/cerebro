@@ -1,10 +1,15 @@
 {
-  "about": "M63.1: durable wakes. Each scenario starts from an empty agent_wakes and runs its steps in order, each at its own instant. admit offers matches as the renderer sends them (an event wake's key is 64 lowercase hex, its trigger 16, its agent process: and a handle of [a-z0-9-], its cause kind event) and answers how many were admitted, how many were already live, and each refusal in offer order. claim, finish and cancel name a wake by its key, meaning the latest wake admitted with it; claim answers started (the cause the run records and the subjects it took with it), deferred with its reasons, gone, or an error that writes nothing. finish ends the claimed run with a run outcome. pause pauses or resumes an agent on the fleet. expire cancels pending wakes past ttl_days. pending lists the pending wakes inside ttl_days, oldest first. rows lists every wake in admission order. Replayed by src-tauri/src/runtime/wakes.rs and src/lib/mockIpc.test.ts.",
+  "about": "M63.1: durable wakes. Each scenario starts from an empty agent_wakes and runs its steps in order, each at its own instant. admit offers matches as the renderer sends them (an event wake's key is 64 lowercase hex, its trigger 16, its agent process: and a handle of [a-z0-9-], its cause kind event) and answers how many were admitted, how many were already live, and each refusal in offer order. claim, finish and cancel name a wake by its key, meaning the latest wake admitted with it; claim answers started (the cause the run records and the subjects it took with it), deferred with its reasons, gone, or an error that writes nothing. finish ends the claimed run with a run outcome. pause pauses or resumes an agent on the fleet. expire cancels pending wakes past ttl_days. pending lists the pending wakes inside ttl_days, oldest first. rows lists every wake in admission order. Replayed by src-tauri/src/runtime/wakes.rs and src/lib/mockIpc.test.ts. M63.2 attribution_cases seed recorded writes and root-first run facts, then offer exact versions; rows assert recorded authors and parentage. Repeat checks skipped-cycle deduplication. Shared replay reads each write through writer_of, not a supplied verdict. M63.3b release names agent, subject and a validated assigned key prefix; it cancels pending assignments only and is idempotent.",
   "ttl_days": 7,
   "coalesce_max": 20,
   "busy_retry_secs": 60,
   "budget_retry_secs": 600,
-  "cancel_whys": ["paused", "trigger_changed", "agent_gone", "page_gone"],
+  "cancel_whys": [
+    "paused",
+    "trigger_changed",
+    "agent_gone",
+    "page_gone"
+  ],
   "scenarios": [
     {
       "why": "a live key is ignored while pending or started, and admitted again once finished",
@@ -21,7 +26,10 @@
                 "kind": "event",
                 "subject": "records/risks/a.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/a.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             }
           ],
           "expect": {
@@ -42,7 +50,10 @@
                 "kind": "event",
                 "subject": "records/risks/a.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/a.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             }
           ],
           "expect": {
@@ -80,7 +91,10 @@
                 "kind": "event",
                 "subject": "records/risks/a.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/a.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             }
           ],
           "expect": {
@@ -107,7 +121,10 @@
                 "kind": "event",
                 "subject": "records/risks/a.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/a.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             }
           ],
           "expect": {
@@ -158,7 +175,10 @@
                 "kind": "event",
                 "subject": "records/risks/a.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/a.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             },
             {
               "agent": "process:other",
@@ -168,7 +188,10 @@
                 "kind": "event",
                 "subject": "records/risks/b.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/b.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             },
             {
               "agent": "process:other",
@@ -178,7 +201,10 @@
                 "kind": "event",
                 "subject": "records/risks/c.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/c.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             },
             {
               "agent": "process:other",
@@ -188,7 +214,10 @@
                 "kind": "schedule",
                 "subject": "records/risks/d.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/d.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             },
             {
               "agent": "process:Other",
@@ -198,7 +227,10 @@
                 "kind": "event",
                 "subject": "records/risks/e.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/e.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             },
             {
               "agent": "process:other",
@@ -208,7 +240,10 @@
                 "kind": "event",
                 "subject": "records/risks/f.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/f.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             }
           ],
           "expect": {
@@ -267,7 +302,10 @@
                 "kind": "event",
                 "subject": "records/risks/a.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/a.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             },
             {
               "agent": "process:scout",
@@ -277,7 +315,10 @@
                 "kind": "event",
                 "subject": "records/risks/b.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/b.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             },
             {
               "agent": "process:scout",
@@ -287,7 +328,10 @@
                 "kind": "event",
                 "subject": "records/risks/c.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/c.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             },
             {
               "agent": "process:other",
@@ -297,7 +341,10 @@
                 "kind": "event",
                 "subject": "records/risks/d.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/d.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             }
           ],
           "expect": {
@@ -323,7 +370,9 @@
                 "subject": "records/risks/a.md",
                 "detail": "it changes in records/risks"
               },
-              "also": ["records/risks/b.md"]
+              "also": [
+                "records/risks/b.md"
+              ]
             }
           }
         },
@@ -416,7 +465,10 @@
                 "kind": "event",
                 "subject": "records/risks/a.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/a.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             }
           ],
           "expect": {
@@ -430,7 +482,9 @@
           "at": "2026-10-13T09:01:00.000Z",
           "agent": "process:scout",
           "wake": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "coalesce": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+          "coalesce": [
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          ],
           "expect": {
             "error": true
           }
@@ -474,7 +528,10 @@
                 "kind": "event",
                 "subject": "records/risks/a.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/a.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             },
             {
               "agent": "process:scout",
@@ -484,7 +541,10 @@
                 "kind": "event",
                 "subject": "records/risks/b.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/b.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             }
           ],
           "expect": {
@@ -517,7 +577,9 @@
           "wake": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
           "coalesce": [],
           "expect": {
-            "deferred": ["agent_running"]
+            "deferred": [
+              "agent_running"
+            ]
           }
         },
         {
@@ -590,7 +652,10 @@
                 "kind": "event",
                 "subject": "records/risks/a.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/a.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             },
             {
               "agent": "process:other",
@@ -600,7 +665,10 @@
                 "kind": "event",
                 "subject": "records/risks/b.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/b.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             }
           ],
           "expect": {
@@ -660,7 +728,10 @@
                 "kind": "event",
                 "subject": "records/risks/a.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/a.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             }
           ],
           "expect": {
@@ -712,7 +783,10 @@
                 "kind": "event",
                 "subject": "records/risks/a.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/a.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             },
             {
               "agent": "process:scout",
@@ -722,7 +796,10 @@
                 "kind": "event",
                 "subject": "records/risks/b.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/b.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             }
           ],
           "expect": {
@@ -833,7 +910,10 @@
                 "kind": "event",
                 "subject": "records/risks/a.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/a.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             }
           ],
           "expect": {
@@ -854,7 +934,10 @@
                 "kind": "event",
                 "subject": "records/risks/b.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/b.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             }
           ],
           "expect": {
@@ -875,7 +958,10 @@
                 "kind": "event",
                 "subject": "records/risks/c.md",
                 "detail": "it changes in records/risks"
-              }
+              },
+              "path": "records/risks/c.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
             }
           ],
           "expect": {
@@ -940,6 +1026,1018 @@
               "detail": null
             }
           ]
+        }
+      ]
+    },
+    {
+      "why": "assignment removal releases only its pending agent page and field, then a re-add is new work",
+      "steps": [
+        {
+          "op": "admit",
+          "offers": [
+            {
+              "agent": "process:scout",
+              "wakeKey": "assigned:12345678:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "assigned",
+                "subject": "tasks/a.md",
+                "detail": "via agent"
+              },
+              "path": "tasks/a.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
+            },
+            {
+              "agent": "process:scout",
+              "wakeKey": "assigned:12345678:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "assigned",
+                "subject": "tasks/b.md",
+                "detail": "via agent"
+              },
+              "path": "tasks/b.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
+            },
+            {
+              "agent": "process:other",
+              "wakeKey": "assigned:12345678:cccccccccccccccccccccccccccccccc",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "assigned",
+                "subject": "tasks/a.md",
+                "detail": "via agent"
+              },
+              "path": "tasks/a.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
+            },
+            {
+              "agent": "process:scout",
+              "wakeKey": "assigned:87654321:dddddddddddddddddddddddddddddddd",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "assigned",
+                "subject": "tasks/a.md",
+                "detail": "via agent"
+              },
+              "path": "tasks/a.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
+            }
+          ],
+          "expect": {
+            "admitted": 4,
+            "live": 0,
+            "refused": []
+          }
+        },
+        {
+          "op": "release",
+          "agent": "process:scout",
+          "subject": "tasks/a.md",
+          "keyPrefix": "assigned:12345678:",
+          "expect": {
+            "released": 1
+          }
+        },
+        {
+          "op": "rows",
+          "expect": [
+            {
+              "wakeKey": "assigned:12345678:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "state": "finished",
+              "outcome": "cancelled",
+              "reason": "superseded",
+              "detail": null
+            },
+            {
+              "wakeKey": "assigned:12345678:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "state": "pending",
+              "outcome": null,
+              "reason": null,
+              "detail": null
+            },
+            {
+              "wakeKey": "assigned:12345678:cccccccccccccccccccccccccccccccc",
+              "state": "pending",
+              "outcome": null,
+              "reason": null,
+              "detail": null
+            },
+            {
+              "wakeKey": "assigned:87654321:dddddddddddddddddddddddddddddddd",
+              "state": "pending",
+              "outcome": null,
+              "reason": null,
+              "detail": null
+            }
+          ]
+        },
+        {
+          "op": "release",
+          "agent": "process:scout",
+          "subject": "tasks/a.md",
+          "keyPrefix": "assigned:12345678:",
+          "expect": {
+            "released": 0
+          }
+        },
+        {
+          "op": "release",
+          "agent": "process:scout",
+          "subject": "tasks/a.md",
+          "keyPrefix": "assigned:%:",
+          "expect": {
+            "error": true
+          }
+        },
+        {
+          "op": "admit",
+          "offers": [
+            {
+              "agent": "process:scout",
+              "wakeKey": "assigned:12345678:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "assigned",
+                "subject": "tasks/a.md",
+                "detail": "via agent"
+              },
+              "path": "tasks/a.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
+            }
+          ],
+          "expect": {
+            "admitted": 1,
+            "live": 0,
+            "refused": []
+          }
+        }
+      ]
+    },
+    {
+      "why": "an assigned wake admits once and runs alone; removal cannot cancel a started assignment",
+      "steps": [
+        {
+          "op": "admit",
+          "offers": [
+            {
+              "agent": "process:scout",
+              "wakeKey": "assigned:12345678:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "assigned",
+                "subject": "tasks/a.md",
+                "detail": "via agent"
+              },
+              "path": "tasks/a.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
+            },
+            {
+              "agent": "process:scout",
+              "wakeKey": "assigned:12345678:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "assigned",
+                "subject": "tasks/b.md",
+                "detail": "via agent"
+              },
+              "path": "tasks/b.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
+            }
+          ],
+          "expect": {
+            "admitted": 2,
+            "live": 0,
+            "refused": []
+          }
+        },
+        {
+          "op": "admit",
+          "offers": [
+            {
+              "agent": "process:scout",
+              "wakeKey": "assigned:12345678:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "trigger": "1111111111111111",
+              "cause": {
+                "kind": "assigned",
+                "subject": "tasks/a.md",
+                "detail": "via agent"
+              },
+              "path": "tasks/a.md",
+              "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "event": "changed"
+            }
+          ],
+          "expect": {
+            "admitted": 0,
+            "live": 1,
+            "refused": []
+          }
+        },
+        {
+          "op": "claim",
+          "agent": "process:scout",
+          "wake": "assigned:12345678:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "coalesce": [
+            "assigned:12345678:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          ],
+          "expect": {
+            "started": {
+              "cause": {
+                "kind": "assigned",
+                "subject": "tasks/a.md",
+                "detail": "via agent"
+              },
+              "also": []
+            }
+          }
+        },
+        {
+          "op": "release",
+          "agent": "process:scout",
+          "subject": "tasks/a.md",
+          "keyPrefix": "assigned:12345678:",
+          "expect": {
+            "released": 0
+          }
+        },
+        {
+          "op": "rows",
+          "expect": [
+            {
+              "wakeKey": "assigned:12345678:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "state": "started",
+              "outcome": null,
+              "reason": null,
+              "detail": null
+            },
+            {
+              "wakeKey": "assigned:12345678:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "state": "pending",
+              "outcome": null,
+              "reason": null,
+              "detail": null
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "attribution_cases": [
+    {
+      "name": "person",
+      "at": "2026-10-13T09:00:00.000Z",
+      "offers": [
+        {
+          "agent": "process:scout",
+          "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "trigger": "1111111111111111",
+          "cause": {
+            "kind": "event",
+            "subject": "records/a.md"
+          },
+          "path": "records/a.md",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "event": "changed"
+        }
+      ],
+      "writes": [
+        {
+          "kind": "vault.write",
+          "path": "records/a.md",
+          "actor": "human:me",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "at": "2026-10-13T09:00:00.000Z"
+        }
+      ],
+      "runs": [],
+      "expect": {
+        "admitted": 1,
+        "live": 0,
+        "refused": []
+      },
+      "rows": [
+        {
+          "author": "person",
+          "authorActor": "human:me",
+          "parentRunId": null,
+          "state": "pending",
+          "outcome": null,
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "unknown",
+      "at": "2026-10-13T09:00:00.000Z",
+      "offers": [
+        {
+          "agent": "process:scout",
+          "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "trigger": "1111111111111111",
+          "cause": {
+            "kind": "event",
+            "subject": "records/a.md"
+          },
+          "path": "records/a.md",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "event": "changed"
+        }
+      ],
+      "writes": [],
+      "runs": [],
+      "expect": {
+        "admitted": 1,
+        "live": 0,
+        "refused": []
+      },
+      "rows": [
+        {
+          "author": "not_recorded",
+          "authorActor": null,
+          "parentRunId": null,
+          "state": "pending",
+          "outcome": null,
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "null_actor",
+      "at": "2026-10-13T09:00:00.000Z",
+      "offers": [
+        {
+          "agent": "process:scout",
+          "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "trigger": "1111111111111111",
+          "cause": {
+            "kind": "event",
+            "subject": "records/a.md"
+          },
+          "path": "records/a.md",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "event": "changed"
+        }
+      ],
+      "writes": [
+        {
+          "kind": "vault.write",
+          "path": "records/a.md",
+          "actor": null,
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "at": "2026-10-13T09:00:00.000Z"
+        }
+      ],
+      "runs": [],
+      "expect": {
+        "admitted": 1,
+        "live": 0,
+        "refused": []
+      },
+      "rows": [
+        {
+          "author": "not_recorded",
+          "authorActor": null,
+          "parentRunId": null,
+          "state": "pending",
+          "outcome": null,
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "no_run",
+      "at": "2026-10-13T09:00:00.000Z",
+      "offers": [
+        {
+          "agent": "process:scout",
+          "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "trigger": "1111111111111111",
+          "cause": {
+            "kind": "event",
+            "subject": "records/a.md"
+          },
+          "path": "records/a.md",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "event": "changed"
+        }
+      ],
+      "writes": [
+        {
+          "kind": "vault.write",
+          "path": "records/a.md",
+          "actor": "process:writer",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "at": "2026-10-13T09:00:00.000Z"
+        }
+      ],
+      "runs": [],
+      "expect": {
+        "admitted": 1,
+        "live": 0,
+        "refused": []
+      },
+      "rows": [
+        {
+          "author": "not_recorded",
+          "authorActor": null,
+          "parentRunId": null,
+          "state": "pending",
+          "outcome": null,
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "missing_run",
+      "at": "2026-10-13T09:00:00.000Z",
+      "offers": [
+        {
+          "agent": "process:scout",
+          "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "trigger": "1111111111111111",
+          "cause": {
+            "kind": "event",
+            "subject": "records/a.md"
+          },
+          "path": "records/a.md",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "event": "changed"
+        }
+      ],
+      "writes": [
+        {
+          "kind": "vault.write",
+          "path": "records/a.md",
+          "actor": "process:writer",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "at": "2026-10-13T09:00:00.000Z",
+          "runId": "gone"
+        }
+      ],
+      "runs": [],
+      "expect": {
+        "admitted": 1,
+        "live": 0,
+        "refused": []
+      },
+      "rows": [
+        {
+          "author": "run",
+          "authorActor": "process:writer",
+          "parentRunId": null,
+          "state": "pending",
+          "outcome": null,
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "hop",
+      "at": "2026-10-13T09:00:00.000Z",
+      "offers": [
+        {
+          "agent": "process:scout",
+          "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "trigger": "1111111111111111",
+          "cause": {
+            "kind": "event",
+            "subject": "records/a.md"
+          },
+          "path": "records/a.md",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "event": "changed"
+        }
+      ],
+      "writes": [
+        {
+          "kind": "vault.write",
+          "path": "records/a.md",
+          "actor": "process:writer",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "at": "2026-10-13T09:00:00.000Z",
+          "runId": "root"
+        }
+      ],
+      "runs": [
+        {
+          "runId": "root",
+          "actor": "process:writer"
+        }
+      ],
+      "expect": {
+        "admitted": 1,
+        "live": 0,
+        "refused": []
+      },
+      "rows": [
+        {
+          "author": "run",
+          "authorActor": "process:writer",
+          "parentRunId": "root",
+          "state": "pending",
+          "outcome": null,
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "client",
+      "at": "2026-10-13T09:00:00.000Z",
+      "offers": [
+        {
+          "agent": "process:scout",
+          "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "trigger": "1111111111111111",
+          "cause": {
+            "kind": "event",
+            "subject": "records/a.md"
+          },
+          "path": "records/a.md",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "event": "changed"
+        }
+      ],
+      "writes": [
+        {
+          "kind": "vault.write",
+          "path": "records/a.md",
+          "actor": "client:calendar",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "at": "2026-10-13T09:00:00.000Z",
+          "runId": "session"
+        }
+      ],
+      "runs": [
+        {
+          "runId": "session",
+          "actor": "client:calendar"
+        }
+      ],
+      "expect": {
+        "admitted": 1,
+        "live": 0,
+        "refused": []
+      },
+      "rows": [
+        {
+          "author": "run",
+          "authorActor": "client:calendar",
+          "parentRunId": "session",
+          "state": "pending",
+          "outcome": null,
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "assistant",
+      "at": "2026-10-13T09:00:00.000Z",
+      "offers": [
+        {
+          "agent": "process:scout",
+          "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "trigger": "1111111111111111",
+          "cause": {
+            "kind": "event",
+            "subject": "records/a.md"
+          },
+          "path": "records/a.md",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "event": "changed"
+        }
+      ],
+      "writes": [
+        {
+          "kind": "vault.write",
+          "path": "records/a.md",
+          "actor": "claude-code",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "at": "2026-10-13T09:00:00.000Z",
+          "runId": "chat"
+        }
+      ],
+      "runs": [
+        {
+          "runId": "chat",
+          "actor": null
+        }
+      ],
+      "expect": {
+        "admitted": 1,
+        "live": 0,
+        "refused": []
+      },
+      "rows": [
+        {
+          "author": "run",
+          "authorActor": "claude-code",
+          "parentRunId": "chat",
+          "state": "pending",
+          "outcome": null,
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "cycle",
+      "at": "2026-10-13T09:00:00.000Z",
+      "offers": [
+        {
+          "agent": "process:scout",
+          "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "trigger": "1111111111111111",
+          "cause": {
+            "kind": "event",
+            "subject": "records/a.md"
+          },
+          "path": "records/a.md",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "event": "changed"
+        }
+      ],
+      "writes": [
+        {
+          "kind": "vault.write",
+          "path": "records/a.md",
+          "actor": "process:scout",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "at": "2026-10-13T09:00:00.000Z",
+          "runId": "root"
+        }
+      ],
+      "runs": [
+        {
+          "runId": "root",
+          "actor": "process:scout"
+        }
+      ],
+      "expect": {
+        "admitted": 0,
+        "live": 0,
+        "refused": [
+          {
+            "agent": "process:scout",
+            "reason": "cycle"
+          }
+        ]
+      },
+      "rows": [
+        {
+          "author": "run",
+          "authorActor": "process:scout",
+          "parentRunId": "root",
+          "state": "finished",
+          "outcome": "skipped",
+          "reason": "cycle"
+        }
+      ],
+      "repeat": true
+    },
+    {
+      "name": "hop_limit",
+      "at": "2026-10-13T09:00:00.000Z",
+      "offers": [
+        {
+          "agent": "process:scout",
+          "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "trigger": "1111111111111111",
+          "cause": {
+            "kind": "event",
+            "subject": "records/a.md"
+          },
+          "path": "records/a.md",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "event": "changed"
+        }
+      ],
+      "writes": [
+        {
+          "kind": "vault.write",
+          "path": "records/a.md",
+          "actor": "process:third",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "at": "2026-10-13T09:00:00.000Z",
+          "runId": "third"
+        }
+      ],
+      "runs": [
+        {
+          "runId": "root",
+          "actor": "process:first"
+        },
+        {
+          "runId": "second",
+          "actor": "process:second",
+          "parent": "root"
+        },
+        {
+          "runId": "third",
+          "actor": "process:third",
+          "parent": "second"
+        }
+      ],
+      "expect": {
+        "admitted": 0,
+        "live": 0,
+        "refused": [
+          {
+            "agent": "process:scout",
+            "reason": "hop_limit"
+          }
+        ]
+      },
+      "rows": [
+        {
+          "author": "run",
+          "authorActor": "process:third",
+          "parentRunId": "third",
+          "state": "finished",
+          "outcome": "skipped",
+          "reason": "hop_limit"
+        }
+      ]
+    },
+    {
+      "name": "burst",
+      "at": "2026-10-13T09:00:00.000Z",
+      "offers": [
+        {
+          "agent": "process:scout",
+          "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "trigger": "1111111111111111",
+          "cause": {
+            "kind": "event",
+            "subject": "records/a.md"
+          },
+          "path": "records/a.md",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "event": "changed"
+        }
+      ],
+      "writes": [
+        {
+          "kind": "vault.write",
+          "path": "records/a.md",
+          "actor": "human:me",
+          "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "at": "2026-10-13T08:59:30.000Z"
+        }
+      ],
+      "runs": [],
+      "expect": {
+        "admitted": 1,
+        "live": 0,
+        "refused": []
+      },
+      "rows": [
+        {
+          "author": "person",
+          "authorActor": "human:me",
+          "parentRunId": null,
+          "state": "pending",
+          "outcome": null,
+          "reason": null
+        }
+      ],
+      "seenAt": "2026-10-13T08:59:00.000Z"
+    },
+    {
+      "name": "outside",
+      "at": "2026-10-13T09:00:00.000Z",
+      "offers": [
+        {
+          "agent": "process:scout",
+          "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "trigger": "1111111111111111",
+          "cause": {
+            "kind": "event",
+            "subject": "records/a.md"
+          },
+          "path": "records/a.md",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "event": "changed"
+        }
+      ],
+      "writes": [
+        {
+          "kind": "vault.write",
+          "path": "records/a.md",
+          "actor": "human:me",
+          "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "at": "2026-10-13T08:59:00.000Z"
+        }
+      ],
+      "runs": [],
+      "expect": {
+        "admitted": 1,
+        "live": 0,
+        "refused": []
+      },
+      "rows": [
+        {
+          "author": "not_recorded",
+          "authorActor": null,
+          "parentRunId": null,
+          "state": "pending",
+          "outcome": null,
+          "reason": null
+        }
+      ],
+      "seenAt": "2026-10-13T08:59:30.000Z"
+    },
+    {
+      "name": "move",
+      "at": "2026-10-13T09:00:00.000Z",
+      "offers": [
+        {
+          "agent": "process:scout",
+          "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "trigger": "1111111111111111",
+          "cause": {
+            "kind": "event",
+            "subject": "records/a.md"
+          },
+          "path": "records/a.md",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "event": "moved"
+        }
+      ],
+      "writes": [
+        {
+          "kind": "vault.rename",
+          "path": "records/old.md",
+          "actor": "human:me",
+          "hash": null,
+          "at": "2026-10-13T09:00:00.000Z",
+          "to": "records/a.md"
+        }
+      ],
+      "runs": [],
+      "expect": {
+        "admitted": 1,
+        "live": 0,
+        "refused": []
+      },
+      "rows": [
+        {
+          "author": "person",
+          "authorActor": "human:me",
+          "parentRunId": null,
+          "state": "pending",
+          "outcome": null,
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "chain_spent",
+      "at": "2026-10-13T09:00:00.000Z",
+      "offers": [
+        {
+          "agent": "process:scout",
+          "wakeKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "trigger": "1111111111111111",
+          "cause": {
+            "kind": "event",
+            "subject": "records/a.md"
+          },
+          "path": "records/a.md",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "event": "changed"
+        }
+      ],
+      "writes": [
+        {
+          "kind": "vault.write",
+          "path": "records/a.md",
+          "actor": "process:writer",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "at": "2026-10-13T09:00:00.000Z",
+          "runId": "root"
+        }
+      ],
+      "runs": [
+        {
+          "runId": "root",
+          "actor": "process:writer",
+          "tokens": 21000
+        }
+      ],
+      "expect": {
+        "admitted": 1,
+        "live": 0,
+        "refused": []
+      },
+      "rows": [
+        {
+          "author": "run",
+          "authorActor": "process:writer",
+          "parentRunId": "root",
+          "state": "finished",
+          "outcome": "skipped",
+          "reason": "chain_spent"
+        }
+      ],
+      "rustOnly": true,
+      "claim": true
+    },
+    {
+      "name": "assigned_cycle",
+      "at": "2026-10-13T09:00:00.000Z",
+      "offers": [
+        {
+          "agent": "process:scout",
+          "wakeKey": "assigned:aaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "trigger": "1111111111111111",
+          "cause": {
+            "kind": "assigned",
+            "subject": "records/a.md",
+            "detail": "via agent"
+          },
+          "path": "records/a.md",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "event": "changed"
+        }
+      ],
+      "writes": [
+        {
+          "kind": "vault.write",
+          "path": "records/a.md",
+          "actor": "process:scout",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "at": "2026-10-13T09:00:00.000Z",
+          "runId": "root"
+        }
+      ],
+      "runs": [
+        {
+          "runId": "root",
+          "actor": "process:scout"
+        }
+      ],
+      "expect": {
+        "admitted": 0,
+        "live": 0,
+        "refused": [
+          {
+            "agent": "process:scout",
+            "reason": "cycle"
+          }
+        ]
+      },
+      "rows": [
+        {
+          "author": "run",
+          "authorActor": "process:scout",
+          "parentRunId": "root",
+          "state": "finished",
+          "outcome": "skipped",
+          "reason": "cycle"
+        }
+      ],
+      "repeat": true
+    },
+    {
+      "name": "assigned_unknown",
+      "at": "2026-10-13T09:00:00.000Z",
+      "offers": [
+        {
+          "agent": "process:scout",
+          "wakeKey": "assigned:aaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "trigger": "1111111111111111",
+          "cause": {
+            "kind": "assigned",
+            "subject": "records/a.md",
+            "detail": "via agent"
+          },
+          "path": "records/a.md",
+          "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "event": "changed"
+        }
+      ],
+      "writes": [],
+      "runs": [],
+      "expect": {
+        "admitted": 1,
+        "live": 0,
+        "refused": []
+      },
+      "rows": [
+        {
+          "author": "not_recorded",
+          "authorActor": null,
+          "parentRunId": null,
+          "state": "pending",
+          "outcome": null,
+          "reason": null
         }
       ]
     }

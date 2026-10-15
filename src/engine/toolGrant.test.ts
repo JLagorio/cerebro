@@ -136,6 +136,8 @@ describe('holds and editsNotes', () => {
     expect(sorted(NOTE_EDITORS)).toEqual([
       'append_to_note',
       'edit_note',
+      'edit_sheet',
+      'import_notion_page',
       'set_fields',
       'update_frontmatter',
     ]);

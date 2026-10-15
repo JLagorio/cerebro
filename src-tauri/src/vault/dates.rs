@@ -14,9 +14,10 @@
 //!
 //! Nothing here reads the clock: a zone is always an argument.
 
+use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
-use chrono::{Duration, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use chrono_tz::Tz;
 use serde::Deserialize;
 use serde_json::Value;
@@ -56,6 +57,85 @@ struct InstantRule {
     zones: Vec<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct RelativeDay {
+    token: String,
+    offset: i32,
+    words: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RelativePeriod {
+    token: String,
+    unit: String,
+    offset: i32,
+    words: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RelativeOffsets {
+    prefix: String,
+    signs: BTreeMap<String, i32>,
+    min: u32,
+    max: u32,
+    leading_zero: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RelativeGrammar {
+    days: Vec<RelativeDay>,
+    offsets: RelativeOffsets,
+    periods: Vec<RelativePeriod>,
+    week_starts: Vec<u32>,
+    words: BTreeMap<String, String>,
+}
+
+fn check_relative(rule: &RelativeGrammar) -> Result<(), String> {
+    let mut tokens = Vec::new();
+    if rule.days.is_empty() || rule.periods.is_empty() {
+        return Err("dates: relative tokens must be non-empty and unique".into());
+    }
+    for (token, words) in rule
+        .days
+        .iter()
+        .map(|d| (&d.token, &d.words))
+        .chain(rule.periods.iter().map(|p| (&p.token, &p.words)))
+    {
+        if token.is_empty() || words.is_empty() || tokens.contains(token) {
+            return Err("dates: relative tokens must be non-empty and unique".into());
+        }
+        tokens.push(token.clone());
+    }
+    let offsets = &rule.offsets;
+    if offsets.prefix.is_empty()
+        || offsets.min != 1
+        || offsets.max != 999
+        || offsets.signs != BTreeMap::from([("+".into(), 1), ("-".into(), -1)])
+        || offsets.leading_zero
+    {
+        return Err("dates: relative offsets are invalid".into());
+    }
+    for period in &rule.periods {
+        word("relative period unit", &period.unit, &["week", "month"])?;
+        if !(-1..=1).contains(&period.offset) {
+            return Err("dates: relative offsets are invalid".into());
+        }
+    }
+    if rule.week_starts != [0, 1] {
+        return Err("dates: relative week_starts must be 0, 1 in order".into());
+    }
+    for key in ["past_one", "past_many", "future_one", "future_many"] {
+        if !rule
+            .words
+            .get(key)
+            .is_some_and(|words| words.contains("{n}"))
+        {
+            return Err("dates: relative words must name {n}".into());
+        }
+    }
+    Ok(())
+}
+
 /// The loaded grammar. `cases` stay `Value`s: only the tests replay them.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Grammar {
@@ -71,6 +151,8 @@ pub struct Grammar {
     read: String,
     write: String,
     backwards: String,
+    relative: RelativeGrammar,
+    pub relative_cases: Vec<Value>,
     pub cases: Vec<Value>,
 }
 
@@ -99,6 +181,12 @@ fn word(key: &str, got: &str, known: &[&str]) -> Result<(), String> {
 
 /// Parse and check a grammar, refusing in the words `dateGrammar.ts` uses.
 pub fn parse_grammar(raw: &str) -> Result<Grammar, String> {
+    // Validate this section's shape separately so both readers refuse a
+    // missing or malformed section in the same words, not serde's wording.
+    let value: Value = serde_json::from_str(raw).map_err(|e| format!("dates: {e}"))?;
+    let relative: RelativeGrammar = serde_json::from_value(value["relative"].clone())
+        .map_err(|_| "dates: relative has an invalid shape".to_string())?;
+    check_relative(&relative)?;
     let g: Grammar = serde_json::from_str(raw).map_err(|e| format!("dates: {e}"))?;
     if g.format != FORMAT {
         return Err(format!("dates: format must be {FORMAT}, not {}", g.format));
@@ -144,6 +232,9 @@ pub fn parse_grammar(raw: &str) -> Result<Grammar, String> {
     if g.cases.is_empty() {
         return Err("dates: no cases".into());
     }
+    if g.relative_cases.is_empty() {
+        return Err("dates: no relative cases".into());
+    }
     Ok(g)
 }
 
@@ -161,6 +252,54 @@ pub fn grammar() -> Result<&'static Grammar, String> {
         })
         .as_ref()
         .map_err(Clone::clone)
+}
+
+/// A relative token resolves to inclusive calendar days on the caller's
+/// clock. Query evaluation passes its injected day here (M62.2).
+pub fn resolve_relative(
+    text: &str,
+    today: NaiveDate,
+    week_start: u32,
+) -> Option<(NaiveDate, NaiveDate)> {
+    let rule = &grammar().ok()?.relative;
+    if !rule.week_starts.contains(&week_start) {
+        return None;
+    }
+    let text = text.trim();
+    let shifted = |days: i64| today.checked_add_signed(Duration::days(days));
+    let range = if let Some(day) = rule.days.iter().find(|day| day.token == text) {
+        let date = shifted(i64::from(day.offset))?;
+        (date, date)
+    } else if let Some(period) = rule.periods.iter().find(|period| period.token == text) {
+        if period.unit == "week" {
+            let back = (today.weekday().num_days_from_sunday() + 7 - week_start) % 7;
+            let start = shifted(i64::from(period.offset) * 7 - i64::from(back))?;
+            (start, start.checked_add_signed(Duration::days(6))?)
+        } else {
+            let month = today.year() * 12 + today.month0() as i32 + period.offset;
+            let first = |n: i32| {
+                NaiveDate::from_ymd_opt(n.div_euclid(12), (n.rem_euclid(12) + 1) as u32, 1)
+            };
+            (first(month)?, first(month + 1)?.pred_opt()?)
+        }
+    } else {
+        let suffix = text.strip_prefix(&rule.offsets.prefix)?;
+        let (sign, number) = suffix.split_at_checked(1)?;
+        let direction = *rule.offsets.signs.get(sign)?;
+        if number.is_empty()
+            || !number.bytes().all(|c| c.is_ascii_digit())
+            || (!rule.offsets.leading_zero && number.starts_with('0'))
+        {
+            return None;
+        }
+        let count: u32 = number.parse().ok()?;
+        if !(rule.offsets.min..=rule.offsets.max).contains(&count) {
+            return None;
+        }
+        let date = shifted(i64::from(count) * i64::from(direction))?;
+        (date, date)
+    };
+    ((0..=9999).contains(&range.0.year()) && (0..=9999).contains(&range.1.year())).then_some(range)
 }
 
 /// One endpoint as a reader sees it: a day, an optional wall time (`HH:MM`),
@@ -535,5 +674,80 @@ mod tests {
                 "dates.rs reads the clock through {clock}"
             );
         }
+    }
+
+    #[test]
+    fn replays_the_relative_date_cases() {
+        for case in &grammar().unwrap().relative_cases {
+            let today =
+                NaiveDate::parse_from_str(case["today"].as_str().unwrap(), "%Y-%m-%d").unwrap();
+            let actual = resolve_relative(
+                case["input"].as_str().unwrap(),
+                today,
+                case["week_start"].as_u64().unwrap() as u32,
+            );
+            let got = actual.map(|(from, to)| {
+                vec![
+                    from.format("%Y-%m-%d").to_string(),
+                    to.format("%Y-%m-%d").to_string(),
+                ]
+            });
+            assert_eq!(
+                serde_json::to_value(got).unwrap(),
+                case["expect"],
+                "{}",
+                case["name"]
+            );
+        }
+    }
+
+    #[test]
+    fn refuses_malformed_relative_sections_in_the_shared_words() {
+        let base: Value = serde_json::from_str(DATES_JSON).unwrap();
+        let edits = [
+            (
+                "relative",
+                Value::Null,
+                "dates: relative has an invalid shape",
+            ),
+            (
+                "days",
+                json!([]),
+                "dates: relative tokens must be non-empty and unique",
+            ),
+            (
+                "week_starts",
+                json!([1, 0]),
+                "dates: relative week_starts must be 0, 1 in order",
+            ),
+            ("words", json!({}), "dates: relative words must name {n}"),
+        ];
+        for (key, value, words) in edits {
+            let mut edited = base.clone();
+            if key == "relative" {
+                edited[key] = value;
+            } else {
+                edited["relative"][key] = value;
+            }
+            assert_eq!(parse_grammar(&edited.to_string()).unwrap_err(), words);
+        }
+        let mut bad = base.clone();
+        bad["relative"]["offsets"]["max"] = json!(1000);
+        assert_eq!(
+            parse_grammar(&bad.to_string()).unwrap_err(),
+            "dates: relative offsets are invalid"
+        );
+        let mut bad = base.clone();
+        bad["relative"]["periods"][0]["unit"] = json!("year");
+        assert_eq!(
+            parse_grammar(&bad.to_string()).unwrap_err(),
+            "dates: relative period unit has an unknown word year"
+        );
+        let mut bad = base;
+        bad["relative_cases"] = json!([]);
+        assert_eq!(
+            parse_grammar(&bad.to_string()).unwrap_err(),
+            "dates: no relative cases"
+        );
     }
 }

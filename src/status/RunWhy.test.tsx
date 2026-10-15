@@ -73,3 +73,18 @@ describe('RunWhy', () => {
     expect(why.getAttribute('title')).toContain('records/risks/r1.md');
   });
 });
+
+it('an assignment names its work and assigning field', () => {
+  expect(
+    runWhyText(
+      {
+        kind: 'assigned',
+        why: 'work was assigned to it',
+        subject: 'tasks/a.md',
+        detail: 'via agent',
+        due_at: null,
+      },
+      '2026-07-28T08:31:00Z',
+    ),
+  ).toBe('work was assigned to it (via agent)');
+});

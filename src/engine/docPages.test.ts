@@ -250,3 +250,9 @@ describe('sub-pages (M55.13)', () => {
     expect(crumbTrail(entry('root.md'), PLAN)).toEqual([]);
   });
 });
+
+it('whiteboards cannot grow or receive sub-pages', () => {
+  const board = entry('boards/plan.canvas');
+  expect(canHaveSubPages(board)).toBe(false);
+  expect(nestPlan('notes/a.md', board, [board, entry('notes/a.md')], [])).toHaveProperty('refused');
+});

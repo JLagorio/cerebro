@@ -1,3 +1,5 @@
+import { WhiteboardBlock as WhiteboardBlockView } from '@/whiteboard/WhiteboardBlock';
+import { WHITEBOARD_FENCE } from '@/engine/whiteboardRef';
 import { useEffect, useRef, useState } from 'react';
 import type { BlockNoteEditor } from '@blocknote/core';
 import { createReactBlockSpec, useEditorChange } from '@blocknote/react';
@@ -9,6 +11,13 @@ import { ConnectedDatabaseBlock } from '@/views/DatabaseBlockView';
 import { DATABASE_FENCE, serializeDatabaseRef } from '@/engine/databaseBlock';
 import { SUBPAGES_FENCE } from '@/engine/docPages';
 import { PAGE_CARD_FENCE, serializePageRef } from '@/engine/pageCard';
+import { parseSheetFence, SHEET_FENCE, sheetSourcesOf } from '@/engine/sheet/fence';
+import { SheetView } from '@/sheet/SheetView';
+import { SheetGrid } from '@/sheet/SheetGrid';
+import { commitSheetEdits } from '@/sheet/commitSheets';
+import { registerSheetDraft, settleSheetDrafts } from '@/sheet/pendingSheets';
+import type { CerebroEditor } from './MarkdownEditor';
+import { useSheetWorkbook } from '@/sheet/useSheetWorkbook';
 import {
   BASE_MARKER_DEPTH,
   DEFAULT_COLUMN_WIDTH,
@@ -23,6 +32,8 @@ import { SubPageList } from './SubPageList';
  *
  *   callout     Obsidian-style `> [!info] …` blockquote
  *   mermaid     ```mermaid fenced code block
+ *   whiteboard  ```cerebro-whiteboard fence holding a raw pointer (M68.5c)
+ *   sheet       ```cerebro-sheet fence holding CSV source cells (M67.1b)
  *   database    ```cerebro-database fence holding a POINTER (M47.2)
  *   subPages    an EMPTY ```cerebro-subpages fence (M55.13)
  *   pageCard    ```cerebro-page fence holding ONE wikilink (M55.14)
@@ -170,6 +181,130 @@ export const MermaidBlock = createReactBlockSpec(
         <code>{`\`\`\`mermaid\n${props.block.props.code as string}\n\`\`\``}</code>
       </pre>
     ),
+  },
+);
+
+/** Copy and save the raw pointer; the embedded board is always a reader. */
+export const WhiteboardBlock = createReactBlockSpec(
+  { type: 'whiteboard', propSchema: { source: { default: '' } }, content: 'none' },
+  {
+    render: (props) => (
+      <WhiteboardBlockView
+        source={props.block.props.source as string}
+        onChange={
+          props.editor.isEditable
+            ? (source) => props.editor.updateBlock(props.block, { props: { source } } as never)
+            : undefined
+        }
+      />
+    ),
+    toExternalHTML: (props) => {
+      const source = props.block.props.source as string;
+      const runs = [...source.matchAll(/`+/g)].map((match) => match[0].length);
+      const marker = '`'.repeat(Math.max(3, ...runs.map((length) => length + 1)));
+      return (
+        <pre>
+          <code>{`${marker}${WHITEBOARD_FENCE}\n${source}${source === '' ? '' : '\n'}${marker}`}</code>
+        </pre>
+      );
+    },
+  },
+);
+
+/** A reused node view must still observe changes to every peer sheet: its
+ * formulas can read those peers, and its ordinal includes nested sheets. */
+function LiveSheetBlock({
+  editor,
+  id,
+  source,
+}: {
+  editor: BlockNoteEditor<any, any, any>;
+  id: string;
+  source: string;
+}) {
+  const [document, setDocument] = useState(() => editor.document);
+  useEditorChange(() => setDocument(editor.document), editor);
+  const sheets = sheetSourcesOf(document);
+  const states = useSheetWorkbook(sheets.map((sheet) => sheet.source));
+  const index = sheets.findIndex((sheet) => sheet.id === id);
+  const parsed = parseSheetFence(source);
+  const state = states[index] ?? { status: 'pending' as const, name: 'Sheet' };
+  return (
+    <div
+      className="min-w-0 w-full"
+      contentEditable={false}
+      data-testid={parsed.ok && state.status !== 'unavailable' ? 'sheet-block' : undefined}
+    >
+      {parsed.ok && state.status !== 'unavailable' ? (
+        <SheetGrid
+          id={id}
+          sources={sheets}
+          computed={state.status === 'ready' ? state.sheet : undefined}
+          getSources={() => sheetSourcesOf(editor.document)}
+          getPage={async () => {
+            settleSheetDrafts(editor);
+            const { blocksToMarkdown } = await import('./markdown');
+            return blocksToMarkdown(editor as CerebroEditor);
+          }}
+          registerDraft={(flush) => registerSheetDraft(editor, id, flush)}
+          onCommit={
+            editor.isEditable
+              ? (edits) => {
+                  commitSheetEdits(editor as CerebroEditor, edits);
+                }
+              : undefined
+          }
+          onUndo={() => editor.undo()}
+          onRedo={() => editor.redo()}
+          onExit={() => {
+            const block = editor.getBlock(id);
+            if (!block) return;
+            const next = editor.getNextBlock(id);
+            if (next) editor.setTextCursorPosition(next, 'start');
+            else if (editor.isEditable) {
+              const inserted = editor.insertBlocks([{ type: 'paragraph' }], id, 'after');
+              if (inserted[0]) editor.setTextCursorPosition(inserted[0], 'start');
+            }
+            editor.focus();
+          }}
+        />
+      ) : (
+        <SheetView state={state} source={source} cells={parsed.ok ? parsed.cells : []} />
+      )}
+    </div>
+  );
+}
+
+export const SheetBlock = createReactBlockSpec(
+  {
+    type: 'sheet',
+    propSchema: { source: { default: '' } },
+    content: 'none',
+  },
+  {
+    // Chromium measurement: focus, slash, Backspace and paste stay in the
+    // grid while the block grip still reorders it. Native pointer/clipboard
+    // listeners own the controls; div rows also avoid BlockNote's table plugin.
+    meta: { selectable: false },
+    render: (props) => (
+      <LiveSheetBlock
+        editor={props.editor}
+        id={props.block.id}
+        source={props.block.props.source as string}
+      />
+    ),
+    // Copy the source, never the caption or computed cells (DOM trap 5).
+    // A longer delimiter also carries a CSV cell containing a backtick line.
+    toExternalHTML: (props) => {
+      const source = props.block.props.source as string;
+      const runs = [...source.matchAll(/`+/g)].map((match) => match[0].length);
+      const marker = '`'.repeat(Math.max(3, ...runs.map((length) => length + 1)));
+      return (
+        <pre>
+          <code>{`${marker}${SHEET_FENCE}\n${source}${source === '' ? '' : '\n'}${marker}`}</code>
+        </pre>
+      );
+    },
   },
 );
 

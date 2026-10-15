@@ -1,3 +1,4 @@
+import { usePaneId } from '@/stores/navStore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { readNote, saveNote } from '@/lib/ipc';
 import { refusalText } from '@/lib/refusal';
@@ -8,7 +9,7 @@ import type { ChoiceView, EditorReadyInfo } from './MarkdownEditor';
 import type { LossyCause } from './markdown';
 import { MergeChoices } from './MergeChoices';
 import { NotePathContext } from './notePath';
-import { onExternalWrite, registerFlush, registerHold } from './openPages';
+import { holdEditor, onExternalWrite, registerFlush, registerHold } from './openPages';
 
 /** Where the body currently stands relative to disk. */
 export type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'failed';
@@ -77,6 +78,7 @@ export function NoteBodyEditor({
   path,
   autoFocus = false,
   compact = false,
+  owner,
   debounceMs,
   onReady,
   onSaveState,
@@ -85,6 +87,8 @@ export function NoteBodyEditor({
   sections = false,
 }: {
   path: string;
+  /** The global peek owns its editor independently of its backdrop pane. */
+  owner?: 'peek';
   autoFocus?: boolean;
   /** Narrow contexts (detail panel): smaller gutter and heading scale. */
   compact?: boolean;
@@ -107,6 +111,8 @@ export function NoteBodyEditor({
    *  in frontmatter (OKF), so its body's H1s render at section size. */
   sections?: boolean;
 }) {
+  const pane = usePaneId();
+  useEffect(() => holdEditor(path, owner ?? pane), [path, owner, pane]);
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
   const toast = useUiStore((s) => s.toast);
@@ -465,18 +471,6 @@ export function NoteBodyEditor({
       ),
     [],
   );
-
-  // ⌘S / Ctrl+S force-flushes the debounce. The instinctive shortcut was a
-  // no-op before, which read as "my work is not being saved".
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 's' || !(e.metaKey || e.ctrlKey) || e.altKey) return;
-      e.preventDefault();
-      void flushRef.current?.();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
 
   // Saves target the path the body was LOADED for, never the current prop —
   // a debounce flush racing a navigation must land in its own file.

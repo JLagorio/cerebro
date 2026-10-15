@@ -1,3 +1,4 @@
+import { navSeed } from '@/test/navSeed';
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -34,7 +35,7 @@ describe('AgentsPage', () => {
     await useVaultStore.getState().openVault('/demo-vault');
     useNavStore.setState({
       selection: { kind: 'agents' },
-      history: [{ kind: 'agents' }],
+      history: [navSeed({ kind: 'agents' })],
       historyIndex: 0,
     });
   });

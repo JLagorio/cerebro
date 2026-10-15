@@ -9,6 +9,7 @@ import {
   type OpenLog,
 } from '@/engine/openLog';
 import { recencyOf, type Recency } from '@/lib/nameRank';
+import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 /**
@@ -97,7 +98,13 @@ export function recordPersonOpen(path: string): void {
  */
 export function pruneOpenLogToSnapshot(): void {
   const { status, entriesVault, vaultPath, entries } = useVaultStore.getState();
-  if (vaultPath === null || status !== 'ready' || entriesVault !== vaultPath) return;
+  if (
+    vaultPath === null ||
+    status !== 'ready' ||
+    entriesVault !== vaultPath ||
+    (useUiStore.getState().pendingRenames[vaultPath] ?? 0) > 0
+  )
+    return;
   useOpenLogStore.getState().prune(vaultPath, new Set(entries.map((e) => e.path)));
 }
 

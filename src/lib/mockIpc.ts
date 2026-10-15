@@ -1,3 +1,42 @@
+import { resetExtractions } from './mockExtract';
+export { extractDocument, seedExtractions } from './mockExtract';
+import { IMPORT_SOURCES, stampRefusal, canonicalRecordId, importPathRefusal } from '@/engine/importSources';
+import { notionCapture, notionRefusal, resetNotionCaptures } from './mockNotion';
+export { seedNotionCapture, beginMockNotionRun, endMockNotionRun } from './mockNotion';
+import { copyIndexOf, planImports, type ImportBatchOp } from '@/engine/importPlan';
+import { parseSheetEdit, planSheetEdit, SHEET_EDIT_SUFFIX } from '@/engine/sheet/edit';
+import type { CanvasRefusal, CanvasSource } from './ipc';
+import { CANVAS_FORMAT } from '@/engine/scene/format';
+import { isWhiteboardPath } from '@/engine/fileKinds';
+import { readCanvas, searchTextOf } from '@/engine/scene/jsonCanvas';
+import { resetFollowups } from './mockFollowups';
+export {
+  scheduleMockFollowup,
+  agentScheduleFollowup,
+  listFollowups,
+  claimFollowup,
+  cancelFollowup,
+  __seedFollowups,
+  readyMockFollowup,
+  releaseMockFollowup,
+  fireMockFollowup,
+  unfireMockFollowup,
+} from './mockFollowups';
+import {
+  clientGrant,
+  clientName,
+  CLIENT_TOKEN_CAP,
+  CLIENT_CAP_WORDS,
+  CLIENT_DUPLICATE,
+  CLIENT_UNAVAILABLE,
+  CLIENT_PORT_WORDS,
+  type ClientTokenRequest,
+  type ClientToken,
+  type CreatedClientToken,
+  type ClientAccessStatus,
+} from '@/engine/clientAccess';
+import { clientToolsets } from '@/lib/policy/tools';
+import { answerText, checkSuggestion } from '@/engine/viewSuggestion';
 // In-memory IPC backend for browser dev, vitest, and Playwright. The whole
 // "disk" is a Map<vault-relative path, raw file content>, seeded at module
 // load from the committed demo-vault/ and mutated by the write commands.
@@ -51,6 +90,7 @@ import {
   type TrashedItem,
 } from '@/engine/trash';
 import type { AgentStreamEvent, TranscriptRead } from '@/agent/types';
+import type { WakeCheck } from '@/agent/agentIpc';
 import {
   MAX_BATCH_BYTES,
   MAX_BATCH_OPS,
@@ -60,11 +100,13 @@ import {
   notFirst,
   pageExists,
   parseBatchOps,
+  replaceNotAlone,
   revertNotAlone,
   staleWords,
   TOO_LARGE,
   tooMany,
   wrongItem,
+  WRITES_BEFORE_RENAMES,
   type BatchApplied,
   type BatchOp,
   type FileResult,
@@ -75,7 +117,7 @@ import {
 import { deepEqual } from './deepEqual';
 import { normalizeAliasV1 } from './epistemic/normalize';
 import { validateFieldPath, validateOverridePointer } from './epistemic/schema';
-import { humanize, splitFrontmatter } from '@/engine/frontmatter';
+import { humanize, replaceH1, splitFrontmatter } from '@/engine/frontmatter';
 import {
   anchorContext,
   commentMatches,
@@ -87,7 +129,7 @@ import {
   quoteMarkdown,
   type QuoteEdit,
 } from '@/engine/quote';
-import { firstH1LineIndex, parseNote } from './mockParse';
+import { parseNote } from './mockParse';
 import { buildSchema } from '@/engine/schema';
 import {
   parseSetFieldsRequest,
@@ -111,6 +153,7 @@ import { toolSchema } from './policy/tools';
 import {
   AMBIENT_CONCURRENCY_DEFAULT,
   AMBIENT_CONCURRENCY_MAX,
+  conditionRun,
   demoActivity,
   demoChanges,
   demoConceptHistory,
@@ -171,6 +214,13 @@ const seededDiagrams = import.meta.glob('/demo-vault/**/*.mmd', {
 }) as Record<string, string>;
 
 const files = new Map<string, string>();
+let stagedSheetFile: StagedSheetFile | null = null;
+let filesGeneration = 0;
+
+/** The same mock disk that note writes and scans use; root 0 reads whole files. */
+export function mockVaultFiles(): readonly (readonly [string, string])[] {
+  return [...files];
+}
 // Connector config (M13.3) — config, not a note; scan never sees it.
 let connectorsJson = '';
 const times = new Map<string, { createdAt: string; modifiedAt: string }>();
@@ -303,11 +353,13 @@ interface LiveMockRun {
   baseline: Map<string, string | null>;
 }
 const liveRuns = new Map<string, LiveMockRun>();
+const wakeRunParents = new Map<string, { actor: string | null; parent: string | null }>();
 
 /** A mock run starts: from here, the paths it writes are its own until it
  * ends, as Rust's `claim_run` holds them. */
 export function beginMockRun(runId: string, actor: string): void {
   liveRuns.set(runId, { actor, from: writes.length, baseline: new Map() });
+  if (!wakeRunParents.has(runId)) wakeRunParents.set(runId, { actor, parent: null });
 }
 
 /** A mock run ends: its paths are no longer anyone's. */
@@ -475,22 +527,31 @@ export function resetOperational(): void {
   connectorStatusFails = false;
   resetAgentPauses();
   resetWakes();
+  resetFollowups();
   resetPanelAgents();
   resetCliTranscripts();
   resetPendingWrites();
+  resetClientAccess();
 }
 
 /** Re-seed the file map alone. Split from `resetMockFs` because module init
  * runs it BEFORE the operational fixtures below are initialized, and reaching
  * them from here would be a temporal-dead-zone error at import time. */
 function seedFiles(): void {
+  filesGeneration++;
   files.clear();
   times.clear();
   folders.clear();
   writes.length = 0;
   liveRuns.clear();
+  wakeRunParents.clear();
   mockJournal = true;
   connectorsJson = '';
+  if (
+    typeof window !== 'undefined' &&
+    (window as unknown as { __cerebroEmptyVault?: boolean }).__cerebroEmptyVault
+  )
+    return;
   for (const [absPath, raw] of Object.entries({
     ...seededNotes,
     ...seededYaml,
@@ -506,8 +567,115 @@ seedFiles();
 /** Re-seed the whole mock — files and the operational fixtures — for test
  * isolation. Safe to call once the module has finished evaluating. */
 export function resetMockFs(): void {
+  resetNotionCaptures();
+  resetExtractions();
+  stagedSheetFile = null;
+  if (typeof window !== 'undefined') sheetExports().length = 0;
+  resetDropped();
+  resetRootBytes('0');
+  resetNotifications();
   seedFiles();
   resetOperational();
+  resetReminderState();
+}
+
+/** An empty files-first vault for onboarding tests; no demo bytes survive. */
+export function emptyMockVault(): void {
+  resetMockFs();
+  files.clear();
+  times.clear();
+  folders.clear();
+  review.cards = [];
+  review.applications = [];
+  lanes = structuredClone(NO_LANES);
+  changes = null;
+  pipeline = emptyOverview();
+  fleetRuns = [];
+  fleetDetails = {};
+  runWrites = {};
+  runTranscripts = {};
+  activityRows = [];
+  activitySpans = [];
+  conceptSeeds.clear();
+}
+
+const starterBytes = import.meta.glob('/shared/starter/vault/**/*.md', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>;
+export const STARTER_FILES = Object.entries(starterBytes)
+  .map(([path, content]) => ({ path: path.replace('/shared/starter/vault/', ''), content }))
+  .sort((a, b) => {
+    // The database precedes records, and the page we open is last.
+    const rank = (path: string) =>
+      path === 'types/tasks.md' ? 0 : path === 'getting-started.md' ? 2 : 1;
+    return rank(a.path) - rank(b.path) || a.path.localeCompare(b.path);
+  });
+const STARTER_MARKER = '.cerebro/starter.json';
+let starterTurn = Promise.resolve();
+function offerTurn<T>(action: () => Promise<T>): Promise<T> {
+  const next = starterTurn.then(action);
+  starterTurn = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
+}
+
+export async function starterMarker(_vault: string): Promise<import('./ipc').StarterMarker | null> {
+  const raw = files.get(STARTER_MARKER);
+  if (raw === undefined) return null;
+  try {
+    const marker: unknown = JSON.parse(raw);
+    if (
+      !marker ||
+      typeof marker !== 'object' ||
+      !('kit' in marker) ||
+      !Number.isInteger(marker.kit) ||
+      Number(marker.kit) < 0 ||
+      Number(marker.kit) > 4_294_967_295 ||
+      !('outcome' in marker) ||
+      (marker.outcome !== 'added' && marker.outcome !== 'declined') ||
+      ('offered_at' in marker &&
+        marker.offered_at !== null &&
+        typeof marker.offered_at !== 'string')
+    ) {
+      throw new Error('invalid marker');
+    }
+    return marker as import('./ipc').StarterMarker;
+  } catch {
+    throw new Error('The starter marker could not be read: invalid marker');
+  }
+}
+
+function saveStarterMarker(outcome: 'added' | 'declined'): void {
+  files.set(
+    STARTER_MARKER,
+    JSON.stringify({ kit: 1, outcome, offered_at: new Date().toISOString() }, null, 2) + '\n',
+  );
+}
+
+export function installStarterKit(vault: string): Promise<{ marker_saved: boolean }> {
+  return offerTurn(async () => {
+    if (await starterMarker(vault))
+      throw new Error('This vault was already offered the starter kit.');
+    if ((await scanVault(vault)).length) {
+      throw new Error('The starter kit goes only into an empty vault, and this one has pages.');
+    }
+    await applyBatch(
+      vault,
+      STARTER_FILES.map(({ path, content }) => ({ op: 'create', path, content })),
+    );
+    saveStarterMarker('added');
+    return { marker_saved: true };
+  });
+}
+
+export function declineStarterKit(vault: string): Promise<void> {
+  return offerTurn(async () => {
+    if (!(await starterMarker(vault))) saveStarterMarker('declined');
+  });
 }
 
 /**
@@ -611,12 +779,20 @@ const isHidden = (name: string): boolean => hfsHeard(name).startsWith('.');
 const isSkippedDir = (name: string): boolean =>
   isHidden(name) || name === 'views' || name === 'attachments';
 
+/** State-lab scan metadata, including an explicitly unrecorded timestamp. */
+export function __seedFileTimes(
+  path: string,
+  value: { createdAt: string; modifiedAt: string },
+): void {
+  times.set(path, value);
+}
+
 export async function scanVault(_vault: string): Promise<Entry[]> {
   const paths = [...files.keys()]
     .filter((p) => {
       const names = p.split('/');
       return (
-        (p.endsWith('.md') || p.endsWith('.mmd')) &&
+        (p.endsWith('.md') || p.endsWith('.mmd') || isWhiteboardPath(p)) &&
         !isHidden(names.at(-1) ?? '') &&
         !names.slice(0, -1).some(isSkippedDir)
       );
@@ -634,6 +810,16 @@ export async function readNote(_vault: string, path: string): Promise<string> {
   // it must never be stripped as frontmatter (parity with read_note).
   if (path.endsWith('.mmd')) return mustGet(path);
   return splitFrontmatter(mustGet(path)).body.replace(/^\n+/, '');
+}
+
+/** Whole-file read used by link-preserving and database renames. */
+export async function readNoteSource(
+  _vault: string,
+  path: string,
+): Promise<{ content: string; hash: string }> {
+  guardNoteTarget(path, MARKDOWN);
+  const content = mustGet(path);
+  return { content, hash: sha256Hex(content) };
 }
 
 // --- ⌘K's page-text search (M59.4) -------------------------------------------
@@ -722,7 +908,13 @@ export async function searchVault(
   if (needle !== '') {
     const pattern = new RegExp(escapeRegExp(needle), 'giu');
     for (const entry of await scanVault(vault)) {
-      const body = await readNote(vault, entry.path);
+      const canvas = isWhiteboardPath(entry.path) ? readCanvas(mustGet(entry.path)) : null;
+      const body =
+        canvas === null
+          ? await readNote(vault, entry.path)
+          : canvas.ok
+            ? searchTextOf(canvas.board)
+            : '';
       let parts: ExcerptPart[] | null = null;
       for (const line of body.split(/\r?\n/)) {
         const matches = [...line.matchAll(pattern)].map((m) => ({
@@ -848,9 +1040,26 @@ export function restoreFile(path: string, raw: string): void {
   logWrite('vault.write', path);
 }
 
-export async function saveNote(_vault: string, path: string, body: string): Promise<void> {
+/** Human saves may compare the version read by a task list or Library draft.
+ * Editor saves omit it; a knowledge capture has no saved projection hash. */
+export async function saveNote(
+  _vault: string,
+  path: string,
+  body: string,
+  expectHash?: string,
+): Promise<string | null> {
+  let expected: string | null;
+  try {
+    expected = parseExpectHash(expectHash);
+  } catch {
+    throw new Error('expectHash must be a 64-character hex hash');
+  }
   // Note targets first, as save_note's note_join does (PLATFORM-API-1).
   guardNoteTarget(path, MARKDOWN_OR_DIAGRAM);
+  const current = mustGet(path);
+  if (expected !== null && sha256Hex(current) !== expected) {
+    throw new Error(`stale_content: ${path} changed since it was read, so nothing was saved.`);
+  }
   // The M23.7 capture valve: an in-app body edit to a knowledge projection
   // is CAPTURED (Rust: an editorial override), no longer refused. The mock
   // applies the same edit; the ledger half exists only in Tauri.
@@ -858,16 +1067,16 @@ export async function saveNote(_vault: string, path: string, body: string): Prom
   // compose (parity with save_note in write.rs). mustGet keeps the .md
   // contract: save only overwrites an existing file.
   if (path.endsWith('.mmd')) {
-    mustGet(path);
     files.set(path, body);
     touch(path);
     logWrite('vault.write', path);
-    return;
+    return sha256Hex(body);
   }
-  const { yaml } = splitFrontmatter(mustGet(path));
+  const { yaml } = splitFrontmatter(current);
   files.set(path, yaml !== null ? `---\n${yaml}\n---\n\n${body}` : body);
   touch(path);
   logWrite('vault.write', path);
+  return isKnowledgePath(path) ? null : sha256Hex(mustGet(path));
 }
 
 /** Mirror of knowledge.rs `AGENT_USE_WRITE_CONCEPT`: the agent's refusal at
@@ -931,13 +1140,13 @@ function staleContentMessage(path: string): string {
  * mock agent (M53.6): the content as its own paragraph at the end of the
  * body, under the frontmatter the note already has, and the file touched the
  * way an MCP write moves its stamp, and logged under the run's `stamp`
- * (M58.1). Refuses what Rust refuses, in Rust's order and words, before
+ * (M58.1). Applies the native door checks before
  * writing or logging a byte: a malformed `expectHash`
  * (`parse_expect_hash`), the bundle (`guard_agent_write`), a `.mmd` and
  * anything that is not a note (`append_note_checked`), then bytes other than
  * the ones `expectHash` names (`stale_content`, M55.3), then a Type doc or an
  * Agent record, judged on the bytes the note holds and on the bytes the
- * append would land (`governed_bytes_refusal`, M55.1).
+ * append would land, then changes to writer-owned source stamps (M69.3b).
  */
 export async function agentAppend(
   _vault: string,
@@ -971,6 +1180,8 @@ export async function agentAppend(
   // the append closes it, and then it is frontmatter at byte zero.
   const minted = governedTypeRefusal(declaredType(path, saved));
   if (minted !== null) throw new Error(minted);
+  const provenance = stampRefusal(current, saved);
+  if (provenance !== null) throw new Error(provenance);
   files.set(path, saved);
   touch(path);
   logWrite('vault.write', path, stamp, null, current);
@@ -980,13 +1191,13 @@ export async function agentAppend(
  * The agent's `edit_note` (mcp.rs `tool_edit_note_in`, M55.5), for the
  * browser-mode mock agent: quoted passages of the body replaced in place,
  * every edit or none, with every byte before the body and every byte no edit
- * quoted left as it was. Refuses what Rust refuses, in Rust's order and
- * words, before writing a byte: a malformed `expectHash`, the bundle
+ * quoted left as it was. Applies the native door checks before writing a byte: a malformed `expectHash`, the bundle
  * (`guard_agent_write`), anything that is not a markdown note (`note_join`,
  * a `.mmd` included), a missing note, bytes other than the ones `expectHash`
  * names (`stale_content`), a Type doc or an Agent record as the note stands,
  * the quotes themselves (`planEdits`, the twin of quote.rs), and bytes the
- * edits would make a Type doc or an Agent record. The read scope that gates
+ * edits would make a Type doc or an Agent record, then changes to writer-owned
+ * source stamps (M69.3b). The read scope that gates
  * it in Rust is the grant's, which the mock agent has none of. A landed edit
  * is logged under the run's `stamp` (M58.1). Returns the report the tool
  * answers with.
@@ -1015,6 +1226,8 @@ export async function agentEdit(
   const saved = prefix + plan.text;
   const minted = governedTypeRefusal(declaredType(path, saved));
   if (minted !== null) throw new Error(minted);
+  const provenance = stampRefusal(current, saved);
+  if (provenance !== null) throw new Error(provenance);
   files.set(path, saved);
   touch(path);
   logWrite('vault.write', path, stamp, null, current);
@@ -1026,6 +1239,80 @@ export async function agentEdit(
   ].join('\n');
 }
 
+/** The sheet door computes on a private copy and checks that the async
+ * engine load did not outlive its source or mock vault. Preview never writes. */
+export async function agentEditSheet(
+  _vault: string,
+  path: string,
+  args: Record<string, unknown>,
+  stamp: WriteStamp,
+  options: { preview?: boolean; alive?: () => boolean } = {},
+): Promise<string> {
+  const request = parseSheetEdit({ ...args, path });
+  const refuse = (words: string): never => {
+    throw new Error(words.endsWith(SHEET_EDIT_SUFFIX) ? words : words + SHEET_EDIT_SUFFIX);
+  };
+  let expected: string | null;
+  try {
+    expected = parseExpectHash(args.expect_hash);
+  } catch (error) {
+    return refuse(error instanceof Error ? error.message : String(error));
+  }
+  if (isKnowledgePath(path)) refuse(AGENT_USE_WRITE_CONCEPT);
+  try {
+    guardNoteTarget(path, MARKDOWN);
+  } catch (error) {
+    return refuse(error instanceof Error ? error.message : String(error));
+  }
+  const current = files.get(path);
+  if (current === undefined) return refuse(`no note at ${path}`);
+  if (expected !== null && sha256Hex(current) !== expected)
+    throw new Error(staleContentMessage(path));
+  const governed = governedTypeRefusal(declaredType(path, current));
+  if (governed !== null) refuse(governed);
+  const { yaml, body } = splitFrontmatter(current);
+  const prefix = current.slice(0, current.length - body.length);
+  const plan = planSheetEdit(body, request);
+  const saved = prefix + plan.body;
+  if (splitFrontmatter(saved).yaml !== yaml) refuse("The edit would change the page's properties.");
+  const minted = governedTypeRefusal(declaredType(path, saved));
+  if (minted !== null) refuse(minted);
+  const provenance = stampRefusal(current, saved);
+  if (provenance !== null) refuse(provenance);
+  const generation = filesGeneration;
+  let report;
+  try {
+    const { sheetEditReport } = await import('./mockSheet');
+    report = await sheetEditReport(plan.before, plan.after, plan.written);
+  } catch (error) {
+    return refuse(
+      `The sheets couldn't be computed (${error instanceof Error ? error.message : String(error)}).`,
+    );
+  }
+  if (generation !== filesGeneration || options.alive?.() === false)
+    return refuse('The sheet edit no longer belongs to an active run.');
+  if (files.get(path) !== current) throw new Error(staleContentMessage(path));
+  const wrote = saved !== current;
+  if (wrote && !options.preview) {
+    files.set(path, saved);
+    touch(path);
+    logWrite('vault.write', path, stamp, null, current);
+  }
+  return JSON.stringify({ path, hash: sha256Hex(saved), wrote, ops: plan.ops, ...report });
+}
+
+/** Checked read-only view suggestions use the same authored cases as Rust.
+ * Refusals are values: the mock agent marks them as failed tool results. */
+export async function agentSuggestView(vault: string, args: unknown): Promise<string> {
+  try {
+    const entries = await scanVault(vault);
+    const checked = checkSuggestion(args, buildSchema(entries), entries);
+    return checked.ok ? answerText(checked.suggestion) : checked.text;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
 /**
  * The agent's `set_fields` (mcp.rs `set_fields_write`, M60.4), for the
  * browser-mode mock agent: a record's fields, checked against its database
@@ -1035,10 +1322,10 @@ export async function agentEdit(
  * malformed `expect_hash`, the bundle (`guard_agent_write`), a `.mmd`, then
  * anything that is not a markdown note (`note_join`), a missing note, bytes
  * other than the ones `expect_hash` names (`stale_content`), a Type doc or
- * an Agent record as the note stands, a malformed frontmatter block, the
- * plan (`schema_invalid`, planned over `scanVault` and `buildSchema`, the
+ * an Agent record as the note stands, a malformed frontmatter block,
+ * writer-owned stamp changes in the raw patch, the plan (`schema_invalid`, planned over `scanVault` and `buildSchema`, the
  * project from the record's entry), and bytes the patch would make a Type
- * doc or an Agent record. The mock agent has no read scope, so every page is
+ * doc or an Agent record or change writer-owned stamps. The mock agent has no read scope, so every page is
  * readable. A landed write is logged under the run's `stamp` (M58.1);
  * identical bytes write and log nothing. Returns the tool's report.
  */
@@ -1076,6 +1363,11 @@ export async function agentSetFields(
     const reason = err instanceof Error ? err.message : String(err);
     throw new Error(`${path}: cannot patch malformed frontmatter: ${reason}`, { cause: err });
   }
+  if (IMPORT_SOURCES.agent_guard.some((key) => Object.hasOwn(parsed.ok.set, key))) {
+    const proposed = patchedFrontmatter(current, parsed.ok.set);
+    const provenance = stampRefusal(current, proposed);
+    if (provenance !== null) throw new Error(provenance);
+  }
   const plan = planSetFields(
     {
       entries,
@@ -1093,6 +1385,8 @@ export async function agentSetFields(
   if (saved === current) return setFieldsReport(path, plan.notes, sha256Hex(current), false);
   const minted = governedTypeRefusal(declaredType(path, saved));
   if (minted !== null) throw new Error(minted);
+  const provenance = stampRefusal(current, saved);
+  if (provenance !== null) throw new Error(provenance);
   files.set(path, saved);
   touch(path);
   logWrite('vault.write', path, stamp, null, current);
@@ -1178,16 +1472,113 @@ function similarBlock(similar: readonly SimilarNote[]): string {
  * browser-mode mock agent (M57.4): a new note in `folder` named by `slug`,
  * holding `body` under no frontmatter. A taken name gets `-2`, `-3` and so
  * on, or, with `ifExists` `refuse` (M61.6b), nothing at all and the
- * `note_exists` refusal. Refuses what Rust refuses, in Rust's order and
- * words, before writing a byte: an `ifExists` that is neither word, the
+ * `note_exists` refusal. Applies the native door checks before writing a byte: an `ifExists` that is neither word, the
  * bundle (`guard_agent_write`), a slug that is not one name
  * (`safe_component`), anything the planned file would be that is no note
  * (`judge_new_note`), then a taken name it was told to keep. A governed type
- * in its frontmatter stays Rust's to refuse (M53.6): the mock agent writes
- * none. The new note is logged under the run's `stamp` (M58.1); a refusal
+ * and every writer-owned provenance key are checked on the composed bytes. The new note is logged under the run's `stamp` (M58.1); a refusal
  * logs nothing. Returns what landed and the report the tool answers with,
  * which, like the refusal, ends with the similar notes (`similarNotes`).
  */
+/** Notion's mock door shares identity/stamp planning with the batch writer.
+ * The capture is a run-owned Rust-normalized fixture; relinking stays native.
+ * No model-provided page is silently substituted for its captured result. */
+export async function agentImportNotion(
+  _vault: string,
+  args: { page: string; folder: string; body?: string },
+  stamp: WriteStamp,
+  scope: { write?: readonly string[] | null; read?: readonly string[] | null } = {},
+): Promise<{ path: string; reply: string; wrote: boolean }> {
+  const page = canonicalRecordId('notion', args.page);
+  const run = stamp.runId ?? '';
+  const held = notionCapture(run, page);
+  const refuse = (reason: string, words: string): never => {
+    const message = notionRefusal({ reason, words });
+    const target = `${reason}:${page}`;
+    const holder = window as unknown as {
+      __cerebroMockRefusals?: { run: string; code: string; surface: string; target?: string; detail: string }[];
+    };
+    const rows = (holder.__cerebroMockRefusals ??= []);
+    if (!rows.some((row) => row.run === run && row.code === 'import_refused' && row.target === target))
+      rows.push({ run, code: 'import_refused', surface: 'import_notion_page', target, detail: message });
+    throw new Error(message);
+  };
+  if (held === undefined)
+    return refuse('capture_missing', 'This run has no matching Notion fetch. Fetch this page in this turn first.');
+  if (args.body !== undefined && !held.composable)
+    return refuse('not_a_page', "A composed body is accepted only after this page's fetch was refused as truncated, narrated or unhandled_markup.");
+  const corpus = [...files].map(([path, content]) => ({ path, content }));
+  const existing = copyIndexOf(corpus).get(JSON.stringify(['notion', page]))?.[0];
+  const folder = args.folder.replace(/\/+$/, '');
+  const landing = (slug: string) => `${folder === '' ? '' : `${folder}/`}${slug}.md`;
+  const admits = (folders: readonly string[] | null | undefined, path: string) =>
+    folders == null || folders.some((folder) => {
+      const normalized = folder.replace(/^(?:\.\/)+/, '').replace(/\/+$/, '');
+      return normalized === '' || normalized === '.' || path === normalized || path.startsWith(`${normalized}/`);
+    });
+  const check = (path: string) => {
+    if (!admits(scope.read, path)) throw new Error('This run cannot import that page within its read reach.');
+    if (!admits(scope.write, path))
+      throw new Error(`This run is scoped to ${scope.write?.map((folder) => `${folder}/`).join(', ') || 'no folders'} and cannot write to ${path}.`);
+    if (isKnowledgePath(path)) throw new Error(AGENT_USE_WRITE_CONCEPT);
+    const invalid = importPathRefusal(path);
+    if (invalid !== null) throw new Error(invalid);
+    guardNoteTarget(path, MARKDOWN);
+  };
+  check(existing?.path ?? landing('notion-page'));
+  const captured = held.capture;
+  let markdown: string;
+  let counts = { linked: 0, media: 0, databases: 0 };
+  if (args.body !== undefined) {
+    if (captured.composed?.body !== args.body)
+      throw new Error('The browser build has no Notion converter for this composed body.');
+    markdown = captured.composed.markdown;
+  } else if ('refusal' in captured.result) {
+    const why = captured.result.refusal;
+    held.composable = ['truncated', 'narrated', 'unhandled_markup'].includes(why.reason);
+    return refuse(why.reason, why.words);
+  } else {
+    markdown = captured.result.markdown;
+    counts = captured.result.counts;
+  }
+  let slug = captured.title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '');
+  while (new TextEncoder().encode(slug).length > 120) slug = [...slug].slice(0, -1).join('');
+  slug ||= 'notion-page';
+  const path = existing?.path ?? landing(slug);
+  check(path);
+  const plan = planImports(
+    [{ index: 0, op: { op: 'import', system: 'notion', recordId: page, url: `https://www.notion.so/${page}`, path, content: markdown } }],
+    corpus, [...files.keys()], [],
+    { now: new Date().toISOString(), actor: stamp.actor, ...(args.body === undefined ? {} : { method: 'agent_composed' }) },
+  );
+  const result = plan.imports[0];
+  for (const { op } of plan.writes) {
+    check(op.path);
+    const before = files.get(op.path);
+    if (op.op === 'create' && before !== undefined) throw new Error(`${op.path} appeared after the import was planned; nothing was written.`);
+    if (op.op === 'replace_file' && (before === undefined || sha256Hex(before) !== op.expectHash))
+      throw new Error(staleContentMessage(op.path));
+    const governed = governedTypeRefusal(declaredType(op.path, before ?? '')) ?? governedTypeRefusal(declaredType(op.path, op.content));
+    if (governed !== null) throw new Error(governed);
+    files.set(op.path, op.content);
+    touch(op.path);
+    logWrite(before === undefined ? 'vault.create' : 'vault.write', op.path, stamp, null, before ?? null);
+  }
+  let reply = result.outcome === 'kept'
+    ? `${result.path} was edited since its import, so it was kept and nothing was written.`
+    : result.outcome === 'unchanged'
+      ? `${result.path} already holds this page, unchanged since its import.`
+      : result.outcome === 'replaced'
+        ? `Updated ${result.path} from Notion; nobody had edited it since its import.`
+        : `Imported “${captured.title}” from Notion to ${result.path}.`;
+  if (result.outcome !== 'kept') {
+    if (counts.linked) reply += ` Linked ${counts.linked} pages already imported.`;
+    if (counts.media) reply += ` ${counts.media} images and files still point at Notion's storage, whose links expire.`;
+    if (counts.databases) reply += ` Dropped ${counts.databases} database blocks.`;
+  }
+  return { path: result.path, reply, wrote: plan.writes.length > 0 };
+}
+
 export async function agentCreate(
   _vault: string,
   args: { folder: string; slug: string; body: string },
@@ -1201,6 +1592,10 @@ export async function agentCreate(
   if (slug === '' || slug === '.' || slug === '..' || /[/\\]/.test(slug)) {
     throw new Error(`invalid slug: ${JSON.stringify(slug)}`);
   }
+  const governed = governedTypeRefusal(declaredType(`${folder}/${slug}.md`, body));
+  if (governed !== null) throw new Error(governed);
+  const provenance = stampRefusal('', body);
+  if (provenance !== null) throw new Error(provenance);
   const prefix = folder === '' ? '' : `${folder}/`;
   const planned = `${prefix}${slug}.md`;
   const title = parseNote(planned, body, SEED_TIME, SEED_TIME).title;
@@ -1219,6 +1614,35 @@ export async function agentCreate(
   const taken = path === planned ? null : planned;
   const numbered = taken === null ? '' : ` (${taken} was taken, so this note is ${path})`;
   return { path, taken, similar, reply: `Created ${path}${numbered}${similarBlock(similar)}` };
+}
+
+/** Agent patch mirror; provenance is checked on exactly the bytes it lands. */
+export async function agentUpdateFrontmatter(
+  _vault: string,
+  path: string,
+  patch: Record<string, unknown>,
+  expectHash: string | undefined,
+  stamp: WriteStamp,
+): Promise<void> {
+  const expected = parseExpectHash(expectHash);
+  if (isKnowledgePath(path)) throw new Error(AGENT_USE_WRITE_CONCEPT);
+  guardNoteTarget(path, MARKDOWN);
+  const current = mustGet(path);
+  if (expected !== null && sha256Hex(current) !== expected)
+    throw new Error(staleContentMessage(path));
+  const declared = governedTypeRefusal(typeof patch.type === 'string' ? patch.type : null);
+  if (declared !== null) throw new Error(declared);
+  const governed = governedTypeRefusal(declaredType(path, current));
+  if (governed !== null) throw new Error(governed);
+  const saved = patchedFrontmatter(current, patch);
+  const minted = governedTypeRefusal(declaredType(path, saved));
+  if (minted !== null) throw new Error(minted);
+  const provenance = stampRefusal(current, saved);
+  if (provenance !== null) throw new Error(provenance);
+  if (saved === current) return;
+  files.set(path, saved);
+  touch(path);
+  logWrite('vault.write', path, stamp, null, current);
 }
 
 export async function updateFrontmatter(
@@ -1467,19 +1891,7 @@ export async function setNoteTitle(_vault: string, path: string, title: string):
   }
   guardNoteTarget(path, MARKDOWN);
   const { yaml, body } = splitFrontmatter(mustGet(path));
-  // Parity with write.rs replace_h1: rewrite exactly the line the parser
-  // reads the title from (fence/indent-aware, shared firstH1LineIndex);
-  // when the body has no real H1, prepend one at the very start.
-  const h1Index = firstH1LineIndex(body);
-  let newBody: string;
-  if (h1Index >= 0) {
-    const lines = body.split('\n');
-    const hadCr = lines[h1Index].endsWith('\r');
-    lines[h1Index] = `# ${title}${hadCr ? '\r' : ''}`;
-    newBody = lines.join('\n');
-  } else {
-    newBody = `# ${title}\n\n${body}`;
-  }
+  const newBody = replaceH1(body, title);
   files.set(path, yaml !== null ? `---\n${yaml}\n---\n${newBody}` : newBody);
   touch(path);
   logWrite('vault.write', path);
@@ -2054,7 +2466,9 @@ export async function renameNote(_vault: string, from: string, to: string): Prom
   // human content into the agent's corpus.
   guardHumanWrite(from);
   guardHumanWrite(to);
-  if (files.has(to) || folders.has(to)) throw new Error(`target already exists: ${to}`);
+  guardMovePath(from);
+  guardMovePath(to);
+  if (occupied(to)) throw new Error(`target already exists: ${to}`);
   if (files.has(from)) {
     carryComments(from, to, false);
     files.set(to, files.get(from)!);
@@ -2083,8 +2497,23 @@ export async function renameNote(_vault: string, from: string, to: string): Prom
       times.delete(p);
     }
   }
-  if (folders.delete(from)) folders.add(to);
+  for (const folder of [...folders]) {
+    if (folder === from || folder.startsWith(prefix)) {
+      folders.delete(folder);
+      folders.add(`${to}${folder.slice(from.length)}`);
+    }
+  }
   logWrite('vault.rename', from, null, to);
+}
+
+/** rename_note's safe_join and hidden-name checks, before any sidecar moves. */
+function guardMovePath(path: string): void {
+  if (path === '' || path.startsWith('/') || path.split('/').includes('..')) {
+    throw new Error(`path escapes the vault: ${path}`);
+  }
+  if (path.split('/').some((name) => name !== '.' && isHidden(name))) {
+    throw new Error(`${path} is not a page Cerebro shows, so it can't be moved.`);
+  }
 }
 
 // --- The vault's Trash (M60.8) ---------------------------------------------
@@ -2383,22 +2812,151 @@ interface PlannedPage {
   skipped: Skipped | null;
 }
 
+type PageBatchOp = Exclude<BatchOp, { op: 'rename' | 'import' }>;
+
+/** Judge moves against the names each preceding move leaves behind. */
+function planBatchRenames(
+  renames: Extract<BatchOp, { op: 'rename' }>[],
+  pages: PlannedPage[],
+): number {
+  const names = new Set([...files.keys(), ...folders]);
+  const fileNames = new Set(files.keys());
+  const contents = new Map(files);
+  let bytes = 0;
+  // A directory exists even when only its descendants have explicit keys.
+  for (const path of [...names]) {
+    const parts = path.split('/');
+    for (let i = 1; i < parts.length; i++) names.add(parts.slice(0, i).join('/'));
+  }
+  for (const page of pages) {
+    if (page.trashed) {
+      names.delete(page.path);
+      fileNames.delete(page.path);
+      contents.delete(page.path);
+    } else if (page.after !== null) {
+      names.add(page.path);
+      fileNames.add(page.path);
+      contents.set(page.path, page.after);
+      const parts = page.path.split('/');
+      for (let i = 1; i < parts.length; i++) names.add(parts.slice(0, i).join('/'));
+    }
+  }
+  for (const { from, to } of renames) {
+    if (names.has(to)) throw new Error(`target already exists: ${to}`);
+    if (!names.has(from)) throw new Error(missingPage(from));
+    if (to.startsWith(`${from}/`)) {
+      throw new Error(`${from} can't be moved inside itself, so nothing was written.`);
+    }
+    let parent = to.includes('/') ? to.slice(0, to.lastIndexOf('/')) : '';
+    while (parent !== '') {
+      if (fileNames.has(parent))
+        throw new Error(`${parent} is not a folder, so nothing was written.`);
+      parent = parent.includes('/') ? parent.slice(0, parent.lastIndexOf('/')) : '';
+    }
+    const isDir = !fileNames.has(from);
+    if (!isDir) bytes += 2 * utf8Length(contents.get(from) ?? null);
+    const sourceSide = carriedRel(from, isDir);
+    const targetSide = carriedRel(to, isDir);
+    if (targetSide !== null && names.has(targetSide)) {
+      throw new Error(`target comments already exist: ${to}`);
+    }
+    const moved = [...names].filter((path) => path === from || path.startsWith(`${from}/`));
+    const moves = moved.map((path) => [path, `${to}${path.slice(from.length)}`]);
+    if (sourceSide !== null && targetSide !== null) {
+      for (const path of names) {
+        if (path === sourceSide || path.startsWith(`${sourceSide}/`)) {
+          moves.push([path, `${targetSide}${path.slice(sourceSide.length)}`]);
+        }
+      }
+    }
+    for (const [old, next] of moves) {
+      names.delete(old);
+      names.add(next);
+      if (fileNames.delete(old)) fileNames.add(next);
+      const content = contents.get(old);
+      if (content !== undefined) {
+        contents.delete(old);
+        contents.set(next, content);
+      }
+    }
+    const parts = to.split('/');
+    for (let i = 1; i < parts.length; i++) names.add(parts.slice(0, i).join('/'));
+  }
+  return bytes;
+}
+
 /** Apply `ops` as one change, all or nothing (lib.rs `apply_batch`). */
+let importTail: Promise<void> = Promise.resolve();
 export async function applyBatch(vault: string, ops: readonly unknown[]): Promise<BatchApplied> {
+  if (!ops.some((op) => (op as { op?: unknown } | null)?.op === 'import'))
+    return applyExpandedBatch(vault, ops);
+  const previous = importTail;
+  let release!: () => void;
+  importTail = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    if (ops.length > MAX_BATCH_OPS) throw new Error(tooMany(ops.length));
+    const parsed = parseBatchOps(ops);
+    const requests = parsed.flatMap((op, index) => (op.op === 'import' ? [{ index, op }] : []));
+    const otherPaths = parsed.flatMap((op) =>
+      op.op === 'import' ? [] : op.op === 'rename' ? [op.from, op.to] : [op.path],
+    );
+    const plan = planImports(
+      requests,
+      [...files]
+        .filter(([path]) => noteRefusal(path, MARKDOWN) === null)
+        .map(([path, content]) => ({ path, content })),
+      [...files.keys(), ...folders],
+      otherPaths,
+      { now: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'), actor: HUMAN_ACTOR },
+    );
+    const writes = new Map(plan.writes.map((row) => [row.index, row.op]));
+    const expanded = parsed.flatMap((op, index): Exclude<BatchOp, ImportBatchOp>[] =>
+      op.op === 'import' ? (writes.has(index) ? [writes.get(index)!] : []) : [op],
+    );
+    const applied = await applyExpandedBatch(vault, expanded);
+    return { ...applied, imports: plan.imports };
+  } finally {
+    release();
+  }
+}
+async function applyExpandedBatch(vault: string, ops: readonly unknown[]): Promise<BatchApplied> {
   for (const op of ops) {
-    const path = (op as { path?: unknown } | null)?.path;
-    guardHumanWrite(typeof path === 'string' ? path : '');
+    const raw = op as { op?: unknown; path?: unknown; from?: unknown; to?: unknown } | null;
+    const paths = raw?.op === 'rename' ? [raw.from, raw.to] : [raw?.path];
+    for (const path of paths) guardHumanWrite(typeof path === 'string' ? path : '');
   }
   if (ops.length === 0) return { batchId: '', files: [] };
   if (ops.length > MAX_BATCH_OPS) throw new Error(tooMany(ops.length));
-  const parsed = parseBatchOps(ops);
+  const parsed = parseBatchOps(ops).map((op) => {
+    if (op.op === 'import') throw new Error('An import must be planned before its writes.');
+    return op;
+  });
+  let sawRename = false;
   for (const op of parsed) {
+    if (op.op === 'rename') {
+      sawRename = true;
+      for (const path of [op.from, op.to]) {
+        guardHumanWrite(path);
+        guardMovePath(path);
+      }
+      continue;
+    }
+    if (sawRename) throw new Error(WRITES_BEFORE_RENAMES);
     guardNoteTarget(op.path, MARKDOWN);
     guardHumanWrite(op.path);
   }
-  const pages = new Map<string, BatchOp[]>();
-  for (const op of parsed) pages.set(op.path, [...(pages.get(op.path) ?? []), op]);
+  const renames = parsed.filter((op) => op.op === 'rename');
+  const pages = new Map<string, PageBatchOp[]>();
+  for (const op of parsed) {
+    if (op.op !== 'rename') pages.set(op.path, [...(pages.get(op.path) ?? []), op]);
+  }
   for (const [path, list] of pages) {
+    if (list.length > 1 && list.some((op) => op.op === 'replace_file')) {
+      throw new Error(replaceNotAlone(path));
+    }
     if (list.length > 1 && list.some((op) => op.op === 'revert')) {
       throw new Error(revertNotAlone(path));
     }
@@ -2429,7 +2987,10 @@ export async function applyBatch(vault: string, ops: readonly unknown[]): Promis
     // A revert of a rewrite skips a page that is gone; its other forms are
     // held to their hash below.
     if (first.op === 'revert') return current[i];
-    if (current[i] === null) throw new Error(missingPage(path));
+    if (current[i] === null) {
+      if (first.op === 'replace_file') throw new Error(staleWords(path));
+      throw new Error(missingPage(path));
+    }
     return current[i];
   });
   entries.forEach(([path, list], i) => {
@@ -2487,7 +3048,7 @@ export async function applyBatch(vault: string, ops: readonly unknown[]): Promis
           if (kept.length > 0) skipped = { keys: kept, reason: null };
         }
       }
-      if (op.op === 'create') after = op.content;
+      if (op.op === 'create' || op.op === 'replace_file') after = op.content;
       if (op.op === 'body') after = composedBody(after ?? '', op.body);
       if (op.op === 'delete') {
         trashed = true;
@@ -2510,13 +3071,19 @@ export async function applyBatch(vault: string, ops: readonly unknown[]): Promis
     }));
     planned.push({ path, before, after, keys, trashed, restored, rewrites, created, skipped });
   });
-  const bytes = planned.reduce((sum, p) => sum + utf8Length(p.before) + utf8Length(p.after), 0);
+  const bytes =
+    planned.reduce((sum, p) => sum + utf8Length(p.before) + utf8Length(p.after), 0) +
+    planBatchRenames(renames, planned);
   if (bytes > MAX_BATCH_BYTES) throw new Error(TOO_LARGE);
   const batchId = Array.from({ length: 32 }, () =>
     Math.floor(Math.random() * 16).toString(16),
   ).join('');
-  if (planned.length === 0) return { batchId, files: [] };
+  if (planned.length === 0 && renames.length === 0) return { batchId, files: [] };
   const results: FileResult[] = [];
+  const originalFiles = new Map(files);
+  const originalTimes = new Map(times);
+  const originalFolders = new Set(folders);
+  const originalWrites = writes.length;
   currentBatch = batchId;
   try {
     // Trash moves log as they move, and each staged page logs once the
@@ -2542,6 +3109,31 @@ export async function applyBatch(vault: string, ops: readonly unknown[]): Promis
     for (const page of planned) {
       if (page.rewrites) logWrite(page.created ? 'vault.create' : 'vault.write', page.path);
     }
+    for (const { from, to } of renames) {
+      const before = files.get(from) ?? null;
+      await renameNote(vault, from, to);
+      const hash = before === null ? null : sha256Hex(before);
+      results.push({
+        path: to,
+        movedFrom: from,
+        before,
+        beforeHash: hash,
+        afterHash: hash,
+        keys: [],
+        trashed: null,
+        restored: null,
+        skipped: null,
+      });
+    }
+  } catch (error) {
+    files.clear();
+    for (const [path, content] of originalFiles) files.set(path, content);
+    times.clear();
+    for (const [path, time] of originalTimes) times.set(path, time);
+    folders.clear();
+    for (const path of originalFolders) folders.add(path);
+    writes.splice(originalWrites);
+    throw error;
   } finally {
     currentBatch = null;
   }
@@ -3184,37 +3776,133 @@ function writeSidecarAs(page: string, file: CommentsFile, by: string, runId: str
 
 // --- Attachments (M16.13c) --------------------------------------------------
 
+export { inspectDropped, readDroppedText, listenOsFileDrop } from './mockDropped';
+import { droppedSeed, resetDropped } from './mockDropped';
+import {
+  seedBytes as seedAttachmentBytes,
+  byteEntries,
+  storedBytes,
+  isLinkedOrFile,
+  resetRootBytes,
+} from './mockBytes';
+import {
+  attachmentName,
+  attachmentRefusal,
+  ATTACHMENT_MAX_BYTES,
+  capWords,
+  type AttachmentImport,
+} from '@/engine/attachments';
+import { sha256Bytes } from './sha256';
+
 /** No native picker in a browser. `canPickFiles()` is what callers branch on;
  * this exists so the facade has something to delegate to. */
 export async function pickFiles(): Promise<string[]> {
   return [];
 }
 
-/**
- * Mirror of `vault::write::import_attachment` — same forced folder, same
- * stem-not-extension dedupe, same absolute-source guard. The mock disk is
- * text-only, so the copy is a stub; what the tests care about is the returned
- * VAULT-RELATIVE path and the fact that the file lands somewhere the mock
- * scanner already skips.
- */
-export async function importAttachment(_vault: string, source: string): Promise<string> {
-  if (!source.startsWith('/')) throw new Error(`attachment source must be absolute: ${source}`);
-  const name = source.split('/').pop() ?? '';
-  if (name === '' || name === '.' || name === '..') {
-    throw new Error(`unusable file name: ${source}`);
+/** Attachment placement mirrors the native name family, bytes and receipts.
+ * No await separates reuse, allocation and write, so concurrent mock imports
+ * cannot choose the same free path. */
+function placeAttachment(name: string, bytes: Uint8Array): AttachmentImport {
+  const why = attachmentRefusal(name, bytes.length);
+  if (why !== null) throw new Error(why);
+  const fold = (s: string) => [...s.normalize('NFC')].map((c) => c.toLowerCase()).join('');
+  const paths = [...new Set([...files.keys(), ...byteEntries('0').map(([path]) => path)])];
+  if (
+    isLinkedOrFile('0', 'attachments') ||
+    paths.some((path) => {
+      const first = path.split('/')[0];
+      return fold(first) === 'attachments' && first !== 'attachments';
+    })
+  )
+    throw new Error('attachments/ is not the folder the scanner skips');
+  const safe = attachmentName(name);
+  const dot = safe.lastIndexOf('.');
+  const [stem, ext] = dot > 0 ? [safe.slice(0, dot), safe.slice(dot)] : [safe, ''];
+  const digest = sha256Bytes(bytes);
+  const family = (path: string): number | null => {
+    if (!path.startsWith('attachments/') || path.slice(12).includes('/')) return null;
+    const candidate = fold(path.slice(12));
+    if (candidate === fold(safe)) return 1;
+    const start = `${fold(stem)}-`;
+    const end = fold(ext);
+    if (!candidate.startsWith(start) || !candidate.endsWith(end)) return null;
+    const middle = candidate.slice(start.length, end.length ? -end.length : undefined);
+    return /^[2-9]$|^[1-9][0-9]+$/.test(middle) ? Number(middle) : null;
+  };
+  const candidates = paths.flatMap((path) => {
+    const order = family(path);
+    return order === null ? [] : [{ path, order }];
+  });
+  candidates.sort((a, b) => a.order - b.order || a.path.localeCompare(b.path));
+  for (const { path } of candidates) {
+    const old =
+      storedBytes('0', path) ??
+      (isLinkedOrFile('0', path)
+        ? null
+        : files.has(path)
+          ? new TextEncoder().encode(files.get(path)!)
+          : null);
+    if (old !== null && old.length === bytes.length && sha256Bytes(old) === digest)
+      return { path, reused: true };
   }
-  const dot = name.lastIndexOf('.');
-  // A leading dot is the whole name (".gitignore"), not an extension.
-  const [stem, ext] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ''];
   for (let n = 1; ; n += 1) {
-    const rel = `attachments/${stem}${n === 1 ? '' : `-${n}`}${ext}`;
-    if (!files.has(rel)) {
-      files.set(rel, '');
-      touch(rel);
-      logWrite('vault.create', rel);
-      return rel;
-    }
+    const path = `attachments/${stem}${n === 1 ? '' : `-${n}`}${ext}`;
+    if (paths.some((held) => fold(held) === fold(path))) continue;
+    files.set(path, '');
+    seedAttachmentBytes('0', path, { bytes });
+    touch(path);
+    logWrite('vault.create', path);
+    writtenAs.set(writes[writes.length - 1], { hash: digest, at: new Date().toISOString() });
+    return { path, reused: false };
   }
+}
+export async function importAttachment(_vault: string, source: string): Promise<AttachmentImport> {
+  if (!source.startsWith('/')) throw new Error(`attachment source must be absolute: ${source}`);
+  const name = source.split('/').at(-1) ?? '';
+  const staged = droppedSeed(source);
+  if (staged === undefined) throw new Error(`${name} could not be read`);
+  if (staged.folder) throw new Error(`${name} is a folder`);
+  const size =
+    staged.size ??
+    (staged.base64 === undefined
+      ? new TextEncoder().encode(staged.content ?? '').length
+      : atob(staged.base64).length);
+  const why = attachmentRefusal(name, size);
+  if (why !== null) throw new Error(why);
+  const bytes =
+    staged.base64 === undefined
+      ? new TextEncoder().encode(staged.content ?? '')
+      : Uint8Array.from(atob(staged.base64), (c) => c.charCodeAt(0));
+  return placeAttachment(name, bytes);
+}
+export async function importAttachmentBytes(
+  _vault: string,
+  name: string,
+  bytesBase64: string,
+): Promise<AttachmentImport> {
+  const leaf = name.split(/[\\/]/).at(-1)?.trim() ?? '';
+  const why = attachmentRefusal(name, 0);
+  if (why !== null) throw new Error(why);
+  if (bytesBase64.length > Math.ceil(ATTACHMENT_MAX_BYTES / 3) * 4)
+    throw new Error(`${leaf} is over ${capWords}`);
+  // Match Rust's STANDARD decoder: canonical padding, no whitespace or URL alphabet.
+  if (
+    bytesBase64.length % 4 !== 0 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(bytesBase64)
+  )
+    throw new Error(`${leaf} could not be read`);
+  let binary: string;
+  try {
+    binary = atob(bytesBase64);
+  } catch {
+    throw new Error(`${leaf} could not be read`);
+  }
+  if (btoa(binary) !== bytesBase64) throw new Error(`${leaf} could not be read`);
+  return placeAttachment(
+    name,
+    Uint8Array.from(binary, (c) => c.charCodeAt(0)),
+  );
 }
 
 /**
@@ -3289,6 +3977,20 @@ export async function exportSvg(defaultName: string, svg: string): Promise<strin
   return defaultName;
 }
 
+/** The browser's CSV save uses the same UTF-8 document as the native dialog. */
+export async function exportCsv(defaultName: string, csv: string): Promise<string | null> {
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = defaultName;
+  try {
+    anchor.click();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+  return defaultName;
+}
+
 // --- The review surface (M24.9) --------------------------------------------
 // The browser mock has no ledger, so it has no proposals, no policy, and
 // nothing to review. It holds FIXTURE cards a UI test can drive — data, not
@@ -3324,6 +4026,7 @@ export interface CardLink {
 /** What a reviewer is being asked about. Mirrors policy/review.rs — every
  * field is typed, and `reason` is display text with no policy effect. */
 export interface ReviewCard {
+  submitted_at?: string | null;
   proposal_id: string;
   commit_set_id: string;
   run_id: string;
@@ -3540,6 +4243,10 @@ async function agentDoor(
       const edits = Array.isArray(args.edits) ? (args.edits as QuoteEdit[]) : [];
       return { path, reply: await agentEdit(vault, path, edits, expectHash, stamp) };
     }
+    case 'edit_sheet': {
+      const path = argText(args, 'path');
+      return { path, reply: await agentEditSheet(vault, path, args, stamp) };
+    }
     case 'set_fields': {
       const path = argText(args, 'path');
       return { path, reply: await agentSetFields(vault, path, args, stamp) };
@@ -3559,6 +4266,16 @@ async function previewAgentWrite(
   tool: string,
   args: Record<string, unknown>,
 ): Promise<{ target: string; hash: string | null } | { refused: string }> {
+  if (tool === 'edit_sheet') {
+    const path = argText(args, 'path');
+    const before = files.get(path);
+    try {
+      await agentEditSheet(vault, path, args, PREVIEW_STAMP, { preview: true });
+      return { target: path, hash: before === undefined ? null : sha256Hex(before) };
+    } catch (error) {
+      return { refused: error instanceof Error ? error.message : String(error) };
+    }
+  }
   const kept = new Map(files);
   const keptTimes = new Map(times);
   const logged = writes.length;
@@ -3935,6 +4652,7 @@ export interface ChangeSection {
 }
 
 export interface ChangesView {
+  changed_at?: string;
   schema_version: string;
   window: { from_seq: number; to_seq: number };
   /** M26's own answer to "did anything move", not a recount of the sections. */
@@ -3978,7 +4696,8 @@ export async function converge(_vault: string, _fromSeq?: number): Promise<Chang
   // answering an empty window, because "nothing changed" and "there is
   // nothing here to compare" are opposite sentences.
   if (changes === null) throw new Error('this vault has no ledger store');
-  return changes;
+  const { changed_at: _changedAt, ...view } = changes;
+  return view;
 }
 
 // --- The control surface (M25.7) -------------------------------------------
@@ -4202,8 +4921,7 @@ export interface FleetRun {
   proposals_submitted: number | null;
   applied: number | null;
   rejected: number | null;
-  /** M34.3's hop lineage (M41): the run this one was spawned FROM; null is
-   * a root. Mirrors fleet.rs — the parity the mock owes the wire. */
+  /** The run that handed off or whose write caused this run; null is a root. */
   parent_run_id: string | null;
   /** Why the run started (M56.7), in Rust's words. `null` is "why not
    * recorded": a row from before causes, or a run that named none. */
@@ -4360,8 +5078,8 @@ function fleetUnavailable(): Error {
 }
 
 /**
- * Book a mock run's row (M57.2): the one browser path that writes the fleet,
- * for a run whose shell ceiling withheld tools nobody could ask about, as
+ * Book a mock run's row (M57.2): a browser check, follow-up, or a run
+ * whose shell ceiling withheld tools nobody could ask about, as
  * Rust's meter books its `agent.ask` refusal. Nothing when the fleet is
  * unavailable, as Rust records nothing without a runtime database.
  */
@@ -4382,6 +5100,36 @@ export function finishMockRun(runId: string, outcome: string): void {
   if (detail !== undefined) {
     fleetDetails = { ...fleetDetails, [runId]: { ...detail, run: close(detail.run) } };
   }
+}
+
+/** The page query stays vault-scoped through both descendant levels. */
+export async function fleetSubjectRuns(
+  vault: string,
+  subjects: string[],
+  limit = FLEET_DEFAULT_LIMIT,
+): Promise<FleetRun[]> {
+  if (!fleetAvailable) throw fleetUnavailable();
+  if (subjects.length === 0) return [];
+  if (subjects.length > 1000) throw new Error("A page's runs can search at most 1000 page paths.");
+  if (subjects.some((path) => new TextEncoder().encode(path).length > 1024))
+    throw new Error('A page path for the runs search is longer than 1024 bytes.');
+  const names = new Set(subjects);
+  const scoped = fleetRuns.filter(
+    (run) => run.vault_id === (vault === '/demo-vault' ? 'demo' : vault),
+  );
+  let level = scoped.filter((run) => run.cause?.subject != null && names.has(run.cause.subject));
+  const ids = new Set(level.map((run) => run.run_id));
+  for (let depth = 0; depth < 2; depth++) {
+    const parents = new Set(level.map((run) => run.run_id));
+    level = scoped.filter((run) => run.parent_run_id !== null && parents.has(run.parent_run_id));
+    for (const run of level) ids.add(run.run_id);
+  }
+  return structuredClone(
+    scoped
+      .filter((run) => ids.has(run.run_id))
+      .sort((a, b) => b.started_at.localeCompare(a.started_at) || b.run_id.localeCompare(a.run_id))
+      .slice(0, Math.max(0, Math.min(limit, FLEET_MAX_LIMIT))),
+  );
 }
 
 export async function fleetRunsPage(filter: FleetFilter = {}): Promise<FleetRun[]> {
@@ -5282,6 +6030,18 @@ export function refuseIfAgentPaused(vault: string, actor: string | null | undefi
   );
 }
 
+/** Manual runs refuse a live actor, including a stopped child not yet reaped. */
+export function refuseIfAgentRunning(
+  vault: string,
+  actor: string | null | undefined,
+  owners: readonly { vault: string; actor: string | null }[],
+): void {
+  if (actor != null && owners.some((owner) => owner.vault === vault && owner.actor === actor))
+    throw new Error(
+      `${actor} is already running, so Run now did not start another. Let that run finish, or stop it first.`,
+    );
+}
+
 // --- Durable wakes (M63.1) ---------------------------------------------------
 //
 // Mirrors `runtime::wakes` and the woken half of `dispatch::claim_woken`:
@@ -5303,6 +6063,9 @@ export interface MockWake {
   wakeKey: string;
   trigger: string;
   cause: WakeCause;
+  author: 'person' | 'run' | 'not_recorded' | null;
+  authorActor: string | null;
+  parentRunId: string | null;
   admittedAt: string;
   notBefore: string | null;
   deferred: string | null;
@@ -5313,6 +6076,13 @@ export interface MockWake {
   outcome: string | null;
   reason: string | null;
   detail: string | null;
+  note?: WakeCheckNote | null;
+}
+
+export interface WakeCheckNote {
+  question: string;
+  reason: string;
+  check_run_id?: string;
 }
 
 const WAKE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -5330,6 +6100,7 @@ let wakesReadable = true;
 function resetWakes(): void {
   mockWakes.length = 0;
   wakesReadable = true;
+  conditionAnswer = 'yes';
 }
 
 const isLowerHex = (raw: unknown, length: number): boolean =>
@@ -5337,10 +6108,10 @@ const isLowerHex = (raw: unknown, length: number): boolean =>
 
 /** A cause value as Rust's `cause::clean` keeps it: control characters as
  * spaces, trimmed, blank as absent, and cut to `cap` with an ellipsis. */
-function cleanCauseValue(raw: unknown, cap: number): string | undefined {
+export function cleanCauseValue(raw: unknown, cap: number): string | undefined {
   if (typeof raw !== 'string') return undefined;
   // eslint-disable-next-line no-control-regex -- Rust's clean: C0, DEL and C1 become spaces
-  const trimmed = raw.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim();
+  const trimmed = rustTrim(raw.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' '));
   if (trimmed === '') return undefined;
   const chars = [...trimmed];
   return chars.length <= cap ? trimmed : `${chars.slice(0, cap - 1).join('')}…`;
@@ -5350,12 +6121,28 @@ function cleanCauseValue(raw: unknown, cap: number): string | undefined {
 function admissibleWake(offer: WakeOffer): WakeCause | null {
   if (typeof offer.agent !== 'string' || offer.agent.length > 128) return null;
   if (!/^process:[a-z0-9-]+$/.test(offer.agent)) return null;
-  if (!isLowerHex(offer.wakeKey, 64) || !isLowerHex(offer.trigger, 16)) return null;
-  if (offer.cause?.kind !== 'event') return null;
+  if (!isLowerHex(offer.trigger, 16)) return null;
+  const assigned = offer.cause?.kind === 'assigned';
+  if (
+    assigned
+      ? !/^assigned:[0-9a-f]{8}:[0-9a-f]{32}$/.test(offer.wakeKey)
+      : offer.cause?.kind !== 'event' || !isLowerHex(offer.wakeKey, 64)
+  )
+    return null;
+  if (assigned && (offer.cause.subject !== offer.path || offer.event === 'moved')) return null;
+  if (
+    typeof offer.path !== 'string' ||
+    offer.path.length === 0 ||
+    new TextEncoder().encode(offer.path).length > 1024
+  )
+    return null;
+  if (!isLowerHex(offer.hash, 64) || !['created', 'changed', 'moved'].includes(offer.event))
+    return null;
   const subject = cleanCauseValue(offer.cause.subject, 512);
   const detail = cleanCauseValue(offer.cause.detail, 200);
+  if (assigned && subject !== offer.path) return null;
   return {
-    kind: 'event',
+    kind: assigned ? 'assigned' : 'event',
     ...(subject === undefined ? {} : { subject }),
     ...(detail === undefined ? {} : { detail }),
   };
@@ -5390,11 +6177,86 @@ function cancelAgentWakes(vault: string, agent: string, now: Date): void {
   }
 }
 
+/** Root-first recorded ancestry; missing rows are never invented. */
+function wakeChain(runId: string): string[] | null {
+  const chain: string[] = [];
+  let current: string | null = runId;
+  for (let depth = 0; current !== null && depth < 16; depth++) {
+    const known = wakeRunParents.get(current);
+    const booked = fleetRuns.find((run) => run.run_id === current);
+    if (known === undefined && booked === undefined)
+      return chain.length === 0 ? null : chain.reverse();
+    const actor = known === undefined ? booked!.actor : known.actor;
+    chain.push(actor?.trim() || 'claude-code');
+    current = known === undefined ? booked!.parent_run_id : known.parent;
+  }
+  return chain.reverse();
+}
+
+/** Shared-case seam: seed the same write and run facts the Rust replay inserts. */
+export function __seedWakeAttribution(input: {
+  writes?: {
+    kind: MockWrite['kind'];
+    path: string;
+    to?: string;
+    actor: string | null;
+    runId?: string;
+    hash?: string;
+    at: string;
+  }[];
+  runs?: { runId: string; actor: string | null; parent?: string }[];
+}): void {
+  for (const row of input.runs ?? [])
+    wakeRunParents.set(row.runId, { actor: row.actor, parent: row.parent ?? null });
+  for (const row of input.writes ?? []) {
+    const write = {
+      kind: row.kind,
+      path: row.path,
+      to: row.to ?? null,
+      actor: row.actor,
+      runId: row.runId ?? null,
+      approvedBy: null,
+    } as MockWrite;
+    writes.push(write);
+    writtenAs.set(write, { hash: row.hash ?? null, at: row.at });
+  }
+}
+
+function writerOfWake(
+  offer: WakeOffer,
+  seenAt: string | undefined,
+  now: Date,
+): Pick<MockWake, 'author' | 'authorActor' | 'parentRunId'> {
+  const unknown = { author: 'not_recorded', authorActor: null, parentRunId: null } as const;
+  const row = [...writes]
+    .reverse()
+    .find(
+      (w) =>
+        ((w.kind === 'vault.write' || w.kind === 'vault.create') && w.path === offer.path) ||
+        (w.kind === 'vault.rename' && w.to === offer.path),
+    );
+  if (row === undefined) return unknown;
+  const stamp = writtenAs.get(row);
+  const seen = seenAt === undefined ? NaN : Date.parse(seenAt);
+  const validSeen =
+    Number.isFinite(seen) && seen >= now.getTime() - WAKE_TTL_MS && seen <= now.getTime() + 60_000;
+  const matches =
+    (offer.event === 'moved' && row.kind === 'vault.rename') ||
+    stamp?.hash === offer.hash ||
+    (validSeen && stamp !== undefined && Date.parse(stamp.at) > seen);
+  if (!matches || typeof row.actor !== 'string' || row.actor.trim() === '') return unknown;
+  if (row.actor.startsWith('human:'))
+    return { author: 'person', authorActor: row.actor, parentRunId: null };
+  if (row.runId === null || row.runId.trim() === '') return unknown;
+  return { author: 'run', authorActor: row.actor, parentRunId: row.runId };
+}
+
 /** Admit trigger matches, each once — `wakes::admit`. */
 export async function admitWakes(
   vault: string,
   offers: readonly WakeOffer[],
   now: Date = new Date(),
+  seenAt?: string,
 ): Promise<AdmitReport> {
   const report: AdmitReport = { admitted: 0, live: 0, refused: [] };
   for (const offer of offers) {
@@ -5418,6 +6280,29 @@ export async function admitWakes(
       report.live += 1;
       continue;
     }
+    const writer = writerOfWake(offer, seenAt, now);
+    const chain = writer.parentRunId === null ? null : wakeChain(writer.parentRunId);
+    const reason =
+      chain?.includes(offer.agent) === true
+        ? 'cycle'
+        : chain !== null && chain.length >= 3
+          ? 'hop_limit'
+          : null;
+    if (chain === null) writer.parentRunId = null;
+    if (reason !== null) {
+      report.refused.push({ agent: offer.agent, reason });
+      if (
+        mockWakes.some(
+          (w) =>
+            w.vault === vault &&
+            w.agent === offer.agent &&
+            w.wakeKey === offer.wakeKey &&
+            w.outcome === 'skipped' &&
+            w.reason === reason,
+        )
+      )
+        continue;
+    }
     mockWakeSeq += 1;
     mockWakes.push({
       wakeId: mockWakeSeq.toString(16).padStart(32, '0'),
@@ -5426,20 +6311,49 @@ export async function admitWakes(
       wakeKey: offer.wakeKey,
       trigger: offer.trigger,
       cause,
+      ...writer,
       admittedAt: now.toISOString(),
       notBefore: null,
       deferred: null,
-      state: 'pending',
+      state: reason === null ? 'pending' : 'finished',
       runId: null,
       startedAt: null,
-      finishedAt: null,
-      outcome: null,
-      reason: null,
+      finishedAt: reason === null ? null : now.toISOString(),
+      outcome: reason === null ? null : 'skipped',
+      reason,
       detail: null,
     });
-    report.admitted += 1;
+    if (reason === null) report.admitted += 1;
   }
   return report;
+}
+
+export async function releaseAssignedWakes(
+  vault: string,
+  agentKey: string,
+  subject: string,
+  keyPrefix: string,
+  now = new Date(),
+): Promise<number> {
+  if (!/^assigned:[0-9a-f]{8}:$/.test(keyPrefix))
+    throw new Error(
+      'an assignment prefix must be assigned: followed by eight lowercase hexadecimal characters and a colon. Nothing was released.',
+    );
+  let released = 0;
+  for (const wake of mockWakes) {
+    if (
+      wake.vault !== vault ||
+      wake.agent !== agentKey ||
+      wake.state !== 'pending' ||
+      wake.cause.kind !== 'assigned' ||
+      wake.cause.subject !== subject ||
+      !wake.wakeKey.startsWith(keyPrefix)
+    )
+      continue;
+    finishWake(wake, 'cancelled', now, 'superseded');
+    released++;
+  }
+  return released;
 }
 
 /** The vault's pending wakes inside the TTL, oldest first — `wakes::pending`. */
@@ -5456,6 +6370,9 @@ export async function wakesPending(vault: string, now: Date = new Date()): Promi
       wakeKey: wake.wakeKey,
       trigger: wake.trigger,
       cause: { ...wake.cause },
+      author: wake.author,
+      authorActor: wake.authorActor,
+      parentRunId: wake.parentRunId,
       admittedAt: wake.admittedAt,
       notBefore: wake.notBefore,
       deferred: wake.deferred,
@@ -5566,6 +6483,7 @@ export function claimMockWake(
   if (request.coalesce.length > WAKE_COALESCE_MAX - 1) {
     throw new Error(`a run takes at most ${WAKE_COALESCE_MAX} wakes`);
   }
+  wakeRunParents.set(runId, { actor, parent: wake.parentRunId });
   Object.assign(wake, {
     state: 'started',
     runId,
@@ -5583,6 +6501,7 @@ export function claimMockWake(
           w.vault === vault &&
           w.agent === actor &&
           w.trigger === wake.trigger &&
+          w.parentRunId === wake.parentRunId &&
           w.cause.kind === 'event',
       );
       if (other === undefined) continue;
@@ -5608,6 +6527,124 @@ export function finishMockWake(runId: string, outcome: string, now: Date = new D
   finishWake(wake, word, now);
 }
 
+// The mock follows condition.rs; shared condition-cases.json holds eligibility
+// and the retry window. Its one seed controls only the internal runner's answer.
+let conditionAnswer: 'yes' | 'no' | 'unavailable' = 'yes';
+let conditionSeq = 0;
+export function __seedCondition(answer: 'yes' | 'no' | 'unavailable'): void {
+  conditionAnswer = answer;
+}
+
+export async function checkMockWake(
+  vault: string,
+  actor: string,
+  ids: string[],
+  question: string,
+  now = new Date(),
+): Promise<WakeCheck> {
+  if (!wakesReadable || !fleetAvailable) throw fleetUnavailable();
+  refuseIfAgentPaused(vault, actor);
+  if (ids.length > WAKE_COALESCE_MAX) throw new Error('a pre-run check takes at most 20 wakes');
+  if (new Set(ids).size !== ids.length) throw new Error('a pre-run check names each wake once');
+  const pending = ids.flatMap((id) => {
+    const wake = mockWakes.find(
+      (w) =>
+        w.wakeId === id &&
+        w.vault === vault &&
+        w.agent === actor &&
+        w.state === 'pending' &&
+        !wakeExpired(w, now),
+    );
+    return wake === undefined ? [] : [wake];
+  });
+  const head = pending[0];
+  const eligible =
+    head === undefined
+      ? []
+      : pending.filter(
+          (w) =>
+            w.wakeId === head.wakeId ||
+            (head.cause.kind === 'event' &&
+              w.cause.kind === 'event' &&
+              w.trigger === head.trigger &&
+              w.parentRunId === head.parentRunId),
+        );
+  const wakes = eligible.map((w) => w.wakeId);
+  if (head === undefined) return { state: 'gone', wakes };
+  const own = (await scanVault(vault)).filter(
+    (e) => isAgentEntry(e) && `process:${agentHandle(e)}` === actor,
+  );
+  if (own.length !== 1) return { state: 'gone', wakes };
+  if (own[0].properties.paused === true)
+    throw new Error(`${actor} is paused. Resume it before starting a pre-run check.`);
+  const skip = (reason: string, note: WakeCheckNote) => {
+    for (const wake of eligible) {
+      finishWake(wake, 'skipped', now, reason);
+      wake.note = { ...note };
+    }
+  };
+  const cleanedQuestion = cleanCauseValue(question, 500);
+  if (cleanedQuestion === undefined || [...question].length > 500) {
+    skip('condition_unavailable', {
+      question: cleanedQuestion ?? '',
+      reason: 'its question is empty or longer than 500 characters',
+    });
+    return { state: 'unavailable', wakes, retry_at: null, skipped: true };
+  }
+  question = cleanedQuestion;
+  const waiting = eligible
+    .flatMap((wake) => (wake.notBefore === null ? [] : [wake.notBefore]))
+    .sort()
+    .at(-1);
+  if (waiting !== undefined && Date.parse(waiting) > now.getTime())
+    return { state: 'unavailable', wakes, retry_at: waiting, skipped: false };
+  if (
+    fleetRuns.some(
+      (run) => run.vault_id === vault && run.actor === actor && run.outcome === 'running',
+    )
+  ) {
+    for (const wake of eligible) deferMockWake(wake.wakeId, ['agent_running'], now);
+    return {
+      state: 'deferred',
+      wakes,
+      reasons: ['agent_running'],
+      words: ['this agent is already running'],
+    };
+  }
+  conditionSeq += 1;
+  const runId = `mock-condition-${conditionSeq}`;
+  bookMockRun(
+    conditionRun({
+      runId,
+      vault,
+      actor,
+      at: now.toISOString(),
+      cause: {
+        ...fleetWakeOf(head).cause!,
+        detail: cleanCauseValue(`checking first: ${question}`, 200) ?? null,
+      },
+      parent: head.parentRunId,
+    }),
+  );
+  if (conditionAnswer === 'yes') return { state: 'met', wakes };
+  if (conditionAnswer === 'no') {
+    skip('condition_not_met', { question, reason: 'The check answered no.', check_run_id: runId });
+    return { state: 'not_met', wakes };
+  }
+  const edge = Date.parse(head.admittedAt) + 10 * 60_000;
+  if (now.getTime() >= edge) {
+    skip('condition_unavailable', {
+      question,
+      reason: 'no answer within 10 minutes',
+      check_run_id: runId,
+    });
+    return { state: 'unavailable', wakes, retry_at: null, skipped: true };
+  }
+  const retry_at = new Date(Math.min(now.getTime() + 3 * 60_000, edge)).toISOString();
+  for (const wake of eligible) wake.notBefore = retry_at;
+  return { state: 'unavailable', wakes, retry_at, skipped: false };
+}
+
 // --- What is waiting to wake an agent (M63.1b) -------------------------------
 //
 // Mirrors `fleet::wakes` over the same store: every pending wake oldest
@@ -5625,7 +6662,11 @@ export interface FleetWake {
   reason: string | null;
   detail: string | null;
   words: string;
+  note?: WakeCheckNote | null;
   cause: FleetRunCause | null;
+  author?: 'person' | 'run' | 'not_recorded' | null;
+  authorActor?: string | null;
+  parentRunId?: string | null;
   admittedAt: string;
   notBefore: string | null;
   deferred: string | null;
@@ -5658,6 +6699,16 @@ export function mockWakeWords(
   if (outcome === 'cancelled' && reason === 'expired') {
     return `expired — waited more than ${WAKE_TTL_MS / (24 * 60 * 60 * 1000)} days`;
   }
+  if (outcome === 'skipped') {
+    if (reason === 'condition_not_met') return 'skipped — its check answered no';
+    if (reason === 'condition_unavailable') return "skipped — its check couldn't answer";
+    if (reason === 'cycle')
+      return 'skipped — the change came from its own chain of runs, so it would wake itself';
+    if (reason === 'hop_limit')
+      return 'skipped — the change came from the second hop of a chain, and a chain stops there';
+    if (reason === 'chain_spent')
+      return 'skipped — the chain that made the change has spent its allowance';
+  }
   const raw = reason === null ? 'not recorded' : detail === null ? reason : `${reason}: ${detail}`;
   return `skipped (or cancelled) for a reason this version does not name (${raw})`;
 }
@@ -5680,13 +6731,22 @@ function fleetWakeOf(wake: MockWake): FleetWake {
     reason: wake.reason,
     detail: wake.detail,
     words: mockWakeWords(wake.outcome, wake.reason, wake.detail),
+    note: wake.note == null ? null : { ...wake.note },
     cause: {
       kind: wake.cause.kind,
-      why: wake.cause.kind === 'event' ? EVENT_WHY : 'a reason this build cannot read',
+      why:
+        wake.cause.kind === 'event'
+          ? EVENT_WHY
+          : wake.cause.kind === 'assigned'
+            ? 'work was assigned to it'
+            : 'a reason this build cannot read',
       subject: wake.cause.subject ?? null,
       detail: wake.cause.detail ?? null,
       due_at: wake.cause.due_at ?? null,
     },
+    author: wake.author,
+    authorActor: wake.authorActor,
+    parentRunId: wake.parentRunId,
     admittedAt: wake.admittedAt,
     notBefore: wake.notBefore,
     deferred: wake.deferred,
@@ -5744,6 +6804,9 @@ export function __seedWakes(rows: readonly SeedWake[] | null): void {
       wakeKey: mockWakeSeq.toString(16).padStart(64, '0'),
       trigger: '0123456789abcdef',
       cause: { kind: 'event' },
+      author: null,
+      authorActor: null,
+      parentRunId: null,
       notBefore: null,
       deferred: null,
       state: row.outcome == null ? 'pending' : 'finished',
@@ -5759,6 +6822,8 @@ export function __seedWakes(rows: readonly SeedWake[] | null): void {
 }
 
 if (typeof window !== 'undefined') {
+  (window as unknown as { __cerebroSeedCondition: typeof __seedCondition }).__cerebroSeedCondition =
+    __seedCondition;
   (window as unknown as { __cerebroMockWakes: () => MockWake[] }).__cerebroMockWakes = () =>
     mockWakes.map((wake) => ({ ...wake, cause: { ...wake.cause } }));
   (window as unknown as { __cerebroSeedWakes: typeof __seedWakes }).__cerebroSeedWakes =
@@ -5925,4 +6990,588 @@ if (typeof window !== 'undefined') {
   (
     window as unknown as { __cerebroFailSearchVault: typeof __failSearchVault }
   ).__cerebroFailSearchVault = __failSearchVault;
+}
+
+// Durable runtime state mirror (M64.3). Shared cases: reminder-state-cases.json.
+import {
+  fireId,
+  markId,
+  validFire,
+  validMark,
+  validExactMark,
+  type ReminderFire,
+  type ReminderClaimResult,
+  type ReminderState,
+  type SessionWindow,
+  type DoneMark,
+  type DoneMarkResult,
+} from '@/engine/reminderState';
+const reminderFires = new Map<string, Map<string, ReminderFire>>();
+const doneMarks = new Map<string, Map<string, DoneMark>>();
+const sessionWindows = new Map<string, SessionWindow | null>();
+const importedReminderVaults = new Set<string>();
+const importedDoneVaults = new Set<string>();
+const lastDoneStamp = new Map<string, number>();
+const MOCK_RUNTIME_KEY = 'cerebro.mock.reminderRuntime';
+// Browser persistence stands in for runtime.db; never write either legacy key.
+function persistReminderState(): void {
+  try {
+    localStorage.setItem(
+      MOCK_RUNTIME_KEY,
+      JSON.stringify({
+        importedReminders: [...importedReminderVaults],
+        importedDone: [...importedDoneVaults],
+        lastDoneStamp: [...lastDoneStamp],
+        fires: [...reminderFires].map(([v, rows]) => [v, [...rows.values()]]),
+        marks: [...doneMarks].map(([v, rows]) => [v, [...rows.values()]]),
+      }),
+    );
+  } catch {
+    /* Browser storage may be unavailable; memory still models this session. */
+  }
+}
+function loadReminderState(): void {
+  try {
+    const raw = localStorage.getItem(MOCK_RUNTIME_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw) as {
+      importedReminders?: string[];
+      importedDone?: string[];
+      lastDoneStamp?: [string, number][];
+      fires: [string, ReminderFire[]][];
+      marks: [string, DoneMark[]][];
+    };
+    for (const vault of saved.importedReminders ?? []) importedReminderVaults.add(vault);
+    for (const vault of saved.importedDone ?? []) importedDoneVaults.add(vault);
+    for (const [vault, stamp] of saved.lastDoneStamp ?? []) lastDoneStamp.set(vault, stamp);
+    for (const [vault, rows] of saved.fires)
+      reminderFires.set(vault, new Map(rows.map((r) => [fireId(r), r])));
+    for (const [vault, rows] of saved.marks)
+      doneMarks.set(vault, new Map(rows.map((r) => [markId(r), r])));
+  } catch {
+    /* Malformed mock-only persistence is discarded by the browser fixture. */
+  }
+}
+loadReminderState();
+function resetReminderState(): void {
+  reminderFires.clear();
+  importedReminderVaults.clear();
+  importedDoneVaults.clear();
+  lastDoneStamp.clear();
+  doneMarks.clear();
+  sessionWindows.clear();
+  try {
+    localStorage.removeItem(MOCK_RUNTIME_KEY);
+  } catch {
+    /* Test-only reset. */
+  }
+}
+function fireRows(vault: string): Map<string, ReminderFire> {
+  let rows = reminderFires.get(vault);
+  if (!rows) {
+    rows = new Map();
+    reminderFires.set(vault, rows);
+  }
+  return rows;
+}
+function markRows(vault: string): Map<string, DoneMark> {
+  let rows = doneMarks.get(vault);
+  if (!rows) {
+    rows = new Map();
+    doneMarks.set(vault, rows);
+  }
+  return rows;
+}
+export async function reminderState(vault: string): Promise<ReminderState> {
+  return structuredClone({
+    fires: [...fireRows(vault).values()],
+    window: sessionWindows.get(vault) ?? null,
+  });
+}
+export async function reminderClaim(
+  vault: string,
+  fires: unknown[],
+  now = new Date().toISOString(),
+): Promise<ReminderClaimResult[]> {
+  if (fires.length > 500) throw new Error('At most 500 reminders can be claimed at once.');
+  const parsed = fires.map((r) => validFire(r));
+  const rows = fireRows(vault);
+  const result = parsed.map((r) => {
+    const id = fireId(r),
+      previous = rows.get(id);
+    if (previous) return { fire: structuredClone(previous), fresh: false };
+    const fire: ReminderFire = { ...r, claimedAt: now };
+    rows.set(id, fire);
+    return { fire: structuredClone(fire), fresh: true };
+  });
+  persistReminderState();
+  return result;
+}
+export async function reminderImport(
+  vault: string,
+  fires: unknown[],
+  now = new Date().toISOString(),
+): Promise<number> {
+  if (importedReminderVaults.has(vault)) return 0;
+  importedReminderVaults.add(vault);
+  const rows = fireRows(vault);
+  let count = 0;
+  for (const value of fires) {
+    try {
+      const r = validFire(value, true);
+      const id = fireId(r);
+      if (!rows.has(id)) {
+        rows.set(id, { ...r, outcome: 'imported', claimedAt: now });
+        count++;
+      }
+    } catch {
+      /* A malformed legacy remnant is skipped, as in Rust. */
+    }
+  }
+  persistReminderState();
+  return count;
+}
+export async function doneMarksRead(vault: string): Promise<DoneMark[]> {
+  return structuredClone([...markRows(vault).values()]);
+}
+export async function doneMark(
+  vault: string,
+  value: unknown,
+  now = new Date().toISOString(),
+): Promise<DoneMarkResult> {
+  const input = validMark(value),
+    rows = markRows(vault),
+    id = markId(input);
+  const replaced = rows.get(id) ?? null;
+  // JavaScript has millisecond precision; preserve strict identity even on a frozen clock.
+  const previousStamp = Math.max(
+    lastDoneStamp.get(vault) ?? -Infinity,
+    ...[...rows.values()].map((m) => Date.parse(m.markedAt)),
+  );
+  const stamp = Math.max(Date.parse(now), previousStamp + 1);
+  lastDoneStamp.set(vault, stamp);
+  const markedAt = new Date(stamp).toISOString();
+  const set = { ...input, markedAt };
+  rows.set(id, set);
+  persistReminderState();
+  return structuredClone({ set, replaced });
+}
+export async function doneUnmark(
+  vault: string,
+  value: unknown,
+  restore: unknown = null,
+): Promise<boolean> {
+  const set = validExactMark(value),
+    previous = restore === null ? null : validExactMark(restore);
+  if (previous && markId(previous) !== markId(set))
+    throw new Error('Undo must restore the same Done subject and lane.');
+  const rows = markRows(vault),
+    id = markId(set),
+    current = rows.get(id);
+  if (
+    !current ||
+    current.until !== set.until ||
+    current.revision !== set.revision ||
+    current.markedAt !== set.markedAt
+  )
+    return false;
+  rows.delete(id);
+  if (previous) rows.set(id, previous);
+  persistReminderState();
+  return true;
+}
+export async function doneMarksImport(
+  vault: string,
+  values: unknown[],
+  now = new Date().toISOString(),
+): Promise<number> {
+  if (importedDoneVaults.has(vault)) return 0;
+  importedDoneVaults.add(vault);
+  const rows = markRows(vault);
+  let count = 0;
+  for (const value of values) {
+    try {
+      const input = validMark({ ...(value as object), until: 'forever', revision: null }),
+        id = markId(input);
+      if (!rows.has(id)) {
+        rows.set(id, { ...input, markedAt: now });
+        count++;
+      }
+    } catch {
+      /* Skip malformed legacy remnants, preserving existing marks. */
+    }
+  }
+  persistReminderState();
+  return count;
+}
+export function __seedSessionWindow(vault: string, window: SessionWindow | null): void {
+  sessionWindows.set(vault, window);
+}
+export function __seedReminderFires(vault: string, fires: ReminderFire[]): void {
+  reminderFires.set(vault, new Map(fires.map((r) => [fireId(r), structuredClone(r)])));
+  persistReminderState();
+}
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    __cerebroSeedSessionWindow: __seedSessionWindow,
+    __cerebroSeedReminderFires: __seedReminderFires,
+    __cerebroMockReminderFires: (vault: string) => structuredClone([...fireRows(vault).values()]),
+  });
+}
+
+/** Home is one vault's finished unattended work (M64.4b). */
+export async function homeRuns(
+  vault: string,
+  limit = 200,
+): Promise<{ runs: FleetRun[]; truncated: boolean }> {
+  if (!fleetAvailable) throw fleetUnavailable();
+  const size = Math.max(1, Math.min(200, Math.trunc(limit)));
+  const rows = fleetRuns
+    .filter(
+      (r) =>
+        r.vault_id === (vault === '/demo-vault' ? 'demo' : vault) &&
+        r.mode === 'ambient' &&
+        r.ended_at !== null &&
+        r.outcome !== 'running' &&
+        !HOME_CONSTRUCTS.has(r.actor ?? ''),
+    )
+    .sort((a, b) => b.ended_at!.localeCompare(a.ended_at!) || b.run_id.localeCompare(a.run_id));
+  return structuredClone({ runs: rows.slice(0, size), truncated: rows.length > size });
+}
+import { CONSTRUCT_ACTORS as HOME_ACTORS } from '@/engine/authors';
+const HOME_CONSTRUCTS = new Set(HOME_ACTORS.map((c) => c.actor));
+export async function homeChanges(_vault: string, afterSeq?: number): Promise<ChangesView | null> {
+  if (!changes) return null;
+  const from = Math.min(afterSeq ?? changes.window.from_seq, changes.window.to_seq);
+  if (from === changes.window.to_seq)
+    return {
+      ...structuredClone(changes),
+      changed_at: undefined,
+      window: { from_seq: from, to_seq: changes.window.to_seq },
+      quiet: true,
+      sections: changes.sections.map((s) => ({ ...s, lines: [] })),
+    };
+  return { ...structuredClone(changes), window: { from_seq: from, to_seq: changes.window.to_seq } };
+}
+
+/** Unbundled by default. Only the test seam simulates installed permissions. */
+let notificationState = 'unknown';
+let notificationPosts: Array<{ id: string; title: string; body: string }> = [];
+let notificationRequests = 0;
+export function __seedNotifications(state: string): void {
+  notificationState = state;
+}
+export function __mockNotifications() {
+  return {
+    state: notificationState,
+    requests: notificationRequests,
+    posts: [...notificationPosts],
+  };
+}
+function resetNotifications(): void {
+  notificationState = 'unknown';
+  notificationPosts = [];
+  notificationRequests = 0;
+}
+export async function notificationPermission(): Promise<string> {
+  return notificationState;
+}
+export async function requestNotificationPermission(): Promise<string> {
+  if (notificationState === 'not-asked') {
+    notificationRequests++;
+    notificationState = 'allowed';
+  }
+  return notificationState;
+}
+export async function postNotification(id: string, title: string, body: string): Promise<string> {
+  notificationPosts.push({
+    id,
+    title: [...title].slice(0, 120).join(''),
+    body: [...body].slice(0, 400).join(''),
+  });
+  return notificationState === 'allowed' || notificationState === 'quiet'
+    ? 'posted'
+    : notificationState;
+}
+if (typeof window !== 'undefined') {
+  Object.assign(window, {
+    __cerebroSeedNotifications: __seedNotifications,
+    __cerebroMockNotifications: __mockNotifications,
+  });
+}
+
+// Personal-token metadata is operational; raw secrets exist only in the create return.
+const clientTokensById = new Map<string, { token: ClientToken; secretSha256: string }>();
+let clientTokensAvailable = true;
+let accessStatus: ClientAccessStatus = { enabled: false, port: 37421, url: null, error: null };
+function resetClientAccess(): void {
+  clientTokensById.clear();
+  clientTokensAvailable = true;
+  accessStatus = { enabled: false, port: 37421, url: null, error: null };
+}
+function randomHex(bytes: number): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (b) =>
+    b.toString(16).padStart(2, '0'),
+  ).join('');
+}
+export async function clientTokens(vault: string): Promise<ClientToken[]> {
+  if (!clientTokensAvailable) throw new Error(CLIENT_UNAVAILABLE);
+  return [...clientTokensById.values()].map(({ token }) =>
+    structuredClone({ ...token, currentVault: token.vaultPath === vault }),
+  );
+}
+export async function createClientToken(
+  vault: string,
+  request: ClientTokenRequest,
+): Promise<CreatedClientToken> {
+  if (!clientTokensAvailable) throw new Error(CLIENT_UNAVAILABLE);
+  const name = clientName(request.name);
+  const grant = clientGrant(request);
+  if (
+    [...clientTokensById.values()].some(
+      ({ token }) => token.vaultPath === vault && token.slug === name.slug,
+    )
+  )
+    throw new Error(CLIENT_DUPLICATE);
+  if (clientTokensById.size >= CLIENT_TOKEN_CAP) throw new Error(CLIENT_CAP_WORDS);
+  // No await between cap/duplicate checks and insertion: the mock's transaction.
+  const secret = `cbr_${randomHex(32)}`;
+  const token: ClientToken = {
+    ...name,
+    ...grant,
+    tokenId: randomHex(16),
+    vaultId: sha256Hex(vault).slice(0, 32),
+    vaultPath: vault,
+    createdAt: new Date().toISOString(),
+    lastUsedAt: null,
+    currentVault: true,
+  };
+  clientTokensById.set(token.tokenId, {
+    token: structuredClone(token),
+    secretSha256: sha256Hex(secret),
+  });
+  return { token, secret };
+}
+export async function revokeClientToken(tokenId: string): Promise<boolean> {
+  if (!clientTokensAvailable) throw new Error(CLIENT_UNAVAILABLE);
+  return clientTokensById.delete(tokenId);
+}
+export async function clientAccessStatus(): Promise<ClientAccessStatus> {
+  return { ...accessStatus };
+}
+export async function setClientAccess(enabled: boolean, port: number): Promise<ClientAccessStatus> {
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error(CLIENT_PORT_WORDS);
+  accessStatus = {
+    enabled,
+    port,
+    url: enabled ? `http://127.0.0.1:${port}/mcp` : null,
+    error: null,
+  };
+  return { ...accessStatus };
+}
+export function __seedClientTokens(n: number | null): void {
+  clientTokensById.clear();
+  clientTokensAvailable = n !== null;
+  for (let i = 0; i < (n ?? 0); i++) {
+    const token: ClientToken = {
+      tokenId: i.toString(16).padStart(32, '0'),
+      vaultId: 'demo',
+      vaultPath: '/demo-vault',
+      name: `App ${i + 1}`,
+      slug: `app-${i + 1}`,
+      toolsets: [clientToolsets().default.id],
+      readScope: null,
+      writeScope: [],
+      createdAt: SEED_TIME,
+      lastUsedAt: null,
+      currentVault: true,
+    };
+    clientTokensById.set(token.tokenId, {
+      token,
+      secretSha256: sha256Hex(`mock-seeded-client-${i}`),
+    });
+  }
+}
+if (typeof window !== 'undefined')
+  Object.assign(window, { __cerebroSeedClientTokens: __seedClientTokens });
+
+// The init seam runs after every operational fixture has been initialized.
+// An empty vault has no demo history, proposals or background runs either.
+if (
+  typeof window !== 'undefined' &&
+  (window as unknown as { __cerebroEmptyVault?: boolean }).__cerebroEmptyVault
+) {
+  emptyMockVault();
+}
+
+// M65.6: the browser accepts delivered payloads, never parses an app URL.
+declare global {
+  interface Window {
+    __cerebroPendingDeepLink?: unknown;
+    __cerebroDeepLink?: (payload: unknown) => void;
+  }
+}
+const deepLinkListeners = new Set<(payload: unknown) => void>();
+export async function takeDeepLink(): Promise<unknown> {
+  if (typeof window === 'undefined') return null;
+  const pending = window.__cerebroPendingDeepLink ?? null;
+  delete window.__cerebroPendingDeepLink;
+  return pending;
+}
+export async function listenDeepLinks(handler: (payload: unknown) => void): Promise<() => void> {
+  deepLinkListeners.add(handler);
+  if (typeof window !== 'undefined')
+    window.__cerebroDeepLink = (payload) => {
+      for (const listener of deepLinkListeners) listener(payload);
+    };
+  return () => deepLinkListeners.delete(handler);
+}
+export async function appLink(_vault: string, path: string): Promise<string> {
+  return `cerebro://open?vault=${'0'.repeat(32)}&path=${encodeURIComponent(path)}`;
+}
+
+/** The wasm is dev-only; packaged calculations always use the Rust command. */
+export async function calculateSheets(
+  sheets: import('@/engine/sheet/fence').SheetInput[],
+): Promise<import('@/engine/sheet/fence').SheetResult[]> {
+  if (!import.meta.env.DEV) throw new Error("The sheet engine couldn't load in this browser.");
+  const { calculateWith, loadEngine } = await import('./mockSheet');
+  let zone = 'UTC';
+  try {
+    zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    /* UTC is the fallback when Intl has no zone. */
+  }
+  return calculateWith(await loadEngine(), sheets, zone);
+}
+
+const CANVAS_REFUSALS: Record<CanvasRefusal['code'], string> = {
+  missing: 'This whiteboard could not be found or read.',
+  too_large: 'This whiteboard is over the 8388608 byte limit.',
+  not_text: 'This whiteboard is not valid UTF-8 text.',
+  not_a_board_path: 'This is not a writable whiteboard path.',
+  unreadable_on_disk: 'This whiteboard cannot be read from disk, so it was left unchanged.',
+  invalid_content: 'The changed whiteboard is invalid, so it was left unchanged.',
+  read_only: 'Knowledge boards are read-only here.',
+};
+function refuseCanvas(code: CanvasRefusal['code']): never {
+  throw Object.assign(new Error(CANVAS_REFUSALS[code]), { code });
+}
+function canvasPath(path: string, writing: boolean): void {
+  if (writing && isKnowledgePath(path)) refuseCanvas('read_only');
+  try {
+    guardNoteTarget(path, ['canvas']);
+  } catch {
+    refuseCanvas('not_a_board_path');
+  }
+}
+function canvasSource(path: string): CanvasSource {
+  canvasPath(path, false);
+  const content = files.get(path);
+  if (content === undefined) refuseCanvas('missing');
+  if (utf8Length(content) > CANVAS_FORMAT.limits.max_bytes) refuseCanvas('too_large');
+  return { content, hash: sha256Hex(content) };
+}
+export async function readCanvasFile(_vault: string, path: string): Promise<CanvasSource> {
+  return canvasSource(path);
+}
+export async function saveCanvasFile(
+  _vault: string,
+  path: string,
+  content: string,
+): Promise<{ hash: string }> {
+  canvasPath(path, true);
+  if (!readCanvas(content).ok) refuseCanvas('invalid_content');
+  const old = canvasSource(path);
+  if (!readCanvas(old.content).ok) refuseCanvas('unreadable_on_disk');
+  files.set(path, content);
+  touch(path);
+  logWrite('vault.write', path);
+  return { hash: sha256Hex(content) };
+}
+export async function createCanvasFile(
+  _vault: string,
+  path: string,
+  content: string,
+  mode: 'preview' | 'commit',
+): Promise<{ path: string; hash: string | null }> {
+  canvasPath(path, true);
+  if (!readCanvas(content).ok) refuseCanvas('invalid_content');
+  let target = path;
+  for (let n = 2; files.has(target) || folders.has(target); n += 1)
+    target = `${path.slice(0, -7)}-${n}.canvas`;
+  if (mode === 'preview') return { path: target, hash: null };
+  files.set(target, content);
+  touch(target);
+  logWrite('vault.create', target);
+  return { path: target, hash: sha256Hex(content) };
+}
+
+export async function sheetRestructure(
+  sheets: import('@/engine/sheet/fence').SheetInput[],
+  sheet: number,
+  change: import('@/engine/sheet/gridEdit').GridChange,
+  at: number,
+  count: number,
+): Promise<import('@/engine/sheet/gridEdit').RestructureResult> {
+  if (!import.meta.env.DEV) throw new Error("The sheet engine couldn't load in this browser.");
+  const { restructureWith, loadEngine } = await import('./mockSheet');
+  return restructureWith(await loadEngine(), sheets, sheet, change, at, count);
+}
+export async function sheetFill(
+  sheets: import('@/engine/sheet/fence').SheetInput[],
+  sheet: number,
+  area: import('@/engine/sheet/selection').Area,
+  axis: import('@/engine/sheet/gridEdit').FillAxis,
+  to: number,
+): Promise<import('@/engine/sheet/gridEdit').FillResult> {
+  if (!import.meta.env.DEV) throw new Error("The sheet engine couldn't load in this browser.");
+  const { fillWith, loadEngine } = await import('./mockSheet');
+  return fillWith(await loadEngine(), sheets, sheet, area, axis, to);
+}
+export async function sheetComplete(
+  names: string[],
+  sheet: number,
+  row: number,
+  column: number,
+  text: string,
+  cursor: number,
+): Promise<import('@/engine/sheet/formulaComplete').CompletionContext> {
+  if (!import.meta.env.DEV) throw new Error("The sheet engine couldn't load in this browser.");
+  const { completeWith, loadEngine } = await import('./mockSheet');
+  return completeWith(await loadEngine(), names, sheet, row, column, text, cursor);
+}
+
+/** The browser serves a staged native decode once; it never interprets XLSX. */
+export type StagedSheetFile =
+  | { kind: 'csv'; name: string; text: string }
+  | { kind: 'xlsx'; name: string; workbook: import('@/engine/sheet/import').XlsxImport }
+  | { refusal: string };
+export function stageSheetFile(file: StagedSheetFile | null): void {
+  stagedSheetFile = file;
+}
+export async function pickSheetFile(): Promise<import('@/engine/sheet/import').PickedSheet | null> {
+  const file = stagedSheetFile;
+  stagedSheetFile = null;
+  if (!file) return null;
+  if ('refusal' in file) throw new Error(file.refusal);
+  if (file.kind === 'xlsx') return file;
+  const bytes = new TextEncoder().encode(file.text);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return { kind: 'csv', name: file.name, bytesBase64: btoa(binary) };
+}
+if (typeof window !== 'undefined')
+  (
+    window as unknown as { __cerebroStageSheetFile: typeof stageSheetFile }
+  ).__cerebroStageSheetFile = stageSheetFile;
+
+function sheetExports(): { defaultName: string; page: string }[] {
+  const host = window as unknown as { __cerebroMockSheetExports?: { defaultName: string; page: string }[] };
+  return host.__cerebroMockSheetExports ??= [];
+}
+/** The browser records export inputs; only native IronCalc encodes Excel bytes. */
+export async function exportSheetXlsx(defaultName: string, page: string): Promise<string | null> {
+  sheetExports().push({ defaultName, page });
+  return defaultName;
 }

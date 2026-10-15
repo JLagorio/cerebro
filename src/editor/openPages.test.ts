@@ -3,8 +3,12 @@ import {
   __resetOpenPages,
   announceExternalWrites,
   flushOpenPages,
+  hasOpenPages,
   onExternalWrite,
   registerFlush,
+  holdEditor,
+  editorHoldersOf,
+  subscribeEditorHolders,
 } from './openPages';
 import { coalescedRefresh } from '@/lib/trailingRefresh';
 
@@ -175,4 +179,33 @@ describe('announceExternalWrites', () => {
     void announceExternalWrites([], catchUp);
     expect(catchUp).toHaveBeenCalledTimes(3);
   });
+});
+
+it('hasOpenPages follows registration and disposal', () => {
+  expect(hasOpenPages()).toBe(false);
+  const dispose = registerFlush(async () => {});
+  expect(hasOpenPages()).toBe(true);
+  dispose();
+  expect(hasOpenPages()).toBe(false);
+});
+
+it('editor owners are counted, reference-stable, and released independently of pending saves', () => {
+  const hear = vi.fn();
+  const stop = subscribeEditorHolders(hear);
+  const release = holdEditor('a.md', 'p1');
+  const first = editorHoldersOf('a.md');
+  expect(first).toEqual(['p1']);
+  const second = holdEditor('a.md', 'p1');
+  expect(editorHoldersOf('a.md')).toBe(first);
+  release();
+  release();
+  expect(editorHoldersOf('a.md')).toBe(first);
+  expect(hear).toHaveBeenCalledTimes(1);
+  const peek = holdEditor('b.md', 'peek');
+  expect(editorHoldersOf('b.md')).toEqual(['peek']);
+  second();
+  expect(editorHoldersOf('a.md')).toEqual([]);
+  peek();
+  stop();
+  expect(hear).toHaveBeenCalledTimes(4);
 });

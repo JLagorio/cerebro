@@ -446,6 +446,22 @@ describe('the view-tab placeholder (M45.4)', () => {
     expect(placeholder.closest('[data-testid="layout-preview-content"]')).not.toBeNull();
   });
 
+  it('a Runs tab previews its subject feed without reading it', () => {
+    setup([typeDoc(undefined, [{ id: 'runs', name: 'Runs', content: 'runs' }]), RECORD]);
+    expect(screen.getByTestId('layout-preview-runstab').textContent).toBe(
+      'Runs about this page and the pages filed under it',
+    );
+    expect(screen.queryByTestId('page-runs')).toBeNull();
+  });
+
+  it('an Agents tab previews its inheritance surface without mounting the picker', () => {
+    setup([typeDoc(undefined, [{ id: 'agents', name: 'Agents', content: 'agents' }]), RECORD]);
+    expect(screen.getByTestId('layout-preview-agentstab').textContent).toBe(
+      'The agents this page lists, and what its work inherits',
+    );
+    expect(screen.queryByTestId('page-agents-add')).toBeNull();
+  });
+
   it('a list-source tab names the list id; a sourceless one says so', () => {
     setup([
       typeDoc(undefined, [{ id: 'v1', name: 'Work', content: 'view', source: { list: 'work' } }]),

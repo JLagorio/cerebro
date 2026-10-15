@@ -18,7 +18,7 @@ import type { Entry, Schema, Selection } from './types';
 
 /** The kinds that name a SUBJECT — a page, a database, a container. They
  * carry a path or a name, so they are reached by name, never from a table. */
-export type SubjectKind = 'doc' | 'diagram' | 'collection' | 'list' | 'type';
+export type SubjectKind = 'doc' | 'diagram' | 'file' | 'collection' | 'list' | 'type';
 
 /** Every other Selection kind is a place in this table. A kind added to
  * Selection fails `ROWS`'s `satisfies` until it is classified here or above. */
@@ -37,6 +37,8 @@ interface Row<K extends DestinationKind> {
   /** Where it goes: the bare selection, no lens. */
   selection: Extract<Selection, { kind: K }>;
   label: string;
+  /** The second key after g, shared by the shell and command catalog. */
+  go: string;
   icon: string;
   /** Extra words ⌘K matches, beyond the label — the ones people reach for. */
   aliases: string;
@@ -49,6 +51,8 @@ interface Row<K extends DestinationKind> {
   hot?: boolean;
   /** Hidden unless the setting it names is on. */
   gate?: 'inbox';
+  /** One editor queue or workspace for the whole window. */
+  single?: true;
 }
 
 export interface Destination extends Row<DestinationKind> {
@@ -59,7 +63,10 @@ const ROWS = {
   // The capture queue (M4). Hot: its count is work waiting on you. Gated on
   // the inbox workflow, so ⌘K hides it exactly when the nav does.
   inbox: {
+    // The capture queue holds one selected editor.
+    single: true,
     id: 'inbox',
+    go: 'i',
     selection: { kind: 'inbox' },
     label: 'Inbox',
     icon: 'inbox',
@@ -73,8 +80,10 @@ const ROWS = {
   // and Type screen as the item world's front door, which was true while
   // those rows lived in a sidebar of Home's own; in the one column they are
   // rows of their own, so on the Epic table Home and Epic were both current.
+  // Home lanes are pull-only (M64.4, D9 b): this row never carries a count.
   home: {
     id: 'home',
+    go: 'h',
     selection: { kind: 'home' },
     label: 'Home',
     icon: 'house',
@@ -86,6 +95,7 @@ const ROWS = {
   // membership rule (engine/myWork), never a promise the page cannot keep.
   mywork: {
     id: 'my_work',
+    go: 'm',
     selection: { kind: 'mywork' },
     label: 'My work',
     icon: 'circle-check',
@@ -97,6 +107,7 @@ const ROWS = {
   // subjects (a prototype is reachable from Studio's own bench).
   studio: {
     id: 'studio',
+    go: 's',
     selection: { kind: 'studio' },
     label: 'Studio',
     icon: 'pencil-ruler',
@@ -109,6 +120,7 @@ const ROWS = {
   // footer SyncBadge speaks instead, and only when something needs doing.
   pulse: {
     id: 'history',
+    go: 'y',
     selection: { kind: 'pulse' },
     label: 'History',
     icon: 'activity',
@@ -123,6 +135,7 @@ const ROWS = {
   // and "agents" are what people type (M18).
   library: {
     id: 'library',
+    go: 'l',
     selection: { kind: 'library' },
     label: 'Library',
     icon: 'blocks',
@@ -134,7 +147,10 @@ const ROWS = {
   // is a row, and the ↗ is the door to the Work surface. The label is the
   // locked name (M37.2); the kind keeps its old word.
   workspace: {
+    // Mounted repositories already own their editor groups.
+    single: true,
     id: 'work',
+    go: 'w',
     selection: { kind: 'workspace' },
     label: 'Work',
     icon: 'folder-tree',
@@ -147,6 +163,7 @@ const ROWS = {
   // and the review queue (M51); the ↗ opens every concept.
   knowledge: {
     id: 'knowledge',
+    go: 'k',
     selection: { kind: 'knowledge' },
     label: 'Knowledge',
     icon: 'brain',
@@ -159,6 +176,7 @@ const ROWS = {
   // M41 destination row used to be.
   agents: {
     id: 'agents',
+    go: 'a',
     selection: { kind: 'agents' },
     label: 'Agents',
     icon: 'bot',
@@ -171,6 +189,7 @@ const ROWS = {
   // and SyncBadge and ⌘K reach it.
   changes: {
     id: 'changes',
+    go: 'c',
     selection: { kind: 'changes' },
     label: 'Changes',
     icon: 'file-diff',
@@ -182,6 +201,7 @@ const ROWS = {
   // you work (M43).
   settings: {
     id: 'settings',
+    go: ',',
     selection: { kind: 'settings' },
     label: 'Settings',
     icon: 'settings',
@@ -212,6 +232,11 @@ export const DESTINATIONS: readonly Destination[] = ORDER.map((kind) => ({
   kind,
   ...(ROWS[kind] as Row<DestinationKind>),
 }));
+
+/** Destination id to its complete go chord. */
+export const GO_KEYS: Readonly<Record<string, string>> = Object.fromEntries(
+  DESTINATIONS.map((d) => [d.id, `g ${d.go}`]),
+);
 
 const BY_KIND = new Map(DESTINATIONS.map((d) => [d.kind, d]));
 

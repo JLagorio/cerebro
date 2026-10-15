@@ -1,4 +1,5 @@
 import {
+  canReschedule,
   dateKindOf,
   rescheduleValue,
   resizeSpan,
@@ -51,8 +52,9 @@ export function useScheduleDrag({
     onCommit: (key, edge, days) => {
       if (dateField === null) return;
       const row = rows.find((r) => r.kind === 'row' && r.key === key);
-      if (row === undefined || row.kind !== 'row') return;
-      const current = spanOf(row.entry, dateField);
+      if (row === undefined || row.kind !== 'row' || !canReschedule(row.entry, dateField, schema))
+        return;
+      const current = spanOf(row.entry, dateField, schema);
       if (current === null) return;
       const kind = dateKindOf(row.entry, dateField, schema);
       // A `date` field holds one date, so there is no end to drag. Quietly
@@ -68,6 +70,8 @@ export function useScheduleDrag({
   return {
     handle,
     preview: (key, span) => {
+      const row = rows.find((r) => r.kind === 'row' && r.key === key);
+      if (row?.kind !== 'row' || !canReschedule(row.entry, dateField, schema)) return span;
       const active = handle.drag;
       if (active === null || active.id !== key) return span;
       return active.edge === 'move'

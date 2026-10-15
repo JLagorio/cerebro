@@ -3,6 +3,7 @@ import { Dropdown } from '@/components/ui/Dropdown';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
 import { Switch } from '@/components/ui/Switch';
+import { AGENT_TYPE, isLibraryType } from '@/engine/library';
 import { humanize } from '@/engine/schema';
 import type { FieldDef, Schema } from '@/engine/types';
 
@@ -45,7 +46,10 @@ export function RelationConfigEditor({
     );
   }
 
-  const types = [...schema.types.keys()].filter((t) => t !== 'Type').sort();
+  const isPerson = def.kind === 'person';
+  const types = [...new Set([...schema.types.keys(), ...(isPerson ? [] : [AGENT_TYPE])])]
+    .filter((t) => t !== 'Type' && (!isPerson || !isLibraryType(t)))
+    .sort();
   const targetDef = def.target !== undefined ? schema.types.get(def.target) : undefined;
   const reciprocal =
     targetDef?.fields.find(
@@ -55,7 +59,6 @@ export function RelationConfigEditor({
   // configured here too — and its unset state means something different: not
   // "any record", but "whoever this vault calls people", which the engine
   // derives from every person field's target (`peopleTypes`).
-  const isPerson = def.kind === 'person';
 
   return (
     <div className="flex flex-col gap-1.5 py-0.5">
@@ -85,7 +88,11 @@ export function RelationConfigEditor({
       </div>
       <div className="flex items-center gap-2 px-1">
         <span className="flex-none text-xs text-n-600">Related property</span>
-        {reciprocal !== null ? (
+        {isLibraryType(def.target) ? (
+          <span data-testid="relation-no-reciprocal" className="text-xs text-n-400">
+            {def.target === AGENT_TYPE ? 'Agents' : 'Skills'} keep no list of their own.
+          </span>
+        ) : reciprocal !== null ? (
           <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-n-700">
             <Icon name="arrow-left-right" size={11} color="var(--n-400)" />
             <span className="truncate">

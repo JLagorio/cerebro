@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('@/lib/ipc', { spy: true });
 
 import { staleWords, type BatchApplied, type BatchOp, type FileResult } from '@/engine/batch';
-import { EVICTED, revertOps } from '@/engine/undoPlan';
+import { EVICTED, revertOps, type RenameChange } from '@/engine/undoPlan';
 import type { TrashedItem } from '@/engine/trash';
 import * as ipc from '@/lib/ipc';
 import { makeEntry } from '@/test/factories';
@@ -15,6 +15,13 @@ import { useVaultStore, type BatchOptions } from '@/stores/vaultStore';
 const VAULT = '/demo-vault';
 const H1 = '1'.repeat(64);
 const H2 = '2'.repeat(64);
+
+/** The existing undo cases restore content, never move a page. */
+function writtenPath(op: BatchOp): string {
+  expect(op.op).not.toBe('rename');
+  if (op.op === 'rename') throw new Error('A content undo must not rename a file');
+  return op.path;
+}
 
 const file = (path: string, partial: Partial<FileResult> = {}): FileResult => ({
   path,
@@ -74,7 +81,7 @@ beforeEach(() => {
 describe('undoStore (M60.7)', () => {
   it('a push clears redo', async () => {
     const id = useUndoStore.getState().pushBatch('First', VAULT, [file('records/a.md')]);
-    applying(async (ops) => undid(ops.map((op) => file(op.path))));
+    applying(async (ops) => undid(ops.map((op) => file(writtenPath(op)))));
     expect(await useUndoStore.getState().undo()).toBe(true);
     expect(useUndoStore.getState().future.map((e) => e.id)).toEqual([id]);
     useUndoStore.getState().pushBatch('Second', VAULT, [file('records/b.md')]);
@@ -91,14 +98,14 @@ describe('undoStore (M60.7)', () => {
     });
     applying(async (ops) => {
       await held;
-      return undid(ops.map((op) => file(op.path)));
+      return undid(ops.map((op) => file(writtenPath(op))));
     });
     const first = store.undo();
     const second = store.undo();
     expect(useUndoStore.getState().past).toEqual([]);
     release();
     expect(await Promise.all([first, second])).toEqual([true, true]);
-    expect(calls.map((c) => c.ops[0].path)).toEqual(['records/b.md', 'records/a.md']);
+    expect(calls.map((c) => writtenPath(c.ops[0]))).toEqual(['records/b.md', 'records/a.md']);
     expect(useUndoStore.getState().future.map((e) => e.id)).toEqual([newer, older]);
   });
 
@@ -106,7 +113,7 @@ describe('undoStore (M60.7)', () => {
     const store = useUndoStore.getState();
     const first = store.pushBatch('First', VAULT, [file('records/a.md')]);
     store.pushBatch('Second', VAULT, [file('records/b.md')]);
-    applying(async (ops) => undid(ops.map((op) => file(op.path))));
+    applying(async (ops) => undid(ops.map((op) => file(writtenPath(op)))));
     expect(await store.undoEntry(first ?? -1)).toBe(true);
     expect(calls[0].ops).toEqual(revertOps([file('records/a.md')]));
     expect(useUndoStore.getState().past.map((e) => e.label)).toEqual(['Second']);
@@ -177,7 +184,7 @@ describe('undoStore (M60.7)', () => {
 
   it('redo reverts the undo, and its toast carries Undo again', async () => {
     const id = useUndoStore.getState().pushBatch('Renamed', VAULT, [file('records/a.md')]);
-    applying(async (ops) => undid(ops.map((op) => file(op.path))));
+    applying(async (ops) => undid(ops.map((op) => file(writtenPath(op)))));
     await useUndoStore.getState().undo();
     const inverse = useUndoStore.getState().future[0];
     expect(inverse.id).toBe(id);
@@ -205,6 +212,62 @@ describe('undoStore (M60.7)', () => {
     store.pushBatch('Big one', VAULT, [file('records/a.md', { before: big })]);
     store.pushBatch('Big two', VAULT, [file('records/a.md', { before: big })]);
     expect(useUndoStore.getState().past.map((e) => e.label)).toEqual(['Big two']);
+  });
+
+  it('rename snapshots share the session cap and reject knowledge file restoration', () => {
+    const change: RenameChange = {
+      steps: [{ from: 'records/a.md', to: 'records/next.md' }],
+      files: [{ path: 'records/b.md', before: '[[a]]', after: '[[next]]' }],
+      anchors: [
+        { path: 'knowledge/concepts/a.md', title: 'A', before: '[[a]]', after: '[[next]]' },
+      ],
+    };
+    const store = useUndoStore.getState();
+    expect(store.pushRename('Rename A', VAULT, change)).not.toBeNull();
+    expect(
+      store.pushRename('Bad write', VAULT, {
+        ...change,
+        files: [{ ...change.files[0], path: 'knowledge/concepts/a.md' }],
+      }),
+    ).toBeNull();
+    expect(
+      store.pushRename('Bad move', VAULT, {
+        ...change,
+        steps: [{ from: 'records/a.md', to: 'knowledge/concepts/a.md' }],
+      }),
+    ).toBeNull();
+    const big = 'x'.repeat(MAX_BYTES / 2);
+    store.pushRename('Large rename', VAULT, {
+      ...change,
+      files: [{ path: 'records/b.md', before: big, after: 'small' }],
+    });
+    store.pushRename('Newest rename', VAULT, {
+      ...change,
+      files: [{ path: 'records/b.md', before: big, after: 'small' }],
+    });
+    expect(useUndoStore.getState().past.map((entry) => entry.label)).toEqual(['Newest rename']);
+    store.clear();
+    expect(useUndoStore.getState().past).toEqual([]);
+  });
+
+  it('a vault switch while a request waits does not repopulate the cleared history', async () => {
+    const store = useUndoStore.getState();
+    store.pushBatch('First', VAULT, [file('records/a.md')]);
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    applying(async () => {
+      await held;
+      return null;
+    });
+    const task = store.undo();
+    store.clear();
+    useVaultStore.setState({ vaultPath: '/other-vault' });
+    release();
+    expect(await task).toBe(false);
+    expect(useUndoStore.getState().past).toEqual([]);
+    expect(useUndoStore.getState().future).toEqual([]);
   });
 
   it("clears, and refuses another vault's entry", async () => {

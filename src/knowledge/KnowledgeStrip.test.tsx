@@ -1,3 +1,4 @@
+import { navSeed } from '@/test/navSeed';
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -77,7 +78,7 @@ describe('KnowledgeStrip (M50.2)', () => {
     useVaultStore.setState({ entries: [project, aboutIt(1), due] });
     useNavStore.setState({
       selection: { kind: 'home' },
-      history: [{ kind: 'home' }],
+      history: [navSeed({ kind: 'home' })],
       historyIndex: 0,
     });
     render(<KnowledgeStrip entry={project} />);

@@ -779,7 +779,13 @@ export function AiPanel({
         text,
         skill: { path: skill.path },
         expand: () =>
-          readNote(vaultPath, skill.path).then((body) => skillPrompt(skill, body, request)),
+          readNote(vaultPath, skill.path).then((body) => {
+            const now = new Date();
+            return skillPrompt(skill, body, request, {
+              now,
+              offsetMinutes: now.getTimezoneOffset(),
+            });
+          }),
         // M17.8: a skill's `allowed-tools:` narrows THIS turn. Passed as data
         // to Rust, which intersects it with the granted policy — a vault file
         // may subtract from what Settings allowed and can never add to it.

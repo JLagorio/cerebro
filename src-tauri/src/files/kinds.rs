@@ -80,6 +80,7 @@ vocabulary!(
         Text => "text",
         Unknown => "unknown",
         Video => "video",
+        Whiteboard => "whiteboard",
     }
 );
 
@@ -107,10 +108,11 @@ vocabulary!(
 );
 
 vocabulary!(
-    /// Whether the Inbox takes the file: as text, through an extractor, or not.
+    /// Whether the Inbox takes the file: as text, through an extractor or import preview, or not.
     Ingest {
         Capture => "capture",
         Extract => "extract",
+        Import => "import",
         None => "none",
     }
 );
@@ -147,7 +149,7 @@ const TOP_KEYS: &[&str] = &[
     "kinds",
     "names",
 ];
-const LIMIT_KEYS: &[&str] = &["capture_max_bytes"];
+const LIMIT_KEYS: &[&str] = &["capture_max_bytes", "attachment_bytes", "import_max_bytes"];
 const ROW_KEYS: &[&str] = &[
     "ext",
     "kind",
@@ -206,6 +208,8 @@ pub struct KindRow {
 pub struct Limits {
     /// The largest file the Inbox captures as text.
     pub capture_max_bytes: u64,
+    pub attachment_bytes: u64,
+    pub import_max_bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -376,6 +380,9 @@ fn check_row(o: &Map<String, Value>, ext: &str) -> Result<(), String> {
             "kinds: {ext} is captured but is not markdown or text"
         ));
     }
+    if row.ingest == Ingest::Import && row.kind != Kind::Data {
+        return Err(format!("kinds: {ext} is imported but is not data"));
+    }
     if row.ingest == Ingest::Extract && row.extractor.is_none() {
         return Err(format!("kinds: {ext} is extracted but names no extractor"));
     }
@@ -413,6 +420,8 @@ pub fn parse(raw: &str) -> Result<KindTable, String> {
     }
     let limits = Limits {
         capture_max_bytes: positive(limits.get("capture_max_bytes")).unwrap_or_default(),
+        import_max_bytes: positive(limits.get("import_max_bytes")).unwrap_or_default(),
+        attachment_bytes: positive(limits.get("attachment_bytes")).unwrap_or_default(),
     };
 
     let unknown = object(&top["unknown"], "unknown")?;
@@ -546,6 +555,11 @@ pub fn lookup(name: &str) -> &'static KindRow {
     row_for(name).unwrap_or(&table().unknown)
 }
 
+/// One answer to whether a path names a JSON Canvas board.
+pub fn is_whiteboard(name: &str) -> bool {
+    lookup(name).kind == Kind::Whiteboard
+}
+
 /// The heads that mark a program, whatever the file is called: a `#!`
 /// script, ELF, Mach-O (both widths, both byte orders), a fat Mach-O or a Java
 /// class (`CAFEBABE`), and a PE (`MZ`).
@@ -599,13 +613,28 @@ pub fn open_policy(path: &Path) -> OpenPolicy {
     let Ok(meta) = std::fs::metadata(path) else {
         return OpenPolicy::Deny;
     };
-    let row = row_for(&name);
+    let bytes = if meta.is_file() {
+        head(path).ok()
+    } else {
+        None
+    };
+    open_policy_for(&name, &meta, bytes.as_deref())
+}
+
+/// The same verdict for an already-open file. Media readers supply its own
+/// metadata and sniffed head, so deciding the verdict never reopens a path.
+pub(crate) fn open_policy_for(
+    name: &str,
+    meta: &std::fs::Metadata,
+    head: Option<&[u8]>,
+) -> OpenPolicy {
+    let row = row_for(name);
     if meta.is_file() {
-        match head(path) {
-            Ok(head) if !has_sign(&head) => {}
+        match head {
+            Some(head) if !has_sign(head) => {}
             _ => return OpenPolicy::Deny,
         }
-        if row.is_none() && executable(&meta) {
+        if row.is_none() && executable(meta) {
             return OpenPolicy::Deny;
         }
     }
@@ -859,12 +888,13 @@ mod tests {
     }
 
     #[test]
-    fn the_scan_set_is_markdown_and_diagram() {
-        // vault/scan.rs keeps its own `md | mmd` match: which files are vault
-        // entries is the vault format (M47), not a kind. This pins that both
-        // rows exist and say what the scanner means by them.
+    fn the_scan_set_is_markdown_diagram_and_whiteboard() {
+        // The vault lists its page and diagram formats plus the shared
+        // whiteboard kind. Attachment kinds remain outside the scan.
         assert_eq!(lookup("a.md").kind, Kind::Markdown);
         assert_eq!(lookup("a.mmd").kind, Kind::Diagram);
+        assert!(is_whiteboard("a.canvas"));
+        assert!(is_whiteboard("a.CANVAS"));
     }
 
     #[cfg(unix)]

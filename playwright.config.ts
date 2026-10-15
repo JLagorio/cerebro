@@ -26,7 +26,17 @@ export default defineConfig({
     // The packaged app is WKWebView. The carrier spec runs there too (M55.4,
     // Q6): what a block writes to disk is the one claim jsdom and Chromium
     // can both pass while the shipped engine fails it.
-    { name: 'webkit', use: { browserName: 'webkit' }, testMatch: 'editor-carriers.spec.ts' },
+    {
+      name: 'webkit',
+      use: { browserName: 'webkit' },
+      testMatch: [
+        'editor-carriers.spec.ts',
+        'sheets.spec.ts',
+        'pdf-viewer.spec.ts',
+        'page-attachments.spec.ts',
+        'inbox-documents.spec.ts',
+      ],
+    },
   ],
   use: {
     baseURL,

@@ -15,10 +15,9 @@ const row = 'flex items-center gap-2';
 const label = 'w-[86px] flex-none text-xs text-n-500';
 
 /**
- * Rollup wiring (M3.4): follow one of this type's relation fields, read a
- * property off the related records, aggregate it. Before this existed a
- * Rollup property could be created but never configured — it displayed `0`
- * forever because `relation` was empty.
+ * Rollup wiring: read and aggregate a property on related records. A
+ * declared reverse source already names the records linking here; a forward
+ * source picks one of this type's relation fields.
  */
 export function RollupConfigEditor({
   typeName,
@@ -40,30 +39,41 @@ export function RollupConfigEditor({
   // person field offered the fields of a type this vault might not have, and
   // silently listed none for a vault whose people are `Teammate`s.
   const targetType =
-    relationDef === null ? null : relationTargetFor(relationDef, entries, typeName);
+    def.from?.type ??
+    (relationDef === null ? null : relationTargetFor(relationDef, entries, typeName));
   const targetFields = targetType === null ? [] : (schema.types.get(targetType)?.fields ?? []);
   const calc = rollupCalcMeta(def.calculate);
+  const percentDone = calc.calc === 'percent_done';
+  const offeredFields = percentDone
+    ? targetFields.filter((field) => field.kind === 'status' || field.kind === 'checkbox')
+    : targetFields;
 
   return (
     <div className="flex flex-col gap-2">
-      <div className={row}>
-        <span className={label}>Follow</span>
-        <Dropdown
-          size="sm"
-          label="Relation to follow"
-          width={200}
-          options={[
-            { value: NONE, label: 'Pick a relation…' },
-            ...relationFields.map((f) => ({
-              value: f.name,
-              label: `${humanize(f.name)}${f.target !== undefined ? ` → ${f.target}` : ''}`,
-            })),
-          ]}
-          value={def.relation ?? NONE}
-          onChange={(v) => onChange({ relation: v === NONE ? null : v })}
-        />
-      </div>
-      {relationFields.length === 0 && (
+      {def.from === undefined ? (
+        <div className={row}>
+          <span className={label}>Follow</span>
+          <Dropdown
+            size="sm"
+            label="Relation to follow"
+            width={200}
+            options={[
+              { value: NONE, label: 'Pick a relation…' },
+              ...relationFields.map((f) => ({
+                value: f.name,
+                label: `${humanize(f.name)}${f.target !== undefined ? ` → ${f.target}` : ''}`,
+              })),
+            ]}
+            value={def.relation ?? NONE}
+            onChange={(v) => onChange({ relation: v === NONE ? null : v })}
+          />
+        </div>
+      ) : (
+        <p className="m-0 text-xs leading-4 text-n-500">
+          {def.from.type} records linking here through {humanize(def.from.field)}.
+        </p>
+      )}
+      {def.from === undefined && relationFields.length === 0 && (
         <p className="m-0 pl-[94px] text-xs leading-4 text-n-400">
           This type has no relation property yet — add one first, then point the rollup at it.
         </p>
@@ -90,18 +100,23 @@ export function RollupConfigEditor({
               {
                 value: NONE,
                 label:
-                  relationDef === null
+                  relationDef === null && def.from === undefined
                     ? 'Pick a relation first'
                     : targetType === null
                       ? 'That relation targets any record'
                       : 'Pick a property…',
               },
-              ...targetFields.map((f) => ({ value: f.name, label: humanize(f.name) })),
+              ...offeredFields.map((f) => ({ value: f.name, label: humanize(f.name) })),
             ]}
             value={def.property ?? NONE}
             onChange={(v) => onChange({ property: v === NONE ? null : v })}
           />
         </div>
+      )}
+      {percentDone && targetType !== null && offeredFields.length === 0 && (
+        <p className="m-0 pl-[94px] text-xs leading-4 text-n-400">
+          Percent done needs a status or checkbox property on {targetType}.
+        </p>
       )}
       {calc.needsProperty && relationDef !== null && targetType === null && (
         <p className="m-0 pl-[94px] text-xs leading-4 text-n-400">

@@ -1,6 +1,7 @@
 ---
 type: Work item
 key: SYN-8
+project: "[[offline-sync-hardening]]"
 status: todo
 priority: urgent
 assignee: "[[mo-byrd]]"

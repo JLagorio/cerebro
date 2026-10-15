@@ -1,4 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { ImportInlet } from '@/app/ImportInlet';
+import type { ImportInput } from '@/engine/inlets';
+import { claimOf } from '@/engine/panes';
+import { editorHoldersOf, subscribeEditorHolders } from '@/editor/openPages';
+import { useListCursor } from '@/hooks/useListCursor';
+import { useOsDropZone } from '@/hooks/useOsDropZone';
+import { useVaultActionGuard } from '@/hooks/useVaultActionGuard';
+import { ListSelectionBar } from '@/components/ListSelectionBar';
+import { copyPageLinks } from '@/app/recordActions';
+import { Keycaps, keycapText } from '@/components/ui/Keycaps';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
@@ -25,7 +35,14 @@ import type { Entry, Schema } from '@/engine/types';
 import { useInboxQueue } from '@/hooks/useInboxQueue';
 import { captureNote } from '@/lib/capture';
 import { useCommand } from '@/lib/keys/useKeys';
-import { describeIngest, ingestFiles, ingestOne, INGESTIBLE_EXTENSIONS } from '@/lib/ingest';
+import {
+  describeIngest,
+  documentCount,
+  ingestDropped,
+  ingestFiles,
+  ingestOne,
+  INGESTIBLE_EXTENSIONS,
+} from '@/lib/ingest';
 import {
   askedAbout,
   fetchRefsLabel,
@@ -37,7 +54,7 @@ import { parseIssuePrefixes, uncachedRefs } from '@/engine/ingest';
 import { matchSpeakers, transcriptFacts } from '@/engine/transcripts';
 import { KnowledgeCommit } from '@/knowledge/KnowledgeCommit';
 import { todayIso } from '@/lib/templates';
-import { useNavStore } from '@/stores/navStore';
+import { useNavStore, usePaneId } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
@@ -368,7 +385,7 @@ function OrganizePanel({
             Mark organized
           </Button>
           <span className="text-center text-2xs text-n-400">
-            <kbd className="[font-family:var(--font-mono)]">⌘E</kbd> · removes it from the Inbox
+            <Keycaps command="inbox.file" /> · removes it from the Inbox
           </span>
         </div>
       </div>
@@ -392,13 +409,35 @@ export function InboxPage() {
   // sources, and doing that inside the map is the same work N times over.
   const concepts = useMemo(() => listConcepts(entries, todayIso()), [entries]);
   const fileInput = useRef<HTMLInputElement>(null);
-  // Depth, not a boolean: dragging over a child fires dragleave on the parent,
-  // so a flag would flicker the overlay off every time the cursor crossed a row.
+  // Browser HTML5 drags count child enter/leave events; native drops use the
+  // path router's hover state instead.
   const [dragDepth, setDragDepth] = useState(0);
 
   // Hoisted to a const so the narrowing survives into the row callbacks.
   const selected = queue.selected;
   const selectedPath = selected?.path ?? null;
+  const pane = usePaneId();
+  const nav = useNavStore();
+  const holders = useSyncExternalStore(subscribeEditorHolders, () =>
+    editorHoldersOf(selectedPath ?? ''),
+  );
+  const heldPane =
+    selectedPath === null
+      ? undefined
+      : nav.paneIds
+          .map((id) => ({ id, selection: useNavStore.getPaneState(id).selection }))
+          .find(
+            (candidate) => candidate.id !== pane && claimOf(candidate.selection) === selectedPath,
+          );
+  const otherEditor = holders.find((owner) => owner !== pane);
+  const heldElsewhere = heldPane !== undefined || otherEditor !== undefined;
+  const showHolder = () => {
+    if (heldPane) useNavStore.getState().focusPane(heldPane.id);
+    else if (otherEditor === 'peek')
+      document.querySelector<HTMLElement>('[data-testid="detail-panel"]')?.focus();
+    else if (otherEditor?.startsWith('p'))
+      useNavStore.getState().focusPane(otherEditor as `p${number}`);
+  };
   const index = queue.entries.findIndex((e) => e.path === selectedPath);
 
   // Filing is the one action here that removes something from the queue, and
@@ -438,36 +477,19 @@ export function InboxPage() {
     { when: () => selectedPath !== null },
   );
 
-  // Arrow keys walk the queue. The rows are a roving tabindex — only the open
-  // one is a tab stop, so Tab crosses the list instead of stepping through
-  // every capture in it.
+  // The capture remains open while the shared cursor tracks row selection.
+  const cursor = useListCursor({
+    keys: queue.entries.map((entry) => entry.path),
+    focus: selectedPath,
+    onFocusChange: (path) => {
+      if (path !== null) queue.select(path);
+    },
+    onOpen: (path) => navigate({ kind: 'doc', path }),
+    selectable: true,
+  });
   const moveSelection = (to: number) => {
-    const list = queue.entries;
-    if (list.length === 0) return;
-    const path = list[Math.min(Math.max(to, 0), list.length - 1)].path;
-    queue.select(path);
-    const el = rowRefs.current.get(path);
-    el?.focus();
-    el?.scrollIntoView({ block: 'nearest' });
-  };
-  const onListKeyDown = (e: React.KeyboardEvent) => {
-    switch (e.key) {
-      case 'ArrowDown':
-        moveSelection(index < 0 ? 0 : index + 1);
-        break;
-      case 'ArrowUp':
-        moveSelection(index < 0 ? 0 : index - 1);
-        break;
-      case 'Home':
-        moveSelection(0);
-        break;
-      case 'End':
-        moveSelection(queue.entries.length - 1);
-        break;
-      default:
-        return;
-    }
-    e.preventDefault();
+    if (queue.entries.length === 0) return;
+    cursor.focus(queue.entries[Math.max(0, Math.min(to, queue.entries.length - 1))].path, true);
   };
 
   const capture = () => {
@@ -481,23 +503,74 @@ export function InboxPage() {
     })();
   };
 
-  // M8.2 — the ingest inlet. New transcripts, exports, and pasted walls of
-  // text arrive here as untyped working docs, which is the same object a
-  // fetched ticket becomes, so the distiller only ever reads one shape. A
-  // repeat of material already filed writes nothing and is named in the
-  // toast by its filed page's title (M64.7).
+  // Text and kept documents file captures; calendars queue a preview.
+  const captureDrop = useVaultActionGuard('inbox');
+  const readingJobs = useRef(new Map<symbol, number>());
+  const [readingDocuments, setReadingDocuments] = useState(0);
+  const beginReading = (sources: readonly { name: string }[]) => {
+    const count = documentCount(sources);
+    const id = Symbol('document capture');
+    if (count > 0) {
+      readingJobs.current.set(id, count);
+      setReadingDocuments([...readingJobs.current.values()].reduce((a, b) => a + b, 0));
+    }
+    return () => {
+      readingJobs.current.delete(id);
+      setReadingDocuments([...readingJobs.current.values()].reduce((a, b) => a + b, 0));
+    };
+  };
+  const nextImport = useRef(0);
+  const [imports, setImports] = useState<{ id: number; input: ImportInput }[]>([]);
+  useEffect(
+    () =>
+      useVaultStore.subscribe((next, previous) => {
+        if (next.vaultPath !== previous.vaultPath) {
+          setImports([]);
+          readingJobs.current.clear();
+          setReadingDocuments(0);
+        }
+      }),
+    [],
+  );
+  const pendingImports = useRef(imports);
+  pendingImports.current = imports;
+  const claimImport = (current: () => boolean) => (input: ImportInput) => {
+    if (!current()) return false;
+    const id = ++nextImport.current;
+    setImports((queue) => [...queue, { id, input }]);
+    return true;
+  };
   const takeFiles = (files: readonly File[]) => {
     if (files.length === 0) return;
+    const current = captureDrop();
+    const done = beginReading(files);
     void (async () => {
       try {
-        const result = await ingestFiles(files);
+        const result = await ingestFiles(files, current, claimImport(current));
+        if (!current()) return;
         if (result.paths.length > 0) queue.select(result.paths[0]);
         toast(describeIngest(result));
       } catch (err) {
-        toast(`Couldn't ingest: ${err instanceof Error ? err.message : String(err)}`);
+        if (current())
+          toast(`Couldn't ingest: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        done();
       }
     })();
   };
+  const osDrop = useOsDropZone('inbox', async (paths) => {
+    if (!inboxEnabled) return;
+    const current = captureDrop();
+    const done = beginReading(paths.map((name) => ({ name })));
+    try {
+      const result = await ingestDropped(paths, current, claimImport(current));
+      if (!current()) return;
+      if (result.paths.length > 0) queue.select(result.paths[0]);
+      toast(describeIngest(result));
+    } finally {
+      done();
+    }
+  });
 
   // A paste big enough to be material rather than a typo becomes a capture.
   // Small pastes are almost certainly meant for a field, so they are left
@@ -548,6 +621,7 @@ export function InboxPage() {
       className="relative flex min-h-0 min-w-0 flex-1 flex-col"
       data-testid="inbox-page"
       onPaste={onPaste}
+      {...osDrop.zoneProps}
       onDragEnter={(e) => {
         if (!e.dataTransfer.types.includes('Files')) return;
         e.preventDefault();
@@ -631,7 +705,7 @@ export function InboxPage() {
         </div>
       )}
 
-      {dragDepth > 0 && (
+      {(dragDepth > 0 || osDrop.over) && (
         <div
           data-testid="inbox-dropzone"
           className="pointer-events-none absolute inset-0 z-10 m-3 flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-cortex-400 bg-cortex-50"
@@ -639,11 +713,17 @@ export function InboxPage() {
           <Icon name="file-down" size={22} color="var(--cortex-600)" />
           <span className="text-sm font-medium text-cortex-700">Drop to file in the Inbox</span>
           <span className="text-xs text-n-500">
-            Transcripts and notes — {INGESTIBLE_EXTENSIONS.map((e) => `.${e}`).join(' ')}
+            Notes, transcripts, documents and calendars —{' '}
+            {INGESTIBLE_EXTENSIONS.map((e) => `.${e}`).join(' ')}
           </span>
         </div>
       )}
 
+      {readingDocuments > 0 && (
+        <p role="status" className="px-4 py-2 text-sm text-n-500">
+          Reading {readingDocuments} documents…
+        </p>
+      )}
       {selected === null ? (
         <div className="flex min-h-0 flex-1 items-center justify-center">
           <EmptyState
@@ -679,11 +759,20 @@ export function InboxPage() {
           <div
             role="listbox"
             aria-label="Captures"
-            onKeyDown={onListKeyDown}
+            {...cursor.containerProps}
             className="flex w-[220px] flex-none flex-col overflow-y-auto border-r border-n-200 @[1100px]/canvas:w-[260px] @[1360px]/canvas:w-[300px]"
           >
+            <ListSelectionBar
+              count={cursor.state.selected.size}
+              onCopy={() =>
+                void copyPageLinks(
+                  queue.entries.filter((entry) => cursor.state.selected.has(entry.path)),
+                )
+              }
+            />
             {queue.entries.map((e) => {
               const active = e.path === selectedPath;
+              const rowProps = cursor.itemProps(e.path);
               // Held in place by the queue while you work on it, but it
               // already satisfies the membership rule — so the counts say 3
               // while 4 rows show. Mark it, or that reads as a bug.
@@ -697,9 +786,9 @@ export function InboxPage() {
                   // overrode the button role in a document with no table
                   // anywhere, so the queue announced as rows of nothing.
                   role="option"
-                  aria-selected={active}
-                  tabIndex={active ? 0 : -1}
+                  {...rowProps}
                   ref={(el) => {
+                    rowProps.ref(el);
                     if (el === null) rowRefs.current.delete(e.path);
                     else rowRefs.current.set(e.path, el);
                   }}
@@ -724,7 +813,7 @@ export function InboxPage() {
                         // about this row and filed a different note.
                         title={
                           active
-                            ? 'Organized — press ⌘E to file it'
+                            ? `Organized — press ${keycapText('inbox.file')} to file it`
                             : 'Organized — open it to file it'
                         }
                         className="inline-flex flex-none text-success-600"
@@ -840,7 +929,19 @@ export function InboxPage() {
                   </button>
                 </span>
               </div>
-              <NoteBodyEditor key={selected.path} path={selected.path} />
+              {heldElsewhere ? (
+                <div
+                  className="rounded-md border border-n-200 p-4 text-sm text-n-600"
+                  data-testid="inbox-held-editor"
+                >
+                  Open in another pane
+                  <Button variant="secondary" size="sm" onClick={showHolder}>
+                    Show
+                  </Button>
+                </div>
+              ) : (
+                <NoteBodyEditor key={selected.path} path={selected.path} />
+              )}
               <button
                 type="button"
                 onClick={() => navigate({ kind: 'doc', path: selected.path })}
@@ -854,6 +955,14 @@ export function InboxPage() {
 
           <OrganizePanel entry={selected} schema={schema} onFile={fileNote} />
         </div>
+      )}
+      {imports[0] && (
+        <ImportInlet
+          key={imports[0].id}
+          input={imports[0].input}
+          shouldNavigate={() => pendingImports.current.length === 1}
+          onClose={() => setImports((queue) => queue.slice(1))}
+        />
       )}
     </div>
   );

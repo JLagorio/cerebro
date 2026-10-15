@@ -210,3 +210,23 @@ describe('the fixture guard', () => {
     expect(scan(synthetic)).toEqual([]);
   });
 });
+
+describe('Notion capture fixtures (M69.5)', () => {
+  it('contain only toy text and synthetic ids, never a fabricated live recording', () => {
+    const raw = readFileSync(join(ROOT, 'src-tauri/fixtures/notion-cases.json'), 'utf8');
+    expect(scan(raw)).toEqual([]);
+    const fixture = JSON.parse(raw) as { about: string; cases: { page: string }[] };
+    expect(fixture.about).toContain('not a live recording');
+    for (const row of fixture.cases) expect(row.page).toMatch(/^([0-9])\1{31}$/);
+  });
+
+  it('refuses a credential, home path or address in a captured page', () => {
+    for (const text of [
+      'Bearer ' + 'q'.repeat(32),
+      '/Users/someone/page',
+      'someone@example.test',
+    ]) {
+      expect(scan(JSON.stringify({ capture: text }))).not.toEqual([]);
+    }
+  });
+});

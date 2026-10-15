@@ -27,8 +27,7 @@ import {
   parseKinds,
   shikiFor,
 } from './fileKinds';
-import { AUDIO, FILE, VIDEO } from './pageMedia';
-import { isMarkdownPath, viewerKindFor } from './roots';
+import { isMarkdownPath } from './roots';
 
 const REPO = join(__dirname, '../..');
 const RAW = readFileSync(join(REPO, KINDS_PATH), 'utf8');
@@ -135,35 +134,7 @@ describe('the derived readers', () => {
     expect(extOf('CLIP.MKV')).toBe('mkv');
   });
 
-  it('pageMedia agrees with the table on every extension it classifies', () => {
-    // pageMedia keeps BlockNote's own lists (M55.4) until M66.6 reads this
-    // table. The known differences, each named so a new one fails: BlockNote
-    // calls ogg a video, which the table files as audio, and lists flv, wmv,
-    // weba and epub, which the table has no row for.
-    const KNOWN: Record<string, string> = {
-      ogg: 'audio',
-      flv: 'none',
-      wmv: 'none',
-      weba: 'none',
-      epub: 'none',
-    };
-    const kindOf = (ext: string): string =>
-      KINDS.kinds.find((row) => row.ext === ext)?.kind ?? 'none';
-    const problems: string[] = [];
-    const check = (ext: string, ok: (kind: string) => boolean): void => {
-      const kind = kindOf(ext);
-      if (ext in KNOWN) {
-        if (kind !== KNOWN[ext])
-          problems.push(`${ext}: known as ${KNOWN[ext]}, table says ${kind}`);
-      } else if (!ok(kind)) {
-        problems.push(`${ext}: table says ${kind}`);
-      }
-    };
-    for (const ext of VIDEO) check(ext, (k) => k === 'video');
-    for (const ext of AUDIO) check(ext, (k) => k === 'audio');
-    for (const ext of FILE) check(ext, (k) => !['none', 'image', 'audio', 'video'].includes(k));
-    expect(problems).toEqual([]);
-  });
+
 });
 
 /*
@@ -388,7 +359,6 @@ describe('answers every key the four retired maps answered, the same way', () =>
       const base = name.split('/').pop() as string;
       expect(isCapturable(base), name).toBe(retiredCapturable(base));
       expect(isMarkdownPath(name), name).toBe(retiredMarkdown(name));
-      expect(viewerKindFor(name), name).toBe(retiredMarkdown(name) ? 'doc' : 'code');
     }
   });
 });

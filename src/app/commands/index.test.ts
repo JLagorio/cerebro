@@ -1,3 +1,5 @@
+import { DESTINATIONS } from '@/engine/destinations';
+import { CREATE_ROWS } from '../createCatalog';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -139,7 +141,37 @@ describe('the command catalog (M65.1)', () => {
       .join('\n');
     const unbound = keyedCommands()
       .map((d) => d.id)
-      .filter((id) => !text.includes(`'${id}'`));
+      .filter((id) => !text.includes(`'${id}'`))
+      // The Go rows and their binding sites derive from the same table.
+      // useAppCommands.test exercises every destination's handler.
+      .filter((id) => !DESTINATIONS.some((place) => id === `go.${place.id}`))
+      // The New rows and handlers share their creation catalog too.
+      .filter((id) => !CREATE_ROWS.some((row) => id === `create.${row.id}`));
+    expect(text).toContain('id: `go.${place.id}`');
+    expect(text).toContain('id: `create.${row.id}`');
     expect(unbound).toEqual([]);
   });
+});
+
+it('chord leaders are plain letters and never single bindings in their scope or app', () => {
+  for (const scope of ['app', 'page']) {
+    expect(() =>
+      checkCatalog([
+        row({ id: 'chord', keys: ['g h'], scope: 'page' }),
+        row({ id: 'single', keys: ['g'], scope }),
+      ]),
+    ).toThrow(/chord leader/);
+  }
+  expect(() => checkCatalog([row({ keys: ['mod+g h'] })])).toThrow(/plain letter/);
+  expect(() =>
+    checkCatalog([row({ id: 'a', keys: ['g h'] }), row({ id: 'b', keys: ['g h'] })]),
+  ).toThrow(/bound twice/);
+  for (const def of catalog()) expect(def.keys).not.toEqual(expect.arrayContaining(['g']));
+  expect(catalog().flatMap((def) => def.keys)).not.toContain('c');
+});
+
+it('a modified shortcut can also have a chord, which keeps letter stand-down', () => {
+  expect(() =>
+    checkCatalog([row({ keys: ['mod+shift+n', 'c n'], inEditor: true, inModal: true })]),
+  ).not.toThrow();
 });

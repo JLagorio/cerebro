@@ -115,3 +115,15 @@ describe('actorLabel (M52.3)', () => {
     expect(label('human:josef').text).toBe('josef');
   });
 });
+
+it('names another app while retaining the recorded actor', () => {
+  expect(actorLabel('client:codex', [])).toEqual({
+    text: 'codex (other app)',
+    raw: 'client:codex',
+  });
+});
+it("the client prefix is Rust's", async () => {
+  const { default: rust } = await import('../../src-tauri/src/client_access.rs?raw');
+  const { CLIENT_ACTOR_PREFIX } = await import('./authors');
+  expect(rust).toContain(`pub const CLIENT_ACTOR_PREFIX: &str = "${CLIENT_ACTOR_PREFIX}";`);
+});

@@ -225,6 +225,9 @@ describe('a mock woken run claims its wake (M63.1)', () => {
     wakeKey: key.repeat(64),
     trigger: '1'.repeat(16),
     cause: { kind: 'event', subject },
+    path: subject,
+    hash: 'a'.repeat(64),
+    event: 'changed' as const,
   });
   async function admitOne(key: string, subject = `records/risks/${key}.md`): Promise<string> {
     await mock.admitWakes(VAULT, [offer(key, subject)]);
@@ -268,7 +271,10 @@ describe('a mock woken run claims its wake (M63.1)', () => {
     const next = await admitOne('b');
     const start = await woken('wait for me', id);
     if (!('run' in start)) throw new Error('a pending wake starts');
-    expect(await woken('hello', next)).toEqual({ deferred: ['agent_running'] });
+    expect(await woken('hello', next)).toEqual({
+      deferred: ['agent_running'],
+      words: ['this agent is already running'],
+    });
     expect(row(next)).toMatchObject({ state: 'pending', deferred: 'agent_running' });
     const done = doneOf(start.run);
     await stopAgent(start.run);
@@ -289,5 +295,87 @@ describe('a mock woken run claims its wake (M63.1)', () => {
     const id = await admitOne('a');
     await expect(woken('hello', id, true)).rejects.toThrow(/a woken run is unattended/);
     expect(row(id)).toMatchObject({ state: 'pending' });
+  });
+});
+
+it('a manual start refuses another live run of that actor only in this vault', async () => {
+  const options = {
+    message: 'wait for me',
+    shell: 'off' as const,
+    connectors: false,
+    attended: true,
+    actor: 'process:release-scout',
+  };
+  const first = (await runAgent(VAULT, options)) as RunHandle;
+  await expect(
+    runAgent(VAULT, { ...options, attended: false, lane: 'agent', cause: { kind: 'manual' } }),
+  ).rejects.toThrow('process:release-scout is already running, so Run now did not start another.');
+  const elsewhere = (await runAgent('/other-vault', {
+    ...options,
+    attended: false,
+    lane: 'agent',
+    cause: { kind: 'manual' },
+  })) as RunHandle;
+  await stopAgent(first.run);
+  await stopAgent(elsewhere.run);
+  const next = (await runAgent(VAULT, {
+    ...options,
+    attended: false,
+    lane: 'agent',
+    cause: { kind: 'manual' },
+  })) as RunHandle;
+  await stopAgent(next.run);
+});
+
+describe('follow-up run binding', () => {
+  const actor = 'process:release-scout';
+  const options = {
+    message: 'hello',
+    shell: 'off' as const,
+    connectors: false,
+    attended: false,
+    lane: 'agent',
+    actor,
+    followup: 'later',
+  };
+  const seed = () =>
+    mock.__seedFollowups([
+      {
+        vault: VAULT,
+        actor,
+        followupId: 'later',
+        note: 'the stored note',
+        dueAt: new Date(Date.now() - 60_000).toISOString(),
+      },
+    ]);
+  it('a claimed row overrides the wire cause and fires only one child', async () => {
+    seed();
+    await mock.claimFollowup(VAULT, 'later');
+    const started = await runAgent(VAULT, {
+      ...options,
+      cause: { kind: 'event', subject: 'forged' },
+    });
+    expect('run' in started).toBe(true);
+    expect(await runAgent(VAULT, options)).toEqual({ settled: 'gone' });
+    if (!('run' in started)) throw Error('not started');
+    await doneOf(started.run);
+    const booked = await mock.fleetRunDetail(started.durableId!);
+    expect(booked?.run.cause).toMatchObject({ kind: 'followup', subject: 'the stored note' });
+    expect(await mock.listFollowups(VAULT)).toEqual([]);
+  });
+  it('a binding cannot become an attended, foreign, wake or differently billed run', async () => {
+    seed();
+    await mock.claimFollowup(VAULT, 'later');
+    for (const patch of [{ attended: true }, { lane: 'skill' }, { actor: 'human:me' }])
+      await expect(runAgent(VAULT, { ...options, ...patch })).rejects.toThrow(
+        'A follow-up starts only its own agent, unattended on lane agent, without a wake.',
+      );
+    expect(await runAgent(VAULT, { ...options, actor: 'process:other' })).toEqual({
+      settled: 'gone',
+    });
+    await expect(
+      runAgent(VAULT, { ...options, followup: null, cause: { kind: 'followup' } }),
+    ).rejects.toThrow('never named by the renderer');
+    expect((await mock.listFollowups(VAULT))[0].state).toBe('claimed');
   });
 });

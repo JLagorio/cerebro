@@ -1,6 +1,7 @@
 ---
 type: Work item
 key: LNC-10
+project: "[[field-app-launch-campaign]]"
 status: backlog
 priority: medium
 assignee: "[[dana-fox]]"

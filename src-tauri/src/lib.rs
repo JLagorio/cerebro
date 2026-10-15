@@ -2,6 +2,8 @@ pub mod agent;
 pub mod app_config;
 pub mod assembly;
 pub mod attention;
+pub mod canvas;
+pub mod client_access;
 mod comment_tools;
 pub mod conflict;
 pub mod connectors;
@@ -15,8 +17,10 @@ mod eval;
 pub mod files;
 pub mod git;
 pub mod git_commands;
+pub mod import;
 pub mod ingest;
 pub mod knowledge;
+mod mail;
 pub mod ledger;
 pub mod maintain;
 pub mod mcp;
@@ -30,8 +34,10 @@ pub mod roots_commands;
 pub mod roots_git_commands;
 pub mod runtime;
 pub mod search;
+pub mod sheet;
 pub mod shell;
 pub mod spawn;
+pub mod starter;
 pub mod trigger;
 pub mod vault;
 
@@ -55,6 +61,25 @@ fn remember_vault(app: &tauri::AppHandle, path: &str) -> Result<(), String> {
     let mut config = app_config::load(&dir);
     config.last_vault = Some(path.to_string());
     app_config::save(&dir, &config)
+}
+
+// Blocking native completion waits stay off the UI thread.
+#[tauri::command(async)]
+fn notification_permission(app: tauri::AppHandle) -> &'static str {
+    shell::notify::permission(&app.config().identifier).word()
+}
+#[tauri::command(async)]
+fn request_notification_permission(app: tauri::AppHandle) -> &'static str {
+    shell::notify::request(&app.config().identifier).word()
+}
+#[tauri::command(async)]
+fn post_notification(
+    app: tauri::AppHandle,
+    id: String,
+    title: String,
+    body: String,
+) -> &'static str {
+    shell::notify::post(&app.config().identifier, &id, &title, &body)
 }
 
 #[tauri::command]
@@ -119,6 +144,70 @@ fn read_note(vault: String, path: String) -> Result<String, String> {
     vault::write::read_note(Path::new(&vault), &path)
 }
 
+/// The exact source used to prepare a checked link rewrite (M60.10).
+#[tauri::command(async)]
+fn read_note_source(vault: String, path: String) -> Result<vault::write::NoteSource, String> {
+    vault::write::read_note_source(Path::new(&vault), &path)
+}
+
+#[tauri::command(async)]
+fn read_canvas_file(
+    vault: String,
+    path: String,
+) -> Result<vault::write::NoteSource, vault::write::CanvasRefusal> {
+    vault::write::read_canvas_source(Path::new(&vault), &path)
+}
+#[derive(serde::Serialize)]
+struct CanvasSaved {
+    hash: String,
+}
+#[tauri::command(async)]
+fn save_canvas_file(
+    vault: String,
+    path: String,
+    content: String,
+) -> Result<CanvasSaved, vault::write::CanvasRefusal> {
+    let by = WriteReceipt::ipc(
+        knowledge::guard_human_write(&path)
+            .map_err(|_| vault::write::CanvasRefusal::new("read_only"))?,
+    );
+    vault::write::save_canvas(Path::new(&vault), &path, &content, &by)
+        .map(|hash| CanvasSaved { hash })
+}
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum CanvasWriteMode {
+    Preview,
+    Commit,
+}
+#[derive(serde::Serialize)]
+struct CanvasCreated {
+    path: String,
+    hash: Option<String>,
+}
+#[tauri::command(async)]
+fn create_canvas_file(
+    vault: String,
+    path: String,
+    content: String,
+    mode: CanvasWriteMode,
+) -> Result<CanvasCreated, vault::write::CanvasRefusal> {
+    let by = WriteReceipt::ipc(
+        knowledge::guard_human_write(&path)
+            .map_err(|_| vault::write::CanvasRefusal::new("read_only"))?,
+    );
+    let mode = match mode {
+        CanvasWriteMode::Preview => vault::write::WriteMode::Preview,
+        CanvasWriteMode::Commit => vault::write::WriteMode::Commit,
+    };
+    vault::write::create_canvas(Path::new(&vault), &path, &content, mode, &by).map(|landing| {
+        CanvasCreated {
+            path: landing.path,
+            hash: (mode == vault::write::WriteMode::Commit).then_some(landing.after),
+        }
+    })
+}
+
 /// ⌘K's page-text search (M59.4): `search::vault_search` over the vault's
 /// cached corpus, up to `limit` hits (50 when absent). Ungated: the webview
 /// can already read every note.
@@ -140,22 +229,59 @@ fn search_vault(
 // have their own, narrower boundary (M17.1): they reach the bundle through
 // the two server-stamped tools alone, `write_concept` and `recheck_concept`
 // (M49.7). See mcp.rs.
+/// The editor omits expect_hash; outside readers carry their full-file hash.
+/// A projection capture returns None; an ordinary save returns its new hash.
 #[tauri::command(async)]
-fn save_note(vault: String, path: String, body: String) -> Result<(), String> {
-    // The M23.7 capture valve: an in-app body edit to a knowledge
-    // projection is CAPTURED (an editorial override, or the unique
-    // extracted-text correction), not refused. The old refusal survives
-    // only where no writer is active or the edit cannot be represented.
+fn save_note(
+    vault: String,
+    path: String,
+    body: String,
+    expect_hash: Option<String>,
+) -> Result<Option<String>, String> {
+    let expected = expect_hash
+        .as_deref()
+        .map(vault::write::normalize_expect_hash)
+        .transpose()?;
+    // M23.7: a body edit to a projection is captured, not overwritten. Its
+    // expectation is compared before the valve and again under its writer.
     if let Some(cleared) = knowledge::concept_door(knowledge::HumanConcept::Capture(&path)) {
         let by = WriteReceipt::ipc(cleared);
-        if let Some(result) =
-            ledger::capture::capture_body_edit(Path::new(&vault), &path, &body, &by)
-        {
-            return result;
+        if let Some(result) = ledger::capture::capture_body_edit(
+            Path::new(&vault),
+            &path,
+            &body,
+            expected.as_deref(),
+            &by,
+        ) {
+            return result.map(|()| None).map_err(save_note_refusal);
         }
     }
     let by = WriteReceipt::ipc(knowledge::guard_human_write(&path)?);
-    vault::write::save_note(Path::new(&vault), &path, &body, &by)
+    vault::write::save_note(Path::new(&vault), &path, &body, expected.as_deref(), &by)
+        .map(Some)
+        .map_err(save_note_refusal)
+}
+
+fn save_note_refusal(error: vault::write::NoteWriteError) -> String {
+    match error {
+        vault::write::NoteWriteError::Refused(message) => message,
+        vault::write::NoteWriteError::Stale(stale) => {
+            let message = vault::write::stale_save_words(&stale.path);
+            let typed = policy::table::PolicyTable::load().and_then(|table| {
+                policy::rejection::OperationalRefusal::new(
+                    &table,
+                    "stale_content",
+                    "save_note",
+                    &message,
+                )
+            });
+            match typed {
+                Ok(typed) => runtime::sink::record(&typed, &runtime::operational::LogEntry::bare()),
+                Err(error) => log::warn!("operational_log: could not type stale_content: {error}"),
+            }
+            message
+        }
+    }
 }
 
 #[tauri::command(async)]
@@ -321,6 +447,23 @@ fn fleet_runs(
 ) -> Result<Vec<runtime::fleet::FleetRun>, String> {
     let ro = runtime::ReadOnly::open(&config_dir(&app)?)?;
     runtime::fleet::runs(&ro, &filter)
+}
+
+/// Page-scoped runs, including at most two descendant hop levels.
+#[tauri::command(async)]
+fn fleet_subject_runs(
+    app: tauri::AppHandle,
+    vault: String,
+    subjects: Vec<String>,
+    limit: Option<u32>,
+) -> Result<Vec<runtime::fleet::FleetRun>, String> {
+    let ro = runtime::ReadOnly::open(&config_dir(&app)?)?;
+    runtime::fleet::subject_runs(
+        &ro,
+        &runtime::scope::derive_vault_id(Path::new(&vault)),
+        &subjects,
+        limit,
+    )
 }
 
 /// One run, with whatever the governance tables recorded about it (M33.2),
@@ -720,6 +863,95 @@ fn job_ledger_read(app: tauri::AppHandle, vault: String) -> Result<JobLedgers, S
     Ok(out)
 }
 
+/// Reminder reads refuse without the runtime database, never invent empty history.
+#[derive(serde::Serialize)]
+struct ReminderState {
+    fires: Vec<runtime::reminders::Fire>,
+    window: Option<runtime::sessions::SessionWindow>,
+}
+#[tauri::command(async)]
+fn reminder_state(app: tauri::AppHandle, vault: String) -> Result<ReminderState, String> {
+    let (conn, id) = job_ledger_scope(&app, &vault)?;
+    Ok(ReminderState {
+        fires: runtime::reminders::read_all(&conn, &id)?,
+        window: runtime::sessions::window_for(&id),
+    })
+}
+#[tauri::command(async)]
+fn reminder_claim(
+    app: tauri::AppHandle,
+    vault: String,
+    fires: Vec<serde_json::Value>,
+) -> Result<Vec<runtime::reminders::ReminderClaim>, String> {
+    let (conn, id) = job_ledger_scope(&app, &vault)?;
+    runtime::reminders::claim(
+        &conn,
+        &id,
+        &fires,
+        &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
+    )
+}
+#[tauri::command(async)]
+fn reminder_import(
+    app: tauri::AppHandle,
+    vault: String,
+    fires: Vec<serde_json::Value>,
+) -> Result<usize, String> {
+    let (conn, id) = job_ledger_scope(&app, &vault)?;
+    runtime::reminders::import(
+        &conn,
+        &id,
+        &fires,
+        &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
+    )
+}
+#[tauri::command(async)]
+fn done_marks_read(
+    app: tauri::AppHandle,
+    vault: String,
+) -> Result<Vec<runtime::done_marks::Mark>, String> {
+    let (conn, id) = job_ledger_scope(&app, &vault)?;
+    runtime::done_marks::read_all(&conn, &id)
+}
+#[tauri::command(async)]
+fn done_mark(
+    app: tauri::AppHandle,
+    vault: String,
+    mark: serde_json::Value,
+) -> Result<runtime::done_marks::MarkResult, String> {
+    let (conn, id) = job_ledger_scope(&app, &vault)?;
+    runtime::done_marks::mark(
+        &conn,
+        &id,
+        &mark,
+        &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
+    )
+}
+#[tauri::command(async)]
+fn done_unmark(
+    app: tauri::AppHandle,
+    vault: String,
+    mark: serde_json::Value,
+    restore: Option<serde_json::Value>,
+) -> Result<bool, String> {
+    let (conn, id) = job_ledger_scope(&app, &vault)?;
+    runtime::done_marks::unmark(&conn, &id, &mark, restore.as_ref())
+}
+#[tauri::command(async)]
+fn done_marks_import(
+    app: tauri::AppHandle,
+    vault: String,
+    marks: Vec<serde_json::Value>,
+) -> Result<usize, String> {
+    let (conn, id) = job_ledger_scope(&app, &vault)?;
+    runtime::done_marks::import(
+        &conn,
+        &id,
+        &marks,
+        &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
+    )
+}
+
 /// Record a run key, answering whether the record was FRESH — false means
 /// another window or an earlier session already answered this exact fire,
 /// and the caller must not spawn.
@@ -832,9 +1064,55 @@ fn admit_wakes(
     app: tauri::AppHandle,
     vault: String,
     wakes: Vec<runtime::wakes::WakeOffer>,
+    seen_at: Option<String>,
 ) -> Result<runtime::wakes::AdmitReport, String> {
     let (conn, vault_id) = job_ledger_scope(&app, &vault)?;
-    runtime::wakes::admit(&conn, &vault_id, &wakes, chrono::Utc::now())
+    let now = chrono::Utc::now();
+    // A renderer clock outside the wake's own retention window cannot prove
+    // a write happened after its scan. Exact hashes still prove that writer.
+    let seen_at = seen_at
+        .as_deref()
+        .and_then(|raw| chrono::DateTime::parse_from_rfc3339(raw).ok())
+        .map(|at| at.with_timezone(&chrono::Utc))
+        .filter(|at| {
+            *at <= now + chrono::Duration::minutes(1)
+                && *at >= now - chrono::Duration::days(runtime::wakes::WAKE_TTL_DAYS)
+        });
+    let ro = runtime::ReadOnly::open(&config_dir(&app)?)?;
+    let writers = wakes
+        .iter()
+        .map(|offer| {
+            runtime::write_log::writer_of(
+                &ro,
+                &vault_id,
+                &offer.path,
+                &offer.hash,
+                &offer.event,
+                seen_at,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    runtime::wakes::admit_with_writers(&conn, &vault_id, &wakes, &writers, now)
+}
+
+/// A removed Agent relation releases pending work, never an already running job.
+#[tauri::command(async)]
+fn release_assigned_wakes(
+    app: tauri::AppHandle,
+    vault: String,
+    agent_key: String,
+    subject: String,
+    key_prefix: String,
+) -> Result<usize, String> {
+    let (conn, vault_id) = job_ledger_scope(&app, &vault)?;
+    runtime::wakes::release_assignment(
+        &conn,
+        &vault_id,
+        &agent_key,
+        &subject,
+        &key_prefix,
+        chrono::Utc::now(),
+    )
 }
 
 /// The wakes waiting in this vault, oldest first (M63.1), read through a
@@ -883,6 +1161,53 @@ fn fleet_wakes(
         actor.as_deref(),
         chrono::Utc::now(),
     )
+}
+
+#[tauri::command(async)]
+fn list_followups(
+    app: tauri::AppHandle,
+    vault: String,
+) -> Result<Vec<runtime::followups::Followup>, String> {
+    let ro = runtime::ReadOnly::open(&config_dir(&app)?)?;
+    runtime::followups::list(
+        &ro,
+        &runtime::scope::derive_vault_id(Path::new(&vault)),
+        chrono::Utc::now(),
+    )
+}
+
+#[tauri::command(async)]
+fn claim_followup(
+    app: tauri::AppHandle,
+    vault: String,
+    id: String,
+) -> Result<runtime::followups::FollowupClaim, String> {
+    let (conn, vault_id) = job_ledger_scope(&app, &vault)?;
+    let Some(row) = runtime::followups::get(&conn, &vault_id, &id)? else {
+        return Ok(runtime::followups::FollowupClaim::NotWaiting);
+    };
+    let entries = vault::scan::scan_vault(Path::new(&vault))?;
+    let standing = match mcp::own_agent_record(&entries, &row.actor) {
+        None => runtime::followups::Standing::Gone,
+        Some(record)
+            if record
+                .properties
+                .get("paused")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+                || runtime::settings::agent_paused(&conn, &vault_id, &row.actor)? =>
+        {
+            runtime::followups::Standing::Paused
+        }
+        Some(_) => runtime::followups::Standing::Active,
+    };
+    runtime::followups::claim(&conn, &vault_id, &id, standing, chrono::Utc::now())
+}
+
+#[tauri::command(async)]
+fn cancel_followup(app: tauri::AppHandle, vault: String, id: String) -> Result<bool, String> {
+    let (conn, vault_id) = job_ledger_scope(&app, &vault)?;
+    runtime::followups::cancel(&conn, &vault_id, &id, chrono::Utc::now())
 }
 
 /// How many background runs may be live at once (M33b.2). Subscription-wide
@@ -1002,6 +1327,49 @@ fn ask_question(
     )
 }
 
+/// Finished unattended work for this vault. A read never registers a vault.
+#[tauri::command(async)]
+fn home_runs(
+    app: tauri::AppHandle,
+    vault: String,
+    limit: Option<u32>,
+) -> Result<runtime::fleet::EndedRuns, String> {
+    let ro = runtime::ReadOnly::open(&config_dir(&app)?)?;
+    runtime::fleet::ended_runs(
+        &ro,
+        &runtime::scope::derive_vault_id(Path::new(&vault)),
+        limit,
+    )
+}
+/// The person's Knowledge change window. No ledger is not recorded; a torn
+/// ledger is unavailable, never an empty window.
+#[tauri::command(async)]
+fn home_changes(
+    app: tauri::AppHandle,
+    vault: String,
+    after_seq: Option<u64>,
+) -> Result<Option<attention::status::ChangesView>, String> {
+    let vault = Path::new(&vault);
+    let directory = ledger::ledger_dir(vault);
+    let Some(store) = ledger::store::load(&directory)? else {
+        return Ok(None);
+    };
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    let vault_id = runtime::scope::derive_vault_id(vault);
+    let read = ledger::read_ledger(&directory).map_err(|e| e.to_string())?;
+    let latest = convergence::store::latest(&conn, &vault_id, &store.store_id)?;
+    let window = convergence::home_window(
+        after_seq,
+        latest.map(|run| run.from_seq),
+        read.head_seq.unwrap_or(0),
+    );
+    let (output, now) = convergence::over_with_now(&read.frames, &store.store_id, window)?;
+    let mut view =
+        attention::status::change_sections(&output, &attention::status::Subjects::of(&now));
+    view.changed_at = convergence::changed_at(&read.frames, window);
+    Ok(Some(view))
+}
+
 /// "How did our model change?", on demand (M26.8c).
 ///
 /// **Attended means returned, not narrated.** The design's word is that
@@ -1012,9 +1380,8 @@ fn ask_question(
 /// difference would be paying for prose about arithmetic, and the day-one
 /// sections are all M26-computable by construction.
 ///
-/// `from_seq` omitted means "since the last stored run", which is the
-/// question a person actually asks; an explicit window is for a surface that
-/// wants to look further back.
+/// An omitted `from_seq` starts after the last stored convergence run.
+/// Home uses its own Done mark through `home_changes`.
 #[tauri::command(async)]
 fn converge(
     app: tauri::AppHandle,
@@ -1039,7 +1406,7 @@ fn converge(
             .unwrap_or(0),
     };
     // A window with nothing in it is a real answer — "nothing has changed
-    // since you last looked" — so it is computed rather than refused.
+    // in this window" — so it is computed rather than refused.
     let window = convergence::diff::Window {
         from_seq: from_seq.min(head_seq),
         to_seq: head_seq,
@@ -1509,11 +1876,7 @@ fn create_folder(vault: String, path: String) -> Result<(), String> {
 #[tauri::command(async)]
 fn rename_note(vault: String, from: String, to: String) -> Result<(), String> {
     let by = WriteReceipt::ipc(knowledge::guard_human_move(&from, &to)?);
-    vault::write::rename_note(Path::new(&vault), &from, &to, &by)?;
-    // M70.4: a thread turn's answer follows its page (or the folder holding
-    // it) to where the rename put it.
-    agent::thread_turn::page_moved(Path::new(&vault), &from, &to);
-    Ok(())
+    vault::write::rename_note(Path::new(&vault), &from, &to, &by)
 }
 
 #[tauri::command(async)]
@@ -1542,6 +1905,28 @@ fn restore_from_trash(vault: String, stamp: String) -> Result<String, String> {
     vault::trash::restore_from_trash(Path::new(&vault), &stamp, &by)
 }
 
+/// A marker read never treats unreadable state as an unoffered vault.
+#[tauri::command(async)]
+fn starter_marker(vault: String) -> Result<Option<starter::StarterMarker>, String> {
+    starter::read_marker(Path::new(&vault))
+}
+
+#[tauri::command(async)]
+fn install_starter_kit(vault: String) -> Result<starter::Installed, String> {
+    let mut cleared = None;
+    for (path, _) in starter::STARTER_FILES {
+        cleared = Some(knowledge::guard_human_write(path)?);
+    }
+    let cleared = cleared.ok_or("The starter kit has no pages.")?;
+    let by = WriteReceipt::ipc(cleared);
+    starter::install(Path::new(&vault), &by)
+}
+
+#[tauri::command(async)]
+fn decline_starter_kit(vault: String) -> Result<(), String> {
+    starter::decline(Path::new(&vault))
+}
+
 /// One database-wide change, all or nothing (M60.6): a property rename,
 /// kind change or copy, or a bulk delete, as `vault::batch` applies it.
 /// Every op's path is guarded as any write is, and the first refusal answers
@@ -1554,13 +1939,22 @@ fn apply_batch(
 ) -> Result<vault::batch::BatchApplied, String> {
     let mut cleared = None;
     for op in &ops {
-        let path = op.get("path").and_then(serde_json::Value::as_str);
-        cleared = Some(knowledge::guard_human_write(path.unwrap_or_default())?);
+        let text = |key| {
+            op.get(key)
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+        };
+        cleared = Some(if text("op") == "rename" {
+            knowledge::guard_human_move(text("from"), text("to"))?
+        } else {
+            knowledge::guard_human_write(text("path"))?
+        });
     }
     let Some(cleared) = cleared else {
         return Ok(vault::batch::BatchApplied {
             batch_id: String::new(),
             files: Vec::new(),
+            imports: None,
         });
     };
     let by = WriteReceipt::ipc(cleared);
@@ -1732,13 +2126,68 @@ async fn pick_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
         .collect()
 }
 
+/// Only the chosen filename and decoded preview cross into the webview.
+#[tauri::command]
+async fn pick_sheet_file(
+    app: tauri::AppHandle,
+) -> Result<Option<sheet::xlsx::PickedSheet>, String> {
+    let Some(picked) = app
+        .dialog()
+        .file()
+        .add_filter("Spreadsheets", &["xlsx", "xlsm", "csv"])
+        .blocking_pick_file()
+    else {
+        return Ok(None);
+    };
+    let path = picked
+        .into_path()
+        .map_err(|_| "Choose a regular spreadsheet file.".to_string())?;
+    let zone = runtime::budget::system_timezone();
+    tauri::async_runtime::spawn_blocking(move || {
+        sheet::xlsx::read_sheet_file(&path, &zone).map(Some)
+    })
+    .await
+    .map_err(|_| "The spreadsheet importer stopped.".to_string())?
+}
+
 /// Copy a picked file into the vault's `attachments/` folder; returns its
 /// vault-relative path. The destination is fixed inside `import_attachment`,
 /// so its receipt is minted from the guard on that folder (M58.1).
 #[tauri::command(async)]
-fn import_attachment(vault: String, source: String) -> Result<String, String> {
+fn import_attachment(
+    vault: String,
+    source: String,
+) -> Result<vault::write::AttachmentImport, String> {
     let by = WriteReceipt::ipc(knowledge::guard_human_write(vault::write::ATTACHMENTS_DIR)?);
     vault::write::import_attachment(Path::new(&vault), &source, &by)
+}
+
+#[tauri::command(async)]
+fn import_attachment_bytes(
+    vault: String,
+    name: String,
+    bytes_base64: String,
+) -> Result<vault::write::AttachmentImport, String> {
+    let by = WriteReceipt::ipc(knowledge::guard_human_write(vault::write::ATTACHMENTS_DIR)?);
+    vault::write::import_attachment_bytes(Path::new(&vault), &name, &bytes_base64, &by)
+}
+
+/// Read the already-kept original through the bounded Office reader. No write
+/// or attribution receipt is minted by an extraction (M66.7c).
+#[tauri::command(async)]
+fn extract_document(vault: String, path: String) -> Result<files::extract::Extraction, String> {
+    files::extract::capture(Path::new(&vault), &path, files::extract::Limits::SHIPPED)
+}
+
+/// Read only the outside paths explicitly supplied by a person's file drop.
+#[tauri::command(async)]
+fn inspect_dropped(paths: Vec<String>) -> Vec<files::dropped::DroppedFile> {
+    files::dropped::inspect(paths)
+}
+
+#[tauri::command(async)]
+fn read_dropped_text(path: String) -> files::dropped::DroppedText {
+    files::dropped::read_text(&path)
 }
 
 /// Write a raw text file (`.mmd` only) into the vault; returns the actual
@@ -1799,11 +2248,105 @@ async fn export_svg(
     Ok(Some(path.to_string_lossy().to_string()))
 }
 
+/// Save a view as UTF-8 CSV at the native dialog's chosen destination (M61.5b).
+/// Cancel is `Ok(None)` and never writes a file.
+#[tauri::command]
+async fn export_csv(
+    app: tauri::AppHandle,
+    default_name: String,
+    csv: String,
+) -> Result<Option<String>, String> {
+    let Some(picked) = app
+        .dialog()
+        .file()
+        .set_file_name(&default_name)
+        .add_filter("CSV document", &["csv"])
+        .blocking_save_file()
+    else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|e| e.to_string())?;
+    std::fs::write(&path, csv).map_err(|e| e.to_string())?;
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
+/// Export calculated live sheet fences; no vault read or write door is involved.
+#[tauri::command]
+async fn export_sheet_xlsx(
+    app: tauri::AppHandle,
+    default_name: String,
+    page: String,
+) -> Result<Option<String>, String> {
+    let zone = runtime::budget::system_timezone();
+    let bytes =
+        tauri::async_runtime::spawn_blocking(move || sheet::xlsx::workbook_xlsx(page, zone))
+            .await
+            .map_err(|_| "The spreadsheet exporter stopped.".to_string())??;
+    let Some(picked) = app
+        .dialog()
+        .file()
+        .set_file_name(&default_name)
+        .add_filter("Excel workbook", &["xlsx"])
+        .blocking_save_file()
+    else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|e| e.to_string())?;
+    std::fs::write(&path, bytes).map_err(|e| format!("The workbook couldn't be written: {e}"))?;
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
 // --- Local agent + MCP (M6) ------------------------------------------------
 
 #[tauri::command(async)]
 fn check_agent() -> agent::AgentStatus {
     agent::status()
+}
+
+/// The pre-run question spends under the ambient gate, with a Rust-only
+/// internal grant; the renderer names wakes, never the check's capabilities.
+#[tauri::command(async)]
+fn check_wake(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, agent::AgentState>,
+    mcp_state: tauri::State<'_, mcp::McpState>,
+    vault: String,
+    actor: String,
+    wakes: Vec<String>,
+    question: String,
+) -> Result<agent::condition::WakeCheck, String> {
+    let vault = Path::new(&vault);
+    let scope = runtime::open_vault(vault)
+        .ok_or("pre-run checks need the runtime database, which is not open")?;
+    let store = scope
+        .store_uuid
+        .as_deref()
+        .ok_or("this vault has no ledger store, so a pre-run check cannot claim its lease")?;
+    let dir = config_dir(&app)?;
+    let conn = runtime::open_existing(&dir)?;
+    let entries = vault::scan::scan_vault(vault)?;
+    agent::condition::check(
+        &conn,
+        &agent::condition::Input {
+            vault,
+            vault_id: &scope.vault_id,
+            store_uuid: store,
+            actor: &actor,
+            wakes: &wakes,
+            question: &question,
+            entries: &entries,
+        },
+        &agent::condition::Live {
+            app: &app,
+            agents: state.inner(),
+            mcp: mcp_state.inner(),
+            vault,
+            data_dir: &dir,
+            vault_id: &scope.vault_id,
+            store_uuid: store,
+        },
+        chrono::Utc::now(),
+    )
 }
 
 /// What the CLI has stored about this vault OUTSIDE it (M17.14).
@@ -1939,7 +2482,7 @@ pub(crate) fn start_handoff_run(
 ///
 /// `Deferred` is the ambient gate saying "not now" — over a ceiling, paused,
 /// accounting unknown — and it is a RESULT, not an error: the caller is
-/// expected to read the reasons, log one honest row, and leave the fire key
+/// expected to read the reasons and their human words, log one honest row, and leave the fire key
 /// unconsumed so the run happens when the window resets. A woken run's wake
 /// stays pending with a time to try again. `Settled` answers a woken run
 /// whose wake was no longer pending, expired, or was cancelled by its
@@ -1949,8 +2492,37 @@ pub(crate) fn start_handoff_run(
 #[serde(untagged)]
 enum RunStart {
     Started(RunHandle),
-    Deferred { deferred: Vec<String> },
-    Settled { settled: &'static str },
+    Deferred {
+        deferred: Vec<String>,
+        words: Vec<String>,
+    },
+    Settled {
+        settled: &'static str,
+    },
+}
+
+impl RunStart {
+    fn deferred(codes: Vec<String>) -> Self {
+        let words = codes
+            .iter()
+            .map(|code| {
+                runtime::budget::GateReason::ALL
+                    .iter()
+                    .find(|reason| reason.as_str() == code)
+                    .map(|reason| reason.words())
+                    .unwrap_or(match code.as_str() {
+                        "agent_running" => "this agent is already running",
+                        "nothing_to_claim" => "the dispatcher found nothing to start",
+                        other => other,
+                    })
+                    .to_string()
+            })
+            .collect();
+        Self::Deferred {
+            deferred: codes,
+            words,
+        }
+    }
 }
 
 /// Returns the run's id — the tag on every event this run emits.
@@ -1962,10 +2534,25 @@ fn run_agent(
     vault: String,
     request: agent::AgentRequest,
     wake: Option<runtime::wakes::WakeRequest>,
+    followup: Option<String>,
 ) -> Result<RunStart, String> {
     // M56.5: the run's model and effort first, before the pause check, the
     // endpoint and any lease, so a refused run leaves no token, lease or row.
     agent::run_options::validate_request(&request)?;
+    if followup.is_some()
+        && (wake.is_some()
+            || request.attended == Some(true)
+            || request.lane.as_deref() != Some("agent")
+            || !request
+                .actor
+                .as_deref()
+                .is_some_and(|actor| actor.starts_with("process:") && actor.len() > 8))
+    {
+        return Err(
+            "A follow-up starts only its own agent, unattended on lane agent, without a wake."
+                .into(),
+        );
+    }
     // M63.1: a woken run is an agent's unattended run on lane agent, and its
     // cause is its wake's, so a request that says otherwise starts nothing.
     if wake.is_some() {
@@ -1996,7 +2583,7 @@ fn run_agent(
     // M25.2: attended chat is METERED and never gated. The run is recorded
     // with its tokens; no reservation, no lease, and no ceiling can refuse it.
     let scope = runtime::open_vault(Path::new(&vault));
-    // M33b.5 — the ONE gate an agent-attributed run does pass, and it is not a
+    // M33b.5 — the fleet pause gate every agent-attributed run passes is not a
     // budget question. Every frontend path that starts a CLI child funnels
     // here (the job runner's schedules and triggers, and the panel addressing
     // an agent by name), so this is where a per-agent pause has to be
@@ -2023,7 +2610,43 @@ fn run_agent(
     // M56.7 — why this run started, admitted before any endpoint, bearer or
     // claim, so a refused cause leaks none of them. An attended turn is
     // always `attended`; an unattended one names its cause or records NULL.
-    let cause = runtime::cause::admit(request.attended.unwrap_or(false), request.cause.as_ref())?;
+    let dir = config_dir(&app)?;
+    // M63.8: only the bound claimed row can authorize a follow-up cause.
+    // A supplied note, due time or different cause cannot rewrite its record.
+    let bound_followup = if let Some(id) = followup.as_deref() {
+        let scope = scope
+            .as_ref()
+            .filter(|s| s.store_uuid.is_some())
+            .ok_or("this vault has no ledger store, so a follow-up cannot claim its lease")?;
+        let conn = runtime::open_existing(&dir)?;
+        let Some(row) = runtime::followups::ready_to_fire(
+            &conn,
+            &scope.vault_id,
+            request.actor.as_deref().unwrap_or_default(),
+            id,
+            chrono::Utc::now(),
+        )?
+        else {
+            return Ok(RunStart::Settled { settled: "gone" });
+        };
+        Some(row)
+    } else {
+        None
+    };
+    let cause = match bound_followup.as_ref() {
+        Some(row) => Some(row.cause()),
+        None => runtime::cause::admit(request.attended.unwrap_or(false), request.cause.as_ref())?,
+    };
+    // M63.5: manual starts never duplicate a live run of this actor, including
+    // an attended @agent or hand-off. Refuse before endpoint, bearer or lease.
+    if cause
+        .as_ref()
+        .is_some_and(|cause| cause.kind() == runtime::cause::CauseKind::Manual)
+    {
+        if let Some(actor) = request.actor.as_deref() {
+            state.refuse_if_running(Path::new(&vault), actor)?;
+        }
+    }
     // M53.10: the endpoint this run dials, started here if it is not up yet.
     // Rust sets it for every run — the wire cannot name it — and before any
     // lease is claimed, so an endpoint that cannot start leaks none.
@@ -2040,8 +2663,8 @@ fn run_agent(
     //
     // No lane, or no runtime scope to claim against, keeps the legacy
     // attended booking — metering is a record, never a precondition.
-    let dir = config_dir(&app)?;
     let mut lease: Option<runtime::dispatch::Lease> = None;
+    let mut parent_run_id: Option<String> = None;
     // The wakes a woken run took with it, named on its WHY block's Also line.
     let mut also: Vec<runtime::cause::RunCause> = Vec::new();
     let mut cause = cause;
@@ -2073,15 +2696,20 @@ fn run_agent(
                 lease: l,
                 cause: woke,
                 also: took,
+                parent_run_id: parent,
             } => {
-                lease = Some(l);
+                lease = Some(*l);
                 cause = woke;
                 also = took;
+                parent_run_id = parent;
             }
             runtime::dispatch::Woken::Deferred(reasons) => {
-                return Ok(RunStart::Deferred { deferred: reasons });
+                return Ok(RunStart::deferred(reasons));
             }
             runtime::dispatch::Woken::Gone => return Ok(RunStart::Settled { settled: "gone" }),
+            runtime::dispatch::Woken::Skipped => {
+                return Ok(RunStart::Settled { settled: "skipped" })
+            }
         }
     } else if !request.attended.unwrap_or(false) {
         if let Some(lane) = request.lane.as_deref() {
@@ -2113,23 +2741,61 @@ fn run_agent(
                 )? {
                     runtime::dispatch::Dispatched::Started(l) => lease = Some(l),
                     runtime::dispatch::Dispatched::Deferred(reasons) => {
-                        return Ok(RunStart::Deferred {
-                            deferred: reasons.iter().map(|r| r.as_str().to_string()).collect(),
-                        });
+                        if let Some(row) = bound_followup.as_ref() {
+                            runtime::followups::release(
+                                &conn,
+                                vault_id,
+                                &row.actor,
+                                &row.followup_id,
+                            )?;
+                        }
+                        return Ok(RunStart::deferred(
+                            reasons.iter().map(|r| r.as_str().to_string()).collect(),
+                        ));
                     }
                     // Unreachable with an empty item list — the empty-claim
                     // guard deliberately passes it to the gate — but if it
                     // ever arrives, honesty over spawning: nothing to do.
                     runtime::dispatch::Dispatched::NothingToClaim => {
-                        return Ok(RunStart::Deferred {
-                            deferred: vec!["nothing_to_claim".to_string()],
-                        });
+                        if let Some(row) = bound_followup.as_ref() {
+                            runtime::followups::release(
+                                &conn,
+                                vault_id,
+                                &row.actor,
+                                &row.followup_id,
+                            )?;
+                        }
+                        return Ok(RunStart::deferred(vec!["nothing_to_claim".to_string()]));
                     }
                 }
             }
         }
     }
-    spawn_requested_run(
+    let admitted_run = lease.as_ref().map(|lease| lease.run_id.clone());
+    if let Some(row) = bound_followup.as_ref() {
+        let firing = (|| {
+            let run = admitted_run
+                .as_deref()
+                .ok_or("A follow-up needs its ambient lease before it can run.")?;
+            let scope = scope.as_ref().ok_or(runtime::followups::RUNTIME_NEEDED)?;
+            let conn = runtime::open_existing(&dir)?;
+            if !runtime::followups::fire(
+                &conn,
+                &scope.vault_id,
+                &row.actor,
+                &row.followup_id,
+                run,
+                chrono::Utc::now(),
+            )? {
+                return Err("That follow-up is no longer waiting. Nothing was started.".into());
+            }
+            Ok(())
+        })();
+        if let Err(error) = firing {
+            return finish_unspawned_lease(&dir, admitted_run.as_deref(), Err(error));
+        }
+    }
+    let result = spawn_requested_run(
         &app,
         state.inner(),
         mcp_state.inner(),
@@ -2139,8 +2805,54 @@ fn run_agent(
         cause,
         lease,
         also,
+        parent_run_id,
     )
-    .map(RunStart::Started)
+    .map(RunStart::Started);
+    if result.is_err() {
+        if let (Some(row), Some(run), Some(scope)) = (
+            bound_followup.as_ref(),
+            admitted_run.as_deref(),
+            scope.as_ref(),
+        ) {
+            let restored = runtime::open_existing(&dir).and_then(|conn| {
+                runtime::followups::unfire(&conn, &scope.vault_id, &row.followup_id, run)
+            });
+            if let Err(error) = restored {
+                log::warn!(
+                    "follow-up {} could not be restored after spawn refusal: {error}",
+                    row.followup_id
+                );
+            }
+        }
+    }
+    finish_unspawned_lease(&dir, admitted_run.as_deref(), result)
+}
+
+/// A failed start has no child to close the lease. In particular, a hop
+/// bearer can be refused after claim but before the stream owns a meter.
+/// Close that run and its wake now instead of waiting for lease recovery.
+fn finish_unspawned_lease<T>(
+    data_dir: &Path,
+    run_id: Option<&str>,
+    result: Result<T, String>,
+) -> Result<T, String> {
+    if let (Err(_), Some(run_id)) = (&result, run_id) {
+        let closed = runtime::open_existing(data_dir).and_then(|conn| {
+            runtime::dispatch::finalize(
+                &conn,
+                run_id,
+                runtime::dispatch::RunOutcome::Failed,
+                Some(agent::usage::Usage::default()),
+                None,
+                runtime::dispatch::ItemOutcome::Requeue,
+                chrono::Utc::now(),
+            )
+        });
+        if let Err(error) = closed {
+            log::warn!("unspawned run {run_id} could not release its lease: {error}");
+        }
+    }
+    result
 }
 
 /// Start an admitted run (out of `run_agent` for M57.1, whose answers resume
@@ -2163,6 +2875,7 @@ fn spawn_requested_run(
     cause: Option<runtime::cause::RunCause>,
     lease: Option<runtime::dispatch::Lease>,
     also: Vec<runtime::cause::RunCause>,
+    parent_run_id: Option<String>,
 ) -> Result<RunHandle, String> {
     let dir = config_dir(app)?;
     // M31.2a: the durable id is minted BEFORE the token so the grant and the
@@ -2205,15 +2918,31 @@ fn spawn_requested_run(
         request.actor.as_deref(),
         request.ask_first,
     ));
-    request.mcp_token = Some(mcp_state.run_token(
-        request.actor.as_deref(),
-        request.scope.clone(),
-        request.read_scope.clone(),
-        grant_tools(&request),
-        run_id.clone(),
-        vault,
-        mcp::WriteAsks::of(&request),
-    )?);
+    request.mcp_token = Some(if let Some(parent) = parent_run_id.as_deref() {
+        let conn = runtime::open_existing(&dir)?;
+        let chain = runtime::dispatch::chain_actors(&conn, parent)?
+            .ok_or("the wake's parent run is no longer recorded")?;
+        mcp_state.hop_token(
+            request.actor.as_deref(),
+            request.scope.clone(),
+            request.read_scope.clone(),
+            grant_tools(&request),
+            run_id.clone(),
+            vault,
+            mcp::WriteAsks::of(&request),
+            &chain,
+        )?
+    } else {
+        mcp_state.run_token(
+            request.actor.as_deref(),
+            request.scope.clone(),
+            request.read_scope.clone(),
+            grant_tools(&request),
+            run_id.clone(),
+            vault,
+            mcp::WriteAsks::of(&request),
+        )?
+    });
     let meter = agent::meter::Meter {
         data_dir: dir.clone(),
         run_id,
@@ -2236,8 +2965,8 @@ fn spawn_requested_run(
         // writes agree about who did the work. `None` is bare chat, and it
         // stays NULL — the fleet reads that as unattributed.
         actor: request.actor.clone(),
-        // Root by construction (M34.3): no tool call started this run.
-        parent_run_id: None,
+        // A recorded run's write wakes a hop; every other start stays a root.
+        parent_run_id,
         // Written by the attended open; a leased run's claim already wrote it.
         cause,
     };
@@ -2508,6 +3237,7 @@ fn answer_interaction(
             cause,
             None,
             Vec::new(),
+            None,
         )
     })();
     match started {
@@ -2597,10 +3327,12 @@ fn start_watcher(
 ) -> Result<OpenReport, String> {
     let vault_path = PathBuf::from(&vault);
     let mut report = OpenReport::default();
-    // M53.10: a run never outlives its vault. Opening one stops every run in
+    // M53.10: a run or client session never outlives its vault.
+    // Opening one stops every run in
     // any other, Cerebro's own included; reopening this one (a webview
     // reload) stops nothing, and a run started here while it opened is kept.
     agents.stop_other_vaults(&vault_path);
+    client_access::vault_opening(&vault_path);
     // M53.11: a connectors.json an older build wrote world-readable holds the
     // vault's connector credentials. Opening the vault narrows it to its
     // owner, best effort, and never stops the open.
@@ -2636,6 +3368,7 @@ fn start_watcher(
         // M49.9 (K25): and the session records which PROCESS has it open.
         if let Some(scope) = runtime::open_vault(&vault_path) {
             runtime::sessions::track(&scope);
+            client_access::vault_opened(&app, &vault_path, &scope);
         }
         // M60.6: a batch an earlier process left unfinished is put back
         // before the purge and the watcher, and the webview says so. The
@@ -2702,6 +3435,7 @@ pub fn run() {
     diagnostics::init();
     let _ = process_started();
     tauri::Builder::default()
+        .register_asynchronous_uri_scheme_protocol("cerebro-file", files::scheme::handle)
         .plugin(tauri_plugin_dialog::init())
         .manage(WatcherState::default())
         .manage(agent::AgentState::default())
@@ -2710,12 +3444,33 @@ pub fn run() {
         // M55.10: ⌘Q is Cerebro's own menu item, and it and the close guard
         // ask the webview to save before the app exits.
         .manage(shell::quit::QuitState::default())
+        .manage(shell::deep_link::DeepLinkInbox::default())
         .menu(shell::quit::app_menu)
         .on_menu_event(shell::quit::on_menu_event)
         // M53.12: tauri.conf.json declares the window `create: false`, so it
         // is built here, with the link guard tauri's own path never attaches.
         .setup(|app| shell::build_main_window(app))
         .invoke_handler(tauri::generate_handler![
+            sheet::calculate_sheets,
+            sheet::sheet_restructure,
+            pick_sheet_file,
+            sheet::sheet_fill,
+            sheet::sheet_complete,
+            roots_commands::probe_file,
+            roots_commands::file_thumbnail,
+            roots_commands::read_file_bytes,
+            roots_commands::open_file_outside,
+            roots_commands::reveal_file,
+            roots_commands::quick_look_file,
+            roots_commands::save_file_copy,
+            client_access::client_tokens,
+            client_access::create_client_token,
+            client_access::revoke_client_token,
+            client_access::listener::client_access_status,
+            client_access::listener::set_client_access,
+            notification_permission,
+            request_notification_permission,
+            post_notification,
             pick_vault,
             open_demo_vault,
             get_last_vault,
@@ -2723,6 +3478,10 @@ pub fn run() {
             set_panel_agent,
             scan_vault,
             read_note,
+            read_note_source,
+            read_canvas_file,
+            save_canvas_file,
+            create_canvas_file,
             search_vault,
             save_note,
             update_frontmatter,
@@ -2735,6 +3494,7 @@ pub fn run() {
             revert_application,
             pipeline_overview,
             fleet_runs,
+            fleet_subject_runs,
             fleet_run_detail,
             fleet_run_transcript,
             run_knowledge_writes,
@@ -2745,6 +3505,13 @@ pub fn run() {
             fleet_actor_summary,
             fleet_actor_summaries,
             job_ledger_read,
+            reminder_state,
+            reminder_claim,
+            reminder_import,
+            done_marks_read,
+            done_mark,
+            done_unmark,
+            done_marks_import,
             job_ledger_claim,
             job_ledger_unclaim,
             job_ledger_stamp,
@@ -2753,9 +3520,13 @@ pub fn run() {
             set_agent_paused,
             paused_agents,
             admit_wakes,
+            release_assigned_wakes,
             wakes_pending,
             cancel_wakes,
             fleet_wakes,
+            list_followups,
+            claim_followup,
+            cancel_followup,
             set_ambient_concurrency,
             set_lane_enabled,
             trigger_status,
@@ -2768,6 +3539,8 @@ pub fn run() {
             ingest_item_state,
             ask_question,
             converge,
+            home_runs,
+            home_changes,
             belief_chips,
             attention_lanes,
             resolve_held_items,
@@ -2784,6 +3557,9 @@ pub fn run() {
             list_trash,
             restore_from_trash,
             apply_batch,
+            starter_marker,
+            install_starter_kit,
+            decline_starter_kit,
             list_comments,
             start_comment_thread,
             reply_to_comment_thread,
@@ -2794,9 +3570,15 @@ pub fn run() {
             list_folders,
             pick_files,
             import_attachment,
+            import_attachment_bytes,
+            inspect_dropped,
+            read_dropped_text,
+            extract_document,
             write_text_file,
             export_png,
             export_svg,
+            export_csv,
+            export_sheet_xlsx,
             ledger_head,
             ledger_status,
             start_watcher,
@@ -2804,6 +3586,7 @@ pub fn run() {
             save_connectors,
             connector_status,
             check_agent,
+            check_wake,
             agent_workspace,
             purge_agent_workspace,
             read_cli_transcript,
@@ -2864,6 +3647,8 @@ pub fn run() {
             roots_git_commands::root_git_pull_ff,
             // M55.9 — Open with: Finder, the default app, agent links and
             // the clipboard. Each target is a vault note or an artifact base.
+            shell::deep_link::take_deep_link,
+            shell::deep_link::app_link,
             shell::open::reveal_in_finder,
             shell::open::open_in_default_app,
             shell::open::open_agent_link,
@@ -2875,16 +3660,21 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| match event {
-            // M53.24: tauri raises Ready right after `setup` (tauri-2.11.5
-            // app.rs:1423-1428), so the log opens here and lib.rs keeps one
+            // M53.24: tauri raises Ready right after `setup` (tauri-2.12.4
+            // app.rs:1442-1447), so the log opens here and lib.rs keeps one
             // `.setup()`: a second would replace the window builder's.
             tauri::RunEvent::Ready => diagnostics::arm(app),
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Opened { urls } => shell::deep_link::received(app, &urls),
             tauri::RunEvent::Exit => {
                 use tauri::Manager;
-                // M53.10: quitting ends every run — TERM, the grace, KILL —
+                // M53.10: quitting ends runs and personal-token sessions.
+                // Subprocesses get TERM, the grace, KILL —
                 // admits no new one, and gives the readers a moment to book
                 // theirs `cancelled`. About three seconds at most.
                 app.state::<agent::AgentState>().shut_down();
+                client_access::shut_down();
+                shell::open::stop_quick_look();
                 // M49.9: a clean exit closes the session exactly; anything
                 // else leaves its last heartbeat as the honest lower bound.
                 runtime::sessions::close_current();
@@ -2895,7 +3685,126 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_deferral_answers_its_reasons_and_their_words() {
+        let mut codes: Vec<String> = runtime::budget::GateReason::ALL
+            .iter()
+            .map(|r| r.as_str().to_string())
+            .collect();
+        codes.extend([
+            "agent_running".into(),
+            "nothing_to_claim".into(),
+            "future_reason".into(),
+        ]);
+        let output = serde_json::to_value(RunStart::deferred(codes.clone())).unwrap();
+        assert_eq!(output["deferred"], serde_json::json!(codes));
+        let mut words: Vec<&str> = runtime::budget::GateReason::ALL
+            .iter()
+            .map(|r| r.words())
+            .collect();
+        words.extend([
+            "this agent is already running",
+            "the dispatcher found nothing to start",
+            "future_reason",
+        ]);
+        assert_eq!(output["words"], serde_json::json!(words));
+    }
+
     use super::*;
+
+    #[test]
+    fn a_failed_hop_token_after_claim_closes_its_wake_and_releases_the_lease() {
+        let _lock = runtime::status::test_lock();
+        runtime::status::clear();
+        let dir = vault::testutil::temp_vault("hop-start-failure");
+        let conn = runtime::open(&dir).unwrap();
+        let vault_id = runtime::scope::register(&conn, &dir).unwrap();
+        let now = chrono::Utc::now();
+        runtime::budget::append_version(
+            &conn,
+            &runtime::budget::Settings {
+                ceilings: runtime::budget::shipped_defaults().unwrap(),
+                timezone_id: "UTC".into(),
+            },
+            now,
+        )
+        .unwrap();
+        let offered = runtime::wakes::WakeOffer {
+            agent: "process:scout".into(),
+            wake_key: "a".repeat(64),
+            trigger: "b".repeat(16),
+            path: "tasks/a.md".into(),
+            hash: "c".repeat(64),
+            event: "changed".into(),
+            cause: runtime::cause::CauseRequest {
+                kind: "event".into(),
+                subject: Some("tasks/a.md".into()),
+                detail: None,
+                due_at: None,
+            },
+        };
+        runtime::wakes::admit(&conn, &vault_id, &[offered], now).unwrap();
+        let wake: String = conn
+            .query_row("SELECT wake_id FROM agent_wakes", [], |row| row.get(0))
+            .unwrap();
+        let started = runtime::dispatch::claim_woken(
+            &conn,
+            &vault_id,
+            "store",
+            "agent",
+            runtime::budget::Reservation {
+                total_tokens: 5_000,
+                output_tokens: 1_000,
+            },
+            "process:scout",
+            &runtime::wakes::WakeRequest {
+                claim: wake,
+                coalesce: vec![],
+            },
+            now,
+        )
+        .unwrap();
+        let runtime::dispatch::Woken::Started { lease, .. } = started else {
+            panic!("expected a claim: {started:?}")
+        };
+        let token = mcp::McpState::default().hop_token(
+            Some("process:scout"),
+            None,
+            None,
+            None,
+            lease.run_id.clone(),
+            &dir,
+            mcp::WriteAsks::of(&panel_style_request()),
+            &["process:scout".into()],
+        );
+        assert!(token.is_err());
+        assert!(finish_unspawned_lease(&dir, Some(&lease.run_id), token).is_err());
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM ambient_dispatch", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            conn.query_row("SELECT outcome FROM agent_wakes", [], |row| row
+                .get::<_, String>(0))
+                .unwrap(),
+            "failed"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT usage_state FROM runs WHERE run_id = ?1",
+                [&lease.run_id],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            "exact"
+        );
+        assert_eq!(conn.query_row("SELECT input_tokens + output_tokens + cache_read + cache_write FROM runs WHERE run_id = ?1", [&lease.run_id], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        drop(conn);
+        runtime::status::clear();
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     /// A request shaped like the panel's — the same construction the agent
     /// module's own tests use, since `AgentRequest` derives no Default.
@@ -3346,7 +4255,7 @@ mod tests {
             } else {
                 target
             };
-            let saved = save_note(v.clone(), target.into(), "pwned\n".into()).unwrap_err();
+            let saved = save_note(v.clone(), target.into(), "pwned\n".into(), None).unwrap_err();
             assert!(saved.contains(named), "{target}: {saved}");
             let patched = update_frontmatter(v.clone(), target.into(), patch.clone()).unwrap_err();
             assert!(patched.contains(named), "{target}: {patched}");
@@ -3375,7 +4284,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(rel, "records/x.md");
-        save_note(v.clone(), rel.clone(), "\n# X\n\nSaved.\n".into()).unwrap();
+        save_note(v.clone(), rel.clone(), "\n# X\n\nSaved.\n".into(), None).unwrap();
         let mut status = serde_json::Map::new();
         status.insert("status".into(), serde_json::json!("done"));
         update_frontmatter(v.clone(), rel.clone(), status).unwrap();
@@ -3519,7 +4428,28 @@ mod tests {
         let map = |key: &str| args[key].as_object().cloned().unwrap_or_default();
         let v = v.to_string();
         match door {
-            "save_note" => save_note(v, text("path"), text("body")),
+            "save_canvas_file" => save_canvas_file(v, text("path"), text("content"))
+                .map(drop)
+                .map_err(|error| error.message),
+            "create_canvas_file" => create_canvas_file(
+                v,
+                text("path"),
+                text("content"),
+                if text("mode") == "preview" {
+                    CanvasWriteMode::Preview
+                } else {
+                    CanvasWriteMode::Commit
+                },
+            )
+            .map(drop)
+            .map_err(|error| error.message),
+            "save_note" => save_note(
+                v,
+                text("path"),
+                text("body"),
+                args["expect_hash"].as_str().map(str::to_string),
+            )
+            .map(drop),
             "update_frontmatter" => update_frontmatter(v, text("path"), map("patch")).map(drop),
             "set_note_title" => set_note_title(v, text("path"), text("title")),
             "create_note" => create_note(
@@ -3545,10 +4475,14 @@ mod tests {
             "apply_batch" => {
                 apply_batch(v, args["ops"].as_array().cloned().unwrap_or_default()).map(drop)
             }
+            "install_starter_kit" => install_starter_kit(v).map(drop),
             "write_text_file" => write_text_file(v, text("path"), text("content")).map(drop),
             "import_attachment" => {
                 let named = text("source").replace("/SOURCE/", "");
                 import_attachment(v, source.join(named).to_string_lossy().to_string()).map(drop)
+            }
+            "import_attachment_bytes" => {
+                import_attachment_bytes(v, text("name"), text("bytes_base64")).map(drop)
             }
             "verify_concept" => {
                 verify_concept(v, text("path"), map("patch"), text("viewed_body_hash"))
@@ -3768,6 +4702,184 @@ mod tests {
         ledger::shadow::deactivate();
         for d in [&dir, &config] {
             let _ = std::fs::remove_dir_all(d);
+        }
+    }
+    #[test]
+    fn a_stale_save_records_one_operational_row() {
+        let _sink = runtime::sink::test_lock();
+        let config = vault::testutil::temp_vault("stale-save-config");
+        let dir = vault::testutil::temp_vault("stale-save-command");
+        runtime::sink::arm(&config).unwrap();
+        vault::testutil::write(&dir, "notes/a.md", "# Outside\n");
+        let error = save_note(
+            dir.to_string_lossy().into(),
+            "notes/a.md".into(),
+            "# Stale\n".into(),
+            Some("0".repeat(64)),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            "stale_content: notes/a.md changed since it was read, so nothing was saved."
+        );
+        let rows = runtime::sink::with_sink(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT code,surface,run_id FROM operational_log WHERE surface='save_note'",
+                )
+                .unwrap();
+            stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+        })
+        .unwrap();
+        assert_eq!(
+            rows,
+            vec![("stale_content".into(), "save_note".into(), None)]
+        );
+        assert!(door_rows(&dir).is_empty());
+        assert_eq!(
+            std::fs::read_to_string(dir.join("notes/a.md")).unwrap(),
+            "# Outside\n"
+        );
+        assert_eq!(
+            save_note(
+                dir.to_string_lossy().into(),
+                "notes/a.md".into(),
+                "# Bad\n".into(),
+                Some("bad".into())
+            )
+            .unwrap_err(),
+            "expectHash must be a 64-character hex hash"
+        );
+        let current = ledger::sha256_hex(b"# Outside\n");
+        let hash = save_note(
+            dir.to_string_lossy().into(),
+            "notes/a.md".into(),
+            "# Saved\n".into(),
+            Some(current),
+        )
+        .unwrap();
+        assert_eq!(hash, Some(ledger::sha256_hex(b"# Saved\n")));
+        assert_eq!(door_rows(&dir).len(), 1);
+        runtime::sink::disarm();
+        for path in [&dir, &config] {
+            let _ = std::fs::remove_dir_all(path);
+        }
+    }
+    #[test]
+    fn a_hashed_knowledge_save_compares_before_the_capture() {
+        use policy::commit::tests_support::seed_belief;
+        let _sink = runtime::sink::test_lock();
+        let config = vault::testutil::temp_vault("hashed-capture-config");
+        let dir = vault::testutil::temp_vault("hashed-capture");
+        let _shadow = ledger::shadow::testing::activated(&dir);
+        runtime::sink::arm(&config).unwrap();
+        ledger::shadow::with_writer(&dir, |writer| {
+            let belief = seed_belief(writer, "seed");
+            let state = ledger::concepts::current_state(writer, &dir).unwrap();
+            let projection = ledger::reduce::project_belief(&state, &belief).unwrap();
+            ledger::manifest::write_projection(&dir, "knowledge/seed.md", &projection).unwrap();
+        })
+        .unwrap();
+        let before = std::fs::read_to_string(dir.join("knowledge/seed.md")).unwrap();
+        let head = ledger::head(&dir).unwrap().hash;
+        let error = save_note(
+            dir.to_string_lossy().into(),
+            "knowledge/seed.md".into(),
+            "# Draft\n".into(),
+            Some("0".repeat(64)),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            "stale_content: knowledge/seed.md changed since it was read, so nothing was saved."
+        );
+        assert_eq!(ledger::head(&dir).unwrap().hash, head);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("knowledge/seed.md")).unwrap(),
+            before
+        );
+        assert!(door_rows(&dir).is_empty());
+        let (_, body) = vault::parse::split_frontmatter(&before);
+        let saved = save_note(
+            dir.to_string_lossy().into(),
+            "knowledge/seed.md".into(),
+            format!("{body}\nAdded here.\n"),
+            Some(ledger::sha256_hex(before.as_bytes())),
+        )
+        .unwrap();
+        assert_eq!(saved, None);
+        assert!(std::fs::read_to_string(dir.join("knowledge/seed.md"))
+            .unwrap()
+            .contains("Added here."));
+        assert_ne!(ledger::head(&dir).unwrap().hash, head);
+        assert_eq!(door_rows(&dir).len(), 1);
+        runtime::sink::disarm();
+        ledger::shadow::deactivate();
+        assert_eq!(
+            save_note(
+                dir.to_string_lossy().into(),
+                "knowledge/seed.md".into(),
+                "# Stale without writer\n".into(),
+                Some("0".repeat(64))
+            )
+            .unwrap_err(),
+            "stale_content: knowledge/seed.md changed since it was read, so nothing was saved."
+        );
+        for path in [&dir, &config] {
+            let _ = std::fs::remove_dir_all(path);
+        }
+    }
+}
+
+#[cfg(test)]
+mod extraction_command_tests {
+    use super::*;
+    #[test]
+    fn extracting_a_kept_document_returns_text_without_changing_the_original() {
+        let dir = files::extract::testdocs::TempDir::new();
+        std::fs::create_dir(dir.path().join("attachments")).unwrap();
+        let bytes = files::extract::testdocs::docx();
+        std::fs::write(dir.path().join("attachments/plan.docx"), &bytes).unwrap();
+        let read = extract_document(
+            dir.path().to_string_lossy().into_owned(),
+            "attachments/plan.docx".into(),
+        )
+        .unwrap();
+        assert_eq!(read.format, "docx");
+        assert!(matches!(
+            read.outcome,
+            files::extract::Outcome::Extracted { .. }
+        ));
+        assert_eq!(
+            std::fs::read(dir.path().join("attachments/plan.docx")).unwrap(),
+            bytes
+        );
+        assert!(!dir.path().join("inbox").exists());
+    }
+    #[test]
+    fn the_extraction_command_keeps_the_contained_file_refusals() {
+        let dir = files::extract::testdocs::TempDir::new();
+        for (path, words) in [
+            ("../outside.docx", "path escapes the vault: ../outside.docx"),
+            (
+                ".secret.docx",
+                "dot-folders and dotfiles are not readable here",
+            ),
+        ] {
+            assert_eq!(
+                extract_document(dir.path().to_string_lossy().into_owned(), path.into())
+                    .unwrap_err(),
+                words
+            );
         }
     }
 }

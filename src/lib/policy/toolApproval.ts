@@ -165,6 +165,7 @@ export interface ToolApproval {
   permission_modes: { internal: string; asks: string; otherwise: string };
   read_scope: Record<string, Decision>;
   hidden_paths: HiddenPaths;
+  unattended_hidden_paths: string[];
   families: Family[];
   unlisted: { decision: Decision };
   messages: Messages;
@@ -208,6 +209,7 @@ function checkShape(value: unknown): ToolApproval {
     'permission_modes',
     'read_scope',
     'hidden_paths',
+    'unattended_hidden_paths',
     'families',
     'unlisted',
     'messages',
@@ -226,6 +228,11 @@ function checkShape(value: unknown): ToolApproval {
   exactly(top.permission_modes, 'permission_modes', ['internal', 'asks', 'otherwise']);
   if (!isRecord(top.read_scope)) throw new Error(`${TOOL_APPROVAL_PATH}: read_scope`);
   Object.values(top.read_scope).forEach(decision);
+  if (
+    !Array.isArray(top.unattended_hidden_paths) ||
+    !top.unattended_hidden_paths.every((item) => typeof item === 'string')
+  )
+    throw new Error(`${TOOL_APPROVAL_PATH}: unattended_hidden_paths must be a list of names`);
   const hidden = exactly(top.hidden_paths, 'hidden_paths', ['folders', 'tools']);
   for (const key of ['folders', 'tools'] as const) {
     const list = hidden[key];
@@ -476,6 +483,21 @@ function validate(table: ToolApproval, manifest: ToolsManifest): void {
     throw refusal('unlisted', 'decision', 'must be cli or refuse');
   }
   checkHiddenPaths(table, manifest);
+  for (const [at, folder] of table.unattended_hidden_paths.entries()) {
+    if (
+      folder
+        .split('/')
+        .some(
+          (part) => !part || part === '.' || part === '..' || !/^[A-Za-z0-9._-]+$/.test(part),
+        ) ||
+      table.unattended_hidden_paths.slice(0, at).includes(folder)
+    )
+      throw refusal(
+        'unattended_hidden_paths',
+        'folders',
+        'must contain unique plain relative folders',
+      );
+  }
   for (const family of table.families) checkFamily(table, family, manifest);
   for (const field of ['open_per_actor', 'input_bytes'] as const) {
     if (table.queue_limits[field] === 0) throw refusal('queue_limits', field, 'must be at least 1');
@@ -529,6 +551,12 @@ function checkHiddenPaths(table: ToolApproval, manifest: ToolsManifest): void {
 export function hiddenPathRules(table: ToolApproval = TOOL_APPROVAL): string[] {
   const { folders, tools } = table.hidden_paths;
   return folders.flatMap((folder) => tools.map((tool) => `${tool}(./${folder}/**)`));
+}
+
+export function unattendedPathRules(table: ToolApproval = TOOL_APPROVAL): string[] {
+  return table.unattended_hidden_paths.flatMap((folder) =>
+    table.hidden_paths.tools.map((tool) => `${tool}(./${folder}/**)`),
+  );
 }
 
 /** The ask-first block (M57.4), as tool_approval.rs's `check_ask_first`. */
@@ -721,6 +749,7 @@ export function plan(input: ApprovalInput, table: ToolApproval = TOOL_APPROVAL):
     if (decision === 'refuse') approval.refused.push(tool.name);
     approval.decisions.push({ tool: tool.name, family: family.id, decision });
   }
+  if (input.kind === 'unattended') approval.disallowed.push(...unattendedPathRules(table));
   if (input.kind !== 'internal') approval.disallowed.push(...hiddenPathRules(table));
   const askFamily = table.families.find((row) => row.id === table.ask_first.family);
   if (askFamily !== undefined) {

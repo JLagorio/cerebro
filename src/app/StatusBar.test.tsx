@@ -1,3 +1,4 @@
+import { navSeed } from '@/test/navSeed';
 // @vitest-environment jsdom
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -37,7 +38,7 @@ describe('StatusBar', () => {
     useVaultStore.setState({ vaultPath: '/demo-vault', entries: [] });
     useNavStore.setState({
       selection: { kind: 'home' },
-      history: [{ kind: 'home' }],
+      history: [navSeed({ kind: 'home' })],
       historyIndex: 0,
     });
   });

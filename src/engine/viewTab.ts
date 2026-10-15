@@ -23,6 +23,7 @@
 // React), so the edge carries no UI into the engine.
 import { hasBlocks } from '@/views/viewKinds';
 import { isLibraryType } from './library';
+import type { FiledUnder } from './createRecord';
 import type {
   Entry,
   FieldDef,
@@ -48,9 +49,9 @@ export type ViewTabResolution =
        * A renderer fact, but an ENGINE answer: deriving it outside would mean
        * a second list lookup, and the resolution happens exactly once. */
       sourceType: string | null;
-      /** Whether the rows were narrowed beyond the source — the saved view's
-       * own filters or the related scope — so the embed's empty state can say
-       * "nothing matches" rather than "no items yet" (the M16.35 rule). */
+      /** The stored relation new records inherit on a related tab. */
+      filedUnder: FiledUnder | null;
+      /** Whether a saved filter narrowed the rows; an empty host invites its first record. */
       filtered: boolean;
     }
   | { kind: 'broken'; reason: string };
@@ -59,7 +60,7 @@ const broken = (reason: string): ViewTabResolution => ({ kind: 'broken', reason 
 
 /**
  * The first field on `sourceType` through which its records can point at a
- * record of `hostType` — the capability that gates `scope: 'related'`. The
+ * record of `hostType` — the capability that gates `scope: 'related'` and filing. The
  * gate reads field EXISTENCE, never a type name (AGENTS.md): any vault whose
  * Task-alike declares a relation at its Project-alike qualifies, whatever
  * either is called.
@@ -247,10 +248,10 @@ export function resolveViewTab(
       surface: { ...surface, entries: relatedEntries(surface, field.name, host, entries, schema) },
       sourceLabel,
       sourceType,
-      // Related IS a narrowing, whatever the saved view declares.
-      filtered: true,
+      filedUnder: { host, field: field.name },
+      filtered,
     };
   }
 
-  return { kind: 'ok', surface, sourceLabel, sourceType, filtered };
+  return { kind: 'ok', surface, sourceLabel, sourceType, filtered, filedUnder: null };
 }

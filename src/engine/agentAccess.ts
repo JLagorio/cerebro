@@ -1,3 +1,4 @@
+import { scheduleText } from './skills';
 /**
  * Who can change a page, and why (M58.6).
  *
@@ -23,6 +24,7 @@
  * DOM.
  */
 
+import { isMailPath } from './mailPolicy';
 import { TOOLS, type ToolRow } from '@/lib/policy/tools';
 import {
   effectiveCeiling,
@@ -170,6 +172,7 @@ export type BundlePage = 'source' | 'log';
 
 /** What the page is, as the rules it meets see it. */
 export interface PageKind {
+  mail: boolean;
   governed: (typeof GOVERNED_TYPES)[number] | null;
   knowledge: boolean;
   /** A cached source or the bundle's log: the Knowledge door that reaches
@@ -211,6 +214,8 @@ export interface AccessRow {
   unattended: Reach;
   write: Reach;
   read: boolean;
+  /** Cerebro and CLI file readers while nobody watches; shell access is separate. */
+  unattendedRead: boolean;
   /** It holds some way to read a page. */
   reads: boolean;
   /** It can run with nobody watching: an agent that is not paused. */
@@ -376,6 +381,7 @@ function deriveRow(seed: RowSeed, input: PageAccessInput, page: PageKind): Acces
     write: strongest(attended, unattended),
     read,
     reads,
+    unattendedRead: runsUnattended && !page.mail && ((readers && readable) || fileRead),
     runsUnattended,
     paused: seed.paused,
     duty: seed.duty,
@@ -407,7 +413,7 @@ function seedOf(agent: AgentRef, entries: Entry[], all: AgentRef[]): RowSeed {
     paused: entry?.properties.paused === true,
     duty:
       onDuty && draft !== null
-        ? { schedule: draft.schedule.trim(), triggers: draft.triggers.length }
+        ? { schedule: scheduleText(draft.schedule), triggers: draft.triggers.length }
         : null,
   };
 }
@@ -435,6 +441,7 @@ export function pageAccess(input: PageAccessInput): PageAccess {
   const agents = listAgents(input.entries);
   const governed = GOVERNED_TYPES.find((type) => type === input.type) ?? null;
   const page: PageKind = {
+    mail: isMailPath(input.path),
     governed,
     knowledge: isKnowledgePath(input.path),
     bundle: bundlePageOf(input),
@@ -578,6 +585,7 @@ export function accessLines(row: AccessRow): AccessLines {
     reasons.push('Runs when you ask, or when another agent hands it work.');
   }
   // Read.
+  if (row.page.mail) reasons.push('Mail is read only in a conversation a person is in.');
   if (!row.reads) reasons.push('None of its tools read a page.');
   else if (axes.readScope === null) reasons.push('Reads it: no read scope.');
   else if (axes.readScope.length === 0) reasons.push('Its read scope is empty.');

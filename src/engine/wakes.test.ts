@@ -89,6 +89,9 @@ describe('wakeOffers (M63.1)', () => {
     expect(offers).toEqual([
       {
         agent: 'process:scout',
+        path: 'inbox/a.md',
+        hash: 'h2',
+        event: 'changed',
         wakeKey: wakeKeyOf(a),
         trigger: triggerDigest({ event: 'changed', in: 'inbox', do: 'file it' }),
         cause: {

@@ -1,0 +1,1282 @@
+{
+  "format": 1,
+  "about": "M67.1 upstream IronCalc 0.8.3, gitHead 9bed9ec023e645101df6b6ac5aebbe0708b259fb. Measured upstream display/kinds, UTC. Replayed by Rust engine and browser wasm; no volatile values. Character limits count Unicode scalar values. Literal array dimensions are refused before upstream materializes them; computed dimensions remain an engine risk.",
+  "limits": {
+    "sheets": 20,
+    "cells": 10000,
+    "pageChars": 2000000,
+    "rows": 500,
+    "columns": 26,
+    "cellChars": 10000
+  },
+  "words": {
+    "sheets": "This page holds {n} sheets. A page computes at most {max}.",
+    "outside": "A sheet cell sits outside the grid, at row {row}, column {col}.",
+    "cells": "This page's sheets hold {n} filled cells. A page computes at most {max}.",
+    "pageChars": "This page's sheets hold {n} characters. A page computes at most {max}.",
+    "rows": "This sheet reaches row {n}. A sheet holds at most {max} rows.",
+    "columns": "This sheet reaches column {n}. A sheet holds at most {max} columns.",
+    "cellChars": "The cell at row {row}, column {col} holds {n} characters. A cell holds at most {max}.",
+    "arraySize": "The formula at row {row}, column {col} asks for {n} rows and {m} columns. A sheet holds at most {maxRows} rows and {maxCols} columns.",
+    "nameInvalid": "\"{name}\" can't name a sheet. Use 1 to 31 characters, none of \\ / * ? : [ ].",
+    "nameTaken": "Another sheet on this page is already named \"{name}\".",
+    "stopped": "The sheet engine stopped on this page's sheets."
+  },
+  "cases": [
+    {
+      "name": "literal kinds",
+      "sheets": [
+        {
+          "name": "Values",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "Rent"
+            },
+            {
+              "row": 1,
+              "col": 2,
+              "source": "1200"
+            },
+            {
+              "row": 1,
+              "col": 3,
+              "source": "TRUE"
+            },
+            {
+              "row": 1,
+              "col": 4,
+              "source": "#N/A"
+            },
+            {
+              "row": 1,
+              "col": 5,
+              "source": "'007"
+            },
+            {
+              "row": 1,
+              "col": 6,
+              "source": "007"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": true,
+          "name": "Values",
+          "rows": 1,
+          "cols": 6,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "text",
+              "display": "Rent"
+            },
+            {
+              "row": 1,
+              "col": 2,
+              "kind": "number",
+              "display": "1200"
+            },
+            {
+              "row": 1,
+              "col": 3,
+              "kind": "boolean",
+              "display": "TRUE"
+            },
+            {
+              "row": 1,
+              "col": 4,
+              "kind": "error",
+              "display": "#N/A"
+            },
+            {
+              "row": 1,
+              "col": 5,
+              "kind": "text",
+              "display": "007"
+            },
+            {
+              "row": 1,
+              "col": 6,
+              "kind": "number",
+              "display": "7"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "SUM and blank reference",
+      "sheets": [
+        {
+          "name": "Budget",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "Amount"
+            },
+            {
+              "row": 2,
+              "col": 1,
+              "source": "1200"
+            },
+            {
+              "row": 3,
+              "col": 1,
+              "source": "300"
+            },
+            {
+              "row": 4,
+              "col": 1,
+              "source": "=SUM(A2:A3)"
+            },
+            {
+              "row": 4,
+              "col": 2,
+              "source": "=B9"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": true,
+          "name": "Budget",
+          "rows": 4,
+          "cols": 2,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "text",
+              "display": "Amount"
+            },
+            {
+              "row": 2,
+              "col": 1,
+              "kind": "number",
+              "display": "1200"
+            },
+            {
+              "row": 3,
+              "col": 1,
+              "kind": "number",
+              "display": "300"
+            },
+            {
+              "row": 4,
+              "col": 1,
+              "kind": "number",
+              "display": "1500"
+            },
+            {
+              "row": 4,
+              "col": 2,
+              "kind": "number",
+              "display": "0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "input formatting",
+      "sheets": [
+        {
+          "name": "Formats",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "$1,200"
+            },
+            {
+              "row": 1,
+              "col": 2,
+              "source": "10%"
+            },
+            {
+              "row": 1,
+              "col": 3,
+              "source": "12/25/2024"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": true,
+          "name": "Formats",
+          "rows": 1,
+          "cols": 3,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "number",
+              "display": "$1,200"
+            },
+            {
+              "row": 1,
+              "col": 2,
+              "kind": "number",
+              "display": "10%"
+            },
+            {
+              "row": 1,
+              "col": 3,
+              "kind": "number",
+              "display": "12/25/2024"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "cross sheet",
+      "sheets": [
+        {
+          "name": "Budget",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "1200"
+            },
+            {
+              "row": 2,
+              "col": 1,
+              "source": "300"
+            },
+            {
+              "row": 3,
+              "col": 1,
+              "source": "=SUM(A1:A2)"
+            }
+          ]
+        },
+        {
+          "name": "Share",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "=Budget!A1/Budget!A3"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": true,
+          "name": "Budget",
+          "rows": 3,
+          "cols": 1,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "number",
+              "display": "1200"
+            },
+            {
+              "row": 2,
+              "col": 1,
+              "kind": "number",
+              "display": "300"
+            },
+            {
+              "row": 3,
+              "col": 1,
+              "kind": "number",
+              "display": "1500"
+            }
+          ]
+        },
+        {
+          "ok": true,
+          "name": "Share",
+          "rows": 1,
+          "cols": 1,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "number",
+              "display": "0.8"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "quoted sheet name",
+      "sheets": [
+        {
+          "name": "My Budget",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "9"
+            }
+          ]
+        },
+        {
+          "name": "Result",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "='My Budget'!A1"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": true,
+          "name": "My Budget",
+          "rows": 1,
+          "cols": 1,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "number",
+              "display": "9"
+            }
+          ]
+        },
+        {
+          "ok": true,
+          "name": "Result",
+          "rows": 1,
+          "cols": 1,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "number",
+              "display": "9"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "missing sheet",
+      "sheets": [
+        {
+          "name": "Result",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "=Missing!A1"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": true,
+          "name": "Result",
+          "rows": 1,
+          "cols": 1,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "error",
+              "display": "#REF!"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "errors",
+      "sheets": [
+        {
+          "name": "Errors",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "=1/0"
+            },
+            {
+              "row": 1,
+              "col": 2,
+              "source": "=WHAT(1)"
+            },
+            {
+              "row": 1,
+              "col": 3,
+              "source": "=("
+            },
+            {
+              "row": 1,
+              "col": 4,
+              "source": "=D1"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": true,
+          "name": "Errors",
+          "rows": 1,
+          "cols": 4,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "error",
+              "display": "#DIV/0!"
+            },
+            {
+              "row": 1,
+              "col": 2,
+              "kind": "error",
+              "display": "#NAME?"
+            },
+            {
+              "row": 1,
+              "col": 3,
+              "kind": "error",
+              "display": "#ERROR!"
+            },
+            {
+              "row": 1,
+              "col": 4,
+              "kind": "error",
+              "display": "#CIRC!"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "leading signs",
+      "sheets": [
+        {
+          "name": "Signs",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "+2"
+            },
+            {
+              "row": 1,
+              "col": 2,
+              "source": "-2"
+            },
+            {
+              "row": 1,
+              "col": 3,
+              "source": "=+2"
+            },
+            {
+              "row": 1,
+              "col": 4,
+              "source": "=-2"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": true,
+          "name": "Signs",
+          "rows": 1,
+          "cols": 4,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "number",
+              "display": "2"
+            },
+            {
+              "row": 1,
+              "col": 2,
+              "kind": "number",
+              "display": "-2"
+            },
+            {
+              "row": 1,
+              "col": 3,
+              "kind": "number",
+              "display": "2"
+            },
+            {
+              "row": 1,
+              "col": 4,
+              "kind": "number",
+              "display": "-2"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "case insensitive duplicate",
+      "sheets": [
+        {
+          "name": "Budget",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "10"
+            }
+          ]
+        },
+        {
+          "name": "budget",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "20"
+            }
+          ]
+        },
+        {
+          "name": "Reader",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "=budget!A1"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": true,
+          "name": "Budget",
+          "rows": 1,
+          "cols": 1,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "number",
+              "display": "10"
+            }
+          ]
+        },
+        {
+          "ok": false,
+          "name": "budget",
+          "problem": "name_taken",
+          "message": "Another sheet on this page is already named \"budget\"."
+        },
+        {
+          "ok": true,
+          "name": "Reader",
+          "rows": 1,
+          "cols": 1,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "number",
+              "display": "10"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "invalid names",
+      "sheets": [
+        {
+          "name": "bad/name",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "1"
+            }
+          ]
+        },
+        {
+          "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "1"
+            }
+          ]
+        },
+        {
+          "name": "",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "1"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": false,
+          "name": "bad/name",
+          "problem": "name_invalid",
+          "message": "\"bad/name\" can't name a sheet. Use 1 to 31 characters, none of \\ / * ? : [ ]."
+        },
+        {
+          "ok": false,
+          "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "problem": "name_invalid",
+          "message": "\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\" can't name a sheet. Use 1 to 31 characters, none of \\ / * ? : [ ]."
+        },
+        {
+          "ok": false,
+          "name": "",
+          "problem": "name_invalid",
+          "message": "\"\" can't name a sheet. Use 1 to 31 characters, none of \\ / * ? : [ ]."
+        }
+      ]
+    },
+    {
+      "name": "default name among peers",
+      "sheets": [
+        {
+          "name": "Budget",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "2"
+            }
+          ]
+        },
+        {
+          "name": "Sheet1",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "=Budget!A1"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": true,
+          "name": "Budget",
+          "rows": 1,
+          "cols": 1,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "number",
+              "display": "2"
+            }
+          ]
+        },
+        {
+          "ok": true,
+          "name": "Sheet1",
+          "rows": 1,
+          "cols": 1,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "number",
+              "display": "2"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "lone Sheet1",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "1"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": true,
+          "name": "Sheet1",
+          "rows": 1,
+          "cols": 1,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "number",
+              "display": "1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "lone sheet1",
+      "sheets": [
+        {
+          "name": "sheet1",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "1"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": true,
+          "name": "sheet1",
+          "rows": 1,
+          "cols": 1,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "number",
+              "display": "1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "spill",
+      "sheets": [
+        {
+          "name": "Spill",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "=SEQUENCE(3)"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": true,
+          "name": "Spill",
+          "rows": 3,
+          "cols": 1,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "number",
+              "display": "1"
+            },
+            {
+              "row": 2,
+              "col": 1,
+              "kind": "number",
+              "display": "2"
+            },
+            {
+              "row": 3,
+              "col": 1,
+              "kind": "number",
+              "display": "3"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "blocked spill",
+      "sheets": [
+        {
+          "name": "Spill",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "=SEQUENCE(3)"
+            },
+            {
+              "row": 2,
+              "col": 1,
+              "source": "held"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": true,
+          "name": "Spill",
+          "rows": 2,
+          "cols": 1,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "error",
+              "display": "#SPILL!"
+            },
+            {
+              "row": 2,
+              "col": 1,
+              "kind": "text",
+              "display": "held"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "empty request",
+      "sheets": [],
+      "expect": []
+    },
+    {
+      "name": "empty sheet",
+      "sheets": [
+        {
+          "name": "Empty",
+          "cells": []
+        }
+      ],
+      "expect": [
+        {
+          "ok": true,
+          "name": "Empty",
+          "rows": 0,
+          "cols": 0,
+          "cells": []
+        }
+      ]
+    },
+    {
+      "name": "temporary names cannot shadow requests",
+      "sheets": [
+        {
+          "name": "__cerebro_0",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "7"
+            }
+          ]
+        },
+        {
+          "name": "Read",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "=__cerebro_0!A1"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": true,
+          "name": "__cerebro_0",
+          "rows": 1,
+          "cols": 1,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "number",
+              "display": "7"
+            }
+          ]
+        },
+        {
+          "ok": true,
+          "name": "Read",
+          "rows": 1,
+          "cols": 1,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "number",
+              "display": "7"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "literal array cap",
+      "sheets": [
+        {
+          "name": "Large",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "=SEQUENCE(501)"
+            }
+          ]
+        },
+        {
+          "name": "Reader",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "=Large!A1"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": false,
+          "name": "Large",
+          "problem": "too_large",
+          "message": "The formula at row 1, column 1 asks for 501 rows and 1 columns. A sheet holds at most 500 rows and 26 columns."
+        },
+        {
+          "ok": true,
+          "name": "Reader",
+          "rows": 1,
+          "cols": 1,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "error",
+              "display": "#REF!"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "literal column cap",
+      "sheets": [
+        {
+          "name": "Large",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "=RANDARRAY(1,27)"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": false,
+          "name": "Large",
+          "problem": "too_large",
+          "message": "The formula at row 1, column 1 asks for 1 rows and 27 columns. A sheet holds at most 500 rows and 26 columns."
+        }
+      ]
+    },
+    {
+      "name": "literal makearray cap",
+      "sheets": [
+        {
+          "name": "Large",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "=MAKEARRAY(501,1,LAMBDA(r,c,r))"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": false,
+          "name": "Large",
+          "problem": "too_large",
+          "message": "The formula at row 1, column 1 asks for 501 rows and 1 columns. A sheet holds at most 500 rows and 26 columns."
+        }
+      ]
+    },
+    {
+      "name": "array text is literal",
+      "sheets": [
+        {
+          "name": "Text",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "'=SEQUENCE(501)"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": true,
+          "name": "Text",
+          "rows": 1,
+          "cols": 1,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "text",
+              "display": "=SEQUENCE(501)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "quoted array syntax is text",
+      "sheets": [
+        {
+          "name": "Text",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "=\"SEQUENCE(501)\""
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": true,
+          "name": "Text",
+          "rows": 1,
+          "cols": 1,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "text",
+              "display": "SEQUENCE(501)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "array in nested formula",
+      "sheets": [
+        {
+          "name": "Large",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "=SUM(SEQUENCE(501))"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": false,
+          "name": "Large",
+          "problem": "too_large",
+          "message": "The formula at row 1, column 1 asks for 501 rows and 1 columns. A sheet holds at most 500 rows and 26 columns."
+        }
+      ]
+    },
+    {
+      "name": "oversized sheet keeps reference unavailable",
+      "sheets": [
+        {
+          "name": "Large",
+          "cells": [
+            {
+              "row": 501,
+              "col": 1,
+              "source": "1"
+            }
+          ]
+        },
+        {
+          "name": "Reader",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "=Large!A1"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": false,
+          "name": "Large",
+          "problem": "too_large",
+          "message": "This sheet reaches row 501. A sheet holds at most 500 rows."
+        },
+        {
+          "ok": true,
+          "name": "Reader",
+          "rows": 1,
+          "cols": 1,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "error",
+              "display": "#REF!"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Unicode name and characters",
+      "sheets": [
+        {
+          "name": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "é"
+            },
+            {
+              "row": 1,
+              "col": 2,
+              "source": "😀"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": true,
+          "name": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+          "rows": 1,
+          "cols": 2,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "text",
+              "display": "é"
+            },
+            {
+              "row": 1,
+              "col": 2,
+              "kind": "text",
+              "display": "😀"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "case normalization respects quotes ranges and Unicode",
+      "sheets": [
+        {
+          "name": "A'😀 B",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "2"
+            },
+            {
+              "row": 2,
+              "col": 1,
+              "source": "3"
+            }
+          ]
+        },
+        {
+          "name": "Read",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "=SUM('a''😀 b'!A1:A2)"
+            },
+            {
+              "row": 2,
+              "col": 1,
+              "source": "=\"a!A1\"&\"A\""
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "ok": true,
+          "name": "A'😀 B",
+          "rows": 2,
+          "cols": 1,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "number",
+              "display": "2"
+            },
+            {
+              "row": 2,
+              "col": 1,
+              "kind": "number",
+              "display": "3"
+            }
+          ]
+        },
+        {
+          "ok": true,
+          "name": "Read",
+          "rows": 2,
+          "cols": 1,
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "kind": "number",
+              "display": "5"
+            },
+            {
+              "row": 2,
+              "col": 1,
+              "kind": "text",
+              "display": "a!A1A"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

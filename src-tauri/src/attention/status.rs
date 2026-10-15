@@ -360,6 +360,8 @@ pub struct ChangeSection {
 /// What changed between two folds of one store, for the surface.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ChangesView {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub changed_at: Option<String>,
     pub schema_version: String,
     pub window: crate::convergence::diff::Window,
     /// M26's own answer to "did anything move". Asked here rather than
@@ -601,6 +603,7 @@ pub fn change_sections(
     })
     .collect();
     ChangesView {
+        changed_at: None,
         schema_version: output.schema_version.to_string(),
         window: output.window,
         quiet: output.quiet(),
@@ -1138,6 +1141,13 @@ mod tests {
     /// row can be read aloud. A section that only appeared when it had content
     /// would make "nothing came into view" and "we did not look" the same
     /// screen.
+    #[test]
+    fn converge_json_has_no_changed_at() {
+        let view = change_sections(&loud(), &Subjects::default());
+        let json = serde_json::to_value(view).unwrap();
+        assert!(json.get("changed_at").is_none());
+    }
+
     #[test]
     fn every_change_section_is_present_and_every_line_has_words() {
         let quiet = change_sections(

@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { DatePicker } from '@/components/ui/DatePicker';
+import { Button } from '@/components/ui/Button';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
@@ -12,6 +13,8 @@ import {
   serializeEndpoint,
 } from '@/engine/dates';
 import { kindMeta } from '@/engine/properties';
+import { DATE_GRAMMAR } from '@/engine/dateGrammar';
+import { parseRelative, relativeLabel, RELATIVE_PRESETS } from '@/engine/relativeDates';
 import { filterDateLabel, filterOpArity } from '@/engine/viewFilters';
 import type { FieldDef, FieldKind, FilterOp, FilterRule, Scalar } from '@/engine/types';
 
@@ -210,7 +213,7 @@ function SingleValue({
 }
 
 /**
- * A date bound, picked rather than typed.
+ * A date bound chosen as a relative day or period, or an exact calendar date.
  *
  * Writes the M16.14 storage shape through `serializeEndpoint`, so a bound with
  * a time reads `2026-08-01 14:30` — the same spelling a date PROPERTY uses,
@@ -235,19 +238,27 @@ function DateValue({
   ariaLabel: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [exact, setExact] = useState(false);
+  const [days, setDays] = useState('7');
   const parsed = parseEndpoint(value);
+  const relative = relativeLabel(value);
   const format = def?.dateFormat ?? 'short';
   const timeFormat = def?.timeFormat ?? DEFAULT_TIME_FORMAT;
   const label =
-    parsed === null
-      ? 'Pick a date…'
-      : ((def !== undefined && value !== undefined ? filterDateLabel(value, def) : null) ??
-        serializeEndpoint(parsed.date, parsed.time));
+    relative !== null
+      ? relative[0].toUpperCase() + relative.slice(1)
+      : parsed === null
+        ? 'Pick a date…'
+        : ((def !== undefined && value !== undefined ? filterDateLabel(value, def) : null) ??
+          serializeEndpoint(parsed.date, parsed.time));
 
   return (
     <InlineSurface
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setExact(false);
+      }}
       ariaLabel="Filter date"
       trigger={
         <>
@@ -256,33 +267,94 @@ function DateValue({
         </>
       }
       triggerLabel={ariaLabel}
-      empty={parsed === null}
+      empty={parsed === null && relative === null}
       width={width}
       panelWidth={260}
     >
-      <DatePicker
-        value={{
-          ...makeDateValue(parsed?.date ?? new Date().toISOString().slice(0, 10)),
-          startTime: parsed?.time ?? null,
-          format,
-          timeFormat,
-        }}
-        // A filter bound is one endpoint, never a range: a range bound would
-        // need the rule to say which end it meant, and `is between` already
-        // says it with two bounds.
-        showEndToggle={false}
-        showRemind={false}
-        // Date format and Time format configure the PROPERTY — the detail
-        // panel writes them to the type note. There is no type note behind a
-        // filter bound, so they were two controls that changed nothing; the
-        // format they display now comes from the field instead (M16.29).
-        showFormat={false}
-        onChange={(v) => onChange(serializeEndpoint(v.start, v.startTime))}
-        onClear={() => {
-          onChange('');
-          setOpen(false);
-        }}
-      />
+      {!exact ? (
+        <>
+          <div className="px-2 pb-1 text-2xs font-medium text-n-400">Relative</div>
+          {RELATIVE_PRESETS.map(({ token, label }) => (
+            <MenuItem
+              key={token}
+              label={label[0].toUpperCase() + label.slice(1)}
+              testId={`filter-relative-${token}`}
+              checked={typeof value === 'string' && value.trim() === token}
+              onSelect={() => {
+                onChange(token);
+                setOpen(false);
+              }}
+            />
+          ))}
+          <div className="my-1 flex items-center gap-1 border-t border-n-200 px-1 pt-2">
+            <Input
+              size="sm"
+              width={54}
+              ariaLabel="Number of days"
+              testId="filter-relative-days"
+              value={days}
+              onChange={(event) => setDays(event.target.value)}
+            />
+            <Button
+              size="sm"
+              variant="ghost"
+              testId="filter-relative-ago"
+              disabled={parseRelative(`${DATE_GRAMMAR.relative.offsets.prefix}-${days}`) === null}
+              onClick={() => {
+                onChange(`${DATE_GRAMMAR.relative.offsets.prefix}-${days}`);
+                setOpen(false);
+              }}
+            >
+              days ago
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              testId="filter-relative-ahead"
+              disabled={parseRelative(`${DATE_GRAMMAR.relative.offsets.prefix}+${days}`) === null}
+              onClick={() => {
+                onChange(`${DATE_GRAMMAR.relative.offsets.prefix}+${days}`);
+                setOpen(false);
+              }}
+            >
+              from now
+            </Button>
+          </div>
+          <MenuItem
+            label="Exact date"
+            icon="calendar"
+            testId="filter-exact-date"
+            onSelect={() => setExact(true)}
+          />
+        </>
+      ) : (
+        <>
+          <MenuItem label="Relative date" icon="arrow-left" onSelect={() => setExact(false)} />
+          <DatePicker
+            value={{
+              ...makeDateValue(parsed?.date ?? new Date().toISOString().slice(0, 10)),
+              startTime: parsed?.time ?? null,
+              format,
+              timeFormat,
+            }}
+            // A filter bound is one endpoint, never a range: a range bound would
+            // need the rule to say which end it meant, and `is between` already
+            // says it with two bounds.
+            showEndToggle={false}
+            showRemind={false}
+            // Date format and Time format configure the PROPERTY — the detail
+            // panel writes them to the type note. There is no type note behind a
+            // filter bound, so they were two controls that changed nothing; the
+            // format they display now comes from the field instead (M16.29).
+            showFormat={false}
+            onChange={(v) => onChange(serializeEndpoint(v.start, v.startTime))}
+            onClear={() => {
+              onChange('');
+              setOpen(false);
+            }}
+          />
+        </>
+      )}
     </InlineSurface>
   );
 }

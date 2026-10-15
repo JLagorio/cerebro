@@ -50,8 +50,16 @@ const ATOMS: [&str; 7] = [
 const FAMILIES: [&str; 7] = [
     "text", "number", "date", "choice", "multi", "boolean", "any",
 ];
-const ROLLUP_CALCS: [&str; 8] = [
-    "count", "sum", "avg", "min", "max", "earliest", "latest", "show",
+const ROLLUP_CALCS: [&str; 9] = [
+    "count",
+    "sum",
+    "avg",
+    "min",
+    "max",
+    "percent_done",
+    "earliest",
+    "latest",
+    "show",
 ];
 const ROLLUP_RESULTS: [&str; 3] = ["number", "value", "text"];
 const STATUS_CHAIN: [&str; 3] = ["project", "type", "default"];
@@ -77,10 +85,12 @@ pub enum FieldKind {
     Rollup,
     CreatedTime,
     LastEditedTime,
+    Formula,
+    Repeat,
 }
 
 impl FieldKind {
-    pub const ALL: [FieldKind; 17] = [
+    pub const ALL: [FieldKind; 19] = [
         FieldKind::Text,
         FieldKind::Number,
         FieldKind::Checkbox,
@@ -98,6 +108,8 @@ impl FieldKind {
         FieldKind::Rollup,
         FieldKind::CreatedTime,
         FieldKind::LastEditedTime,
+        FieldKind::Formula,
+        FieldKind::Repeat,
     ];
 
     /// The word a Type doc spells the kind with.
@@ -120,6 +132,8 @@ impl FieldKind {
             FieldKind::Rollup => "rollup",
             FieldKind::CreatedTime => "created_time",
             FieldKind::LastEditedTime => "last_edited_time",
+            FieldKind::Formula => "formula",
+            FieldKind::Repeat => "repeat",
         }
     }
 
@@ -214,6 +228,7 @@ pub struct KindTable {
     pub rollup_calcs: Vec<RollupCalc>,
     pub virtual_fields: Vec<String>,
     pub collation: Collation,
+    pub deadline_cases: Vec<Value>,
     pub cases: Value,
 }
 
@@ -425,6 +440,8 @@ pub struct FieldDef {
     pub relation: Option<String>,
     pub property: Option<String>,
     pub calculate: Option<String>,
+    /// Preserved as authored; formula evaluation belongs to the renderer.
+    pub formula: Option<String>,
     pub from: Option<FromSpec>,
 }
 
@@ -434,6 +451,8 @@ pub struct TypeSchema {
     pub fields: Vec<FieldDef>,
     pub statuses: Vec<StatusDef>,
     pub folder: Option<String>,
+    /// A stored date or daterange field declared on this same Type doc.
+    pub deadline: Option<String>,
 }
 
 /// Which link of the status chain answered.
@@ -545,6 +564,7 @@ pub fn parse_field_def(name: &str, spec: &Value) -> FieldDef {
         relation: None,
         property: None,
         calculate: None,
+        formula: None,
         from: None,
     };
     let kind_of = |v: Option<&Value>| {
@@ -565,6 +585,7 @@ pub fn parse_field_def(name: &str, spec: &Value) -> FieldDef {
                 Some(Value::String(t)) => t == "1",
                 _ => false,
             };
+            def.formula = s.get("formula").and_then(Value::as_str).map(str::to_string);
             def.relation = string_at(s, "relation");
             def.property = string_at(s, "property");
             def.calculate =
@@ -644,13 +665,27 @@ impl VaultSchema {
         for e in entries {
             let statuses = parse_statuses(e.properties.get("statuses"), table);
             if e.entry_type.as_deref() == Some("Type") {
+                let fields = parse_fields(e.properties.get("fields"));
+                let deadline = e
+                    .properties
+                    .get("deadline")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|name| {
+                        fields.iter().any(|field| {
+                            field.name == *name
+                                && matches!(field.kind, FieldKind::Date | FieldKind::Daterange)
+                        })
+                    })
+                    .map(str::to_string);
                 types.insert(
                     e.title.clone(),
                     TypeSchema {
                         name: e.title.clone(),
-                        fields: parse_fields(e.properties.get("fields")),
+                        fields,
                         statuses: statuses.clone(),
                         folder: parse_folder(e.properties.get("folder")),
+                        deadline,
                     },
                 );
             }
@@ -667,6 +702,14 @@ impl VaultSchema {
 
     pub fn type_named(&self, name: &str) -> Option<&TypeSchema> {
         self.types.get(name)
+    }
+
+    /// The declared deadline; describe_database reads it (M62.2), and
+    /// list_agenda labels deadlines with it (M62.3).
+    pub fn deadline_field(&self, type_name: &str) -> Option<&FieldDef> {
+        let own = self.types.get(type_name)?;
+        let name = own.deadline.as_deref()?;
+        own.fields.iter().find(|field| field.name == name)
     }
 
     /// The field `name` as the entry's own type declares it.
@@ -697,9 +740,9 @@ impl VaultSchema {
 
     /// The value a view reads for `name`, in `fieldValue`'s pinned order:
     /// an entry fact, then a declared created or edited time, then the
-    /// relationship, then the property. A rollup or a derived relation reads
-    /// None: Rust holds no relation index to compute them from, a gap the
-    /// schema README records.
+    /// relationship, then the property. A rollup, formula or derived relation reads
+    /// None: Rust holds neither a relation index nor a formula evaluator, as
+    /// the schema README records.
     pub fn field_value(&self, entry: &Entry, name: &str) -> Option<Value> {
         if let Some(v) = virtual_value(entry, name) {
             return v;
@@ -708,7 +751,7 @@ impl VaultSchema {
             match def.kind {
                 FieldKind::CreatedTime => return Some(Value::String(entry.created_at.clone())),
                 FieldKind::LastEditedTime => return Some(Value::String(entry.modified_at.clone())),
-                FieldKind::Rollup => return None,
+                FieldKind::Rollup | FieldKind::Formula => return None,
                 FieldKind::Person | FieldKind::Relation if def.from.is_some() => return None,
                 _ => {}
             }
@@ -878,8 +921,16 @@ mod tests {
             "relation": d.relation,
             "property": d.property,
             "calculate": d.calculate,
+            "formula": d.formula,
             "from": d.from.as_ref().map(|f| json!({ "type": f.type_name, "field": f.field })),
         })
+    }
+
+    #[test]
+    fn a_date_field_with_remind_reads_as_its_kind() {
+        let def = parse_field_def("due", &serde_json::json!({"kind": "date", "remind": "1d"}));
+        assert_eq!(def.kind, FieldKind::Date);
+        assert_eq!(def.name, "due");
     }
 
     #[test]
@@ -888,6 +939,36 @@ mod tests {
             let name = case["name"].as_str().unwrap();
             let def = parse_field_def(case["field"].as_str().unwrap(), &case["spec"]);
             assert_eq!(def_json(&def), case["expect"], "{name}");
+        }
+    }
+
+    #[test]
+    fn replays_the_deadline_cases() {
+        for case in &t().deadline_cases {
+            let mut doc = Entry::empty_for_test("types/work.md");
+            doc.title = "Work".into();
+            doc.entry_type = Some("Type".into());
+            doc.properties
+                .insert("fields".into(), case["fields"].clone());
+            doc.properties
+                .insert("deadline".into(), case["deadline"].clone());
+            let schema = VaultSchema::from_entries(&[doc], t());
+            let expected = case["expect"].as_str();
+            assert_eq!(
+                schema.type_named("Work").unwrap().deadline.as_deref(),
+                expected,
+                "{}",
+                case["name"]
+            );
+            assert_eq!(
+                schema
+                    .deadline_field("Work")
+                    .map(|field| field.name.as_str()),
+                expected,
+                "{}",
+                case["name"]
+            );
+            assert!(schema.deadline_field("Unknown").is_none());
         }
     }
 
@@ -1042,6 +1123,13 @@ mod tests {
         assert_eq!(epic.kind, FieldKind::Relation);
         assert_eq!(epic.target.as_deref(), Some("Epic"));
         assert_eq!(field("window").kind, FieldKind::Daterange);
+        assert_eq!(work.deadline.as_deref(), Some("due"));
+        assert_eq!(
+            schema
+                .deadline_field("Work item")
+                .map(|field| field.name.as_str()),
+            Some("due")
+        );
         // No project.md in the corpus overrides it, so a work item's statuses
         // come from its Type doc.
         let record = entries

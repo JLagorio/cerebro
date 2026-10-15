@@ -1,3 +1,5 @@
+import { commandDef } from '@/app/commands';
+import { matchesSpec } from '@/lib/keys/combo';
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { undoDepth } from 'prosemirror-history';
@@ -312,7 +314,8 @@ describe('replace and links', () => {
 
   it('a read-only page finds but never offers Replace', async () => {
     await mount(PAGE, { readOnly: true });
-    openReplace();
+    expect(openReplace()).toBe(true);
+    openFind();
     await search('sync');
     await waitFor(() => expect(count()).toBe('1 of 4'));
     expect(screen.queryByTestId('find-toggle-replace')).toBeNull();
@@ -321,7 +324,7 @@ describe('replace and links', () => {
 });
 
 function StandIn({ onClose }: { onClose: () => void }) {
-  useEscapeLayer(onClose);
+  useEscapeLayer(onClose, { modal: false });
   return <div data-testid="stand-in">panel</div>;
 }
 
@@ -474,4 +477,14 @@ describe('which page a key acts on', () => {
     expect(screen.queryByTestId('find-bar')).toBeNull();
     outside.remove();
   });
+});
+
+it('the Find row reserves Command-F, leaving Control-F to macOS line editing', async () => {
+  const spec = commandDef('find.open').keys[0]!;
+  const control = { key: 'f', metaKey: false, ctrlKey: true, altKey: false, shiftKey: false };
+  expect(matchesSpec(spec, control, true)).toBe(false);
+  expect(matchesSpec(spec, { ...control, metaKey: true, ctrlKey: false }, true)).toBe(true);
+  await mount(PAGE);
+  expect(openFind()).toBe(false);
+  expect(screen.getByTestId('find-input')).toBeTruthy();
 });

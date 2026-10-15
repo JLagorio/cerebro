@@ -267,7 +267,8 @@ mod tests {
             (by.actor(), by.run_id(), by.approved_by()),
             (HUMAN_ACTOR, None, None)
         );
-        crate::vault::write::save_note(&vault, "notes/a.md", "\n# A\n\nSaved.\n", &by).unwrap();
+        crate::vault::write::save_note(&vault, "notes/a.md", "\n# A\n\nSaved.\n", None, &by)
+            .unwrap();
         let vault_id = crate::runtime::scope::derive_vault_id(&vault);
         let rows: Vec<(String, Option<String>, Option<String>)> =
             crate::runtime::sink::with_sink(|conn| {

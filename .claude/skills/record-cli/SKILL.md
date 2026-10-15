@@ -48,7 +48,8 @@ header disagree, the header wins and this file gets fixed.
   <name> --source app --proves <one sentence>`, plus `--ends` when the run
   never reached a result. It finds the session file from the init.
 - It refuses rather than guesses: an init key it does not know (add it to
-  `INIT_KEEP` or `INIT_DROP` with a reason), a server other than the toys, an
+  `INIT_KEEP` or `INIT_DROP` with a reason), a server other than the toys or an exact `--allow-server <name>`
+  (one flag per reviewed connector, written into the recording meta), an
   API-key source, another CLI version, or any hit in the post-scan. Its report
   is counts only, so it is safe to paste.
 

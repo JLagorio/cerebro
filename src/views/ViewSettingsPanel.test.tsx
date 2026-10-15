@@ -717,3 +717,27 @@ describe('calendar span (M61.8)', () => {
     expect(nextPresentation().calendarSpan).toBe('day');
   });
 });
+
+describe('date grouping controls (M61.3)', () => {
+  it('offers a Dates block and persists a calendar choice per level', () => {
+    const { nextPresentation } = setup({ group: [{ field: 'due' }, { field: 'status' }] });
+    fireEvent.click(screen.getByTestId('view-settings-group'));
+    expect(screen.getByText('Dates')).toBeTruthy();
+    const select = screen.getByTestId('group-date-bucket-0');
+    expect((select as HTMLSelectElement).value).toBe('relative');
+    expect(screen.queryByTestId('group-date-bucket-1')).toBeNull();
+    fireEvent.change(select, { target: { value: 'month' } });
+    expect(nextPresentation().group).toEqual([
+      { field: 'due', dateBucket: 'month' },
+      { field: 'status' },
+    ]);
+  });
+  it('Relative removes the saved key and preserves the other group options', () => {
+    const { nextPresentation } = setup({
+      group: [{ field: 'due', dateBucket: 'week', dir: 'desc', hideEmpty: true }],
+    });
+    fireEvent.click(screen.getByTestId('view-settings-group'));
+    fireEvent.change(screen.getByTestId('group-date-bucket-0'), { target: { value: 'relative' } });
+    expect(nextPresentation().group).toEqual([{ field: 'due', dir: 'desc', hideEmpty: true }]);
+  });
+});

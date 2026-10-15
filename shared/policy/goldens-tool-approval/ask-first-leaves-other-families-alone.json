@@ -29,6 +29,7 @@
       "mcp__cerebro__set_fields",
       "mcp__cerebro__append_to_note",
       "mcp__cerebro__edit_note",
+      "mcp__cerebro__edit_sheet",
       "ExitPlanMode"
     ],
     "withheld": [],
@@ -50,7 +51,8 @@
       "mcp__cerebro__update_frontmatter": "ask",
       "mcp__cerebro__set_fields": "ask",
       "mcp__cerebro__append_to_note": "ask",
-      "mcp__cerebro__edit_note": "ask"
+      "mcp__cerebro__edit_note": "ask",
+      "mcp__cerebro__edit_sheet": "ask"
     }
   }
 }

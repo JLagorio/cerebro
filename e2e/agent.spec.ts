@@ -368,7 +368,7 @@ test('agent page: an agent is built from pickers, not from remembered strings', 
   await expect(page.getByTestId('agent-tools-summary')).toContainText('Read-only');
   await toolsEditor.getByRole('button', { name: 'Done' }).click();
   await expect.poll(() => scoutFile(page)).toContain('allowed-tools:');
-  await expect(page.getByTestId('agent-prop-tools')).toContainText('6 granted');
+  await expect(page.getByTestId('agent-prop-tools')).toContainText('14 granted');
 
   // A trigger is clauses, not YAML, and the sentence under it is the same one
   // the library prints — so what will fire it is readable before it ever runs.
@@ -475,7 +475,7 @@ test('agent page: editing its schedule property updates the record', async ({ pa
 
   await editor.getByRole('button', { name: 'Done' }).click();
   await expect.poll(() => scoutFile(page)).toContain('weekly fri 17:30');
-  await expect(row).toContainText('weekly fri 17:30');
+  await expect(row).toContainText('Every Friday at 17:30');
   await expect(page.getByTestId('dossier-duty')).toContainText('On duty');
 });
 

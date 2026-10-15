@@ -49,6 +49,77 @@ const BANNED: [&str; 3] = [
     "std::env::remove_var",
 ];
 
+fn outside_parser_violations(sources: &[Source]) -> Vec<String> {
+    sources
+        .iter()
+        .filter_map(|(path, text)| {
+            if path == Path::new("src/rails.rs") {
+                return None;
+            }
+            let archive = ["zip::", "calamine::", "quick_xml::"].iter().any(|needle| {
+                let allowed = if *needle == "zip::" {
+                    path == Path::new("src/files/extract/package.rs")
+                } else {
+                    path.starts_with("src/files/extract")
+                };
+                !allowed
+                    && text
+                        .lines()
+                        .any(|line| !line.trim_start().starts_with("//") && line.contains(needle))
+            });
+            let image = path != Path::new("src/files/images.rs")
+                && text
+                    .lines()
+                    .any(|line| !line.trim_start().starts_with("//") && line.contains("image::"));
+            (archive || image).then(|| path.display().to_string())
+        })
+        .collect()
+}
+
+#[test]
+fn outside_bytes_are_parsed_only_behind_limits() {
+    assert_eq!(outside_parser_violations(&sources()), Vec::<String>::new());
+}
+#[test]
+fn an_archive_parser_outside_the_boundary_fails_the_rail() {
+    for source in [
+        "use zip::ZipArchive;",
+        "calamine::Xlsx::new(bytes)",
+        "quick_xml::Reader::from_reader(bytes)",
+    ] {
+        assert_eq!(
+            outside_parser_violations(&[(PathBuf::from("src/rogue.rs"), source.into())]),
+            ["src/rogue.rs"]
+        );
+    }
+}
+
+#[test]
+fn even_an_extractor_must_open_zip_through_package() {
+    assert_eq!(
+        outside_parser_violations(&[(
+            PathBuf::from("src/files/extract/rogue.rs"),
+            "use zip::ZipArchive;".into()
+        )]),
+        ["src/files/extract/rogue.rs"]
+    );
+}
+
+#[test]
+fn an_image_decoder_outside_the_boundary_fails_the_rail() {
+    for source in ["image::load_from_memory(bytes)", "use image::ImageReader;"] {
+        assert_eq!(
+            outside_parser_violations(&[(PathBuf::from("src/rogue.rs"), source.into())]),
+            ["src/rogue.rs"]
+        );
+    }
+    assert!(outside_parser_violations(&[(
+        PathBuf::from("src/files/images.rs"),
+        "use image::ImageReader;".into()
+    )])
+    .is_empty());
+}
+
 /// A source file: its path within the crate, and its text.
 type Source = (PathBuf, String);
 
@@ -495,4 +566,174 @@ fn every_reader_refuses_what_it_guards_against() {
         log_readers(&mentions),
         ["src/probe.rs", "../src/lib/probe.ts"]
     );
+}
+
+#[test]
+fn only_the_reminders_command_posts_a_notification() {
+    let callers: Vec<_> = sources()
+        .into_iter()
+        .filter(|(path, text)| path != Path::new("src/rails.rs") && text.contains("notify::post("))
+        .map(|(path, _)| path)
+        .collect();
+    assert_eq!(callers, vec![PathBuf::from("src/lib.rs")]);
+}
+
+/// Mask prose and literals without moving offsets, then examine function
+/// bodies. This is a source rail, not a second Rust parser: compilation owns
+/// syntax, and these markers deliberately match the engine's small API.
+fn engine_code(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut code = bytes.to_vec();
+    let mut at = 0;
+    while at < bytes.len() {
+        let start = at;
+        if bytes[at..].starts_with(b"//") {
+            while at < bytes.len() && bytes[at] != b'\n' {
+                at += 1;
+            }
+        } else if bytes[at..].starts_with(b"/*") {
+            at += 2;
+            let mut depth = 1;
+            while at < bytes.len() && depth > 0 {
+                if bytes[at..].starts_with(b"/*") {
+                    depth += 1;
+                    at += 2;
+                } else if bytes[at..].starts_with(b"*/") {
+                    depth -= 1;
+                    at += 2;
+                } else {
+                    at += 1;
+                }
+            }
+        } else if bytes[at] == b'"' {
+            at += 1;
+            while at < bytes.len() {
+                if bytes[at] == b'\\' {
+                    at = (at + 2).min(bytes.len());
+                } else if bytes[at] == b'"' {
+                    at += 1;
+                    break;
+                } else {
+                    at += 1;
+                }
+            }
+        } else if bytes[at] == b'\'' && bytes.get(at + 2) == Some(&b'\'') {
+            at += 3;
+        } else if bytes[at..].starts_with(b"'\\") {
+            at += 2;
+            while at < bytes.len() && bytes[at] != b'\'' {
+                at += 1;
+            }
+            at = (at + 1).min(bytes.len());
+        } else {
+            at += 1;
+            continue;
+        }
+        for ch in &mut code[start..at] {
+            if *ch != b'\n' {
+                *ch = b' ';
+            }
+        }
+    }
+    // All remaining non-ASCII bytes are outside the syntactic markers this
+    // rail reads; mask whole bytes so the result is valid UTF-8 as well.
+    for ch in &mut code {
+        if !ch.is_ascii() {
+            *ch = b' ';
+        }
+    }
+    String::from_utf8(code).unwrap()
+}
+
+fn brace_end(code: &str, open: usize) -> usize {
+    let mut depth = 0;
+    for (offset, ch) in code.as_bytes()[open..].iter().enumerate() {
+        if *ch == b'{' {
+            depth += 1;
+        } else if *ch == b'}' {
+            depth -= 1;
+            if depth == 0 {
+                return open + offset + 1;
+            }
+        }
+    }
+    code.len()
+}
+
+fn tokenless_engine_functions(text: &str) -> Vec<String> {
+    let mut code = engine_code(text);
+    // Ignore test modules and individual test-only helpers, wherever they
+    // appear; a cfg(test) helper near the top must not hide production below.
+    for marker in ["#[cfg(test)]", "#[test]"] {
+        let mut from = 0;
+        while let Some(offset) = code[from..].find(marker) {
+            let start = from + offset;
+            let Some(open) = code[start..].find('{').map(|at| start + at) else {
+                break;
+            };
+            let end = brace_end(&code, open);
+            code.replace_range(start..end, &" ".repeat(end - start));
+            from = end;
+        }
+    }
+    let mut problems = Vec::new();
+    let mut from = 0;
+    while let Some(offset) = code[from..].find("fn ") {
+        let start = from + offset;
+        let Some(open) = code[start..].find('{').map(|at| start + at) else {
+            break;
+        };
+        let end = brace_end(&code, open);
+        let signature = &code[start..open];
+        let body = &code[open..end];
+        let compact: String = body.chars().filter(|ch| !ch.is_whitespace()).collect();
+        let computes = ["build_model(", "prepare_model(", ".evaluate("]
+            .iter()
+            .any(|call| compact.contains(call));
+        let signature_compact: String =
+            signature.chars().filter(|ch| !ch.is_whitespace()).collect();
+        if computes && !signature_compact.contains(":&EngineThread") {
+            problems.push(signature.trim().to_string());
+        }
+        from = end;
+    }
+    problems
+}
+
+#[test]
+fn ironcalc_evaluates_only_on_the_engine_thread() {
+    let source = sources();
+    for required in ["src/sheet/engine.rs", "src/sheet/ai.rs"] {
+        assert!(
+            source.iter().any(|(path, _)| path == Path::new(required)),
+            "the source walk missed {required}"
+        );
+    }
+    let problems: Vec<_> = source
+        .iter()
+        .flat_map(|(path, text)| {
+            tokenless_engine_functions(text)
+                .into_iter()
+                .map(|signature| format!("{}: {signature}", path.display()))
+        })
+        .collect();
+    assert!(
+        problems.is_empty(),
+        "Every engine constructor/evaluation needs &EngineThread: {problems:#?}"
+    );
+}
+
+#[test]
+fn the_engine_thread_rail_rejects_a_tokenless_sample() {
+    let good = "fn compute(thread: &EngineThread) { build_model(thread); model.evaluate(); }";
+    assert!(tokenless_engine_functions(good).is_empty());
+    let bad = "fn compute() { model.evaluate(); }";
+    assert_eq!(tokenless_engine_functions(bad), ["fn compute()"]);
+    let nested =
+        "#[cfg(test)] fn helper() { model.evaluate(); }\nfn production() { prepare_model(); }";
+    assert_eq!(tokenless_engine_functions(nested), ["fn production()"]);
+    assert!(tokenless_engine_functions(
+        "fn quiet() { let text = \"model.evaluate()\"; /* build_model() */ }"
+    )
+    .is_empty());
 }

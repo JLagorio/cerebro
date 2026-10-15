@@ -39,6 +39,8 @@
     { "url": "ftp://example.com/", "verdict": "deny" },
     { "url": "ipc://localhost/x", "verdict": "deny" },
     { "url": "asset://localhost/x", "verdict": "deny" },
+    { "url": "cerebro-file://localhost/0/attachments/probe.png", "verdict": "deny" },
+    { "url": "CEREBRO-FILE://localhost/0/attachments/probe.png", "verdict": "deny" },
     { "url": "http://localhost:5173/notes/a.md", "dev_root": "http://localhost:5173", "verdict": "deny" },
     { "url": "http://localhost:5173/?x=1", "dev_root": "http://localhost:5173", "verdict": "deny" },
     { "url": "http://x@localhost:5173/", "dev_root": "http://localhost:5173", "verdict": "deny" }

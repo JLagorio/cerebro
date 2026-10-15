@@ -129,3 +129,11 @@ describe('changeset words (M58.3)', () => {
     expect(isChangeset(null)).toBe(false);
   });
 });
+
+it('accepts old events without a mail count and refuses invalid recorded counts', () => {
+  const old = { state: 'nothing', run_id: 'old', shell_unrecorded: false };
+  expect(isChangeset(old)).toBe(true);
+  for (const count of [-1, 0.5, null, '2'])
+    expect(isChangeset({ ...old, kept_out_of_git: count })).toBe(false);
+  expect(isChangeset({ ...old, kept_out_of_git: 2 })).toBe(true);
+});

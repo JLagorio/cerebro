@@ -162,6 +162,13 @@
      it has to sit between --n-100 (invisible) and --n-300 (a texture that
      competes with the diagram). Picked by eye against --surface-board. */
   --canvas-dot: #d5d9e3;
+  /* JSON Canvas files store only the digit, never these theme paints. */
+  --canvas-1: var(--opt-red);
+  --canvas-2: var(--opt-orange);
+  --canvas-3: var(--opt-yellow);
+  --canvas-4: var(--opt-green);
+  --canvas-5: #0e9bb5;
+  --canvas-6: var(--opt-purple);
   --text-primary: var(--n-900);
   --text-secondary: var(--n-600);
   --text-muted: var(--n-500);
@@ -329,6 +336,13 @@
      nearer its ground than the light one is to hers, because a light dot on a
      dark field reads louder than a dark dot on a light one at the same delta. */
   --canvas-dot: #333a49;
+  /* JSON Canvas files store only the digit, never these theme paints. */
+  --canvas-1: var(--opt-red);
+  --canvas-2: var(--opt-orange);
+  --canvas-3: var(--opt-yellow);
+  --canvas-4: var(--opt-green);
+  --canvas-5: #3fb8d0;
+  --canvas-6: var(--opt-purple);
   --text-primary: var(--n-900);
   --text-secondary: var(--n-600);
   --text-muted: var(--n-500);

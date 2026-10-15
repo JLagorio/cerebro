@@ -1,0 +1,467 @@
+{
+  "lines": [
+    {
+      "line": "![](attachments/a.png)",
+      "media": {
+        "name": "",
+        "url": "attachments/a.png",
+        "caption": ""
+      },
+      "kind": "image"
+    },
+    {
+      "line": "![Plan](a.png \"Caption\")",
+      "media": {
+        "name": "Plan",
+        "url": "a.png",
+        "caption": "Caption"
+      },
+      "kind": "image"
+    },
+    {
+      "line": "![](<My Shot.png>)",
+      "media": {
+        "name": "",
+        "url": "My Shot.png",
+        "caption": ""
+      },
+      "kind": "image"
+    },
+    {
+      "line": "![Plan|300](a.png)",
+      "media": {
+        "name": "Plan",
+        "url": "a.png",
+        "caption": "",
+        "width": 300
+      },
+      "kind": "image"
+    },
+    {
+      "line": "![Walkthrough|640](clip.mp4 \"Day one\")",
+      "media": {
+        "name": "Walkthrough",
+        "url": "clip.mp4",
+        "caption": "Day one",
+        "width": 640
+      },
+      "kind": "video"
+    },
+    {
+      "line": "![Take|300](a.mp3)",
+      "media": {
+        "name": "Take|300",
+        "url": "a.mp3",
+        "caption": ""
+      },
+      "kind": "audio"
+    },
+    {
+      "line": "![Original](a.docx)",
+      "media": {
+        "name": "Original",
+        "url": "a.docx",
+        "caption": ""
+      },
+      "kind": "file"
+    },
+    {
+      "line": "![Version\\|2](a.png)",
+      "media": {
+        "name": "Version|2",
+        "url": "a.png",
+        "caption": ""
+      },
+      "kind": "image"
+    },
+    {
+      "line": "![a\\\\|2](a.png)",
+      "media": {
+        "name": "a\\",
+        "url": "a.png",
+        "caption": "",
+        "width": 2
+      },
+      "kind": "image"
+    },
+    {
+      "line": "![測定 🖼️](画像.PNG)",
+      "media": {
+        "name": "測定 🖼️",
+        "url": "画像.PNG",
+        "caption": ""
+      },
+      "kind": "image"
+    },
+    {
+      "line": "![x](a.png 'Cap')",
+      "media": {
+        "name": "x",
+        "url": "a.png",
+        "caption": "Cap"
+      },
+      "kind": "image"
+    },
+    {
+      "line": "![x](a.png (Cap))",
+      "media": {
+        "name": "x",
+        "url": "a.png",
+        "caption": "Cap"
+      },
+      "kind": "image"
+    },
+    {
+      "line": "![x](a.png   \"Cap\"  )",
+      "media": {
+        "name": "x",
+        "url": "a.png",
+        "caption": "Cap"
+      },
+      "kind": "image"
+    },
+    {
+      "line": "![a \\[draft\\]](a.png)",
+      "media": {
+        "name": "a [draft]",
+        "url": "a.png",
+        "caption": ""
+      },
+      "kind": "image"
+    },
+    {
+      "line": "![a \\* b](a.png)",
+      "media": {
+        "name": "a * b",
+        "url": "a.png",
+        "caption": ""
+      },
+      "kind": "image"
+    },
+    {
+      "line": "![a](a(b).png)",
+      "media": {
+        "name": "a",
+        "url": "a(b).png",
+        "caption": ""
+      },
+      "kind": "image"
+    },
+    {
+      "line": "![](<a\\<b\\>.png>)",
+      "media": {
+        "name": "",
+        "url": "a<b>.png",
+        "caption": ""
+      },
+      "kind": "image"
+    },
+    {
+      "line": "![](a\\(b\\).png)",
+      "media": {
+        "name": "",
+        "url": "a(b).png",
+        "caption": ""
+      },
+      "kind": "image"
+    },
+    {
+      "line": "![](https://example.test/img)",
+      "media": {
+        "name": "",
+        "url": "https://example.test/img",
+        "caption": ""
+      },
+      "kind": "image"
+    },
+    {
+      "line": "![](data:image/png;base64,AA)",
+      "media": {
+        "name": "",
+        "url": "data:image/png;base64,AA",
+        "caption": ""
+      },
+      "kind": "image"
+    },
+    {
+      "line": "![](file:///a.png)",
+      "media": {
+        "name": "",
+        "url": "file:///a.png",
+        "caption": ""
+      },
+      "kind": "image"
+    },
+    {
+      "line": "![](photo.svg)",
+      "media": {
+        "name": "",
+        "url": "photo.svg",
+        "caption": ""
+      },
+      "kind": "image"
+    },
+    {
+      "line": "![](photo.heic)",
+      "media": {
+        "name": "",
+        "url": "photo.heic",
+        "caption": ""
+      },
+      "kind": "image"
+    },
+    {
+      "line": "![](unknown.thing)",
+      "media": {
+        "name": "",
+        "url": "unknown.thing",
+        "caption": ""
+      },
+      "kind": "file"
+    },
+    {
+      "line": "![](picture)",
+      "media": {
+        "name": "",
+        "url": "picture",
+        "caption": ""
+      },
+      "kind": "image"
+    },
+    {
+      "line": "![](image.png?x=1#here)",
+      "media": {
+        "name": "",
+        "url": "image.png?x=1#here",
+        "caption": ""
+      },
+      "kind": "image"
+    },
+    {
+      "line": "![x|0](a.png)",
+      "media": {
+        "name": "x",
+        "url": "a.png",
+        "caption": "",
+        "width": 0
+      },
+      "kind": "image"
+    },
+    {
+      "line": "![x|20](a.pdf)",
+      "media": {
+        "name": "x|20",
+        "url": "a.pdf",
+        "caption": ""
+      },
+      "kind": "file"
+    },
+    {
+      "line": " ![](a.png)",
+      "media": null,
+      "kind": null
+    },
+    {
+      "line": "![](a.png) ",
+      "media": null,
+      "kind": null
+    },
+    {
+      "line": "![](a.png)![](b.png)",
+      "media": null,
+      "kind": null
+    },
+    {
+      "line": "[x](a.png)",
+      "media": null,
+      "kind": null
+    },
+    {
+      "line": "![x]()",
+      "media": null,
+      "kind": null
+    },
+    {
+      "line": "![x](<>)",
+      "media": null,
+      "kind": null
+    },
+    {
+      "line": "![a [b]](a.png)",
+      "media": null,
+      "kind": null
+    },
+    {
+      "line": "![x] (a.png)",
+      "media": null,
+      "kind": null
+    },
+    {
+      "line": "![](a(.png)",
+      "media": null,
+      "kind": null
+    },
+    {
+      "line": "![](a.png \"open)",
+      "media": null,
+      "kind": null
+    },
+    {
+      "line": "![](a.png (nested(cap)))",
+      "media": null,
+      "kind": null
+    },
+    {
+      "line": "![](a\nb.png)",
+      "media": null,
+      "kind": null
+    },
+    {
+      "line": "![](a\u0000.png)",
+      "media": null,
+      "kind": null
+    },
+    {
+      "line": "![](<a<b.png>)",
+      "media": null,
+      "kind": null
+    },
+    {
+      "line": "![x](a.png) trailing",
+      "media": null,
+      "kind": null
+    }
+  ],
+  "destinations": [
+    {
+      "note": "docs/page.md",
+      "dest": "a.png",
+      "path": "docs/a.png"
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "../attachments/a.png",
+      "path": "attachments/a.png"
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "/attachments/a.png",
+      "path": "attachments/a.png"
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "<../a%20b.png>",
+      "path": "a b.png"
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "./a.png?v=1#x",
+      "path": "docs/a.png"
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "%2e%2e/a.png",
+      "path": "a.png"
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "%2Fattachments%2Fa.png",
+      "path": "attachments/a.png"
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "a%23b.png",
+      "path": "docs/a#b.png"
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "a%253fb.png",
+      "path": "docs/a%3fb.png"
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "/.hidden/a.png",
+      "path": ".hidden/a.png"
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "https://example.test/a.png",
+      "path": null
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "file:///x.png",
+      "path": null
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "data:image/png;base64,AA",
+      "path": null
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "//example.test/a.png",
+      "path": null
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "%2f%2fexample.test/a.png",
+      "path": null
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "file%3A/x.png",
+      "path": null
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "../../a.png",
+      "path": null
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "%zz.png",
+      "path": null
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "%ff.png",
+      "path": null
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "a%00.png",
+      "path": null
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "a%7f.png",
+      "path": null
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "a%C2%85.png",
+      "path": null
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "a%5cb.png",
+      "path": null
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "#here",
+      "path": null
+    },
+    {
+      "note": "docs/page.md",
+      "dest": "/",
+      "path": null
+    },
+    {
+      "note": "page.md",
+      "dest": "../a.png",
+      "path": null
+    }
+  ]
+}

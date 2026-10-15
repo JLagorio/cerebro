@@ -1,22 +1,36 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FilesField } from '@/detail/FilesField';
 import { resetLayers } from '@/components/ui/layers';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import { useNavStore } from '@/stores/navStore';
+import { seedBytes, reset as resetBytes } from '@/lib/mockBytes';
+import { mockDrop } from '@/lib/mockDropped';
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 const ipc = vi.hoisted(() => ({
   canPickFiles: vi.fn(() => true),
   pickFiles: vi.fn(async () => [] as string[]),
   importAttachment: vi.fn(async (_v: string, source: string) => {
     const name = source.split('/').pop() ?? 'file';
-    return `attachments/${name}`;
+    return { path: `attachments/${name}`, reused: false };
   }),
 }));
 
-vi.mock('@/lib/ipc', () => ipc);
+vi.mock('@/lib/ipc', async (original) => ({
+  ...(await original<typeof import('@/lib/ipc')>()),
+  ...ipc,
+}));
 
 /**
  * Files, for real (M16.13c).
@@ -29,19 +43,47 @@ vi.mock('@/lib/ipc', () => ipc);
 describe('FilesField', () => {
   beforeEach(() => {
     resetLayers();
+    resetBytes();
+    useNavStore.getState().reset();
     useUiStore.setState({ toasts: [] });
     useVaultStore.setState({ vaultPath: '/vault' });
     ipc.canPickFiles.mockReturnValue(true);
     ipc.pickFiles.mockResolvedValue([]);
+    ipc.importAttachment.mockClear();
     ipc.importAttachment.mockImplementation(async (_v: string, source: string) => {
       const name = source.split('/').pop() ?? 'file';
-      return `attachments/${name}`;
+      return { path: `attachments/${name}`, reused: false };
     });
   });
   afterEach(cleanup);
 
   const open = async (user: ReturnType<typeof userEvent.setup>) =>
     user.click(screen.getByRole('button', { name: /Add file to/ }));
+
+  it('opens image chips in an image-only lightbox, other files as pages and URLs as links', async () => {
+    const user = userEvent.setup();
+    seedBytes('0', 'attachments/a.png', { bytes: [1, 2] });
+    const onChange = vi.fn();
+    render(
+      <FilesField
+        values={['attachments/a.png', 'attachments/b.pdf', 'https://example.com/image.png']}
+        label="Files"
+        onChange={onChange}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Open a.png' }));
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+    expect(screen.getByText('1 of 1')).toBeTruthy();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Open b.pdf' }));
+    expect(useNavStore.getState().selection).toEqual({ kind: 'file', path: 'attachments/b.pdf' });
+    expect(screen.getByRole('link').getAttribute('href')).toBe('https://example.com/image.png');
+    expect(
+      screen.getByRole('button', { name: 'Add file to Files' }).hasAttribute('data-cell-primary'),
+    ).toBe(true);
+    expect(onChange).not.toHaveBeenCalled();
+  });
 
   it('copies a picked file in and stores the path the copy landed at', async () => {
     const user = userEvent.setup();
@@ -56,6 +98,59 @@ describe('FilesField', () => {
     expect(ipc.importAttachment).toHaveBeenCalledWith('/vault', '/Users/me/Downloads/report.pdf');
     // The vault-relative path, never the absolute one it came from.
     expect(onChange).toHaveBeenCalledWith(['attachments/report.pdf']);
+  });
+
+  it.each(['vault round trip', 'unmount', 'another record'])(
+    'discards a picker after %s',
+    async (change) => {
+      const user = userEvent.setup();
+      const picked = deferred<string[]>();
+      ipc.pickFiles.mockReturnValue(picked.promise);
+      const onChange = vi.fn();
+      const field = render(
+        <FilesField ownerKey="a:files" values={[]} label="Files" onChange={onChange} />,
+      );
+      await open(user);
+      await user.click(screen.getByTestId('files-upload'));
+      if (change === 'unmount') field.unmount();
+      else if (change === 'another record')
+        field.rerender(
+          <FilesField ownerKey="b:files" values={[]} label="Files" onChange={onChange} />,
+        );
+      else
+        act(() => {
+          useVaultStore.setState({ vaultPath: '/other' });
+          useVaultStore.setState({ vaultPath: '/vault' });
+        });
+      await act(async () => picked.resolve(['/a/new.pdf']));
+      expect(ipc.importAttachment).not.toHaveBeenCalled();
+      expect(onChange).not.toHaveBeenCalled();
+    },
+  );
+
+  it('never replaces newer values or starts the next import after a pending copy', async () => {
+    const user = userEvent.setup();
+    const copied = deferred<{ path: string; reused: boolean }>();
+    ipc.pickFiles.mockResolvedValue(['/a/one.pdf', '/a/two.pdf']);
+    ipc.importAttachment.mockReturnValue(copied.promise);
+    const onChange = vi.fn();
+    const field = render(
+      <FilesField ownerKey="a:files" values={[]} label="Files" onChange={onChange} />,
+    );
+    await open(user);
+    await user.click(screen.getByTestId('files-upload'));
+    await waitFor(() => expect(ipc.importAttachment).toHaveBeenCalledTimes(1));
+    field.rerender(
+      <FilesField
+        ownerKey="a:files"
+        values={['attachments/newer.pdf']}
+        label="Files"
+        onChange={onChange}
+      />,
+    );
+    await act(async () => copied.resolve({ path: 'attachments/one.pdf', reused: false }));
+    expect(ipc.importAttachment).toHaveBeenCalledTimes(1);
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   // Concurrently would race: the dedupe suffix is decided by what is already
@@ -74,6 +169,45 @@ describe('FilesField', () => {
       'attachments/old.pdf',
       'attachments/one.png',
       'attachments/two.png',
+    ]);
+  });
+
+  it('copies native dropped files in order and names folders and hidden files as skipped', async () => {
+    const onChange = vi.fn();
+    const { container } = render(
+      <FilesField
+        ownerKey="a:files"
+        values={['attachments/old.pdf']}
+        label="Files"
+        onChange={onChange}
+      />,
+    );
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: () => container.querySelector('[data-os-drop]'),
+    });
+    await act(async () =>
+      mockDrop({
+        at: { x: 8, y: 9 },
+        files: [
+          { path: '/outside/one.pdf', content: '%PDF' },
+          { path: '/outside/folder', folder: true },
+          { path: '/outside/.hidden.md', content: 'hidden' },
+          { path: '/outside/two.png', base64: 'AQI=' },
+        ],
+      }),
+    );
+    expect(ipc.importAttachment.mock.calls.map(([, path]) => path)).toEqual([
+      '/outside/one.pdf',
+      '/outside/two.png',
+    ]);
+    expect(onChange).toHaveBeenCalledWith([
+      'attachments/old.pdf',
+      'attachments/one.pdf',
+      'attachments/two.png',
+    ]);
+    expect(useUiStore.getState().toasts.map((toast) => toast.message)).toEqual([
+      'Skipped folder (a folder), .hidden.md (a hidden file)',
     ]);
   });
 

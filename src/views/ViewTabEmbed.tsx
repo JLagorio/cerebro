@@ -1,4 +1,11 @@
 import { Icon } from '@/components/ui/Icon';
+import { useEffect, useState } from 'react';
+import { addExistingToHost } from '@/app/relatedActions';
+import { RelationPicker } from '@/detail/RelationPicker';
+import { pointsAt } from '@/engine/linkDelta';
+import { useVaultStore } from '@/stores/vaultStore';
+import { resolveDateField } from '@/engine/schedule';
+import { useQuickAdd, useCreateOnDay } from '@/views/QuickAdd';
 import { columnUniverse } from '@/engine/columns';
 import type { Entry, Schema } from '@/engine/types';
 import type { ViewTabResolution } from '@/engine/viewTab';
@@ -10,7 +17,8 @@ import { ViewCanvas } from '@/views/ViewCanvas';
  * or the honest card when its pointer is dead. Both record surfaces mount it
  * since M45.6: the page and the peek, the second in a column that starts at
  * 360px, which is why the embed flows with its host's scroll and claims no
- * height of its own.
+ * height of its own. A tab can create in its database, and a related tab
+ * files new records under the page that holds it.
  *
  * THE SEAM, decided against the plan's "extract ViewBlock's resolvable core"
  * (amended 2026-08-28): DashboardView's ViewBlock does NOT route through this
@@ -57,6 +65,13 @@ export function ViewTabEmbed({
   /** Collapse-state namespace, `viewtab:<tab id>` from the record page. */
   scope: string;
 }) {
+  const sourceType = resolution.kind === 'ok' ? resolution.sourceType : null;
+  const host = resolution.kind === 'ok' ? resolution.filedUnder : null;
+  const vault = useVaultStore((state) => state.vaultPath);
+  const [adding, setAdding] = useState(false);
+  useEffect(() => setAdding(false), [vault, scope, host?.host.path, host?.field, sourceType]);
+  const quickAdd = useQuickAdd(sourceType ?? '', host);
+  const createOnDay = useCreateOnDay(sourceType ?? '', host);
   if (resolution.kind === 'broken') {
     return (
       <div data-testid="view-tab-broken" className="rounded-lg border border-n-200 bg-n-0">
@@ -64,7 +79,7 @@ export function ViewTabEmbed({
       </div>
     );
   }
-  const { surface, sourceType, filtered } = resolution;
+  const { surface, filtered } = resolution;
   // ViewBlock's wiring: the universe from the source type over the RESOLVED
   // rows. The synthetic ListSource is exact — `chainTypes` reads only `type`,
   // and a list's `project` narrowing already happened inside resolveSurface.
@@ -74,10 +89,46 @@ export function ViewTabEmbed({
     schema,
     surface.presentation.group,
   );
+  const dateField = resolveDateField(surface.presentation, fields);
   return (
     // No fixed height: unlike a dashboard tile, the embed flows with the
     // record page's own scroll — Notion's linked-database posture.
     <div data-testid="view-tab-embed" className="flex min-h-0 flex-col">
+      {host !== null && sourceType !== null && (
+        <div className="flex justify-end pb-2">
+          <button
+            type="button"
+            data-testid="view-tab-add-existing"
+            onClick={() => setAdding(true)}
+            className="flex items-center gap-1 rounded-md border border-n-200 bg-transparent px-2 py-1 text-xs text-n-600 hover:bg-n-50"
+          >
+            <Icon name="plus" size={13} />
+            Add existing
+          </button>
+        </div>
+      )}
+      {adding && host !== null && sourceType !== null && (
+        <RelationPicker
+          fieldName="Add existing"
+          targetType={sourceType}
+          value={[]}
+          entries={entries}
+          schema={schema}
+          onChange={() => {
+            /* Confirm mode stages without a live write. */
+          }}
+          onClose={() => setAdding(false)}
+          confirm={{
+            label: (count) => `Add ${count} records`,
+            exclude: new Set(
+              entries
+                .filter((entry) => pointsAt(entry, host.field, host.host, entries))
+                .map((entry) => entry.path),
+            ),
+            onConfirm: (selected) => addExistingToHost(host, selected, schema),
+          }}
+        />
+      )}
       <ViewCanvas
         embedded
         entries={surface.entries}
@@ -88,6 +139,15 @@ export function ViewTabEmbed({
         scope={scope}
         createType={sourceType ?? undefined}
         filtered={filtered}
+        onCreate={sourceType === null ? undefined : quickAdd}
+        onCreateOn={
+          sourceType === null || dateField === null
+            ? undefined
+            : (title, day, slot) =>
+                slot === undefined
+                  ? createOnDay(title, day, dateField)
+                  : createOnDay(title, day, dateField, slot)
+        }
       />
     </div>
   );

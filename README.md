@@ -5,7 +5,15 @@ markdown files you own — open the same folder in any editor and it is all stil
 there. The assistant is the [Claude Code CLI](https://claude.com/claude-code)
 already installed on your machine, so no API key ever goes into the app.
 
+## Reminders
+
+Reminders always show in Cerebro. In Settings → Reminders, allow notifications
+to also see reminders you set in Notification Center. A self-built app may
+need allowing again after it is rebuilt.
+
 ## Run it on a Mac
+
+It needs macOS 14 (Sonoma) or later.
 
 ### Download a build
 

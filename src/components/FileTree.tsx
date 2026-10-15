@@ -1,3 +1,4 @@
+import { isWhiteboardPath, kindFor } from '@/engine/fileKinds';
 import { useEffect, useMemo, useState } from 'react';
 import { MoveDialog } from '@/components/MoveDialog';
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
@@ -8,10 +9,11 @@ import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { addSubPage, nestPage } from '@/app/pageActions';
 import { trashPath } from '@/app/trashActions';
+import { renameKeepingLinks } from '@/app/renameActions';
 import { canHaveSubPages, isFolderNote } from '@/engine/docPages';
 import { TRASH_WORDS } from '@/engine/trash';
 import type { Entry } from '@/engine/types';
-import { createFolder, readNote, renameNote, setNoteTitle } from '@/lib/ipc';
+import { createFolder, readNote } from '@/lib/ipc';
 import { askedAbout, TEMPLATE_FILL_LABEL } from '@/lib/prompts';
 import { humanizeSlug, slugify } from '@/lib/slug';
 import {
@@ -26,7 +28,7 @@ import {
 } from '@/lib/templates';
 import { isDocEntry, typeStyle } from '@/engine/typeCatalog';
 import { EntryIcon } from '@/components/PageIcon';
-import { useNavStore } from '@/stores/navStore';
+import { useRenamePromptStore } from '@/stores/renamePromptStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
@@ -87,7 +89,7 @@ function buildTree(
     if (!e.path.startsWith(prefix) || hide(e.path)) continue;
     attach({
       path: e.path,
-      name: e.filename.replace(/\.(md|mmd)$/, ''),
+      name: e.filename.slice(0, e.filename.lastIndexOf('.')),
       label: e.title,
       kind: 'file',
       children: [],
@@ -217,7 +219,7 @@ export function FileTree({
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
   const createItem = useVaultStore((s) => s.createItem);
-  const replacePath = useNavStore((s) => s.replacePath);
+  const reviewingRename = useRenamePromptStore((s) => s.pending !== null);
   const expanded = useUiStore((s) => s.expandedFolders);
   const toggleFolder = useUiStore((s) => s.toggleFolder);
   const treeOrder = useUiStore((s) => s.treeOrder);
@@ -321,9 +323,11 @@ export function FileTree({
     const base = src.split('/').pop() ?? src;
     const dest = join(destDir, base);
     try {
-      await renameNote(vaultPath, src, dest);
-      await rescan();
-      replacePath(src, dest);
+      const result = await renameKeepingLinks({
+        steps: [{ from: src, to: dest }],
+        label: `Move ${entryByPath.get(src)?.title ?? src}`,
+      });
+      if (result === null) return;
       if (!expanded[destDir]) toggleFolder(destDir);
       const next = remapActive(src, dest);
       if (next !== null) onOpen(next);
@@ -341,9 +345,11 @@ export function FileTree({
       if (parentDir(src) !== destDir) {
         const base = src.split('/').pop() ?? src;
         const dest = join(destDir, base);
-        await renameNote(vaultPath, src, dest);
-        await rescan();
-        replacePath(src, dest);
+        const result = await renameKeepingLinks({
+          steps: [{ from: src, to: dest }],
+          label: `Move ${entryByPath.get(src)?.title ?? src}`,
+        });
+        if (result === null) return;
         const next = remapActive(src, dest);
         if (next !== null) onOpen(next);
       }
@@ -506,33 +512,28 @@ export function FileTree({
       const dot = node.path.lastIndexOf('.');
       const fileExt = node.kind === 'file' && dot !== -1 ? node.path.slice(dot) : '.md';
       const to = join(parentDir(node.path), `${slug}${node.kind === 'file' ? fileExt : ''}`);
-      if (to !== node.path) {
-        await renameNote(vaultPath, node.path, to);
-        // Repair history as well as the canvas: the old path is still in the
-        // back stack, and a folder rename takes every page under it along.
-        replacePath(node.path, to);
-        // Folder-note pattern: the doc's main file must keep the folder's
-        // name or the folder stops being a doc.
-        if (node.kind === 'doc' && node.mainPath !== undefined) {
-          await renameNote(vaultPath, `${to}/${node.name}.md`, `${to}/${slug}.md`);
-          replacePath(`${to}/${node.name}.md`, `${to}/${slug}.md`);
-        }
+      const steps = to === node.path ? [] : [{ from: node.path, to }];
+      // A folder-note's main file follows the folder name in a second step.
+      if (steps.length > 0 && node.kind === 'doc' && node.mainPath !== undefined) {
+        steps.push({ from: `${to}/${node.name}.md`, to: `${to}/${slug}.md` });
       }
       // A row's label is the note's H1, never its filename — renaming only
       // the file left the visible name unchanged in the tree, breadcrumb,
-      // recents and Quick Open ("the rename did nothing"). A .mmd has no H1
-      // to rewrite — its title IS its filename stem, and splicing `# title`
-      // into raw mermaid source would corrupt the diagram (M29.21).
+      // recents and Quick Open ("the rename did nothing"). Diagrams and whiteboards have no H1 to rewrite: their title is the filename stem.
       const titleTarget =
         node.kind === 'file'
-          ? to.endsWith('.mmd')
+          ? to.endsWith('.mmd') || isWhiteboardPath(to)
             ? null
-            : to
+            : node.path
           : node.kind === 'doc'
-            ? `${to}/${slug}.md`
+            ? (node.mainPath ?? null)
             : null;
-      if (titleTarget !== null) await setNoteTitle(vaultPath, titleTarget, trimmed);
-      await rescan();
+      const renamed = await renameKeepingLinks({
+        steps,
+        ...(titleTarget === null ? {} : { retitle: { path: titleTarget, title: trimmed } }),
+        label: `Rename ${node.label}`,
+      });
+      if (renamed === null) return;
       // Follow the file: renaming the page you are reading must not strand
       // the canvas on "This page no longer exists".
       let next = remapActive(node.path, to);
@@ -770,7 +771,7 @@ export function FileTree({
                     <EntryIcon
                       entry={entry}
                       fallback={{
-                        name: style.icon,
+                        name: isWhiteboardPath(node.path) ? kindFor(node.path).icon : style.icon,
                         color: active ? 'var(--cortex-500)' : (style.color ?? 'var(--n-500)'),
                       }}
                     />
@@ -839,7 +840,7 @@ export function FileTree({
       )}
       {dialog !== null && (
         <Dialog
-          open
+          open={!reviewingRename}
           onClose={closeDialog}
           title={
             dialog.mode === 'new-page'

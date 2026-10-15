@@ -1,0 +1,706 @@
+{
+  "format": 1,
+  "about": "Personal token names and grants (M62.5). Replayed by runtime/client_tokens.rs and the browser mock. Toolset eligibility and whether a toolset writes come only from tools.v1.json. Folder normalization removes repeated ./ prefixes and outer slashes, collapses interior repeated separators, and deduplicates in order. Backslashes and controls are refused so a displayed folder cannot obscure its boundary. Limits count normalized unique folders, Unicode scalar name characters, and UTF-8 folder bytes. Slugs trim after the 32-byte ASCII cut.",
+  "limits": {
+    "tokens": 20,
+    "nameChars": 100,
+    "slugChars": 32,
+    "folders": 20,
+    "folderBytes": 512
+  },
+  "names": [
+    {
+      "name": " Claude Code ",
+      "expect": {
+        "name": "Claude Code",
+        "slug": "claude-code"
+      }
+    },
+    {
+      "name": "My APP___Two",
+      "expect": {
+        "name": "My APP___Two",
+        "slug": "my-app-two"
+      }
+    },
+    {
+      "name": "\u4f60\u597d",
+      "expect": {
+        "name": "\u4f60\u597d",
+        "slug": "app"
+      }
+    },
+    {
+      "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa b",
+      "expect": {
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa b",
+        "slug": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "expect": {
+        "name": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "slug": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "  ",
+      "expect": {
+        "refusal": "Give this token a name from 1 to 100 characters."
+      }
+    },
+    {
+      "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "expect": {
+        "refusal": "Give this token a name from 1 to 100 characters."
+      }
+    },
+    {
+      "name": "tab\tname",
+      "expect": {
+        "refusal": "A token name can't contain control characters."
+      }
+    },
+    {
+      "name": "line\nname",
+      "expect": {
+        "refusal": "A token name can't contain control characters."
+      }
+    },
+    {
+      "name": "c1\u0085name",
+      "expect": {
+        "refusal": "A token name can't contain control characters."
+      }
+    },
+    {
+      "name": "del\u007fname",
+      "expect": {
+        "refusal": "A token name can't contain control characters."
+      }
+    },
+    {
+      "name": "  Caf\u00e9 \u2615  ",
+      "expect": {
+        "name": "Caf\u00e9 \u2615",
+        "slug": "caf"
+      }
+    },
+    {
+      "name": "App\n",
+      "expect": {
+        "name": "App",
+        "slug": "app"
+      }
+    },
+    {
+      "name": "\t",
+      "expect": {
+        "refusal": "Give this token a name from 1 to 100 characters."
+      }
+    },
+    {
+      "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\u0000",
+      "expect": {
+        "refusal": "Give this token a name from 1 to 100 characters."
+      }
+    }
+  ],
+  "grants": [
+    {
+      "name": "read default",
+      "request": {
+        "toolsets": ["read"],
+        "writeScope": [],
+        "readScope": null
+      },
+      "expect": {
+        "grant": {
+          "toolsets": ["read"],
+          "writeScope": [],
+          "readScope": null
+        }
+      }
+    },
+    {
+      "name": "comment is read scoped",
+      "request": {
+        "toolsets": ["read", "comment"],
+        "writeScope": [],
+        "readScope": ["notes"]
+      },
+      "expect": {
+        "grant": {
+          "toolsets": ["read", "comment"],
+          "writeScope": [],
+          "readScope": ["notes"]
+        }
+      }
+    },
+    {
+      "name": "a nonwriting grant drops supplied write folders",
+      "request": {
+        "toolsets": ["read"],
+        "writeScope": ["knowledge"],
+        "readScope": null
+      },
+      "expect": {
+        "grant": {
+          "toolsets": ["read"],
+          "writeScope": [],
+          "readScope": null
+        }
+      }
+    },
+    {
+      "name": "writing grant",
+      "request": {
+        "toolsets": ["read", "write"],
+        "writeScope": ["notes"],
+        "readScope": null
+      },
+      "expect": {
+        "grant": {
+          "toolsets": ["read", "write"],
+          "writeScope": ["notes"],
+          "readScope": null
+        }
+      }
+    },
+    {
+      "name": "all grantable sets",
+      "request": {
+        "toolsets": ["comment", "write", "read"],
+        "writeScope": ["notes", "projects"],
+        "readScope": ["notes", "projects"]
+      },
+      "expect": {
+        "grant": {
+          "toolsets": ["comment", "write", "read"],
+          "writeScope": ["notes", "projects"],
+          "readScope": ["notes", "projects"]
+        }
+      }
+    },
+    {
+      "name": "normalized duplicate folders",
+      "request": {
+        "toolsets": ["read", "write"],
+        "writeScope": [" ././notes/ ", "/notes/", "projects//active"],
+        "readScope": ["/././notes/", "notes"]
+      },
+      "expect": {
+        "grant": {
+          "toolsets": ["read", "write"],
+          "writeScope": ["notes", "projects/active"],
+          "readScope": ["notes"]
+        }
+      }
+    },
+    {
+      "name": "missing default",
+      "request": {
+        "toolsets": ["write"],
+        "writeScope": ["notes"],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "A token must include the \"read\" toolset."
+      }
+    },
+    {
+      "name": "empty grant",
+      "request": {
+        "toolsets": [],
+        "writeScope": [],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "A token must include the \"read\" toolset."
+      }
+    },
+    {
+      "name": "unknown grant",
+      "request": {
+        "toolsets": ["read", "shell"],
+        "writeScope": [],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "A token can't hold the \"shell\" toolset."
+      }
+    },
+    {
+      "name": "not grantable knowledge",
+      "request": {
+        "toolsets": ["read", "knowledge"],
+        "writeScope": [],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "A token can't hold the \"knowledge\" toolset."
+      }
+    },
+    {
+      "name": "not grantable proposals",
+      "request": {
+        "toolsets": ["read", "proposals"],
+        "writeScope": [],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "A token can't hold the \"proposals\" toolset."
+      }
+    },
+    {
+      "name": "not grantable propose",
+      "request": {
+        "toolsets": ["read", "propose"],
+        "writeScope": [],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "A token can't hold the \"propose\" toolset."
+      }
+    },
+    {
+      "name": "not grantable agents",
+      "request": {
+        "toolsets": ["read", "agents"],
+        "writeScope": [],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "A token can't hold the \"agents\" toolset."
+      }
+    },
+    {
+      "name": "not grantable ui",
+      "request": {
+        "toolsets": ["read", "ui"],
+        "writeScope": [],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "A token can't hold the \"ui\" toolset."
+      }
+    },
+    {
+      "name": "duplicate set",
+      "request": {
+        "toolsets": ["read", "read"],
+        "writeScope": [],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "A token can't repeat the \"read\" toolset."
+      }
+    },
+    {
+      "name": "write folders required",
+      "request": {
+        "toolsets": ["read", "write"],
+        "writeScope": [],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "Choose from 1 to 20 write folders."
+      }
+    },
+    {
+      "name": "empty read scope",
+      "request": {
+        "toolsets": ["read"],
+        "writeScope": [],
+        "readScope": []
+      },
+      "expect": {
+        "refusal": "Choose from 1 to 20 read folders."
+      }
+    },
+    {
+      "name": "no root ''",
+      "request": {
+        "toolsets": ["read", "write"],
+        "writeScope": [""],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "Choose a write folder inside the vault, not the whole vault."
+      }
+    },
+    {
+      "name": "no root '/'",
+      "request": {
+        "toolsets": ["read", "write"],
+        "writeScope": ["/"],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "Choose a write folder inside the vault, not the whole vault."
+      }
+    },
+    {
+      "name": "no root '././'",
+      "request": {
+        "toolsets": ["read", "write"],
+        "writeScope": ["././"],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "Choose a write folder inside the vault, not the whole vault."
+      }
+    },
+    {
+      "name": "no read root string",
+      "request": {
+        "toolsets": ["read"],
+        "writeScope": [],
+        "readScope": ["/"]
+      },
+      "expect": {
+        "refusal": "Choose a read folder inside the vault, not the whole vault."
+      }
+    },
+    {
+      "name": "knowledge write refused knowledge",
+      "request": {
+        "toolsets": ["read", "write"],
+        "writeScope": ["knowledge"],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "A token can't write in Knowledge."
+      }
+    },
+    {
+      "name": "knowledge write refused knowledge/concepts",
+      "request": {
+        "toolsets": ["read", "write"],
+        "writeScope": ["knowledge/concepts"],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "A token can't write in Knowledge."
+      }
+    },
+    {
+      "name": "knowledge read allowed",
+      "request": {
+        "toolsets": ["read"],
+        "writeScope": [],
+        "readScope": ["knowledge"]
+      },
+      "expect": {
+        "grant": {
+          "toolsets": ["read"],
+          "writeScope": [],
+          "readScope": ["knowledge"]
+        }
+      }
+    },
+    {
+      "name": "no hidden segments ../notes",
+      "request": {
+        "toolsets": ["read", "write"],
+        "writeScope": ["../notes"],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "A write folder can't contain a hidden or parent directory."
+      }
+    },
+    {
+      "name": "no hidden segments notes/../other",
+      "request": {
+        "toolsets": ["read", "write"],
+        "writeScope": ["notes/../other"],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "A write folder can't contain a hidden or parent directory."
+      }
+    },
+    {
+      "name": "no hidden segments .trash",
+      "request": {
+        "toolsets": ["read", "write"],
+        "writeScope": [".trash"],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "A write folder can't contain a hidden or parent directory."
+      }
+    },
+    {
+      "name": "no hidden segments notes/.hidden",
+      "request": {
+        "toolsets": ["read", "write"],
+        "writeScope": ["notes/.hidden"],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "A write folder can't contain a hidden or parent directory."
+      }
+    },
+    {
+      "name": "no hidden segments notes/.",
+      "request": {
+        "toolsets": ["read", "write"],
+        "writeScope": ["notes/."],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "A write folder can't contain a hidden or parent directory."
+      }
+    },
+    {
+      "name": "no ambiguous characters 'notes\\\\other'",
+      "request": {
+        "toolsets": ["read"],
+        "writeScope": [],
+        "readScope": ["notes\\other"]
+      },
+      "expect": {
+        "refusal": "A read folder can't contain a backslash or control characters."
+      }
+    },
+    {
+      "name": "no ambiguous characters 'notes\\nother'",
+      "request": {
+        "toolsets": ["read"],
+        "writeScope": [],
+        "readScope": ["notes\nother"]
+      },
+      "expect": {
+        "refusal": "A read folder can't contain a backslash or control characters."
+      }
+    },
+    {
+      "name": "folder byte limit",
+      "request": {
+        "toolsets": ["read"],
+        "writeScope": [],
+        "readScope": [
+          "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9"
+        ]
+      },
+      "expect": {
+        "refusal": "A read folder must be at most 512 bytes."
+      }
+    },
+    {
+      "name": "folder at byte limit",
+      "request": {
+        "toolsets": ["read"],
+        "writeScope": [],
+        "readScope": [
+          "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9"
+        ]
+      },
+      "expect": {
+        "grant": {
+          "toolsets": ["read"],
+          "writeScope": [],
+          "readScope": [
+            "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9"
+          ]
+        }
+      }
+    },
+    {
+      "name": "twenty write folders",
+      "request": {
+        "toolsets": ["read", "write"],
+        "writeScope": [
+          "folder0",
+          "folder1",
+          "folder2",
+          "folder3",
+          "folder4",
+          "folder5",
+          "folder6",
+          "folder7",
+          "folder8",
+          "folder9",
+          "folder10",
+          "folder11",
+          "folder12",
+          "folder13",
+          "folder14",
+          "folder15",
+          "folder16",
+          "folder17",
+          "folder18",
+          "folder19"
+        ],
+        "readScope": null
+      },
+      "expect": {
+        "grant": {
+          "toolsets": ["read", "write"],
+          "writeScope": [
+            "folder0",
+            "folder1",
+            "folder2",
+            "folder3",
+            "folder4",
+            "folder5",
+            "folder6",
+            "folder7",
+            "folder8",
+            "folder9",
+            "folder10",
+            "folder11",
+            "folder12",
+            "folder13",
+            "folder14",
+            "folder15",
+            "folder16",
+            "folder17",
+            "folder18",
+            "folder19"
+          ],
+          "readScope": null
+        }
+      }
+    },
+    {
+      "name": "too many write folders",
+      "request": {
+        "toolsets": ["read", "write"],
+        "writeScope": [
+          "folder0",
+          "folder1",
+          "folder2",
+          "folder3",
+          "folder4",
+          "folder5",
+          "folder6",
+          "folder7",
+          "folder8",
+          "folder9",
+          "folder10",
+          "folder11",
+          "folder12",
+          "folder13",
+          "folder14",
+          "folder15",
+          "folder16",
+          "folder17",
+          "folder18",
+          "folder19",
+          "folder20"
+        ],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "Choose from 1 to 20 write folders."
+      }
+    },
+    {
+      "name": "too many read folders",
+      "request": {
+        "toolsets": ["read"],
+        "writeScope": [],
+        "readScope": [
+          "folder0",
+          "folder1",
+          "folder2",
+          "folder3",
+          "folder4",
+          "folder5",
+          "folder6",
+          "folder7",
+          "folder8",
+          "folder9",
+          "folder10",
+          "folder11",
+          "folder12",
+          "folder13",
+          "folder14",
+          "folder15",
+          "folder16",
+          "folder17",
+          "folder18",
+          "folder19",
+          "folder20"
+        ]
+      },
+      "expect": {
+        "refusal": "Choose from 1 to 20 read folders."
+      }
+    },
+    {
+      "name": "single dot",
+      "request": {
+        "toolsets": ["read"],
+        "writeScope": [],
+        "readScope": ["."]
+      },
+      "expect": {
+        "refusal": "Choose a read folder inside the vault, not the whole vault."
+      }
+    },
+    {
+      "name": "long hidden folder",
+      "request": {
+        "toolsets": ["read"],
+        "writeScope": [],
+        "readScope": [
+          ".aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      },
+      "expect": {
+        "refusal": "A read folder must be at most 512 bytes."
+      }
+    },
+    {
+      "name": "long folder with backslash",
+      "request": {
+        "toolsets": ["read"],
+        "writeScope": [],
+        "readScope": [
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\"
+        ]
+      },
+      "expect": {
+        "refusal": "A read folder must be at most 512 bytes."
+      }
+    },
+    {
+      "name": "knowledge disk alias Knowledge",
+      "request": {
+        "toolsets": ["read", "write"],
+        "writeScope": ["Knowledge"],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "A token can't write in Knowledge."
+      }
+    },
+    {
+      "name": "knowledge disk alias \u212anowledge/concepts",
+      "request": {
+        "toolsets": ["read", "write"],
+        "writeScope": ["\u212anowledge/concepts"],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "A token can't write in Knowledge."
+      }
+    },
+    {
+      "name": "knowledge disk alias know\u200cledge",
+      "request": {
+        "toolsets": ["read", "write"],
+        "writeScope": ["know\u200cledge"],
+        "readScope": null
+      },
+      "expect": {
+        "refusal": "A token can't write in Knowledge."
+      }
+    }
+  ]
+}

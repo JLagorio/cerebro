@@ -26,6 +26,7 @@ import {
 } from './MarkdownEditor';
 import { blockMenuItems, formattingToolbarItems, UNCARRIED_ACTIONS } from './SelectionToolbar';
 import { splitFrontmatter } from '@/engine/frontmatter';
+import { sheetSourcesOf } from '@/engine/sheet/fence';
 
 // The app schema, not the default one: markdownToBlocks promotes chip text
 // (wikilinks, 📅 dates, [^citations]) into custom inline nodes that only exist
@@ -180,6 +181,92 @@ describe('the synchronous forms', () => {
       expect(blocksToMarkdownNow(editor, now)).toBe(await blocksToMarkdown(editor, now));
     });
   }
+});
+
+describe('the cerebro-whiteboard fence', () => {
+  it.each([
+    '',
+    'board: boards/plan.canvas',
+    'board: "boards/plan.canvas"\nheight: 400\nextra: kept',
+    'board: boards/plan.canvas\n\n',
+  ])('keeps its raw source over two saves: %s', async (source) => {
+    const markdown = `\`\`\`cerebro-whiteboard\n${source}${source ? '\n' : ''}\`\`\`\n`;
+    const blocks = await markdownToBlocks(editor, markdown);
+    expect(blocks[0]).toMatchObject({ type: 'whiteboard', props: { source } });
+    const once = await blocksToMarkdown(editor, blocks);
+    expect(once).toBe(markdown);
+    expect(await roundTrip(once)).toBe(once);
+    expect(lossyImportCause(markdown, once)).toBeNull();
+  });
+  it('leaves an invalid pointer as code', async () => {
+    expect(
+      (await markdownToBlocks(editor, '```cerebro-whiteboard\nboard: ../outside.canvas\n```\n'))[0]
+        .type,
+    ).toBe('codeBlock');
+  });
+  it.each([
+    ':::columns\n::::column\nFENCE::::\n::::column\nOther\n::::\n:::\n',
+    ':::toggle Details\nFENCE:::\n',
+    ':::ai{prompt="Plan"}\nFENCE:::\n',
+  ])('keeps a raw pointer inside a container: %s', async (carrier) => {
+    const fence = '```cerebro-whiteboard\nboard: "boards/plan.canvas"\nextra: kept\n```\n';
+    const once = await roundTrip(carrier.replace('FENCE', fence));
+    expect(once).toContain(fence);
+    expect(await roundTrip(once)).toBe(once);
+  });
+});
+
+describe('the cerebro-sheet fence', () => {
+  const sources = [
+    '',
+    'Item,Amount\nRent,1200\nTotal,=SUM(B2:B3)',
+    '---\nformat: 1\nname: Budget\n---\nItem,Amount\nRent,1200',
+    '---\nformat: 2\n---\nfuture,source',
+    '---\nname: [broken\n---\nuntouched,source',
+    '"line one\nline two",7',
+    '[[link]],*stars*,a\\b,trailing  ',
+    '1,2\n\n',
+  ];
+
+  it.each(sources)('keeps source verbatim over two saves: %s', async (source) => {
+    const markdown = `\`\`\`cerebro-sheet\n${source}${source ? '\n' : ''}\`\`\`\n`;
+    const blocks = await markdownToBlocks(editor, markdown);
+    expect(blocks[0]).toMatchObject({ type: 'sheet', props: { source } });
+    const once = await blocksToMarkdown(editor, blocks);
+    expect(once).toBe(markdown);
+    expect(await roundTrip(once)).toBe(once);
+    expect(lossyImportCause(markdown, once)).toBeNull();
+  });
+
+  it('uses a longer delimiter for a backtick line inside a CSV cell', async () => {
+    const source = '"first\n```\nlast",7';
+    const once = await blocksToMarkdown(editor, [{ type: 'sheet', props: { source } }] as never);
+    expect(once).toBe(`\`\`\`\`cerebro-sheet\n${source}\n\`\`\`\`\n`);
+    expect(sheetSourcesOf(await markdownToBlocks(editor, once))[0].source).toBe(source);
+    expect(await roundTrip(once)).toBe(once);
+  });
+
+  it('normalizes a tilde delimiter without changing its cells, and leaves yaml as code', async () => {
+    const source = '---\nformat: 1\n---\n1,2';
+    expect(await roundTrip(`~~~cerebro-sheet\n${source}\n~~~\n`)).toBe(
+      `\`\`\`cerebro-sheet\n${source}\n\`\`\`\n`,
+    );
+    expect((await markdownToBlocks(editor, `\`\`\`yaml\n${source}\n\`\`\`\n`))[0].type).toBe(
+      'codeBlock',
+    );
+  });
+
+  it('keeps sheets inside columns and toggles', async () => {
+    const markdown =
+      ':::columns\n::::column\n```cerebro-sheet\n1,2\n```\n::::\n::::column\n:::toggle Details\n```cerebro-sheet\n3,4\n```\n:::\n::::\n:::\n';
+    const blocks = await markdownToBlocks(editor, markdown);
+    expect(sheetSourcesOf(blocks).map((sheet) => sheet.source)).toEqual(['1,2', '3,4']);
+    const once = await blocksToMarkdown(editor, blocks);
+    expect(
+      sheetSourcesOf(await markdownToBlocks(editor, once)).map((sheet) => sheet.source),
+    ).toEqual(['1,2', '3,4']);
+    expect(await roundTrip(once)).toBe(once);
+  });
 });
 
 /**
@@ -1213,6 +1300,11 @@ describe('every / item survives a save or is not offered', () => {
     callout: [{ type: 'callout', props: { kind: 'warning' }, content: 'Mind the gap' }],
     mermaid: [{ type: 'mermaid', props: { code: 'flowchart TD\n  A --> B' } }],
     database: [{ type: 'database', props: { database: 'Reading list', view: 'shelf' } }],
+    whiteboard: [
+      { type: 'whiteboard', props: { source: 'board: boards/plan.canvas' } },
+      { type: 'whiteboard', props: { source: '' } },
+    ],
+    sheet: [{ type: 'sheet', props: { source: 'Item,Amount\nTotal,=SUM(B2:B3)' } }],
     subPages: [{ type: 'subPages' }],
     // Set, then unset (the picker `/Page` inserts): each is its own fence.
     pageCard: [
@@ -2432,4 +2524,21 @@ describe('lossyImportCause', () => {
     expect(lossyImportCause('```\nx\n```\n', '```javascript\nx\n```\n')).toBe('added');
     expect(lossyImportCause('ab\n', 'ba\n')).toBe('rewritten');
   });
+});
+
+it('root-anchored attachment carriers reopen with their kinds and stay byte-stable', async () => {
+  const markdown =
+    '![](/attachments/image.PNG)\n\n![](/attachments/phone.heic)\n\n![Report](/attachments/report.pdf)\n\n![Bundle](/attachments/bundle.zip)\n\n![Clip](/attachments/clip.mp4)\n\n![Voice](/attachments/voice.ogg)\n';
+  const blocks = await markdownToBlocks(editor, markdown);
+  expect(blocks.map((block) => block.type)).toEqual([
+    'image',
+    'image',
+    'file',
+    'file',
+    'video',
+    'audio',
+  ]);
+  const once = await blocksToMarkdown(editor, blocks);
+  expect(once).toBe(markdown);
+  expect(await roundTrip(once)).toBe(once);
 });

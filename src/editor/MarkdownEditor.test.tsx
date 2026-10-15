@@ -14,6 +14,8 @@ import {
   type EditorReadyInfo,
 } from './MarkdownEditor';
 import { readerText } from './readerText';
+import * as ipc from '@/lib/ipc';
+import { resetSheetCache } from '@/sheet/useSheetWorkbook';
 
 type ReadyInfo = Pick<EditorReadyInfo, 'editor' | 'lossyCause'>;
 
@@ -42,6 +44,87 @@ const appendParagraph = (editor: CerebroEditor, text: string) => {
 
 describe('MarkdownEditor', () => {
   afterEach(cleanup);
+
+  it('an explicit page flush saves the open grid draft before quit without unmounting', async () => {
+    resetSheetCache();
+    const calculate = vi
+      .spyOn(ipc, 'calculateSheets')
+      .mockResolvedValue([{ ok: true, name: 'Sheet1', rows: 1, cols: 1, cells: [] }]);
+    const ready = vi.fn<(info: EditorReadyInfo) => void>();
+    const save = vi.fn();
+    render(
+      <MarkdownEditor
+        markdown={'```cerebro-sheet\n1\n```\n'}
+        onChange={save}
+        onReady={ready}
+        debounceMs={60000}
+      />,
+    );
+    try {
+      await waitFor(() => expect(ready).toHaveBeenCalled());
+      const grid = screen.getByTestId('sheet-grid');
+      fireEvent.keyDown(grid, { key: 'x' });
+      fireEvent.change(screen.getByTestId('sheet-cell-editor'), {
+        target: { value: 'saved before quit' },
+      });
+      await act(async () => {
+        await ready.mock.calls[0][0].flushPendingSave();
+      });
+      expect(save).toHaveBeenCalledWith('```cerebro-sheet\nsaved before quit\n\n```\n');
+    } finally {
+      calculate.mockRestore();
+    }
+  });
+  it('shares one calculation across two sheets and flushes their exact source on unmount', async () => {
+    resetSheetCache();
+    const calculate = vi.spyOn(ipc, 'calculateSheets').mockResolvedValue([
+      {
+        ok: true,
+        name: 'Budget',
+        rows: 2,
+        cols: 2,
+        cells: [{ row: 2, col: 2, kind: 'number', display: '1500' }],
+      },
+      {
+        ok: true,
+        name: 'Sheet2',
+        rows: 1,
+        cols: 1,
+        cells: [{ row: 1, col: 1, kind: 'number', display: '0.8' }],
+      },
+    ]);
+    const first = '---\nformat: 1\nname: Budget\n---\nRent,1200\nTotal,=SUM(B1:B3)';
+    const second = '=Budget!B1/Budget!B2';
+    const markdown = `# Budget\n\n\`\`\`cerebro-sheet\n${first}\n\`\`\`\n\n\`\`\`cerebro-sheet\n${second}\n\`\`\`\n`;
+    const onReady = vi.fn<(info: ReadyInfo) => void>();
+    const onChange = vi.fn();
+    const { unmount } = render(
+      <MarkdownEditor
+        markdown={markdown}
+        onChange={onChange}
+        onReady={onReady}
+        debounceMs={60_000}
+      />,
+    );
+    try {
+      await waitFor(() => expect(onReady).toHaveBeenCalled());
+      await waitFor(() => expect(screen.getAllByTestId('sheet-grid')).toHaveLength(2));
+      expect(onReady.mock.calls[0][0].lossyCause).toBeNull();
+      expect(calculate).toHaveBeenCalledOnce();
+      expect(calculate.mock.calls[0][0].map((sheet) => sheet.name)).toEqual(['Budget', 'Sheet2']);
+      expect(screen.getByText('1500')).toBeTruthy();
+      expect(screen.getByText('0.8')).toBeTruthy();
+      appendParagraph(onReady.mock.calls[0][0].editor, 'Last words');
+      unmount();
+      await waitFor(() => expect(onChange).toHaveBeenCalledWith(`${markdown}\nLast words\n`));
+      expect(onChange.mock.calls[0][0]).not.toContain('1500');
+      expect(onChange.mock.calls[0][0]).not.toContain('0.8');
+    } finally {
+      unmount();
+      calculate.mockRestore();
+      resetSheetCache();
+    }
+  });
 
   it('renders the initial markdown as editor content', async () => {
     await renderReady({ markdown: '# Hello\n\nWorld paragraph.\n' });
@@ -236,6 +319,32 @@ describe('MarkdownEditor', () => {
     unmount();
     await waitFor(() => expect(onChange).toHaveBeenCalled());
     expect(onChange.mock.calls[0][0]).toBe('# Doc\n\n```cerebro-page\n[[how-we-schedule]]\n```\n');
+  });
+
+  it('flushes a fresh whiteboard on unmount as its raw pointer fence', async () => {
+    const onChange = vi.fn();
+    const onReady = vi.fn<(info: ReadyInfo) => void>();
+    const source = 'board: "boards/plan.canvas"\nheight: 400\nextra: kept';
+    const { unmount } = render(
+      <MarkdownEditor
+        markdown={'# Doc\n'}
+        onChange={onChange}
+        onReady={onReady}
+        debounceMs={60000}
+      />,
+    );
+    await waitFor(() => expect(onReady).toHaveBeenCalled());
+    const { editor } = onReady.mock.calls[0][0];
+    editor.insertBlocks(
+      [{ type: 'whiteboard', props: { source } }],
+      editor.document[editor.document.length - 1],
+      'after',
+    );
+    unmount();
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    expect(onChange.mock.calls[0][0]).toBe(
+      `# Doc\n\n\`\`\`cerebro-whiteboard\n${source}\n\`\`\`\n`,
+    );
   });
 
   /* The way an answer actually arrives: the run writes it into the live block

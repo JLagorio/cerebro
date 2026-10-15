@@ -13,6 +13,9 @@
 //! Ops arrive as JSON (`parse_ops`), tagged by `op` in snake case with
 //! camelCase fields:
 //!
+//! - `import {system, recordId, url?, path, content}`: one stamped copy per
+//!   source identity. The import mutex is held before path locks; a single
+//!   vault walk plans creates or checked replacements. Edited copies stay.
 //! - `patch {path, set, expectHash?}`: a frontmatter patch, as
 //!   `update_frontmatter` applies it.
 //! - `create {path, content}`: a new page, its whole bytes.
@@ -22,6 +25,10 @@
 //!   Trash (`trash::trash_locked`).
 //! - `restore {path, stamp}`: a Trash item back to `path`
 //!   (`trash::untrash_locked`).
+//! - `replace_file {path, content, expectHash}`: byte-exact, checked replacement.
+//!   It is the only write on its path.
+//! - `rename {from, to}`: a page or folder and its comments, in request
+//!   order after every write. The journal carries both names.
 //! - `revert {path, afterHash?, before?, keys?, trashed?, restored?}`: undo
 //!   (M60.7), built from one `FileResult` of an earlier change. A page that
 //!   change trashed comes back from its stamp, unless its path is taken or
@@ -36,9 +43,9 @@
 //!   undo's result.
 //!
 //! Checks, in order, before anything is written: the count, each op's
-//! words, each path as a note (`note_join`, markdown only) outside
+//! words, each write path as a note (`note_join`, markdown only) outside
 //! knowledge/, the per-path order (patch and body apply in order; a create
-//! or restore comes first and once; a delete or a revert stands alone), the
+//! or restore comes first and once; delete, revert and replace_file stand alone), the
 //! journal,
 //! then under the locks: each page read, its existence and Trash
 //! preconditions, every `expectHash` (D2 (c): a mismatch is `Stale`, M55.3),
@@ -137,6 +144,7 @@ fn left_for_next_open(error: &str) -> String {
 /// One op, read.
 #[derive(Debug, Clone, PartialEq)]
 pub enum BatchOp {
+    Import(crate::import::plan::Request),
     Patch {
         path: String,
         set: Map<String, Value>,
@@ -158,6 +166,15 @@ pub enum BatchOp {
     Restore {
         path: String,
         stamp: String,
+    },
+    ReplaceFile {
+        path: String,
+        content: String,
+        expect: String,
+    },
+    Rename {
+        from: String,
+        to: String,
     },
     /// Undo of one page of an earlier change (M60.7): see the module doc.
     Revert {
@@ -189,7 +206,10 @@ impl BatchOp {
             | BatchOp::Body { path, .. }
             | BatchOp::Delete { path, .. }
             | BatchOp::Restore { path, .. }
-            | BatchOp::Revert { path, .. } => path,
+            | BatchOp::Revert { path, .. }
+            | BatchOp::ReplaceFile { path, .. } => path,
+            BatchOp::Rename { from, .. } => from,
+            BatchOp::Import(request) => &request.path,
         }
     }
 
@@ -198,7 +218,12 @@ impl BatchOp {
             BatchOp::Patch { expect, .. }
             | BatchOp::Body { expect, .. }
             | BatchOp::Delete { expect, .. } => expect.as_deref(),
-            BatchOp::Create { .. } | BatchOp::Restore { .. } | BatchOp::Revert { .. } => None,
+            BatchOp::ReplaceFile { expect, .. } => Some(expect),
+            BatchOp::Create { .. }
+            | BatchOp::Restore { .. }
+            | BatchOp::Revert { .. }
+            | BatchOp::Rename { .. }
+            | BatchOp::Import(_) => None,
         }
     }
 
@@ -267,6 +292,9 @@ pub struct FileResult {
     pub trashed: Option<String>,
     pub restored: Option<String>,
     pub skipped: Option<Skipped>,
+    /// A rename's source; ordinary writes omit this key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub moved_from: Option<String>,
 }
 
 /// A landed batch: its id and one result per page it wrote, in the order
@@ -276,6 +304,8 @@ pub struct FileResult {
 pub struct BatchApplied {
     pub batch_id: String,
     pub files: Vec<FileResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub imports: Option<Vec<crate::import::plan::ImportResult>>,
 }
 
 /// Why a batch wrote nothing: an `expectHash` that no longer holds, or a
@@ -307,11 +337,14 @@ pub struct RecoveryReport {
 /// The keys each op takes.
 fn keys_of(op: &str) -> Option<&'static [&'static str]> {
     Some(match op {
+        "import" => &["op", "system", "recordId", "url", "path", "content"],
         "patch" => &["op", "path", "set", "expectHash"],
         "create" => &["op", "path", "content"],
         "body" => &["op", "path", "body", "expectHash"],
         "delete" => &["op", "path", "expectHash"],
         "restore" => &["op", "path", "stamp"],
+        "replace_file" => &["op", "path", "content", "expectHash"],
+        "rename" => &["op", "from", "to"],
         "revert" => &[
             "op",
             "path",
@@ -343,7 +376,7 @@ fn parse_op(n: usize, value: &Value) -> Result<BatchOp, String> {
     let allowed = keys_of(op).ok_or_else(|| {
         unreadable(
             n,
-            "its op must be patch, create, body, delete, restore or revert",
+            "its op must be patch, create, body, delete, restore, revert, rename, replace_file or import",
         )
     })?;
     if let Some(key) = object.keys().find(|key| !allowed.contains(&key.as_str())) {
@@ -356,6 +389,12 @@ fn parse_op(n: usize, value: &Value) -> Result<BatchOp, String> {
             .map(str::to_string)
             .ok_or_else(|| unreadable(n, &format!("{key} must be text")))
     };
+    if op == "rename" {
+        return Ok(BatchOp::Rename {
+            from: text("from")?,
+            to: text("to")?,
+        });
+    }
     let path = text("path")?;
     let hash_at = |key: &str| -> Result<Option<String>, String> {
         match object.get(key) {
@@ -377,6 +416,13 @@ fn parse_op(n: usize, value: &Value) -> Result<BatchOp, String> {
         }
     };
     Ok(match op {
+        "import" => BatchOp::Import(crate::import::plan::Request {
+            system: text("system")?,
+            record_id: text("recordId")?,
+            url: maybe_text("url")?,
+            path,
+            content: text("content")?,
+        }),
         "patch" => {
             let set = object
                 .get("set")
@@ -401,6 +447,12 @@ fn parse_op(n: usize, value: &Value) -> Result<BatchOp, String> {
         "delete" => BatchOp::Delete {
             path,
             expect: expect()?,
+        },
+        "replace_file" => BatchOp::ReplaceFile {
+            path,
+            content: text("content")?,
+            expect: expect()?
+                .ok_or_else(|| unreadable(n, "expectHash must be a 64-character hash"))?,
         },
         "restore" => BatchOp::Restore {
             path,
@@ -484,13 +536,17 @@ struct Planned {
     rollback_stamp: Option<String>,
     /// What a revert left as it was.
     skipped: Option<Skipped>,
+    moved_from: Option<String>,
 }
 
 impl Planned {
     /// Whether the batch writes or moves this page: a page a revert only
     /// skipped is reported, never journaled or touched.
     fn touches(&self) -> bool {
-        self.temp.is_some() || self.trashed.is_some() || self.restored.is_some()
+        self.temp.is_some()
+            || self.trashed.is_some()
+            || self.restored.is_some()
+            || self.moved_from.is_some()
     }
 
     fn journal(&self) -> JournalFile {
@@ -503,7 +559,7 @@ impl Planned {
             trashed: self.trashed.clone(),
             restored: self.restored.clone(),
             sidecar: self.sidecar.clone(),
-            moved_from: None,
+            moved_from: self.moved_from.clone(),
         }
     }
 
@@ -517,6 +573,7 @@ impl Planned {
             trashed: self.trashed.clone(),
             restored: self.restored.clone(),
             skipped: self.skipped.clone(),
+            moved_from: self.moved_from.clone(),
         }
     }
 }
@@ -547,6 +604,14 @@ fn pages(vault: &Path, ops: Vec<BatchOp>) -> Result<Vec<Page>, String> {
         }
     }
     for page in &pages {
+        if page.ops.len() > 1
+            && page
+                .ops
+                .iter()
+                .any(|op| matches!(op, BatchOp::ReplaceFile { .. }))
+        {
+            return Err(format!("{}: a replace_file must be the only write step on its page, so nothing was written.", page.path));
+        }
         let reverts = page.ops.iter().any(|op| op.revert().is_some());
         if reverts && page.ops.len() > 1 {
             return Err(revert_not_alone(&page.path));
@@ -713,6 +778,9 @@ fn plan(vault: &Path, pages: &[Page]) -> Result<Vec<Planned>, BatchError> {
             // A revert of a rewrite skips a page that is gone; its other
             // forms are held to their hash below.
             (BatchOp::Revert { .. }, None) => now.clone(),
+            (BatchOp::ReplaceFile { expect, .. }, None) if now.is_none() => {
+                return Err(stale(&page.path, expect, now));
+            }
             _ => {
                 if now.is_none() {
                     return Err(missing(&page.path).into());
@@ -772,7 +840,19 @@ fn plan(vault: &Path, pages: &[Page]) -> Result<Vec<Planned>, BatchError> {
         let mut skipped: Option<Skipped> = None;
         for op in &page.ops {
             match op {
-                BatchOp::Create { content, .. } => state = Some(content.clone()),
+                BatchOp::Create { content, .. } | BatchOp::ReplaceFile { content, .. } => {
+                    state = Some(content.clone())
+                }
+                BatchOp::Import(_) => {
+                    return Err("An import must be planned before its writes."
+                        .to_string()
+                        .into())
+                }
+                BatchOp::Rename { .. } => {
+                    return Err("a rename cannot be planned as a page write"
+                        .to_string()
+                        .into())
+                }
                 BatchOp::Restore { .. } => {}
                 BatchOp::Patch { set, .. } => {
                     let text = state.clone().unwrap_or_default();
@@ -873,6 +953,7 @@ fn plan(vault: &Path, pages: &[Page]) -> Result<Vec<Planned>, BatchError> {
             restored,
             kind,
             skipped,
+            moved_from: None,
         });
     }
     let bytes: usize = planned
@@ -885,40 +966,322 @@ fn plan(vault: &Path, pages: &[Page]) -> Result<Vec<Planned>, BatchError> {
     Ok(planned)
 }
 
+/// Moves are kept in request order, after all page writes.
+struct Rename {
+    from: String,
+    to: String,
+}
+
+fn normalized(path: &str) -> String {
+    Path::new(path)
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn beneath(path: &str, parent: &str) -> Option<String> {
+    if path == parent {
+        Some(String::new())
+    } else {
+        path.strip_prefix(&format!("{parent}/"))
+            .map(|tail| format!("/{tail}"))
+    }
+}
+
+/// Where a name in the virtual, moved tree came from on the initial disk.
+/// A source moved away and not replaced names nothing.
+fn origin_of(path: &str, prior: &[Rename]) -> Option<String> {
+    let mut path = normalized(path);
+    for step in prior.iter().rev() {
+        let from = normalized(&step.from);
+        let to = normalized(&step.to);
+        if let Some(tail) = beneath(&path, &to) {
+            path = format!("{from}{tail}");
+        } else if beneath(&path, &from).is_some() {
+            return None;
+        }
+    }
+    Some(path)
+}
+
+enum MoveNode {
+    Directory,
+    File(Option<String>),
+}
+
+/// The disk after planned writes but before moves. Text is needed only to
+/// report a file's hashes; a binary attachment may move without being read
+/// as a markdown page.
+fn move_node(vault: &Path, path: &str, writes: &[Planned]) -> Result<Option<MoveNode>, String> {
+    if let Some(page) = writes.iter().find(|p| normalized(&p.path) == path) {
+        return Ok(page.after.clone().map(|text| MoveNode::File(Some(text))));
+    }
+    let abs = write::safe_join(vault, path)?;
+    match std::fs::metadata(&abs) {
+        Ok(meta) if meta.is_dir() => Ok(Some(MoveNode::Directory)),
+        Ok(_) => {
+            let bytes = std::fs::read(&abs).map_err(|e| format!("{path}: {e}"))?;
+            Ok(Some(MoveNode::File(String::from_utf8(bytes).ok())))
+        }
+        Err(e)
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
+            // Staging a create makes its parents too.
+            Ok(writes
+                .iter()
+                .any(|p| p.after.is_some() && beneath(&normalized(&p.path), path).is_some())
+                .then_some(MoveNode::Directory))
+        }
+        Err(e) => Err(format!("{path}: {e}")),
+    }
+}
+
+fn virtual_node(
+    vault: &Path,
+    path: &str,
+    prior: &[Rename],
+    writes: &[Planned],
+) -> Result<Option<MoveNode>, String> {
+    let node = match origin_of(path, prior) {
+        Some(origin) => move_node(vault, &origin, writes)?,
+        None => None,
+    };
+    if node.is_some() {
+        return Ok(node);
+    }
+    // A preceding move can create a destination's parent directory. Carry
+    // those parent names through subsequent moves just like existing ones.
+    for (i, step) in prior.iter().enumerate() {
+        for parent in Path::new(&step.to)
+            .ancestors()
+            .skip(1)
+            .filter(|p| !p.as_os_str().is_empty())
+        {
+            let mut name = normalized(&parent.to_string_lossy());
+            for later in &prior[i + 1..] {
+                if let Some(tail) = beneath(&name, &normalized(&later.from)) {
+                    name = format!("{}{tail}", normalized(&later.to));
+                }
+            }
+            if name == normalized(path) {
+                return Ok(Some(MoveNode::Directory));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Validate every move against the names earlier moves leave. No rename,
+/// temp or journal row exists until this succeeds whole.
+fn plan_renames(
+    vault: &Path,
+    steps: &[Rename],
+    writes: &[Planned],
+) -> Result<Vec<Planned>, BatchError> {
+    let mut planned = Vec::new();
+    for (i, step) in steps.iter().enumerate() {
+        let prior = &steps[..i];
+        if virtual_node(vault, &step.to, prior, writes)?.is_some() {
+            return Err(format!("target already exists: {}", step.to).into());
+        }
+        let source =
+            virtual_node(vault, &step.from, prior, writes)?.ok_or_else(|| missing(&step.from))?;
+        let is_dir = matches!(source, MoveNode::Directory);
+        if let Some(origin) = origin_of(&step.to, prior) {
+            if let Some(side) = super::comments::carried_rel(&origin, is_dir) {
+                // A batch must be able to put every byte back. The ordinary
+                // rename sends an orphan to OS Trash, which has no journaled
+                // inverse, so a batch leaves that case for a direct rename.
+                if super::comments::sidecar_join(vault, &side).is_ok_and(|p| p.exists()) {
+                    return Err(format!("target comments already exist: {}", step.to).into());
+                }
+            }
+        }
+        if is_dir && beneath(&normalized(&step.to), &normalized(&step.from)).is_some() {
+            return Err(format!(
+                "{} can't be moved inside itself, so nothing was written.",
+                step.from
+            )
+            .into());
+        }
+        let mut parent = Path::new(&step.to).parent();
+        while let Some(path) = parent.filter(|p| !p.as_os_str().is_empty()) {
+            if matches!(
+                virtual_node(vault, &path.to_string_lossy(), prior, writes)?,
+                Some(MoveNode::File(_))
+            ) {
+                return Err(format!(
+                    "{} is not a folder, so nothing was written.",
+                    path.display()
+                )
+                .into());
+            }
+            parent = path.parent();
+        }
+        let before = match source {
+            MoveNode::File(text) => text,
+            MoveNode::Directory => None,
+        };
+        planned.push(Planned {
+            path: step.to.clone(),
+            abs: vault.join(&step.to),
+            before: before.clone(),
+            after: before,
+            keys: Vec::new(),
+            trashed: None,
+            restored: None,
+            temp: None,
+            kind: None,
+            sidecar: super::comments::carried_rel(&step.to, is_dir),
+            rollback_stamp: None,
+            skipped: None,
+            moved_from: Some(step.from.clone()),
+        });
+    }
+    let bytes: usize = writes
+        .iter()
+        .chain(&planned)
+        .map(|p| p.before.as_ref().map_or(0, String::len) + p.after.as_ref().map_or(0, String::len))
+        .sum();
+    if bytes > MAX_BATCH_BYTES {
+        return Err(TOO_LARGE.to_string().into());
+    }
+    Ok(planned)
+}
+
 // --- Applying ------------------------------------------------------------------
 
 /// Apply `ops` as one change, all or nothing (see the module doc), as the
-/// person `by` names. Returns one result per page written.
+/// person `by` names. Creates make their missing parent folders; an
+/// in-process rollback removes only those new folders that are still empty.
+/// Returns one result per page written.
 pub fn apply_batch(
     vault: &Path,
     ops: &[Value],
     by: &WriteReceipt<Human>,
 ) -> Result<BatchApplied, BatchError> {
+    apply_batch_at(
+        vault,
+        ops,
+        by,
+        &Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+    )
+}
+
+/// A fixed clock for the shared replay; the receipt alone supplies the actor.
+pub(crate) fn apply_batch_at(
+    vault: &Path,
+    ops: &[Value],
+    by: &WriteReceipt<Human>,
+    now: &str,
+) -> Result<BatchApplied, BatchError> {
     if ops.len() > MAX_BATCH_OPS {
         return Err(too_many(ops.len()).into());
     }
-    let ops = parse_ops(ops)?;
-    for op in &ops {
-        write::note_join(vault, op.path(), write::MARKDOWN)?;
-        crate::knowledge::guard_human_write(op.path()).map(drop)?;
+    if !ops
+        .iter()
+        .any(|op| op.get("op").and_then(Value::as_str) == Some("import"))
+    {
+        return apply_expanded(vault, ops, by);
     }
-    let mut pages = pages(vault, ops)?;
+    let parsed = parse_ops(ops)?;
+    // An import takes this mutex before any path lock. Concurrent imports
+    // discover the same identity only after the preceding batch commits.
+    let _import = crate::import::lock();
+    let requests: Vec<_> = parsed
+        .iter()
+        .enumerate()
+        .filter_map(|(i, op)| match op {
+            BatchOp::Import(request) => Some((i, request.clone())),
+            _ => None,
+        })
+        .collect();
+    let other: Vec<String> = parsed
+        .iter()
+        .flat_map(|op| match op {
+            BatchOp::Import(_) => Vec::new(),
+            BatchOp::Rename { from, to } => vec![from.clone(), to.clone()],
+            _ => vec![op.path().to_string()],
+        })
+        .collect();
+    let (files, occupied) = crate::import::plan::read_vault(vault)?;
+    let planned = crate::import::plan::plan(&requests, &files, &occupied, &other, now, by.actor())?;
+    let replacements: HashMap<_, _> = planned.writes.into_iter().collect();
+    let expanded: Vec<_> = parsed
+        .iter()
+        .enumerate()
+        .filter_map(|(index, op)| {
+            if matches!(op, BatchOp::Import(_)) {
+                replacements.get(&index).cloned()
+            } else {
+                Some(ops[index].clone())
+            }
+        })
+        .collect();
+    #[cfg(test)]
+    seams::park_import();
+    let mut applied = apply_expanded(vault, &expanded, by)?;
+    applied.imports = Some(planned.imports);
+    Ok(applied)
+}
+
+fn apply_expanded(
+    vault: &Path,
+    ops: &[Value],
+    by: &WriteReceipt<Human>,
+) -> Result<BatchApplied, BatchError> {
+    let ops = parse_ops(ops)?;
+    let mut renames = Vec::new();
+    let mut writes = Vec::new();
+    for op in ops {
+        if let BatchOp::Rename { from, to } = op {
+            crate::knowledge::guard_human_move(&from, &to).map(drop)?;
+            write::rename_paths(vault, &from, &to)?;
+            for end in [&from, &to] {
+                if let Some(landing) = write::landing_path(vault, end) {
+                    crate::knowledge::guard_human_write(&landing).map(drop)?;
+                    write::rename_paths(vault, &landing, &landing)?;
+                }
+            }
+            renames.push(Rename { from, to });
+        } else {
+            if !renames.is_empty() {
+                return Err(
+                    "Every write must precede every rename, so nothing was written."
+                        .to_string()
+                        .into(),
+                );
+            }
+            write::note_join(vault, op.path(), write::MARKDOWN)?;
+            crate::knowledge::guard_human_write(op.path()).map(drop)?;
+            writes.push(op);
+        }
+    }
+    let mut pages = pages(vault, writes)?;
     let batch_id = format!("{:032x}", rand::random::<u128>());
-    if pages.is_empty() {
+    if pages.is_empty() && renames.is_empty() {
         return Ok(BatchApplied {
             batch_id,
             files: Vec::new(),
+            imports: None,
         });
     }
     if !crate::runtime::sink::is_armed() {
         return Err(no_journal().into());
     }
-    let lock = lock_all(vault, &mut pages)?;
-    let planned = plan(vault, &pages)?;
+    let lock = lock_all(vault, &mut pages, &renames)?;
+    let mut planned = plan(vault, &pages)?;
+    let moved = plan_renames(vault, &renames, &planned)?;
+    planned.extend(moved);
     if !planned.iter().any(Planned::touches) {
         return Ok(BatchApplied {
             batch_id,
             files: planned.iter().map(Planned::result).collect(),
+            imports: None,
         });
     }
     let journal: Vec<JournalFile> = planned
@@ -926,6 +1289,7 @@ pub fn apply_batch(
         .filter(|p| p.touches())
         .map(Planned::journal)
         .collect();
+    let new_parents = missing_parents(vault, planned.iter().map(|page| page.abs.as_path()));
     batch_journal::begin(vault, &batch_id, &journal, by.actor())
         .map_err(|e| format!("Couldn't start the change: {e}, so nothing was written."))?;
     crate::crash::crash_point("batch-journaled");
@@ -937,6 +1301,7 @@ pub fn apply_batch(
             .collect();
         return Err(match roll_back(vault, &journal, &lock, &stamps, by) {
             Ok(_) => {
+                prune_new_parents(&new_parents);
                 let _ = batch_journal::finish(&batch_id);
                 rolled_back(&error)
             }
@@ -955,15 +1320,40 @@ pub fn apply_batch(
     Ok(BatchApplied {
         batch_id,
         files: planned.iter().map(Planned::result).collect(),
+        imports: None,
     })
 }
 
 /// Take every path the batch touches, retrying the stamps when another
 /// delete took one meanwhile.
-fn lock_all(vault: &Path, pages: &mut [Page]) -> Result<PathLock, String> {
+fn lock_all(vault: &Path, pages: &mut [Page], renames: &[Rename]) -> Result<PathLock, String> {
     for _ in 0..8 {
         mint_stamps(vault, pages);
-        let keys = lock_keys(pages);
+        let mut keys = lock_keys(pages);
+        for (i, step) in renames.iter().enumerate() {
+            keys.extend(write::rename_lock_keys(&step.from, &step.to));
+            for end in [&step.from, &step.to] {
+                if let Some(origin) = origin_of(end, &renames[..i]) {
+                    keys.extend(write::rename_lock_keys(&origin, &origin));
+                }
+            }
+        }
+        // Cleanup of a new empty parent must not race another writer that
+        // just created it but has not yet placed its file inside it.
+        let targets: Vec<PathBuf> = pages
+            .iter()
+            .map(|page| page.abs.clone())
+            .chain(renames.iter().map(|step| vault.join(&step.to)))
+            .collect();
+        for parent in missing_parents(vault, targets.iter().map(PathBuf::as_path)) {
+            keys.push(
+                parent
+                    .strip_prefix(vault)
+                    .map_err(|e| e.to_string())?
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+            );
+        }
         let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
         let lock = write::lock_paths(vault, &refs)?;
         let fresh_taken = pages.iter().any(|page| {
@@ -978,6 +1368,55 @@ fn lock_all(vault: &Path, pages: &mut [Page]) -> Result<PathLock, String> {
         }
     }
     Err("no free Trash stamp, so nothing was written.".to_string())
+}
+
+/// Missing ancestors below the vault, deepest first. Existing empty folders
+/// belong to the person and must never be removed by a failed batch.
+fn missing_parents<'a>(vault: &Path, targets: impl Iterator<Item = &'a Path>) -> Vec<PathBuf> {
+    let mut parents = Vec::new();
+    for target in targets {
+        for parent in target.ancestors().skip(1) {
+            if parent == vault
+                || !parent.starts_with(vault)
+                || std::fs::symlink_metadata(parent).is_ok()
+            {
+                break;
+            }
+            if !parents.iter().any(|taken| taken == parent) {
+                parents.push(parent.to_path_buf());
+            }
+        }
+    }
+    parents.sort_by_key(|parent| std::cmp::Reverse(parent.components().count()));
+    parents
+}
+
+fn prune_new_parents(parents: &[PathBuf]) {
+    for parent in parents {
+        // remove_dir is deliberately empty-only: an outside writer's file
+        // is never removed, and a replaced symlink is never followed.
+        match std::fs::remove_dir(parent) {
+            Ok(()) => {
+                if let Some(above) = parent.parent() {
+                    if let Err(error) = write::sync_dir(above) {
+                        log::warn!(
+                            "batch: removed new folder {} but could not sync it: {error}",
+                            parent.display()
+                        );
+                    }
+                }
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
+                ) => {}
+            Err(error) => log::warn!(
+                "batch: could not remove new empty folder {}: {error}",
+                parent.display()
+            ),
+        }
+    }
 }
 
 /// The write half, after the journal row: stage, mark, rename and move,
@@ -1003,12 +1442,27 @@ fn write_all(
     for (i, page) in planned.iter().enumerate() {
         #[cfg(test)]
         seams::fail_at(i)?;
+        if let Some(from) = &page.moved_from {
+            write::rename_carrying(
+                vault,
+                from,
+                &page.path,
+                lock,
+                |_| Err("a batch cannot discard comments it could not restore".to_string()),
+                by,
+            )?;
+            crate::crash::crash_point("batch-renamed");
+            crate::crash::stop_point("batch-renamed");
+        }
         if let Some(stamp) = &page.restored {
             trash::untrash_locked(vault, stamp, lock, by)?;
         }
         if let (Some(temp), Some(after)) = (&page.temp, &page.after) {
             write::rename_into_place(lock, &vault.join(temp), &page.abs, hash(after))
                 .map_err(|e| format!("{}: {e}", page.path))?;
+            if let Some(parent) = page.abs.parent() {
+                write::sync_dir(parent)?;
+            }
         }
         if let Some(stamp) = &page.trashed {
             trash::trash_locked(vault, &page.path, stamp, lock, by)?;
@@ -1016,15 +1470,6 @@ fn write_all(
         if i == 0 {
             crate::crash::crash_point("batch-renamed-first");
             crate::crash::stop_point("batch-renamed-first");
-        }
-    }
-    let mut synced: Vec<&Path> = Vec::new();
-    for page in planned.iter().filter(|p| p.temp.is_some()) {
-        if let Some(parent) = page.abs.parent() {
-            if !synced.contains(&parent) {
-                write::sync_dir(parent)?;
-                synced.push(parent);
-            }
         }
     }
     batch_journal::finish(batch_id)?;
@@ -1064,6 +1509,49 @@ fn roll_back<D: Door>(
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => return Err(format!("{temp}: {e}")),
             }
+        }
+        if let Some(from) = &file.moved_from {
+            let old = write::safe_join(vault, from)?;
+            let new = write::safe_join(vault, &file.path)?;
+            let old_exists = std::fs::symlink_metadata(&old).is_ok();
+            let new_exists = std::fs::symlink_metadata(&new).is_ok();
+            if new_exists != old_exists {
+                write::recover_rename(vault, from, &file.path, lock, by)?;
+                restored += 1;
+            } else if !old_exists && !new_exists {
+                // A later folder/main-file step may never have started.
+                // If its original name still exists, there is no move to undo.
+                let previous: Vec<Rename> = files
+                    .iter()
+                    .take_while(|p| !std::ptr::eq(*p, file))
+                    .filter_map(|p| {
+                        Some(Rename {
+                            from: p.moved_from.clone()?,
+                            to: p.path.clone(),
+                        })
+                    })
+                    .collect();
+                let unstarted =
+                    origin_of(from, &previous).is_some_and(|origin| vault.join(origin).exists());
+                if unstarted {
+                    restored += 1;
+                } else {
+                    log::warn!(
+                        "batch: rename {} -> {} has neither endpoint; left for review",
+                        from,
+                        file.path
+                    );
+                    kept += 1;
+                }
+            } else {
+                log::warn!(
+                    "batch: rename {} -> {} has both endpoints; neither was overwritten",
+                    from,
+                    file.path
+                );
+                kept += 1;
+            }
+            continue;
         }
         let abs = vault.join(&file.path);
         let now = hash_at(&abs);
@@ -1154,6 +1642,10 @@ pub fn recover(
         let mut keys: Vec<String> = Vec::new();
         for file in &row.files {
             keys.push(file.path.clone());
+            if let Some(from) = &file.moved_from {
+                keys.extend(write::rename_lock_keys(from, &file.path));
+                continue;
+            }
             let stamp = file.trashed.clone().or_else(|| file.restored.clone());
             let stamp = match stamp {
                 Some(stamp) => stamp,
@@ -1219,6 +1711,14 @@ pub(crate) mod seams {
     /// The next batch to reach `batch-staged` says so on the sender and
     /// waits on the receiver.
     pub static PARK: Mutex<Option<(SyncSender<()>, Receiver<()>)>> = Mutex::new(None);
+    pub static IMPORT_PARK: Mutex<Option<(SyncSender<()>, Receiver<()>)>> = Mutex::new(None);
+    pub(super) fn park_import() {
+        let parked = IMPORT_PARK.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some((parked, release)) = parked {
+            let _ = parked.send(());
+            let _ = release.recv();
+        }
+    }
 
     pub(super) fn fail_at(i: usize) -> Result<(), String> {
         if FAIL_AT.load(Ordering::SeqCst) == i {
@@ -1238,6 +1738,7 @@ pub(crate) mod seams {
 
 #[cfg(test)]
 mod tests {
+    include!("../import/batch_tests.rs");
     use super::*;
     use crate::vault::receipt::{BATCH_RECOVERY_ACTOR, HUMAN_ACTOR};
     use crate::vault::testutil;
@@ -1420,7 +1921,11 @@ mod tests {
                 }
             }
             let before = tree(&vault);
-            let outcome = apply(&vault, ops);
+            let outcome = if let Some(now) = case["now"].as_str() {
+                apply_batch_at(&vault, ops.as_array().unwrap(), &human(), now)
+            } else {
+                apply(&vault, ops)
+            };
             let name = case["name"].as_str().unwrap();
             if let Some(fragment) = case["refused"].as_str() {
                 let message = refusal(outcome);
@@ -1431,6 +1936,20 @@ mod tests {
                 continue;
             }
             let applied = outcome.unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            if let Some(imports) = case.get("imports") {
+                assert_eq!(
+                    serde_json::to_value(&applied.imports).unwrap(),
+                    *imports,
+                    "{name}"
+                );
+            }
+            for (path, text) in case["afterRaw"].as_object().into_iter().flatten() {
+                assert_eq!(
+                    read(&vault, path).as_deref(),
+                    text.as_str(),
+                    "{name}: {path}"
+                );
+            }
             let written: Vec<&str> = applied.files.iter().map(|f| f.path.as_str()).collect();
             let expected: Vec<&str> = case["written"]
                 .as_array()
@@ -1632,7 +2151,13 @@ mod tests {
         let (saved_tx, saved_rx) = std::sync::mpsc::channel();
         let save_vault = vault.clone();
         let save = std::thread::spawn(move || {
-            let saved = write::save_note(&save_vault, "records/b.md", "\n# B\n\nMine.\n", &human());
+            let saved = write::save_note(
+                &save_vault,
+                "records/b.md",
+                "\n# B\n\nMine.\n",
+                None,
+                &human(),
+            );
             let _ = saved_tx.send(());
             saved
         });
@@ -1741,6 +2266,7 @@ mod tests {
                 trashed: None,
                 restored: None,
                 skipped: None,
+                moved_from: None,
             }
         );
         assert_eq!(applied.files[1].before, None);
@@ -2366,6 +2892,375 @@ mod tests {
     #[test]
     fn a_batch_stopped_after_its_first_rename_rolls_back_on_the_next_start() {
         stopped_at("batch-renamed-first", "batch-stopped-renamed");
+    }
+
+    #[test]
+    fn a_rename_op_moves_the_page_and_carries_its_comments() {
+        let _recording = Recording::new("batch-rename-config");
+        let vault = vault_with(
+            "batch-rename",
+            &[("notes/a.md", A), (".comments/notes/a.md.json", "comments")],
+        );
+        let applied = apply(
+            &vault,
+            json!([{ "op": "rename", "from": "notes/a.md", "to": "notes/b.md" }]),
+        )
+        .unwrap();
+        assert_eq!(read(&vault, "notes/b.md").as_deref(), Some(A));
+        assert_eq!(
+            read(&vault, ".comments/notes/b.md.json").as_deref(),
+            Some("comments")
+        );
+        assert!(!vault.join("notes/a.md").exists());
+        assert!(!vault.join(".comments/notes/a.md.json").exists());
+        assert_eq!(applied.files[0].moved_from.as_deref(), Some("notes/a.md"));
+        assert_eq!(applied.files[0].after_hash, Some(hash(A)));
+        assert_eq!(journal_rows(), 0);
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn rename_ops_follow_the_names_earlier_renames_leave() {
+        let _recording = Recording::new("batch-folder-rename-config");
+        let vault = vault_with(
+            "batch-folder-rename",
+            &[
+                ("old/old.md", A),
+                ("old/child.md", B),
+                (".comments/old/old.md.json", "comments"),
+            ],
+        );
+        let applied = apply(
+            &vault,
+            json!([
+                { "op": "replace_file", "path": "old/old.md", "content": C, "expectHash": hash(A) },
+                { "op": "rename", "from": "old", "to": "new" },
+                { "op": "rename", "from": "new/old.md", "to": "new/new.md" }
+            ]),
+        )
+        .unwrap();
+        assert_eq!(read(&vault, "new/new.md").as_deref(), Some(C));
+        assert_eq!(read(&vault, "new/child.md").as_deref(), Some(B));
+        assert_eq!(
+            read(&vault, ".comments/new/new.md.json").as_deref(),
+            Some("comments")
+        );
+        assert!(!vault.join("old").exists());
+        assert_eq!(applied.files[1].before_hash, None);
+        assert_eq!(applied.files[2].before_hash, Some(hash(C)));
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn a_later_failure_puts_the_rename_back() {
+        let _recording = Recording::new("batch-rename-failure-config");
+        let vault = vault_with(
+            "batch-rename-failure",
+            &[
+                ("notes/a.md", A),
+                ("notes/citer.md", B),
+                ("notes/other.md", C),
+                (".comments/notes/a.md.json", "comments"),
+            ],
+        );
+        let before = snapshot_bytes(&vault);
+        seams::FAIL_AT.store(2, Ordering::SeqCst);
+        let outcome = apply(
+            &vault,
+            json!([
+                { "op": "replace_file", "path": "notes/citer.md", "content": "[[b]]\n", "expectHash": hash(B) },
+                { "op": "rename", "from": "notes/a.md", "to": "notes/b.md" },
+                { "op": "rename", "from": "notes/other.md", "to": "notes/last.md" }
+            ]),
+        );
+        seams::FAIL_AT.store(usize::MAX, Ordering::SeqCst);
+        assert!(refusal(outcome).contains("every page was put back"));
+        assert_eq!(snapshot_bytes(&vault), before);
+        assert_eq!(journal_rows(), 0);
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    fn snapshot_bytes(vault: &Path) -> Vec<(String, Vec<u8>)> {
+        tree(vault)
+            .into_iter()
+            .map(|(path, bytes, _)| (path, bytes))
+            .collect()
+    }
+
+    fn journal_move(from: &str, to: &str, before: Option<&str>) -> JournalFile {
+        JournalFile {
+            path: to.into(),
+            moved_from: Some(from.into()),
+            before: before.map(str::to_string),
+            before_hash: before.map(hash),
+            after_hash: before.map(hash),
+            temp: None,
+            trashed: None,
+            restored: None,
+            sidecar: None,
+        }
+    }
+
+    #[test]
+    fn recovery_renames_back_a_journaled_rename() {
+        let _recording = Recording::new("batch-move-recovery-config");
+        let vault = vault_with(
+            "batch-move-recovery",
+            &[("new/new.md", A), (".comments/new/new.md.json", "comments")],
+        );
+        batch_journal::begin(
+            &vault,
+            &"a".repeat(32),
+            &[
+                journal_move("old", "new", None),
+                journal_move("new/old.md", "new/new.md", Some(A)),
+            ],
+            HUMAN_ACTOR,
+        )
+        .unwrap();
+        let report = recover(
+            &vault,
+            Utc::now() + chrono::Duration::seconds(1),
+            &recovery(),
+        );
+        assert_eq!((report.restored, report.kept), (2, 0));
+        assert_eq!(read(&vault, "old/old.md").as_deref(), Some(A));
+        assert_eq!(
+            read(&vault, ".comments/old/old.md.json").as_deref(),
+            Some("comments")
+        );
+        assert!(!vault.join("new").exists());
+        assert_eq!(journal_rows(), 0);
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn recovery_leaves_an_unstarted_folder_and_main_rename_alone() {
+        let _recording = Recording::new("batch-unstarted-moves-config");
+        let vault = vault_with("batch-unstarted-moves", &[("old/old.md", A)]);
+        let before = tree(&vault);
+        batch_journal::begin(
+            &vault,
+            &"b".repeat(32),
+            &[
+                journal_move("old", "new", None),
+                journal_move("new/old.md", "new/new.md", Some(A)),
+            ],
+            HUMAN_ACTOR,
+        )
+        .unwrap();
+        let report = recover(
+            &vault,
+            Utc::now() + chrono::Duration::seconds(1),
+            &recovery(),
+        );
+        assert_eq!((report.restored, report.kept), (2, 0));
+        assert_eq!(tree(&vault), before);
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn recovery_rejoins_comments_when_either_half_of_a_move_stopped() {
+        let _recording = Recording::new("batch-half-move-config");
+        // A stop during apply leaves the page home and its comments moved;
+        // a stop during rollback leaves the comments home and its page moved.
+        for (page, comments) in [
+            ("old/old.md", ".comments/new/old.md.json"),
+            ("new/old.md", ".comments/old/old.md.json"),
+        ] {
+            let vault = vault_with("batch-half-move", &[(page, A), (comments, "comments")]);
+            batch_journal::begin(
+                &vault,
+                &"c".repeat(32),
+                &[
+                    journal_move("old", "new", None),
+                    journal_move("new/old.md", "new/new.md", Some(A)),
+                ],
+                HUMAN_ACTOR,
+            )
+            .unwrap();
+            let report = recover(
+                &vault,
+                Utc::now() + chrono::Duration::seconds(1),
+                &recovery(),
+            );
+            assert_eq!((report.restored, report.kept), (2, 0), "{page}");
+            assert_eq!(read(&vault, "old/old.md").as_deref(), Some(A));
+            assert_eq!(
+                read(&vault, ".comments/old/old.md.json").as_deref(),
+                Some("comments")
+            );
+            assert!(!vault.join("new").exists());
+            assert!(!vault.join(".comments/new").exists());
+            assert_eq!(journal_rows(), 0);
+            let _ = std::fs::remove_dir_all(vault);
+        }
+    }
+
+    #[test]
+    fn recovery_of_a_split_move_keeps_both_comments_when_the_old_name_was_reused() {
+        let _recording = Recording::new("batch-half-move-conflict-config");
+        let vault = vault_with(
+            "batch-half-move-conflict",
+            &[
+                ("notes/a.md", A),
+                (".comments/notes/a.md.json", "new comments"),
+                (".comments/notes/b.md.json", "original comments"),
+            ],
+        );
+        batch_journal::begin(
+            &vault,
+            &"d".repeat(32),
+            &[journal_move("notes/a.md", "notes/b.md", Some(A))],
+            HUMAN_ACTOR,
+        )
+        .unwrap();
+        let before = snapshot_bytes(&vault);
+        recover(
+            &vault,
+            Utc::now() + chrono::Duration::seconds(1),
+            &recovery(),
+        );
+        assert_eq!(snapshot_bytes(&vault), before);
+        assert_eq!(journal_rows(), 1, "a conflicting recovery stays journaled");
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn a_batch_never_discards_an_orphan_sidecar_it_could_not_restore() {
+        let _recording = Recording::new("batch-orphan-move-config");
+        let vault = vault_with(
+            "batch-orphan-move",
+            &[("notes/a.md", A), (".comments/notes/b.md.json", "orphan")],
+        );
+        let before = tree(&vault);
+        let outcome = apply(
+            &vault,
+            json!([{ "op": "rename", "from": "notes/a.md", "to": "notes/b.md" }]),
+        );
+        assert!(refusal(outcome).contains("target comments already exist: notes/b.md"));
+        assert_eq!(tree(&vault), before);
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn a_failed_create_batch_removes_only_its_new_empty_parent_folders() {
+        let _recording = Recording::new("batch-create-parents-config");
+        for existing_records in [false, true] {
+            let vault = testutil::temp_vault("batch-create-parents");
+            if existing_records {
+                std::fs::create_dir(vault.join("records")).unwrap();
+            }
+            seams::FAIL_AT.store(1, Ordering::SeqCst);
+            let outcome = apply(
+                &vault,
+                json!([
+                    { "op": "create", "path": "types/books.md", "content": "# Books\n" },
+                    { "op": "create", "path": "records/books/dune.md", "content": "# Dune\n" }
+                ]),
+            );
+            seams::FAIL_AT.store(usize::MAX, Ordering::SeqCst);
+            assert!(refusal(outcome).contains("every page was put back"));
+            assert!(!vault.join("types").exists());
+            assert!(!vault.join("records/books").exists());
+            assert_eq!(vault.join("records").exists(), existing_records);
+            assert_eq!(trashed_as(&vault, "types/books.md", "# Books\n"), 1);
+            assert!(temps(&vault).is_empty());
+            assert_eq!(journal_rows(), 0);
+            let _ = std::fs::remove_dir_all(vault);
+        }
+    }
+
+    #[test]
+    fn the_batch_records_its_rename_and_writes_stamped_as_you() {
+        let _recording = Recording::new("batch-move-receipts-config");
+        let vault = vault_with(
+            "batch-move-receipts",
+            &[("notes/a.md", A), ("notes/citer.md", B)],
+        );
+        apply(&vault, json!([
+            { "op": "replace_file", "path": "notes/citer.md", "content": C, "expectHash": hash(B) },
+            { "op": "rename", "from": "notes/a.md", "to": "notes/b.md" }
+        ])).unwrap();
+        assert_eq!(
+            rows(&vault),
+            vec![
+                (
+                    "vault.rename".into(),
+                    "notes/a.md".into(),
+                    HUMAN_ACTOR.into()
+                ),
+                (
+                    "vault.write".into(),
+                    "notes/citer.md".into(),
+                    HUMAN_ACTOR.into()
+                )
+            ]
+        );
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    #[ignore = "stop-point child, spawned by the link-keeping rename crash test on Linux"]
+    fn crash_scenario_link_keeping_rename() {
+        let (Ok(config), Ok(vault)) = (
+            std::env::var("CEREBRO_BATCH_CONFIG"),
+            std::env::var("CEREBRO_BATCH_VAULT"),
+        ) else {
+            return;
+        };
+        crate::runtime::sink::arm(Path::new(&config)).unwrap();
+        let _ = apply(
+            Path::new(&vault),
+            json!([
+                { "op": "replace_file", "path": "notes/citer.md", "content": "[[b]]\n", "expectHash": hash(B) },
+                { "op": "rename", "from": "notes/a.md", "to": "notes/b.md" }
+            ]),
+        );
+    }
+
+    #[test]
+    fn crash_a_link_keeping_rename_cut_after_its_rename_puts_everything_back() {
+        link_keeping_rename_stopped_at("batch-renamed");
+    }
+
+    #[test]
+    fn crash_a_link_keeping_rename_cut_between_comments_and_page_puts_everything_back() {
+        link_keeping_rename_stopped_at("rename-comments-carried");
+    }
+
+    fn link_keeping_rename_stopped_at(point: &str) {
+        let _lock = crate::runtime::sink::test_lock();
+        crate::runtime::sink::disarm();
+        let config = testutil::temp_vault("batch-link-rename-stop-config");
+        let vault = vault_with(
+            "batch-link-rename-stop",
+            &[
+                ("notes/a.md", A),
+                ("notes/citer.md", B),
+                (".comments/notes/a.md.json", "comments"),
+            ],
+        );
+        let before = snapshot_bytes(&vault);
+        let output = testutil::run_test_child(
+            "vault::batch::tests::crash_scenario_link_keeping_rename",
+            &[
+                ("CEREBRO_STOP_POINT", std::ffi::OsStr::new(point)),
+                ("CEREBRO_BATCH_CONFIG", config.as_os_str()),
+                ("CEREBRO_BATCH_VAULT", vault.as_os_str()),
+            ],
+        );
+        assert_eq!(output.status.code(), Some(86));
+        crate::runtime::sink::arm(&config).unwrap();
+        let report = recover(&vault, Utc::now(), &recovery());
+        assert_eq!((report.restored, report.kept), (2, 0));
+        assert_eq!(snapshot_bytes(&vault), before);
+        assert_eq!(journal_rows(), 0);
+        assert!(temps(&vault).is_empty());
+        crate::runtime::sink::disarm();
+        for dir in [vault, config] {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     // --- Crash points (CI's Linux job) -----------------------------------------

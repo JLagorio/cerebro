@@ -20,8 +20,10 @@ beforeEach(() => {
 describe('loadRoots', () => {
   it('populates from the backend', async () => {
     seedRoot({ path: '/repos/alpha', label: 'alpha' });
+    expect(useRootsStore.getState().rootsLoaded).toBe(false);
     await useRootsStore.getState().loadRoots();
     expect(useRootsStore.getState().roots).toHaveLength(1);
+    expect(useRootsStore.getState().rootsLoaded).toBe(true);
   });
 });
 

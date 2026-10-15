@@ -1,5 +1,8 @@
+import { beginPointerRename, followRename } from './pointers';
+import { installOpenIntent } from './openIntent';
+import { navSeed } from '@/test/navSeed';
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DESTINATIONS, destination } from '@/engine/destinations';
 import type { Entry, Selection } from '@/engine/types';
@@ -37,9 +40,38 @@ const project = mkEntry({
 });
 
 describe('Sidebar', () => {
+  it.each([false, true])(
+    'Search and Assistant show catalog hints with collapsed=%s',
+    async (collapsed) => {
+      useUiStore.setState({ sidebarCollapsed: collapsed });
+      render(<Sidebar />);
+      for (const [label, spec] of [
+        ['Search', 'mod+k'],
+        ['Assistant', 'mod+j'],
+      ]) {
+        const button = screen.getByRole('button', { name: label });
+        expect(button.getAttribute('title')).toBeNull();
+        fireEvent.pointerEnter(button);
+        await waitFor(() =>
+          expect(
+            screen.getByRole('tooltip').querySelector('[data-keys]')?.getAttribute('data-keys'),
+          ).toBe(spec),
+        );
+        fireEvent.pointerLeave(button);
+        await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull());
+      }
+      expect(
+        [...document.querySelectorAll('[title]')].every(
+          (node) => !/[⌘⇧⌥⌃]/.test(node.getAttribute('title') ?? ''),
+        ),
+      ).toBe(true);
+    },
+  );
+
   beforeEach(() => {
     useVaultStore.setState({
       vaultPath: '/demo-vault',
+      entriesVault: '/demo-vault',
       entries: [project],
       views: [
         {
@@ -75,7 +107,7 @@ describe('Sidebar', () => {
     });
     useNavStore.setState({
       selection: { kind: 'home' },
-      history: [{ kind: 'home' }],
+      history: [navSeed({ kind: 'home' })],
       historyIndex: 0,
     });
     useUiStore.setState({
@@ -117,6 +149,12 @@ describe('Sidebar', () => {
       }
       return labels;
     };
+
+    it('Home carries no count, whatever its lanes hold (D9 b)', () => {
+      render(<Sidebar />);
+      const home = screen.getByRole('button', { name: 'Home' });
+      expect(home.textContent).toBe('Home');
+    });
 
     it('carries exactly the destinations the shell has (M43)', () => {
       render(<Sidebar />);
@@ -826,6 +864,13 @@ describe('Sidebar', () => {
       expect(screen.getByText('New database')).toBeTruthy();
     });
 
+    it('opens Import CSV from the Databases header', () => {
+      render(<Sidebar />);
+      fireEvent.click(screen.getByRole('button', { name: 'Import CSV' }));
+      expect(screen.getByTestId('csv-import-dialog')).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Choose CSV' })).toBeTruthy();
+    });
+
     // `listTypes` hides Collection, Skill and Agent, so the dialog's "taken"
     // check alone let it declare a schema over the app's own machinery.
     it('the New-database dialog refuses a name Cerebro reserves', () => {
@@ -852,9 +897,17 @@ describe('Sidebar', () => {
       });
       fireEvent.click(screen.getByRole('button', { name: 'Create' }));
       await waitFor(() => expect(createItem).toHaveBeenCalled());
-      const fm = (createItem.mock.calls[0] as unknown as [{ frontmatter: { folder: string } }])[0]
-        .frontmatter;
+      const fm = (
+        createItem.mock.calls[0] as unknown as [
+          { frontmatter: { folder: string; statuses: unknown[]; fields: unknown } },
+        ]
+      )[0].frontmatter;
       expect(fm.folder).toBe('records/recipes-2');
+      expect(fm.statuses.length).toBeGreaterThan(0);
+      expect(fm.fields).toEqual({ status: { kind: 'status' } });
+      await waitFor(() =>
+        expect(useNavStore.getState().selection).toEqual({ kind: 'type', name: 'Recipes' }),
+      );
     });
 
     it('right-click on a custom type offers rename and delete', () => {
@@ -956,6 +1009,28 @@ describe('Sidebar', () => {
       expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'notes/keep.md' });
     });
 
+    it.each([
+      { status: 'scanning' as const, entriesVault: '/demo-vault' },
+      { status: 'error' as const, entriesVault: '/demo-vault' },
+      { status: 'ready' as const, entriesVault: '/previous-vault' },
+    ])('keeps saved favorites until the current vault has a successful scan: %j', (scan) => {
+      useVaultStore.setState({ ...scan, entries: [] });
+      useUiStore.setState({ favorites: { '/demo-vault': ['notes/keep.md', 'notes/gone.md'] } });
+      render(<Sidebar />);
+      expect(useUiStore.getState().favorites['/demo-vault']).toEqual([
+        'notes/keep.md',
+        'notes/gone.md',
+      ]);
+      act(() =>
+        useVaultStore.setState({
+          status: 'ready',
+          entriesVault: '/demo-vault',
+          entries: [mkEntry({ path: 'notes/keep.md', title: 'Keep me' })],
+        }),
+      );
+      expect(useUiStore.getState().favorites['/demo-vault']).toEqual(['notes/keep.md']);
+    });
+
     // M55.11 — a page's own icon on its nav rows: the pinned page, and the
     // doc row a Collection lists.
     it('a favourite and a Collections doc row whose page has an icon both draw it', () => {
@@ -1053,4 +1128,47 @@ describe('Sidebar', () => {
       expect(useUiStore.getState().themeMode).toBe('system');
     });
   });
+});
+
+it('a modified destination click opens beside without moving the original page', () => {
+  useNavStore.getState().reset();
+  useNavStore.getState().setPaneCapacity(2);
+  const first = useNavStore.getState().active;
+  const stop = installOpenIntent();
+  try {
+    render(<Sidebar />);
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }), { ctrlKey: true });
+    expect(useNavStore.getState().paneIds).toHaveLength(2);
+    expect(useNavStore.getState().selection).toEqual({ kind: 'settings' });
+    expect(useNavStore.getPaneState(first).selection).toEqual({ kind: 'home' });
+  } finally {
+    stop();
+    cleanup();
+  }
+});
+
+it('keeps a favorite through the batch rescan until the rename hook moves it', () => {
+  cleanup();
+  useVaultStore.setState({
+    vaultPath: '/pins',
+    entriesVault: '/pins',
+    status: 'ready',
+    entries: [mkEntry({ path: 'old.md', title: 'Old' })],
+    collections: [],
+    views: [],
+  });
+  useUiStore.setState({ favorites: { '/pins': ['old.md'] }, pendingRenames: {} });
+  render(<Sidebar />);
+  let finish!: () => void;
+  act(() => {
+    finish = beginPointerRename('/pins');
+  });
+  act(() => useVaultStore.setState({ entries: [mkEntry({ path: 'new.md', title: 'New' })] }));
+  expect(useUiStore.getState().favorites['/pins']).toEqual(['old.md']);
+  act(() => {
+    followRename('/pins', 'old.md', 'new.md');
+    finish();
+  });
+  expect(useUiStore.getState().favorites['/pins']).toEqual(['new.md']);
+  cleanup();
 });

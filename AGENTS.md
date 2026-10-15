@@ -35,12 +35,20 @@ enforced: `.github/workflows/mac-app.yml`
 
 - `src/` — React app. `engine/` is the pure domain core (best-tested layer),
   and `engine/scene/` the whiteboard scene core (M68.1, CV-45);
+  `scene/jsonCanvas.ts` reads/writes JSON Canvas without losing unknown values,
+  replaying the shared format and cases against Rust `canvas/read.rs` and
+  `canvas/write.rs` (M68.2, M68.7); `canvas/answer.rs` bounds the agent read,
+  using `shared/canvas/agent-limits.v1.json` through the two checked loaders;
   `views/`, `pages/`, `app/`, `detail/`, `knowledge/`, `agent/`, `editor/`,
-  `git/`, `library/`, `workspace/`, `status/`, `history/` are surfaces; `stores/` is
+  `git/`, `library/`, `workspace/`, `status/`, `history/`, `sheet/` are surfaces; `stores/` is
   Zustand; `lib/` holds IPC + browser mocks, and `lib/keys/` the keymap (one
   capture-phase listener, scopes, editor claims) that dispatches the command
   rows in `app/commands/` (M65.1, CV-47). Lint (`eslint.config.js`) and the
   no-DOM typecheck (`tsconfig.engine.json`) keep `engine/` pure;
+  Navigation history (`stores/navStore.ts`) holds visit slots, including the
+  search, filter bar and table scroll retained by `app/useEntryState.ts`.
+  `app/LastPlaceHost.tsx` restores a valid last place per vault after readiness,
+  and `engine/placeResolves.ts` prunes dead Back/Forward destinations (M65.4).
   `@tauri-apps/*` loads only in the four IPC adapters (`lib/ipc.ts`,
   `lib/gitIpc.ts`, `lib/rootsIpc.ts`, `agent/agentIpc.ts`), and only
   `lib/mockIpc.ts` reads `lib/mockParse.ts` (M53.20). `lab/` is the dev-only
@@ -78,17 +86,23 @@ enforced: `.github/workflows/mac-app.yml`
   retired with M43.10; section fold state rides the closed set
   (`cerebro.navClosed`; Databases keeps `typesOpen`). The chrome is the DS's:
   sunken sidebar, `--surface-selected` + cortex ink for the current row,
-  quiet mono counts — never a filled pill (M42.1).
+  quiet mono counts — never a filled pill (M42.1). The main canvas holds up
+  to four page panes (M65.9), each with its own history and editor. Modified
+  clicks and Shift+Enter open beside; a narrow row parks the least recently
+  focused panes behind tabs while keeping them mounted.
   The destination names are asserted in `app/Sidebar.test.tsx`, and every
   destination is one row of `engine/destinations.ts` (M59.1): the sidebar
-  rows and doors, ⌘K Go to, the window title, thread labels and navigate's
-  `to` read it, and `destinations.test.ts` holds `tools.v1.json`'s navigate
+  rows and doors, each destination's `g` chord, ⌘K Go to, the window title,
+  thread labels and navigate's `to` read it, and `destinations.test.ts` holds `tools.v1.json`'s navigate
   list to it. Specs scope destination clicks to `nav-surfaces` (nested rows
   live OUTSIDE those containers precisely because they share accessible
   names with destinations). Sections are addressed by `data-section`, never
   by a per-section testid, and the `KnowledgeNav` selection type carries the
   tab (plus `run`, for one fleet detail) so a tab is a place the back button
   returns to.
+- **Home is pull-only** (M64.4). Quiet lanes follow the order in
+  `engine/homeLanes.ts` (`HOME_LANES`). Empty lanes stay silent, each failed
+  read says so on its own, and Home carries no sidebar count.
 - **An agent is a page** (M55.12). DocPage renders it: its body is its
   standing instructions, and `library/AgentProperties.tsx`'s rows are its
   grants, each writing its one key on Done. Runs and Memory are fixed tabs
@@ -97,6 +111,14 @@ enforced: `.github/workflows/mac-app.yml`
   a library agent path forward to the page with `navigate(…, {replace: true})`,
   so Back never lands on a forwarder; only construct actors keep a page on the
   Agents surface.
+- **A project is a page** (M61.11). Its Type doc declares Tasks and Docs tabs
+  over related records, plus Agents (M63.4) and Runs (M63.4b) tabs. Runs lists
+  recorded causes about the page and its filed work, including their hops. Newly filed work inherits
+  listed agents through its single Agent relation in the same human write;
+  existing work keeps its agents. Membership is the record's stored `project:` relation,
+  and a related tab files new records under its host. New records live in the
+  database's home folder; a task-like type under a host with a key prefix takes
+  its next item key. Cycles are saved views over the work's date range.
 - `src-tauri/src/` — Rust: `vault/` (scan/parse/write, and `comments.rs`,
   each page's comment sidecar under `.comments/`; `receipt.rs` is the
   receipt every write carries, minted only by its door's guard, M58.1;
@@ -106,11 +128,40 @@ enforced: `.github/workflows/mac-app.yml`
   the launch purge hands it to the OS Trash, M60.8; `schema.rs` reads Type
   docs and checks values by `shared/schema/field-kinds.v1.json`, and
   `dates.rs` reads dates by `shared/calendar/dates.v1.json`, the tables TS
-  reads too, M60.3; `batch.rs` is the batch writer, a database-wide change
+  reads too, M60.3; `query.rs` evaluates database queries over the readable
+  corpus, held to the view evaluator by shared filter cases (M62.2);
+  `agenda.rs` reads dated records in the readable scope, using shared agenda
+  cases and making no availability judgment (M62.3); `views.rs` checks view
+  suggestions against the shared vocabulary without writing (M62.4);
+  `batch.rs` is the batch writer, a database-wide change
   checked whole, journaled, staged and renamed, and put back at the next
   start if it stopped, M60.6),
+  `sheet/` computes page `cerebro-sheet` source fences on upstream IronCalc
+  through a capped engine thread and writes nothing itself (M67.1); its
+  `fence.rs` reads source blocks and `ai.rs` reads cells or calculates
+  hypothetical inputs on a private copy (M67.2). `edit.rs` plans a checked
+  source batch; `vault/write.rs::edit_sheet_page` holds the lock through
+  planning, calculation and one receipted write (M67.2b). `grid.rs` rewrites
+  row/column references and fills selections on a paused private workbook;
+  shared grid cases hold the browser twin. Partial-formula completion reads
+  the same upstream parser, and `FormulaInput.tsx` uses its character offsets
+  with the pinned MIT function catalog (M67.3b). `src/sheet/SheetGrid.tsx` keeps selection/drafts local,
+  `commitSheets.ts` gives each source change one page undo step, and
+  `pendingSheets.ts` settles open drafts before page flush/quit (M67.3).
+  `sheet/xlsx.rs` imports Excel through upstream `ironcalc`, after the shared
+  Office package reader checks every part and bounds array/string expansion
+  before upstream parsing. It returns source fences and a bounded loss/value
+  report; calamine extracts text independently (M67.4). The same module exports
+  live page fences through IronCalc's byte writer. `SheetExportMenu` settles
+  drafts before workbook export; CSV carries shown values and guards text
+  formula prefixes. Both save outside the vault through a native dialog (M67.4b).
+  CSV uses `readCsvText` and the existing raw-record reader. Choosing a file
+  writes nothing; Import creates one root page in one undoable human batch,
   `git/`, `mcp.rs`
-  (loopback MCP server), `agent/` (CLI spawn; `fold.rs` folds the live
+  (the runs' loopback MCP server), `client_access.rs` (the optional second
+  loopback listener for other apps, authenticated by personal tokens; token
+  metadata and SHA-256 fingerprints live in `runtime/client_tokens.rs`,
+  and each client session has its own run, M62.5–.5c), `agent/` (CLI spawn; `fold.rs` folds the live
   stream and Claude Code's session file into one event vocabulary, and
   `transcript.rs` finds that file and reads it back; `interaction.rs` is the
   ask seam's book, where a run waits on a call and only a person's answer
@@ -121,10 +172,16 @@ enforced: `.github/workflows/mac-app.yml`
   M70.3), `knowledge.rs` (OKF guards),
   `files/` (`kinds.rs` reads `shared/files/kinds.v1.json`, and its
   `open_policy` is the one verdict on whether a file may open outside the
-  app, M66.1),
-  `connectors.rs`, `shell/` (the main window, built in setup so its
+  app, M66.1; `extract/` owns bounded Office parsing, `read.rs` selects
+  scoped document text and pictures, and `images.rs` alone decodes them),
+  `connectors.rs`, `shell/` (`notify.rs` is the one door to Notification Center: bundle-guarded
+  permission and reminder posts, with no Dock badge; the main window, built in setup so its
   navigation guard is attached and its title follows the page's; `open.rs`
   is Open with: Finder, the default app, agent links and the clipboard;
+  `file_actions.rs` guards contained root files by the kinds table, pins Open
+  to the original file identity, and supplies Reveal, Quick Look and Save a copy;
+  `deep_link.rs` buffers incoming `cerebro:` links until the webview and vault
+  are ready, then only navigates inside registered vaults;
   `quit.rs` owns ⌘Q and the close guard, which flush every pending save
   before exit (M55.10), while Dock Quit, logout and shutdown exit without
   them), `runtime/fleet.rs` (run history, and the `agent_wakes` the Agents
@@ -135,20 +192,46 @@ enforced: `.github/workflows/mac-app.yml`
   phase that needs a new fact still goes through the Meter or the governance
   writers. `runtime/wakes.rs` holds durable wakes (M63.1): each trigger match
   is admitted once, claimed inside the dispatch transaction with its run's
-  lease, and ends in a closed outcome. `runtime/batch_journal.rs` holds a
+  lease, and ends in a closed outcome. `agent/condition.rs` books and meters
+  a trigger's bounded pre-run check with its own held answer tool (M63.7).
+  `runtime/followups.rs` holds self-only later runs with an atomic booking
+  cap and one conditional claim before firing (M63.8).
+  `runtime/batch_journal.rs` holds a
   batch's row while it runs (M60.6): its pages' pre-images, deleted at the
   commit.
+- `shared/policy/mail.v1.json` — mail folders excluded from git and the scoped,
+  default-closed Gmail admission gate; Rust and TS replay its shared cases.
 - `shared/prompt/` — prose the model reads, which Rust compiles in and TS
   imports `?raw` (M54.7). `server-instructions.md` is the MCP `instructions`
   every run hears, whatever it holds; its README holds the rules (CV-19).
   `product-brief.md` is the one description of the product, which the system
   prompt and get_vault_context both carry, and `retired-terms.json` lists the
   words for the retired model that none of it may say (M54.8, CV-20).
+- `shared/starter/` — the explicitly offered kit for an empty vault (M64.8):
+  byte-identical markdown installed create-only in one batch. Its two agents
+  start paused; its two read-only recipes remain editable Skill pages (M64.9).
+  `.cerebro/starter.json` records an added or declined offer.
 - `shared/files/` — what a file is (M66.1): `kinds.v1.json` gives each
   extension its kind, MIME, viewer, extractor, ingest rule, Shiki language,
   icon, bytes door and open policy. Rust (`src-tauri/src/files/kinds.rs`)
   and TS (`src/engine/fileKinds.ts`) read the same bytes; its README holds
   the columns and the regen command.
+- `shared/import/` — source identity and writer-owned provenance (M69.3):
+  Rust `import/` and TS `engine/importSources.ts` read `sources.v1.json`.
+  The import planner finds copies by stamped identity wherever they moved;
+  `vault/batch.rs` serializes imports before its path locks, then journals
+  their creates and checked replacements as one undoable change. Edited
+  copies stay as they are, and every request gets an explicit outcome.
+- `src/engine/csv.ts` is the frontend RFC 4180 reader and writer (M61.5).
+  CSV import, export and migrations reuse it; Rust `sheet/fence.rs` is its
+  sheet-fence twin, held by `src-tauri/fixtures/sheet-fence-cases.json` (M67.2).
+  `csvImport.ts` plans one
+  undoable create batch for the database and its records.
+- `shared/schema/views.v1.json` is the view suggestion vocabulary (M62.4):
+  `engine/viewVocabulary.ts` and Rust `vault/views.rs` read the same layouts,
+  slots and limits; `engine/viewSuggestion.ts` and its Rust twin check the
+  readable database before a suggestion can become a card. They replay
+  `src-tauri/fixtures/view-suggestion-cases.json`; the tool writes nothing.
 - `demo-vault/` — the golden corpus. Dev, vitest, and Playwright all run
   against it; editing it churns e2e assertions, so treat changes as test
   changes.
@@ -200,11 +283,17 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
   case file holds both, replayed by cargo and vitest; `shared/policy/README.md`
   lists every twin, and an unlisted twin is the same defect. Field kinds and
   dates are such artifacts (M60.3): `shared/schema/` and `shared/calendar/`.
+  JSON Canvas format and reader rules live in `shared/canvas/` (M68.2),
+  replayed by both readers; the scanner includes boards without ingesting them.
+  Whiteboard agent caps are data too (M68.7): `shared/canvas/agent-limits.v1.json`
+  bounds an agent read; Rust and TS load it and assert the same digest.
+  Import source identity, stamps and URL grammar are data too (M69.3),
+  read from `shared/import/sources.v1.json`.
   File kinds are data too (M66.1): `shared/files/kinds.v1.json` names each
   extension's kind, MIME, viewer, extractor, ingest, Shiki language, icon,
   bytes door and open policy; Rust alone enforces open and the doors, and TS
   derives icons, languages and ingest from it.
-  enforced: `src/lib/policy/table.test.ts::hashes to the digest`, `src-tauri/src/policy/table.rs::the_loaded_bytes_match_the_committed_digest`, `src/lib/policy/tools.test.ts::hashes to the digest the Rust core also asserts`, `src-tauri/src/policy/tools.rs::the_loaded_bytes_match_the_committed_digest`, `src/engine/fieldKindTable.test.ts::hashes to the digest the Rust reader also asserts`, `src-tauri/src/vault/schema.rs::the_loaded_bytes_match_the_committed_digest`, `src/engine/dateGrammar.test.ts::hashes to the digest the Rust reader also asserts`, `src-tauri/src/vault/dates.rs::the_loaded_bytes_match_the_committed_digest`, `src/engine/fileKinds.test.ts::hashes to the digest the Rust reader also asserts`, `src-tauri/src/files/kinds.rs::the_loaded_bytes_match_the_committed_digest`, `scripts/twins.test.ts::every listed twin replays its cases in both suites`
+  enforced: `src/engine/scene/canvasLimits.test.ts::hashes to the digest the Rust loader also asserts`, `src-tauri/src/canvas/agent_limits.rs::the_loaded_bytes_match_the_committed_digest`, `src/engine/scene/format.test.ts::hashes to the digest the Rust reader also asserts`, `src-tauri/src/canvas/format.rs::the_loaded_bytes_match_the_committed_digest`, `src/lib/policy/table.test.ts::hashes to the digest`, `src-tauri/src/policy/table.rs::the_loaded_bytes_match_the_committed_digest`, `src/lib/policy/tools.test.ts::hashes to the digest the Rust core also asserts`, `src-tauri/src/policy/tools.rs::the_loaded_bytes_match_the_committed_digest`, `src/engine/fieldKindTable.test.ts::hashes to the digest the Rust reader also asserts`, `src-tauri/src/vault/schema.rs::the_loaded_bytes_match_the_committed_digest`, `src/engine/dateGrammar.test.ts::hashes to the digest the Rust reader also asserts`, `src-tauri/src/vault/dates.rs::the_loaded_bytes_match_the_committed_digest`, `src/engine/viewVocabulary.test.ts::hashes to the digest the Rust reader also asserts`, `src-tauri/src/vault/views.rs::the_loaded_bytes_match_the_committed_digest`, `src/engine/fileKinds.test.ts::hashes to the digest the Rust reader also asserts`, `src-tauri/src/files/kinds.rs::the_loaded_bytes_match_the_committed_digest`, `src/engine/importSources.test.ts::hashes to the digest the Rust reader also asserts`, `src-tauri/src/import/mod.rs::the_compiled_sources_match_the_digest`, `scripts/twins.test.ts::every listed twin replays its cases in both suites`
 - **CV-05 Absent is never zero, and unavailable is never empty.** A number nobody
   recorded renders as words ("not recorded", "unknown", "unattributed"), never
   as `0` or `$0`; a total that had to skip unmetered rows says how many it
@@ -239,7 +328,9 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
   status field is task-like; a record the base holds concepts about gets a
   dossier). Do not route on type names. The only exceptions are the reserved
   names `isReservedTypeName` lists in `src/engine/typeCatalog.ts`: `Type`,
-  `Collection`, `Skill` and `Agent`.
+  `Collection`, `Skill` and `Agent`. A relation reaches Agent only through a
+  declared `target: Agent`; no inference and no person field ever yields a
+  reserved type (M63.3).
   enforced: prose
 - **CV-09 Wikilink fields** arrive from the scanner bracket-stripped in
   `entry.relationships`, not `properties` — test fixtures must use that shape.
@@ -259,7 +350,11 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
   routing vault paths in-app, never through an `href`. Only a packaged build
   proves it. Agent links (M55.9) are a command, not a navigation:
   `shell/open.rs` opens only `shared/policy/agent-links.v1.json`'s bases.
-  enforced: `src-tauri/src/shell/links.rs::replays_the_shared_link_cases`, `src-tauri/src/shell/mod.rs::both_guards_are_attached`, `src-tauri/src/shell/open.rs::replays_the_agent_link_cases`
+  A file leaves the app only through `open_file_outside`, which reads the
+  kinds table's open verdict (allow; confirm, asked by a native dialog;
+  deny) and never opens an executable-like file. Reveal, Quick Look and
+  Save a copy never run a file.
+  enforced: `src-tauri/src/shell/links.rs::replays_the_shared_link_cases`, `src-tauri/src/shell/mod.rs::both_guards_are_attached`, `src-tauri/src/shell/open.rs::replays_the_agent_link_cases`, `src-tauri/src/shell/file_actions.rs::deny_never_reaches_the_desktop`
 - **CV-10 Suppressions carry reasons**: every `eslint-disable` states why, in place.
   The compiler-era react-hooks rules are off by documented choice
   (`eslint.config.js`) — candidates to ratchet on, not free to violate.
@@ -327,13 +422,16 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
   outranks it, and nothing re-keys an item already recorded. M69's import
   writer keeps the key.
   enforced: `src-tauri/src/ingest/source.rs::an_import_never_carries_human_authority`, `src-tauri/src/ingest/deterministic.rs::an_imported_capture_registers_as_imported_content`
-- **CV-23 Agent writes compare; human saves win** (D2, M55.3). An agent's
+- **CV-23 Agent writes compare; editor saves win** (D2, M55.3, M65.7). An agent's
   note write may carry `expect_hash` (get_note's Hash line) and lands only on
   those exact bytes; otherwise it is refused as `stale_content` (operational)
-  and nothing is written. Human saves never compare: the last write wins. The
+  and nothing is written. Editor saves never compare: the last write wins.
+  Human writers outside the editor (task ticks and Library drafts) compare the
+  version they read; a conflict refreshes the task list or asks the person
+  whether to load the new version or save their draft anyway. The
   ledger's `expected_version` and `stale_target_version` guard a different
   record, and neither is borrowed for the other.
-  enforced: `src-tauri/src/mcp.rs::a_stale_expect_hash_is_refused_and_leaves_the_file_alone`
+  enforced: `src-tauri/src/mcp.rs::a_stale_expect_hash_is_refused_and_leaves_the_file_alone`, `src-tauri/src/vault/write.rs::a_stale_save_from_outside_the_editor_writes_nothing`
 - **CV-24 Every block the editor offers has a disk carrier, or it is not
   offered** (M55.4). A block a `/` entry inserts saves as markdown that
   reopens as the same block and saves the same bytes again: plain markdown, or
@@ -459,14 +557,25 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
   enforced: `src-tauri/src/vault/batch.rs::revert_skips_keys_changed_since_and_keeps_the_rest`, `src/stores/undoStore.test.ts::never applies to knowledge/ or proposal decisions`
 - **CV-40 References follow renames** (M60.2). Every stored view, layout,
   tab, field-spec and list key is classified in `src/engine/fieldRefs.ts`,
-  and a field is renamed only through `renameFieldOnType`, as one batch.
+  and a field is renamed only through `renameFieldOnType`, and a database
+  only through `renameDatabase`, each as one batch.
   List files, agent triggers and knowledge/ pages that name the field are
   flagged, never rewritten.
   enforced: `src/engine/fieldRefs.test.ts::every classified key is walked`
+- **CV-41 Renames keep links, and links are stems** (M60.10). Every move
+  and rename the webview makes goes through `src/app/renameActions.ts`: each
+  wikilink whose target it would change is re-pointed at the page's filename
+  stem in the same batch, alias and section kept; knowledge/ `about:` anchors
+  go through the capture valve; what can't change is listed before anything
+  moves. Cerebro writes links with `linkTargetOf` (the filename stem, or a
+  project.md's folder), never by title.
+  enforced: `src/app/renameActions.test.ts::only renameActions renames a file`, `src/app/renameActions.test.ts::no module writes a title link`, `src/engine/linkRewrite.test.ts::a rename leaves every link pointing where it pointed`
 - **CV-45 The whiteboard scene core stays self-contained** (M68.1).
   `src/engine/scene/` imports only its own files, perfect-freehand (in
   `ink.ts` alone) and fractional-indexing (in `order.ts` alone), reads no
   clock or randomness, and takes every new id from its caller.
+  Only `format.ts` reads `shared/canvas/format.v1.json`, and only
+  `canvasLimits.ts` reads `shared/canvas/agent-limits.v1.json`.
   enforced: `src/engine/scene/boundary.test.ts::the scene core imports only itself and its two upstream libraries`, `scripts/lint-rails.test.ts::engine imports admit the two scene libraries and no subpath`
 - **CV-46 An agent's reach is derived, never restated** (M58.6). What an
   agent may read or change on a page comes from `src/engine/agentAccess.ts`
@@ -478,12 +587,134 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
 - **CV-47 App shortcuts go through the keymap** (M65.1). A shortcut is a row
   in `src/app/commands/*.commands.ts`, bound with `useCommand` and dispatched
   by the one capture-phase listener in `src/lib/keys/root.ts`; Settings →
-  Keyboard shortcuts renders the catalog. Every other keydown listener is
+  Keyboard shortcuts and keycap hints render the catalog (M65.1b). Every other keydown listener is
   listed with its reason. Escape belongs to `layers.ts`, and letters stand
-  down in editors, claimed elements and modal layers.
+  down in editors, claimed elements and modal layers. A chord hints after
+  200 ms and expires after 2 seconds; an unrecognized second key passes
+  before the hint and is consumed after it.
   enforced: `src/lib/keys/keydownRail.test.ts::every keydown listener outside the keymap is listed with a reason`, `src/app/commands/index.test.ts::no command binds Escape`
 
+- **CV-48 Wakes an agent caused are chain hops** (M63.2). Admission reads the
+  writer from `vault_writes`. A recorded run's write makes the wake a hop of
+  that run: two hops, no cycles, the root's chain allowance. A person's write,
+  or one Cerebro did not record, wakes a root, and an unrecorded author is never
+  labelled a person.
+  enforced: `src-tauri/src/runtime/wakes.rs::an_agent_write_that_would_wake_its_author_is_skipped_as_a_cycle`, `src-tauri/src/runtime/wakes.rs::an_unrecorded_author_wakes_a_root_never_a_person`, `src-tauri/src/runtime/dispatch.rs::a_woken_hop_claim_books_its_parent_on_the_run_row`
+
+- **CV-49 Other apps reach a vault only through a personal token** (M62.5b).
+  The run port keeps its private per-run bearer and never answers 401. The
+  client port is off by default, binds loopback only, stores each token as
+  its SHA-256 alone, and dispatches through the normal tool guards under one
+  runs row per client session. A client connection never enters a Cerebro
+  run's MCP configuration.
+  enforced: `src-tauri/src/runtime/client_tokens.rs::a_minted_token_is_stored_as_its_hash_alone`, `src-tauri/src/client_access/listener.rs::every_answered_call_carries_its_session_run`, `src-tauri/src/client_access/listener.rs::nothing_listens_until_turned_on`, `src-tauri/src/mcp.rs::a_cbr_token_on_the_run_port_is_an_unknown_bearer`, `src-tauri/src/agent/mod.rs::client_access_keeps_every_run_on_its_per_run_mcp_config`
+
+- **CV-51 File bytes stay inside their open root** (M66.2). The media scheme
+  and raw-byte IPC read through `files/bytes.rs`, using one contained open
+  handle from check to read. Root `0` resolves the current vault on every
+  request; a mounted root resolves by ID. No URL names a vault path. The
+  scheme serves only media rows to the main webview, with bounded ranges,
+  and never becomes a navigation door. Refusals are UI values, never logs.
+  The browser twin replays `shared/files/bytes.v1.json`.
+  enforced: `src-tauri/src/files/bytes.rs::replays_the_shared_bytes_cases`, `src/lib/mockBytes.test.ts::replays the shared bytes cases`, `src-tauri/src/files/scheme.rs::only_the_main_webview_is_served`
+- **CV-52 One live editor per file** (M65.8). A file shows in one pane at
+  most, or in the record peek. `claimOf` in `src/engine/panes.ts` keys every
+  Selection kind by its edited file path, and Work and Inbox are single.
+  Opening a held file focuses its holder, silently for the agent, and Back
+  skips entries another pane holds. Inside a pane `useNavStore` reads and
+  moves that pane; `useNavStore.getState()` is the focused pane.
+  enforced: `src/engine/panes.test.ts::invariants hold over random sequences`, `src/stores/navStore.test.ts::opening a held file activates its pane`
+
+- **CV-50 A `cerebro://` link only navigates** (M65.6). It arrives as
+  `RunEvent::Opened`, waits in `shell/deep_link.rs` until the webview takes
+  it once, names a vault only by its registered id, asks before switching
+  vaults, and never writes or runs anything.
+  enforced: `src-tauri/src/shell/deep_link.rs::the_take_hands_over_once`, `src/app/DeepLinkHost.test.tsx::a delivered link writes nothing`
+
+- **CV-53 Pointers follow a rename together** (M65.10). Panes and their
+  history, favorites, recents and last place change on a rename only through
+  `followRename` and `followTypeRename` in `src/app/pointers.ts`; a new pointer
+  store joins them. The pane layout is per vault in `cerebro.panes`, pruned on
+  load, and restores places only.
+  enforced: `src/app/pointers.test.ts::only the rename hook remaps pointer stores`
+
+- **CV-54 Only `src/lib/mockSheet.ts` and `*.ironcalc.test.ts` load
+  `@ironcalc/wasm`** (M67.1). Sheets compute in Rust on upstream
+  `ironcalc_base`; the browser mock computes them with the npm wasm at the
+  same release. Lint keeps the import to those files, test setup refuses
+  any other test that reaches the wasm and names the fix (mock
+  `calculateSheets` from `@/lib/ipc`), and a pin test refuses diverging
+  releases. The packaging patch adds only the upstream timezone shim that
+  npm 0.8.3 omitted; engine and wasm bytes stay upstream. Every Rust workbook
+  preparation or evaluation takes the engine-thread token, including agent
+  scratch calculations (M67.2) and structural grid edits, fill and partial-formula completion (M67.3–.3b). The mock's exact report values come from
+  `scripts/sheet-values/`'s project-owned reader of the cached upstream
+  workbook carrier: the same unchanged engine release, no evaluation or
+  source rewriting. Its generated wasm has a reproducible build and hashed
+  source/lock/artifact provenance; only the mock and its real-engine tests
+  load it (M67.2b).
+  enforced: `eslint.config.js::ironcalc: {`, `src/test/ironcalcGuard.ts::installIronCalcGuard`, `scripts/lint-rails.test.ts::only mockSheet.ts and *.ironcalc.test.ts load the sheet wasm`, `scripts/ironcalc.test.ts::both engines pin one release`, `scripts/ironcalc.test.ts::the cached-value facade pins the same engine and its generated artifact has exact source provenance`, `src-tauri/src/rails.rs::ironcalc_evaluates_only_on_the_engine_thread`
+
+- **CV-55 A board saves only after an edit, over readable bytes** (M68.2b).
+  Opening, reloading and applying a clean outside update write nothing.
+  Dirty outside merges retain the person's edit and may save. The canvas
+  save door refuses a missing or unreadable file and new content its own
+  reader refuses. `src/whiteboard/` owns the page and serial save lifecycle
+  over the pure scene core; path locks and human receipts hold every save.
+  enforced: `src-tauri/src/vault/write.rs::save_canvas_refuses_to_write_over_an_unreadable_board`, `src-tauri/src/vault/write.rs::save_canvas_refuses_content_it_cannot_read_back`, `src/whiteboard/useCanvasFile.test.tsx::opening and reloading a board write nothing`
+
+- **CV-56 Page attachments copy through the human doors** (M66.6). Paste,
+  OS drop, browser drop and Upload use `import_attachment` or
+  `import_attachment_bytes`, bounded by the shared file-kind cap. Placement
+  holds the attachments directory lock, reuses identical bytes only in the
+  NFC/case-insensitive name family, and records a hash only for a new copy.
+  It never follows the destination directory or a candidate symlink, never
+  grants execute bits, and retains macOS quarantine protection. Editor URLs
+  stay root-anchored markdown paths; one undo removes a placement batch.
+  enforced: `src-tauri/src/vault/write.rs::replays_the_shared_attachment_names`, `src-tauri/src/vault/write.rs::attachment_candidates_and_the_folder_never_follow_symlinks`, `src-tauri/src/vault/write.rs::importing_and_pasting_the_same_bytes_reuses_without_changing_the_file`, `src/editor/attachments.test.ts::places a batch after its captured block in one undo step, with root-anchored durable media lines`
+
+- **CV-57 Outside bytes are parsed only behind limits** (M66.7). Office
+  archives open only in `src-tauri/src/files/extract/`: `package.rs` caps the
+  file, its entry count and each inflated part before XML or workbook parsing.
+  A DOCTYPE is refused, workbook reads remain sparse, and allocation-driving
+  shared-string counts and formula indices are checked before calamine opens.
+  Repeated references consume a materialized-data budget before strings are
+  copied, and repeated inflation has a separate work cap. Outcomes are typed,
+  never a panic or a silent empty result. Pictures decode only in
+  `src-tauri/src/files/images.rs`, under `image::Limits`.
+  enforced: `src-tauri/src/rails.rs::outside_bytes_are_parsed_only_behind_limits`, `src-tauri/src/files/extract/package.rs::a_part_past_its_cap_is_too_large_however_its_header_lies`
+
+- **CV-58 Agent note writes preserve writer-owned provenance** (M69.3b).
+  `shared/import/sources.v1.json` names the guarded keys. Every agent note
+  door compares their presence and YAML value under the file's write lock,
+  after the governed-type checks, including queued or approved writes.
+  `cache_source` and `write_concept` stamp their own output; ordinary note
+  tools cannot add, change or remove those stamps. Human edits remain free.
+  enforced: `src-tauri/src/import/stamps.rs::replays_the_stamp_guard_cases`, `src/engine/importSources.test.ts::replays the stamp guard cases`, `src-tauri/src/import/door_tests.rs::no_agent_write_door_changes_a_stamped_key`, `src-tauri/src/import/door_tests.rs::every_note_door_is_covered_by_the_stamp_guard`
+
+- **CV-59 Mail and its comments stay out of git** (M69.7).
+  `shared/policy/mail.v1.json` names the kept-out paths and the default-closed
+  admission gate. Checkpoints untrack previously tracked copies without
+  deleting them; run commits withhold and count those paths. A gate opens
+  only for its listed kinds in the one accepted vault-store scope; tests
+  require its dated, fired evidence pack and R14 registration. Older commits
+  retain material they already contained. Unattended runs and token clients
+  cannot read mail through Cerebro; ambient ingestion skips it, unattended
+  CLI readers and the declared connector readers are denied, and mail URLs
+  never enter the web cache (M69.7b).
+  enforced: `src-tauri/src/git/commit.rs::gitignore_keeps_mail_and_its_comments_out`, `src-tauri/src/git/commit.rs::a_tracked_digest_is_untracked_even_when_ignore_rows_exist`, `src-tauri/src/git/changeset.rs::a_run_that_wrote_only_digests_commits_nothing_and_counts_them`, `src-tauri/src/policy/mail.rs::the_gate_opens_only_after_the_pack_is_accepted`, `src/engine/mailPolicy.test.ts::the Gmail pack names its gate and kinds, and an open gate requires owner acceptance`, `src-tauri/src/mcp.rs::an_unattended_run_and_a_token_client_cannot_read_a_digest`, `src-tauri/src/mcp.rs::cache_source_refuses_mail_as_a_web_page`, `src-tauri/src/runtime/catchup.rs::ambient_ingest_never_reads_mail`, `src-tauri/src/agent/mod.rs::an_unattended_run_is_denied_mail_reading_connector_tools`
+
 ## Verifying UI work
+
+OS file-drop specs use `window.__cerebroMockDrop({at, files, hold?})` and
+`__cerebroMockDragLeave()`. Synthetic HTML5 drops exercise the browser route
+only; Tauri consumes native drags and delivers paths through the shared
+`lib/osDrop.ts` router. The editor, Inbox and Files properties register zones
+on their React wrappers.
+
+Whiteboard gesture proofs use a real pointer down, two moves past 3 px, then
+up; a single event is a click. Plane controls are tested with `page.mouse`
+at their measured bounds because the canvas input plane receives the gesture.
 
 **CV-14 Only `*.mermaid.test.ts` may `import mermaid`.** Those files exist to measure
 claims about the bundled renderer — the shape registry, the `style`/arrow syntax
@@ -493,7 +724,16 @@ under `src/` stays pure string code or mocks `../render` with a fixture svg
 a component test that flakes under load. Lint limits the import to
 `mermaid/render.ts` and `*.mermaid.test.ts`, and `src/test/setup.ts` fails any
 other test file that reaches the renderer, naming the fix.
-enforced: `eslint.config.js::mermaid: {`, `src/test/mermaidGuard.ts::installMermaidGuard`, `scripts/lint-rails.test.ts::only render.ts and *.mermaid.test.ts load mermaid`
+pdf.js follows the same import boundary (M66.5): only
+`src/workspace/viewers/pdf/pdfjs.ts` and `*.pdf.test.ts` load pdfjs-dist.
+The loader uses upstream's compatible legacy build, opens bytes with XFA
+and wasm off, and never loads a scripting manager or sandbox. Upstream has
+removed document eval rather than retaining an `isEvalSupported` switch.
+Every other test mocks the loader; `pdfGuard` also fails swallowed imports.
+enforced: `eslint.config.js::mermaid: {`, `src/test/mermaidGuard.ts::installMermaidGuard`, `scripts/lint-rails.test.ts::only render.ts and *.mermaid.test.ts load mermaid`, `eslint.config.js::pdfjs: {`, `src/test/pdfGuard.ts::installPdfGuard`, `scripts/lint-rails.test.ts::only the pdf loader and *.pdf.test.ts load pdfjs-dist`, `src/workspace/viewers/pdf/pdfjs.test.ts::opens inert bytes and filters annotations before any non-link widget can render`
+
+Address a page pane by `data-pane-index`; `data-active` marks the focused
+pane and `data-parked` marks one kept mounted at zero width (M65.9).
 
 Playwright specs use `getByTestId`/`getByRole` against the mock backend
 (`window.__cerebroMockFs` exposes the fake disk). **CV-15 Import `boot` from

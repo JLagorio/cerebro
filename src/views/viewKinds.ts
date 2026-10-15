@@ -74,7 +74,7 @@ export interface ViewKind {
   blocks?: boolean;
   /**
    * Draws a free-form CANVAS rather than records (M29.45): the tab's content
-   * is a `.mmd` file it owns, so it gets no record-layout pages and exactly
+   * is a `.canvas` file it owns (or a legacy `.mmd`), so it gets no record-layout pages and exactly
    * one presentation key — `whiteboard`, the file pointer.
    *
    * Optional like every flag above it — the file's style is that absence IS
@@ -330,7 +330,7 @@ const KEY_NEEDS = {
  * Keys `carryOver` never copies, even to a kind that can read them (M29.45).
  *
  * `whiteboard.file` names a resource the TAB owns, not a preference about
- * drawing. Seeding it into a new tab would aim two tabs at one `.mmd`, so
+ * drawing. Seeding it into a new tab would aim two tabs at one whiteboard file, so
  * "add a whiteboard" while standing on one would silently create a second
  * door to the same canvas instead of a new canvas. The new tab starts with
  * no pointer and creates its own file on first open.

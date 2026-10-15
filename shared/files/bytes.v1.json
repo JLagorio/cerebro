@@ -1,0 +1,46 @@
+{
+  "format": 1,
+  "scheme": "cerebro-file",
+  "host": "localhost",
+  "vault_root": "0",
+  "revision_key": "v",
+  "limits": { "body_bytes": 67108864, "range_bytes": 1048576, "rel_bytes": 8192, "root_bytes": 128, "link_hops": 8, "revision_bytes": 64 },
+  "refusals": {
+    "no_such_root": "This folder is not open in Cerebro.",
+    "bad_address": "This file address is not valid.",
+    "not_found": "This file could not be found or read.",
+    "folder": "This is a folder, not a file.",
+    "outside": "This file is outside its open folder.",
+    "wrong_door": "This kind of file cannot be read through this door.",
+    "too_large": "This file is over the 64 MiB preview limit."
+  },
+  "cases": [
+    { "root": "0", "rel": "a.png", "revision": "session-2", "url": "cerebro-file://localhost/0/a.png?v=session-2" },
+    { "root": "0", "rel": "attachments/hello world.png", "url": "cerebro-file://localhost/0/attachments/hello%20world.png" },
+    { "root": "repo-42", "rel": "images/café #1%.svg", "url": "cerebro-file://localhost/repo-42/images/caf%C3%A9%20%231%25.svg" },
+    { "root": "0", "rel": "报告/图片.png", "url": "cerebro-file://localhost/0/%E6%8A%A5%E5%91%8A/%E5%9B%BE%E7%89%87.png" },
+    { "root": "0", "rel": ".hidden/image.png", "url": "cerebro-file://localhost/0/.hidden/image.png" },
+    { "root": "0", "rel": "", "refusal": "bad_address" },
+    { "root": "", "rel": "a.png", "refusal": "bad_address" },
+    { "root": "/vault", "rel": "a.png", "refusal": "bad_address" },
+    { "root": "..", "rel": "a.png", "refusal": "bad_address" },
+    { "root": "0", "rel": "/etc/hosts", "refusal": "bad_address" },
+    { "root": "0", "rel": "../outside.png", "refusal": "bad_address" },
+    { "root": "0", "rel": "a/../outside.png", "refusal": "bad_address" },
+    { "root": "0", "rel": "a/./image.png", "refusal": "bad_address" },
+    { "root": "0", "rel": "a//image.png", "refusal": "bad_address" },
+    { "root": "0", "rel": "a/", "refusal": "bad_address" },
+    { "root": "0", "rel": "a\\image.png", "refusal": "bad_address" },
+    { "root": "0", "rel": "C:/image.png", "refusal": "bad_address" },
+    { "root": "0", "rel": "a\u0000.png", "refusal": "bad_address" },
+    { "root": "0", "rel": "a\n.png", "refusal": "bad_address" }
+  ],
+  "files": [
+    { "rel": "a.png", "bytes": [137, 80, 78, 71, 0], "door": "scheme", "open": "allow" },
+    { "rel": "a.pdf", "bytes": [37, 80, 68, 70, 45], "door": "ipc", "open": "allow" },
+    { "rel": "a.txt", "bytes": [72, 105], "door": "none", "open": "allow" },
+    { "rel": "a.unknown", "bytes": [72, 105], "door": "none", "open": "confirm" },
+    { "rel": "program.png", "bytes": [35, 33, 47, 98, 105, 110], "door": "scheme", "open": "deny" },
+    { "rel": "program.unknown", "bytes": [72, 105], "executable": true, "door": "none", "open": "deny" }
+  ]
+}

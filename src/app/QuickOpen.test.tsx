@@ -1,3 +1,8 @@
+import { installOpenIntent } from './openIntent';
+import { fireEvent } from '@testing-library/react';
+import { APP_SCOPE, bind, resetKeymap } from '@/lib/keys/registry';
+import { ROOT_PAGE_ID } from '@/lib/keys/root';
+import { previewTheme } from '@/hooks/useTheme';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -31,6 +36,25 @@ describe('QuickOpen', () => {
     useOpenLogStore.setState({ logs: {}, saved: true });
     searchVault.mockReset();
     searchVault.mockResolvedValue(NOTHING);
+  });
+
+  it('names a scanned whiteboard and uses its file-kind icon', async () => {
+    useVaultStore.setState({
+      entries: [
+        makeEntry({
+          path: 'boards/release-plan.canvas',
+          filename: 'release-plan.canvas',
+          title: 'Release plan',
+        }),
+      ],
+    });
+    render(<QuickOpen />);
+    await userEvent.type(screen.getByPlaceholderText(PLACEHOLDER), 'Release plan');
+    expect(screen.getByText('Whiteboard')).toBeTruthy();
+    const board = screen
+      .getAllByTestId('quick-open-result')
+      .find((row) => row.textContent?.includes('Release plan'));
+    expect(board?.querySelector('[data-icon="presentation"]')).toBeTruthy();
   });
 
   // M55.11 — a page's own icon in ⌘K: an emoji page, and a Collection page
@@ -160,7 +184,7 @@ describe('QuickOpen', () => {
 
   it('hints the keys in the dialog footer', () => {
     render(<QuickOpen />);
-    expect(screen.getByText('↑↓ navigate · ↵ open · esc close')).toBeTruthy();
+    expect(screen.getByText(/Open beside/).querySelector('[data-keys="shift+enter"]')).toBeTruthy();
   });
 
   // M59.1: the first place is the table's first visible row — Inbox while
@@ -185,7 +209,13 @@ describe('QuickOpen', () => {
     render(<QuickOpen />);
     const options = screen.getAllByRole('option');
     const want = visibleDestinations({ inboxEnabled: true });
-    expect(options.map((o) => o.textContent)).toEqual(want.map((d) => `${d.label}Go to`));
+    expect(options).toHaveLength(want.length);
+    for (const [index, destination] of want.entries()) {
+      expect(options[index].textContent).toContain(destination.label);
+      expect(options[index].querySelector('[data-keys]')?.getAttribute('data-keys')).toBe(
+        `g ${destination.go}`,
+      );
+    }
     expect(options.map((o) => o.textContent).join(' ')).not.toContain('Pulse');
   });
 
@@ -194,7 +224,7 @@ describe('QuickOpen', () => {
     render(<QuickOpen />);
     const labels = screen.getAllByRole('option').map((o) => o.textContent);
     expect(labels).not.toContain('InboxGo to');
-    expect(labels[0]).toBe('HomeGo to');
+    expect(labels[0]).toMatch(/^Home.*Go to$/);
   });
 
   it('goes to History when you type history', async () => {
@@ -499,5 +529,187 @@ describe('QuickOpen', () => {
       const log = useOpenLogStore.getState().logs['/v'] ?? [];
       expect(log.map((r) => [r.path, r.count])).toEqual([['notes/plan-alpha.md', 1]]);
     });
+  });
+});
+
+describe('palette commands and choosers', () => {
+  beforeEach(() => {
+    resetKeymap();
+    useVaultStore.setState({
+      vaultPath: '/demo-vault',
+      entriesVault: '/demo-vault',
+      entries: fixtureVault(),
+      status: 'ready',
+    });
+    useUiStore.setState({
+      quickOpenVisible: true,
+      inboxEnabled: true,
+      handoffs: [],
+      themeMode: 'light',
+      favorites: {},
+    });
+    useOpenLogStore.setState({ logs: {}, saved: true });
+    searchVault.mockReset();
+    searchVault.mockResolvedValue(NOTHING);
+  });
+  afterEach(() => {
+    resetKeymap();
+    previewTheme(null);
+  });
+  it('cycles category chips with Tab and exposes combobox option ids', async () => {
+    const user = userEvent.setup();
+    render(<QuickOpen />);
+    const input = screen.getByRole('combobox');
+    expect(input.getAttribute('aria-controls')).toBe(screen.getByRole('listbox').id);
+    const id = input.getAttribute('aria-activedescendant');
+    expect(document.getElementById(id!)?.getAttribute('aria-selected')).toBe('true');
+    await user.keyboard('{Tab}');
+    expect(screen.getByTestId('palette-category-pages').getAttribute('aria-selected')).toBe('true');
+    await user.keyboard('{Shift>}{Tab}{/Shift}');
+    expect(screen.getByTestId('palette-category-all').getAttribute('aria-selected')).toBe('true');
+  });
+  it('runs a snapshotted registry command after closing with its keycaps', async () => {
+    const run = vi.fn(() => expect(useUiStore.getState().quickOpenVisible).toBe(false));
+    bind(APP_SCOPE, 'theme.toggle', { run });
+    const user = userEvent.setup();
+    render(<QuickOpen />);
+    await user.type(screen.getByRole('combobox'), 'theme');
+    const command = screen.getByRole('option', { name: /Switch light and dark/ });
+    expect(command.querySelector('[data-keys]')?.getAttribute('data-keys')).toBe('mod+shift+l');
+    await user.click(command);
+    await vi.waitFor(() => expect(run).toHaveBeenCalledOnce());
+  });
+  it('previews a theme, restores on Escape and Backspace, and commits on Enter', async () => {
+    useUiStore.getState().setThemeMode('light');
+    const user = userEvent.setup();
+    render(<QuickOpen />);
+    const input = screen.getByRole('combobox');
+    await user.type(input, 'theme');
+    await user.click(screen.getByRole('option', { name: /Change theme/ }));
+    await user.keyboard('{ArrowDown}');
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    expect(localStorage.getItem('cerebro.themeMode')).toBe('light');
+    await user.keyboard('{Escape}');
+    expect((screen.getByRole('combobox') as HTMLInputElement).value).toBe('theme');
+    expect(document.documentElement.dataset.theme).toBe('light');
+    await user.keyboard('{Enter}');
+    await user.keyboard('{ArrowDown}{Backspace}');
+    expect(document.documentElement.dataset.theme).toBe('light');
+    await user.keyboard('{Enter}{ArrowDown}{Enter}');
+    expect(localStorage.getItem('cerebro.themeMode')).toBe('dark');
+    expect(useUiStore.getState().quickOpenVisible).toBe(false);
+  });
+  it('offers nothing active for an unmatched query, then Down reaches Ask', async () => {
+    const user = userEvent.setup();
+    render(<QuickOpen />);
+    await user.type(screen.getByRole('combobox'), 'zzqxv');
+    expect(
+      screen.getAllByRole('option').every((row) => row.getAttribute('aria-selected') === 'false'),
+    ).toBe(true);
+    await user.keyboard('{Enter}');
+    expect(useUiStore.getState().quickOpenVisible).toBe(true);
+    expect(useUiStore.getState().handoffs).toEqual([]);
+    await user.keyboard('{ArrowDown}{Enter}');
+    expect(useUiStore.getState().quickOpenVisible).toBe(false);
+    expect(useUiStore.getState().handoffs.at(-1)?.text).toBe('zzqxv');
+  });
+  it('adopts a late first content hit only while the highlight is untouched', async () => {
+    let land!: (value: VaultSearch) => void;
+    searchVault.mockImplementation(
+      () =>
+        new Promise<VaultSearch>((resolve) => {
+          land = resolve;
+        }),
+    );
+    const user = userEvent.setup();
+    render(<QuickOpen />);
+    await user.type(screen.getByRole('combobox'), 'zzqxv');
+    await vi.waitFor(() => expect(searchVault).toHaveBeenCalled());
+    await act(async () =>
+      land({
+        hits: [{ path: 'late.md', title: 'Late page', type: null, parts: [] }],
+        total: 1,
+        capped: 0,
+        widened: false,
+      }),
+    );
+    expect(screen.getByTestId('quick-open-content-result').getAttribute('aria-selected')).toBe(
+      'true',
+    );
+  });
+  it('captures only commands bound in the original page scope', async () => {
+    const stop = bind({ id: ROOT_PAGE_ID, name: 'page' }, 'inbox.file', { run: vi.fn() });
+    const user = userEvent.setup();
+    render(<QuickOpen />);
+    await user.type(screen.getByRole('combobox'), 'file');
+    expect(screen.getByRole('option', { name: /File the open capture/ })).toBeTruthy();
+    cleanup();
+    stop();
+    useUiStore.setState({ quickOpenVisible: true });
+    render(<QuickOpen />);
+    await user.type(screen.getByRole('combobox'), 'file');
+    expect(screen.queryByRole('option', { name: /File the open capture/ })).toBeNull();
+  });
+  it('opens a favorite or agent as a page', async () => {
+    const favorite = makeEntry({ path: 'my-page.md', title: 'My page' });
+    const agent = makeEntry({
+      path: 'records/agents/helper.md',
+      title: 'Helper',
+      type: 'Agent',
+      properties: { slug: 'helper', paused: true },
+    });
+    useVaultStore.setState({ entries: [favorite, agent] });
+    useUiStore.setState({ favorites: { '/demo-vault': [favorite.path] } });
+    const user = userEvent.setup();
+    render(<QuickOpen />);
+    await user.type(screen.getByRole('combobox'), 'favorite');
+    await user.click(screen.getByRole('option', { name: /Open favorite/ }));
+    await user.keyboard('{Enter}');
+    expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: favorite.path });
+    await act(async () => useUiStore.setState({ quickOpenVisible: true }));
+    await user.type(screen.getByRole('combobox'), 'open agent');
+    await user.click(screen.getByRole('option', { name: /Open agent/ }));
+    expect(screen.getByRole('option', { name: /Helper/ }).textContent).toContain(
+      '@helper · paused',
+    );
+    await user.keyboard('{Enter}');
+    expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: agent.path });
+  });
+});
+
+describe('QuickOpen beside intent', () => {
+  beforeEach(() => {
+    useNavStore.getState().reset();
+    useNavStore.getState().setPaneCapacity(2);
+    useVaultStore.setState({ entries: [makeEntry({ path: 'beside.md', title: 'Beside note' })] });
+    useUiStore.setState({ quickOpenVisible: true });
+    searchVault.mockResolvedValue(NOTHING);
+  });
+  it.each(['shift', 'modified click'])('opens a place with %s', async (method) => {
+    const stop = installOpenIntent();
+    try {
+      const user = userEvent.setup();
+      render(<QuickOpen />);
+      const input = screen.getByTestId('quick-open-input');
+      await user.type(input, 'Beside note');
+      if (method === 'shift') fireEvent.keyDown(input, { key: 'Enter', shiftKey: true });
+      else fireEvent.click(screen.getByTestId('quick-open-result'), { metaKey: true });
+      expect(useNavStore.getState().paneIds).toHaveLength(2);
+      expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'beside.md' });
+    } finally {
+      stop();
+    }
+  });
+  it('Shift+Enter runs a command without opening a pane', async () => {
+    const ran = vi.fn();
+    bind(APP_SCOPE, 'theme.toggle', { run: ran });
+    const user = userEvent.setup();
+    render(<QuickOpen />);
+    const input = screen.getByTestId('quick-open-input');
+    await user.click(screen.getByTestId('palette-category-commands'));
+    await user.type(input, 'Switch light and dark');
+    fireEvent.keyDown(input, { key: 'Enter', shiftKey: true });
+    expect(useNavStore.getState().paneIds).toHaveLength(1);
+    await vi.waitFor(() => expect(ran).toHaveBeenCalledOnce());
   });
 });

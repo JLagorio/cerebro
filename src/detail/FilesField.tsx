@@ -1,11 +1,18 @@
-import { useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { MenuItem, MenuSurface } from '@/components/ui/Menu';
 import { Popover } from '@/components/ui/Popover';
 import { Tooltip } from '@/components/ui/Tooltip';
-import { canPickFiles, importAttachment, pickFiles } from '@/lib/ipc';
+import { canPickFiles, importAttachment, inspectDropped, pickFiles } from '@/lib/ipc';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import { useOpenPath } from '@/app/useOpenPath';
+import { FileLightbox } from '@/components/FileLightbox';
+import { FileThumb } from '@/components/FileThumb';
+import { kindFor } from '@/engine/fileKinds';
+import { useVaultActionGuard } from '@/hooks/useVaultActionGuard';
+import { useOsDropZone } from '@/hooks/useOsDropZone';
+import { droppedReason } from '@/engine/osDrop';
 
 /**
  * The Files property (M16.13c).
@@ -23,11 +30,6 @@ import { useVaultStore } from '@/stores/vaultStore';
  * and the only one that can hold a URL. It is a second menu item now rather
  * than the only door.
  *
- * NOT here, on purpose: image previews. Rendering vault files in the webview
- * needs Tauri's `assetProtocol` enabled AND the CSP widened to allow
- * `asset:`/`http://asset.localhost` — a deliberate change to what the webview
- * may load, which should be its own commit with its own reasoning, not a side
- * effect of adding a field kind.
  */
 
 const isUrl = (v: string) => /^(https?|mailto):/i.test(v);
@@ -36,41 +38,98 @@ export function FilesField({
   values,
   label,
   onChange,
+  ownerKey = label,
 }: {
   values: string[];
   /** Humanized property name, for the accessible names of the controls. */
   label: string;
+  /** Page and field identity, even when the next record has identical values. */
+  ownerKey?: string;
   onChange: (next: string[]) => void;
 }) {
   const addRef = useRef<HTMLButtonElement | null>(null);
   const [menu, setMenu] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const copying = useRef(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const openPath = useOpenPath();
+  const images = values.filter((path) => !isUrl(path) && kindFor(path).kind === 'image');
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const toast = useUiStore((s) => s.toast);
+  const scope = JSON.stringify([vaultPath, ownerKey, values]);
+  const capture = useVaultActionGuard(scope);
+  useLayoutEffect(() => {
+    const clear = () => {
+      copying.current = false;
+      setMenu(false);
+      setDraft(null);
+      setBusy(false);
+      setLightbox(null);
+    };
+    clear();
+    return useVaultStore.subscribe((next, previous) => {
+      if (next.vaultPath !== previous.vaultPath) clear();
+    });
+  }, [scope]);
+  const osDrop = useOsDropZone('files-field', async (paths) => {
+    if (vaultPath === null || copying.current) return;
+    const current = capture();
+    copying.current = true;
+    setBusy(true);
+    try {
+      const inspected = await inspectDropped(paths);
+      const added: string[] = [];
+      const skipped: string[] = [];
+      for (const file of inspected) {
+        if (!current()) return;
+        const why = droppedReason(file);
+        if (why !== null) {
+          skipped.push(`${file.name} (${why})`);
+          continue;
+        }
+        added.push((await importAttachment(vaultPath, file.path)).path);
+      }
+      if (!current()) return;
+      if (added.length > 0)
+        onChange([...values, ...added.filter((path) => !values.includes(path))]);
+      if (skipped.length > 0) toast(`Skipped ${skipped.join(', ')}`);
+    } finally {
+      if (current()) {
+        copying.current = false;
+        setBusy(false);
+      }
+    }
+  });
 
   const upload = () => {
     setMenu(false);
-    if (vaultPath === null) return;
+    if (vaultPath === null || copying.current) return;
+    const current = capture();
+    copying.current = true;
     void (async () => {
       setBusy(true);
       try {
         const picked = await pickFiles();
-        if (picked.length === 0) return;
-        // Sequential, not Promise.all: the dedupe suffix is decided by what is
-        // already on disk, so two concurrent imports of `report.pdf` would both
-        // see the folder empty and race for the same name.
+        if (!current() || picked.length === 0) return;
+        // Sequential so references retain the person's selection order.
         const added: string[] = [];
         for (const source of picked) {
-          added.push(await importAttachment(vaultPath, source));
+          if (!current()) return;
+          added.push((await importAttachment(vaultPath, source)).path);
         }
+        if (!current()) return;
         onChange([...values, ...added.filter((a) => !values.includes(a))]);
       } catch (e) {
         // The store-layer invariant: never throw at a call site, say what
         // happened. A failed copy leaves the field exactly as it was.
-        toast(`Couldn't add the file — ${e instanceof Error ? e.message : String(e)}`);
+        if (current())
+          toast(`Couldn't add the file — ${e instanceof Error ? e.message : String(e)}`);
       } finally {
-        setBusy(false);
+        if (current()) {
+          copying.current = false;
+          setBusy(false);
+        }
       }
     })();
   };
@@ -82,13 +141,26 @@ export function FilesField({
   };
 
   return (
-    <span className="flex min-w-0 flex-wrap items-center gap-1">
+    <span
+      {...osDrop.zoneProps}
+      className={`flex min-w-0 flex-wrap items-center gap-1 ${osDrop.over ? 'rounded-md outline outline-2 outline-cortex-500' : ''}`}
+    >
       {values.map((f) => (
         <span
           key={f}
           className="inline-flex max-w-full items-center gap-1 rounded-md bg-n-50 px-1.5 py-px text-xs text-n-700"
         >
-          <Icon name={isUrl(f) ? 'link' : 'paperclip'} size={11} color="var(--n-500)" />
+          {!isUrl(f) && ['image', 'pdf'].includes(kindFor(f).kind) ? (
+            <FileThumb
+              rootId="0"
+              path={f}
+              size={128}
+              compact
+              className="inline-flex h-4 w-4 shrink-0"
+            />
+          ) : (
+            <Icon name={isUrl(f) ? 'link' : 'paperclip'} size={11} color="var(--n-500)" />
+          )}
           {isUrl(f) ? (
             <a
               href={f}
@@ -101,9 +173,16 @@ export function FilesField({
           ) : (
             // title, not a tooltip: the full path is the useful detail and a
             // chip is small enough that the name alone is often ambiguous.
-            <span className="truncate" title={f}>
+            <button
+              type="button"
+              className="truncate border-0 bg-transparent p-0 text-inherit"
+              data-testid="files-chip"
+              title={f}
+              aria-label={`Open ${f.split('/').at(-1) ?? f}`}
+              onClick={() => (images.includes(f) ? setLightbox(f) : openPath(f))}
+            >
               {f.split('/').pop()}
-            </span>
+            </button>
           )}
           <button
             type="button"
@@ -178,6 +257,14 @@ export function FilesField({
             />
           </MenuSurface>
         </Popover>
+      )}
+      {lightbox !== null && images.includes(lightbox) && (
+        <FileLightbox
+          key={lightbox}
+          paths={images}
+          initialIndex={images.indexOf(lightbox)}
+          onClose={() => setLightbox(null)}
+        />
       )}
     </span>
   );

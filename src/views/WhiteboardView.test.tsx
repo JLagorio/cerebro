@@ -1,13 +1,12 @@
+import * as ipc from '@/lib/ipc';
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildSchema } from '@/engine/schema';
 import type { Entry, Presentation, Schema } from '@/engine/types';
 import { resetMockFs } from '@/lib/mockIpc';
-import { parseFlowchart } from '@/mermaid/flowchart/model';
-import { isManualLayout } from '@/mermaid/flowchart/views';
 import { makeEntry } from '@/test/factories';
 import { useOpenLogStore } from '@/stores/openLogStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -165,6 +164,53 @@ describe('WhiteboardView', () => {
   });
   afterEach(cleanup);
 
+  it('converts a manual .mmd tab by repointing it and preserves the original bytes', async () => {
+    const source =
+      'flowchart LR\n%% cerebro:layout manual\n%% cerebro:pos A 100,100 B 400,100\nA[One] --> B[Two]\n';
+    fs().set(MAP, source);
+    await useVaultStore.getState().rescan();
+    const onPresentationChange = vi.fn();
+    render(
+      <WhiteboardView
+        entries={entries}
+        presentation={onMap}
+        schema={schema}
+        host={host}
+        onPresentationChange={onPresentationChange}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId('whiteboard-convert'));
+    expect(fs().has('delivery/whiteboards/map.canvas')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Convert' }));
+    await waitFor(() =>
+      expect(onPresentationChange).toHaveBeenCalledExactlyOnceWith({
+        ...onMap,
+        whiteboard: { file: 'delivery/whiteboards/map.canvas' },
+      }),
+    );
+    expect(fs().get(MAP)).toBe(source);
+    expect(changes).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'flowchart LR\nA --> B',
+    'sequenceDiagram\nA->>B: hello',
+    'flowchart LR\n%% cerebro:layout manual',
+  ])('does not offer conversion for %s', async (source) => {
+    fs().set(MAP, source);
+    render(
+      <WhiteboardView
+        entries={entries}
+        presentation={onMap}
+        schema={schema}
+        host={host}
+        onPresentationChange={vi.fn()}
+      />,
+    );
+    await screen.findByTestId('fake-editor');
+    expect(screen.queryByTestId('whiteboard-convert')).toBeNull();
+  });
+
   it('renders the unavailable face when it has no host (a dashboard block)', () => {
     render(<WhiteboardView entries={entries} presentation={base} schema={schema} host={null} />);
     expect(screen.getByTestId('whiteboard-unavailable')).toBeTruthy();
@@ -184,16 +230,11 @@ describe('WhiteboardView', () => {
     await waitFor(() =>
       expect(onPresentationChange).toHaveBeenCalledWith({
         ...base,
-        whiteboard: { file: 'delivery/whiteboards/launch-map.mmd' },
+        whiteboard: { file: 'delivery/whiteboards/launch-map.canvas' },
       }),
     );
-    // The seed is measured, not assumed: an empty flowchart the visual editor
-    // can open, already in manual layout so a dropped node stays dropped.
-    const seed = fs().get('delivery/whiteboards/launch-map.mmd')!;
-    expect(seed).toContain('flowchart TD');
-    const model = parseFlowchart(seed);
-    expect(model).not.toBeNull();
-    expect(isManualLayout(model!)).toBe(true);
+    const seed = fs().get('delivery/whiteboards/launch-map.canvas')!;
+    expect(JSON.parse(seed)).toMatchObject({ nodes: [], edges: [] });
   });
 
   it('a root-level list creates under whiteboards/ with no leading slash', async () => {
@@ -210,7 +251,7 @@ describe('WhiteboardView', () => {
     await waitFor(() =>
       expect(onPresentationChange).toHaveBeenCalledWith({
         ...base,
-        whiteboard: { file: 'whiteboards/sketch.mmd' },
+        whiteboard: { file: 'whiteboards/sketch.canvas' },
       }),
     );
   });
@@ -224,7 +265,7 @@ describe('WhiteboardView', () => {
    *
    * Round-tripping the name inside the create window is the shape that
    * defeats a "last target" ref: it would see `Other` and re-attempt `Map`,
-   * and the stem dedupe would answer with map-2.mmd.
+   * and the stem dedupe would answer with map-2.canvas.
    */
   it('attempts a given canvas once, however often the effect re-fires', async () => {
     const onPresentationChange = vi.fn();
@@ -243,11 +284,11 @@ describe('WhiteboardView', () => {
     await waitFor(() =>
       expect(onPresentationChange).toHaveBeenCalledWith({
         ...base,
-        whiteboard: { file: 'delivery/whiteboards/other.mmd' },
+        whiteboard: { file: 'delivery/whiteboards/other.canvas' },
       }),
     );
     expect([...fs().keys()].filter((k) => k.startsWith('delivery/whiteboards/map'))).toEqual([
-      'delivery/whiteboards/map.mmd',
+      'delivery/whiteboards/map.canvas',
     ]);
   });
 
@@ -260,12 +301,12 @@ describe('WhiteboardView', () => {
    */
   it('clearing the pointer re-arms creation, even for a canvas this mount made', async () => {
     render(<OneWhiteboardTab />);
-    await waitFor(() => expect(fs().get('work/whiteboards/sketch.mmd')).toBeTruthy());
+    await waitFor(() => expect(fs().get('work/whiteboards/sketch.canvas')).toBeTruthy());
     await screen.findByTestId('whiteboard-view');
 
     // What "Start a new canvas" does: drop the pointer and expect a new file.
     fireEvent.click(screen.getByTestId('clear-pointer'));
-    await waitFor(() => expect(fs().get('work/whiteboards/sketch-2.mmd')).toBeTruthy());
+    await waitFor(() => expect(fs().get('work/whiteboards/sketch-2.canvas')).toBeTruthy());
     await screen.findByTestId('whiteboard-view');
   });
 
@@ -278,21 +319,23 @@ describe('WhiteboardView', () => {
    */
   it('a second whiteboard tab on the same mounted view gets its own canvas', async () => {
     render(<TwoWhiteboardTabs />);
-    await waitFor(() => expect(fs().get('work/whiteboards/sketch.mmd')).toBeTruthy());
+    await waitFor(() => expect(fs().get('work/whiteboards/sketch.canvas')).toBeTruthy());
     // Tab A settled onto its canvas rather than sitting on the creating face.
     await screen.findByTestId('whiteboard-view');
 
     fireEvent.click(screen.getByTestId('to-tab-b'));
-    await waitFor(() => expect(fs().get('work/whiteboards/plan-b.mmd')).toBeTruthy());
+    await waitFor(() => expect(fs().get('work/whiteboards/plan-b.canvas')).toBeTruthy());
     await waitFor(() => expect(screen.queryByTestId('whiteboard-creating')).toBeNull());
     expect(screen.getByTestId('whiteboard-view')).toBeTruthy();
 
     // And back: each tab kept its OWN pointer through the round trip.
     fireEvent.click(screen.getByTestId('to-tab-a'));
-    await waitFor(() => expect(editorProps.mock.calls.at(-1)![0].title).toBe('Sketch'));
+    await waitFor(() =>
+      expect(screen.getByRole('img', { name: 'Sketch' }).getAttribute('aria-label')).toBe('Sketch'),
+    );
     expect([...fs().keys()].filter((k) => k.startsWith('work/whiteboards/')).sort()).toEqual([
-      'work/whiteboards/plan-b.mmd',
-      'work/whiteboards/sketch.mmd',
+      'work/whiteboards/plan-b.canvas',
+      'work/whiteboards/sketch.canvas',
     ]);
   });
 
@@ -325,13 +368,43 @@ describe('WhiteboardView', () => {
         onPresentationChange={onB}
       />,
     );
-    const A = 'delivery/whiteboards/tab-a.mmd';
-    const B = 'delivery/whiteboards/tab-b.mmd';
+    const A = 'delivery/whiteboards/tab-a.canvas';
+    const B = 'delivery/whiteboards/tab-b.canvas';
     await waitFor(() => expect(onA).toHaveBeenCalledWith({ ...base, whiteboard: { file: A } }));
     await waitFor(() => expect(onB).toHaveBeenCalledWith({ ...base, whiteboard: { file: B } }));
     // Neither tab is ever told to adopt the other's file.
     expect(onB.mock.calls.every(([p]) => p.whiteboard.file !== A)).toBe(true);
     expect(onA.mock.calls.every(([p]) => p.whiteboard.file !== B)).toBe(true);
+  });
+
+  it('a batched vault round trip retires the old pointer publication', async () => {
+    let resolve!: (value: ipc.CanvasResult<{ path: string; hash: string | null }>) => void;
+    const create = vi.spyOn(ipc, 'createCanvasFile').mockImplementation(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    const change = vi.fn();
+    try {
+      render(
+        <WhiteboardView
+          entries={entries}
+          presentation={base}
+          schema={schema}
+          host={host}
+          onPresentationChange={change}
+        />,
+      );
+      act(() => {
+        useVaultStore.setState({ vaultPath: '/other' });
+        useVaultStore.setState({ vaultPath: '/demo-vault' });
+      });
+      await act(async () => resolve({ ok: true, path: 'old.canvas', hash: 'saved' }));
+      expect(change).not.toHaveBeenCalled();
+    } finally {
+      create.mockRestore();
+    }
   });
 
   it('creates nothing when the surface cannot persist the pointer', async () => {
@@ -347,6 +420,72 @@ describe('WhiteboardView', () => {
     // read-only host waits instead of creating an orphan on every open.
     await waitFor(() => expect(screen.getByTestId('whiteboard-creating')).toBeTruthy());
     expect([...fs().keys()].filter((k) => k.includes('whiteboards/'))).toHaveLength(0);
+  });
+
+  it('a canvas offers only unplaced view records and adds the exact path', async () => {
+    const path = 'delivery/whiteboards/cards.canvas';
+    fs().set(
+      path,
+      JSON.stringify({
+        nodes: [
+          {
+            id: 'existing',
+            type: 'file',
+            file: entries[0].path,
+            x: 0,
+            y: 0,
+            width: 320,
+            height: 120,
+          },
+        ],
+        edges: [],
+      }),
+    );
+    render(
+      <WhiteboardView
+        entries={[...entries, shipV2]}
+        presentation={{ ...base, whiteboard: { file: path } }}
+        schema={schema}
+        host={host}
+      />,
+    );
+    await screen.findByTestId('wb-board');
+    fireEvent.click(screen.getByTestId('whiteboard-add-record'));
+    expect(screen.getAllByTestId('whiteboard-add-option')).toHaveLength(1);
+    expect(screen.getByTestId('whiteboard-add-option').getAttribute('title')).toBe(shipV2.path);
+    fireEvent.click(screen.getByTestId('whiteboard-add-option'));
+    await waitFor(() => expect(JSON.parse(fs().get(path)!).nodes).toHaveLength(2));
+    expect(JSON.parse(fs().get(path)!).nodes[1]).toMatchObject({
+      type: 'file',
+      file: shipV2.path,
+      width: 320,
+      height: 120,
+    });
+  });
+
+  it.each([
+    ['gone.canvas', null, 'whiteboard-tombstone'],
+    ['broken.canvas', '{bad', 'canvas-unavailable'],
+    ['notes.md', '# Notes', 'whiteboard-not-a-board'],
+  ])('a %s pointer is honest and never rewritten merely by opening', async (path, source, face) => {
+    if (source !== null) fs().set(path, source);
+    const change = vi.fn();
+    render(
+      <WhiteboardView
+        entries={entries}
+        presentation={{ ...base, whiteboard: { file: path } }}
+        schema={schema}
+        host={host}
+        onPresentationChange={change}
+      />,
+    );
+    await screen.findByTestId(face);
+    expect(fs().get(path)).toBe(source ?? undefined);
+    expect(change).not.toHaveBeenCalled();
+    if (face !== 'canvas-unavailable') {
+      fireEvent.click(screen.getByRole('button', { name: 'Start a new canvas' }));
+      expect(change).toHaveBeenCalledExactlyOnceWith({ ...base, whiteboard: { file: null } });
+    }
   });
 
   it('renders the editor over an existing file, embedded and titled by the view', async () => {

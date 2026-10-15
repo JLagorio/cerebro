@@ -60,8 +60,8 @@ const VIRTUAL: readonly string[] = VIRTUAL_FIELDS;
  * The entry fields each position's reader resolves with no declaration, off
  * the entry itself. Filters, sorts, bands, charts and dashboard widgets read
  * `schema.fieldValue`, whose virtual fields come first (M60.1); a column
- * draws the title alone; the date, dependency and cover axes and a nest read
- * declared fields only. viewCheck.test.ts pins the filter and sort rows
+ * draws the title alone; the date axis also reads file times; dependency and
+ * cover axes and a nest read declared fields only. Tests pin the reader rows
  * against evaluateFilters and sortEntries, so the readers decide.
  */
 export const ENTRY_FIELDS = {
@@ -70,7 +70,7 @@ export const ENTRY_FIELDS = {
   band: VIRTUAL,
   nest: [],
   column: ['title'],
-  dateField: [],
+  dateField: ['createdAt', 'modifiedAt'],
   dependencyField: [],
   galleryCover: [],
   chartValue: VIRTUAL,
@@ -83,7 +83,7 @@ export const ENTRY_FIELDS = {
 } as const satisfies Record<RefPosition, readonly string[]>;
 
 /** Ops that compare a rule's value against a choice's id. */
-const OPTION_OPS: ReadonlySet<FilterOp> = new Set<FilterOp>([
+export const OPTION_OPS: ReadonlySet<FilterOp> = new Set<FilterOp>([
   'equals',
   'not_equals',
   'any_of',
@@ -93,7 +93,7 @@ const OPTION_OPS: ReadonlySet<FilterOp> = new Set<FilterOp>([
 ]);
 
 /** The kinds whose values are choices from a declared set. */
-const OPTION_KINDS: ReadonlySet<FieldKind> = new Set<FieldKind>([
+export const OPTION_KINDS: ReadonlySet<FieldKind> = new Set<FieldKind>([
   'select',
   'multiselect',
   'status',
@@ -111,6 +111,23 @@ const valuesOf = (value: FilterRule['value']): Scalar[] => {
 };
 
 const asList = (v: unknown): unknown[] => (Array.isArray(v) ? v : [v]);
+
+export const recordsHoldKey = (records: readonly Entry[], name: string): boolean =>
+  records.some((e) => name in e.properties || name in e.relationships);
+
+export const recordsHoldValue = (records: readonly Entry[], name: string, value: string): boolean =>
+  records.some((e) =>
+    asList(e.relationships[name] ?? e.properties[name]).some(
+      (x) => x !== null && x !== undefined && String(x) === value,
+    ),
+  );
+
+export function declaredOptions(schema: Schema, type: string, def: FieldDef) {
+  const own = def.options ?? [];
+  return own.length > 0 || kindMeta(def.kind).statusSet !== true
+    ? own
+    : filterStatusSet(schema, type);
+}
 
 /**
  * Every problem `view` has against its database, deduped, in walk order.
@@ -148,17 +165,13 @@ export function checkView(
   const holdsKey = (name: string): boolean => {
     let answer = held.get(name);
     if (answer === undefined) {
-      answer = sourceRecords().some((e) => name in e.properties || name in e.relationships);
+      answer = recordsHoldKey(sourceRecords(), name);
       held.set(name, answer);
     }
     return answer;
   };
   const holdsValue = (name: string, value: string): boolean =>
-    sourceRecords().some((e) =>
-      asList(e.relationships[name] ?? e.properties[name]).some(
-        (x) => x !== null && x !== undefined && String(x) === value,
-      ),
-    );
+    recordsHoldValue(sourceRecords(), name, value);
 
   /** The declarations of `name` across the chain, each with its type. */
   const declarations = (name: string): { type: string; def: FieldDef }[] =>
@@ -170,9 +183,7 @@ export function checkView(
   /** The option ids a declaration offers: its own, else (status) its type's
    * set, then the defaults. */
   const optionIds = (type: string, def: FieldDef): string[] => {
-    const own = def.options ?? [];
-    if (own.length > 0 || kindMeta(def.kind).statusSet !== true) return own.map((o) => o.id);
-    return filterStatusSet(schema, type).map((o) => o.id);
+    return declaredOptions(schema, type, def).map((o) => o.id);
   };
 
   const out: ViewProblem[] = [];

@@ -73,9 +73,10 @@ export function placeOf(selection: Selection): Place {
     // comment thread are lenses on one page.
     case 'doc':
       return { kind: 'doc', path: selection.path };
-    // A standalone diagram is a subject the same way a doc is (M29.21).
+    // A standalone diagram or whiteboard is a subject the same way a doc is.
     case 'diagram':
-      return { kind: 'diagram', path: selection.path };
+    case 'file':
+      return { kind: selection.kind, path: selection.path };
     case 'collection':
       return { kind: 'collection', folder: selection.folder };
     // A prototype is a subject the way a Collection is — the thread about
@@ -112,6 +113,8 @@ export function placeKey(place: Place): string {
       return `doc:${place.path}`;
     case 'diagram':
       return `diagram:${place.path}`;
+    case 'file':
+      return `file:${place.path}`;
     case 'collection':
       return `collection:${place.folder}`;
     case 'list':
@@ -147,7 +150,7 @@ export function samePlace(a: Place | null | undefined, b: Place | null | undefin
 /** Basename without its extension — the fallback name for anything unresolved. */
 function stem(path: string): string {
   const base = path.slice(path.lastIndexOf('/') + 1);
-  return base.replace(/\.(md|mmd)$/, '');
+  return base.replace(/\.(md|mmd|canvas)$/, '');
 }
 
 /**
@@ -191,6 +194,8 @@ export function placeLabel(
       }
       return knowledge;
     }
+    case 'file':
+      return place.path.split('/').at(-1) ?? place.path;
     case 'doc':
     case 'diagram':
       return entries.find((e) => e.path === place.path)?.title ?? stem(place.path);
@@ -274,6 +279,7 @@ export function isPlace(raw: unknown): raw is Place {
     }
     case 'doc':
     case 'diagram':
+    case 'file':
       return typeof p.path === 'string';
     case 'collection':
       return typeof p.folder === 'string';

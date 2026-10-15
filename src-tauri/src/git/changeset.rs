@@ -243,6 +243,7 @@ pub enum RunChangeset {
     /// The run's own commit, under its full hash. A total is None when every
     /// file it counts is binary; `binary` counts the binary files.
     Committed {
+        kept_out_of_git: u64,
         run_id: String,
         commit: String,
         files: Vec<ChangedFile>,
@@ -253,24 +254,28 @@ pub enum RunChangeset {
     },
     /// The run wrote nothing, or wrote the bytes that were already there.
     Nothing {
+        kept_out_of_git: u64,
         run_id: String,
         shell_unrecorded: bool,
     },
     /// Nobody recorded what the run wrote: a run with no durable id, or one
     /// from before its writes were booked.
     NotRecorded {
+        kept_out_of_git: u64,
         run_id: Option<String>,
         reason: String,
         files: Vec<String>,
     },
     /// The vault keeps no history, so there are files and no counts.
     NotARepo {
+        kept_out_of_git: u64,
         run_id: String,
         files: Vec<String>,
         shell_unrecorded: bool,
     },
     /// The commit could not be made or read back.
     Unavailable {
+        kept_out_of_git: u64,
         run_id: String,
         reason: String,
         files: Vec<String>,
@@ -399,7 +404,7 @@ pub const QUITTING: &str = "Cerebro was quitting";
 /// A run's recorded paths: its runtime database (when it opened), the paths,
 /// whether the shell may have written more, and whether its writes were
 /// recorded at all.
-fn recorded(run: &SettleRun<'_>) -> (Result<ReadOnly, String>, Vec<String>, bool, bool) {
+fn recorded(run: &SettleRun<'_>) -> (Result<ReadOnly, String>, Vec<String>, bool, bool, u64) {
     let ro = ReadOnly::open(run.data_dir);
     let recorded = match &ro {
         Ok(ro) => write_log::run_writes(ro, run.run_id).ok(),
@@ -410,14 +415,18 @@ fn recorded(run: &SettleRun<'_>) -> (Result<ReadOnly, String>, Vec<String>, bool
         Some(RunWrites::Partial(rows)) => (rows, true, true),
         Some(RunWrites::NotRecorded) | None => (Vec::new(), false, false),
     };
-    let files = run_paths(&rows, &run.cli_paths);
-    (ro, files, shell_unrecorded, known)
+    let mut files = run_paths(&rows, &run.cli_paths);
+    let before = files.len();
+    files.retain(|path| !crate::policy::mail::is_kept_out_of_git(path));
+    let kept_out_of_git = (before - files.len()) as u64;
+    (ro, files, shell_unrecorded, known, kept_out_of_git)
 }
 
 /// A run that ended while Cerebro quit: its files, uncommitted, and why.
 pub fn quitting(run: SettleRun<'_>) -> RunChangeset {
-    let (_, files, shell_unrecorded, _) = recorded(&run);
+    let (_, files, shell_unrecorded, _, kept_out_of_git) = recorded(&run);
     RunChangeset::Unavailable {
+        kept_out_of_git,
         run_id: run.run_id.to_string(),
         reason: QUITTING.into(),
         files,
@@ -426,18 +435,21 @@ pub fn quitting(run: SettleRun<'_>) -> RunChangeset {
 }
 
 /// Settle one ended run (M58.3): commit what it wrote and say what changed.
+/// Mail and its comments are withheld and counted before any git path is built.
 /// See the module note for each state.
 pub fn settle_run(run: SettleRun<'_>) -> RunChangeset {
-    let (ro, files, shell_unrecorded, known) = recorded(&run);
+    let (ro, files, shell_unrecorded, known, kept_out_of_git) = recorded(&run);
     let run_id = run.run_id.to_string();
     if files.is_empty() {
-        return if known {
+        return if known || kept_out_of_git > 0 {
             RunChangeset::Nothing {
+                kept_out_of_git,
                 run_id,
                 shell_unrecorded,
             }
         } else {
             RunChangeset::NotRecorded {
+                kept_out_of_git,
                 run_id: Some(run_id),
                 reason: "this run's writes were not recorded".into(),
                 files,
@@ -447,6 +459,7 @@ pub fn settle_run(run: SettleRun<'_>) -> RunChangeset {
     let ws = workspace::resolve(run.vault);
     if !ws.is_repo() {
         return RunChangeset::NotARepo {
+            kept_out_of_git,
             run_id,
             files,
             shell_unrecorded,
@@ -480,10 +493,12 @@ pub fn settle_run(run: SettleRun<'_>) -> RunChangeset {
         summary: summary.as_deref(),
         files: &files,
         shell_unrecorded,
+        kept_out_of_git,
     };
     commit
         .make()
         .unwrap_or_else(|reason| RunChangeset::Unavailable {
+            kept_out_of_git,
             run_id,
             reason,
             files,
@@ -493,6 +508,7 @@ pub fn settle_run(run: SettleRun<'_>) -> RunChangeset {
 
 /// One run's commit, being made.
 struct Commit<'a> {
+    kept_out_of_git: u64,
     ws: &'a GitWorkspaceInfo,
     ro: Option<&'a ReadOnly>,
     vault_id: &'a str,
@@ -532,6 +548,7 @@ impl Commit<'_> {
         let message = with_trailers(&subject, self.run_id, self.actor, head.as_deref());
         let Some(hash) = commit::commit_paths_in(ws, self.files, &message)? else {
             return Ok(RunChangeset::Nothing {
+                kept_out_of_git: self.kept_out_of_git,
                 run_id: self.run_id.to_string(),
                 shell_unrecorded: self.shell_unrecorded,
             });
@@ -577,6 +594,7 @@ impl Commit<'_> {
             (!counted.is_empty()).then(|| counted.iter().filter_map(|f| pick(f)).sum())
         };
         Ok(RunChangeset::Committed {
+            kept_out_of_git: self.kept_out_of_git,
             run_id: self.run_id.to_string(),
             commit: hash,
             additions: total(|f| f.additions),
@@ -887,6 +905,7 @@ mod tests {
         assert_eq!(
             f.settle("run-3", vec![]),
             RunChangeset::Nothing {
+                kept_out_of_git: 0,
                 run_id: "run-3".into(),
                 shell_unrecorded: false
             }
@@ -989,6 +1008,7 @@ mod tests {
         assert_eq!(
             f.settle("run-8", vec![]),
             RunChangeset::NotARepo {
+                kept_out_of_git: 0,
                 run_id: "run-8".into(),
                 files: vec!["a.md".into()],
                 shell_unrecorded: false,
@@ -1005,6 +1025,7 @@ mod tests {
             wire,
             serde_json::json!({
                 "state": "not_recorded",
+                "kept_out_of_git": 0,
                 "run_id": "run-none",
                 "reason": "this run's writes were not recorded",
                 "files": [],
@@ -1202,6 +1223,7 @@ mod tests {
         assert_eq!(
             f.settle("run-13", vec![]),
             RunChangeset::Nothing {
+                kept_out_of_git: 0,
                 run_id: "run-13".into(),
                 shell_unrecorded: true
             }
@@ -1227,6 +1249,7 @@ mod tests {
         assert_eq!(
             changeset,
             RunChangeset::Unavailable {
+                kept_out_of_git: 0,
                 run_id: "run-14".into(),
                 reason: BUSY.into(),
                 files: vec!["a.md".into()],
@@ -1234,6 +1257,69 @@ mod tests {
             }
         );
         assert_eq!(f.git(&["status", "--porcelain"]).trim(), "M a.md");
+        f.done();
+    }
+    #[test]
+    fn a_run_never_commits_a_digest() {
+        let f = fixture("m69-mail-run", true);
+        testutil::write(&f.vault, "a.md", "# Public change\n");
+        testutil::write(&f.vault, "sources/mail/a.md", "# Private\n");
+        f.run("mail-mixed", "process:scout", 1);
+        f.wrote("vault.write", "a.md", "process:scout", Some("mail-mixed"));
+        f.wrote(
+            "vault.write",
+            "sources/mail/a.md",
+            "process:scout",
+            Some("mail-mixed"),
+        );
+        let RunChangeset::Committed {
+            files,
+            kept_out_of_git,
+            ..
+        } = f.settle("mail-mixed", vec![])
+        else {
+            panic!("expected public commit");
+        };
+        assert_eq!(kept_out_of_git, 1);
+        assert_eq!(
+            files
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a.md"]
+        );
+        assert!(!f.git(&["ls-files"]).contains("sources/mail"));
+        assert!(f.vault.join("sources/mail/a.md").is_file());
+        f.done();
+    }
+    #[test]
+    fn a_run_that_wrote_only_digests_commits_nothing_and_counts_them() {
+        let f = fixture("m69-mail-only", true);
+        testutil::write(&f.vault, "sources/mail/a.md", "# Private\n");
+        testutil::write(&f.vault, ".comments/sources/mail/a.md.json", "[]");
+        f.run("mail-only", "process:scout", 1);
+        f.wrote(
+            "vault.write",
+            "sources/mail/a.md",
+            "process:scout",
+            Some("mail-only"),
+        );
+        let head = f.git(&["rev-parse", "HEAD"]);
+        assert_eq!(
+            f.settle(
+                "mail-only",
+                vec![
+                    "sources/mail/a.md".into(),
+                    ".comments/sources/mail/a.md.json".into()
+                ]
+            ),
+            RunChangeset::Nothing {
+                run_id: "mail-only".into(),
+                shell_unrecorded: false,
+                kept_out_of_git: 2
+            }
+        );
+        assert_eq!(f.git(&["rev-parse", "HEAD"]), head);
         f.done();
     }
 }

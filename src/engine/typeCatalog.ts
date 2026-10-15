@@ -258,6 +258,9 @@ function fieldToSpec(def: FieldDef): unknown {
   if (def.timeFormat !== undefined && def.timeFormat !== DEFAULT_TIME_FORMAT) {
     spec.timeFormat = def.timeFormat;
   }
+  if ((def.kind === 'date' || def.kind === 'daterange') && def.remind !== undefined) {
+    spec.remind = def.remind;
+  }
   if (def.visibility !== undefined && def.visibility !== 'show') spec.visibility = def.visibility;
   return spec;
 }

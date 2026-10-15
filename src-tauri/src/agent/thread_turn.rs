@@ -562,6 +562,7 @@ pub fn start(
                 let end = rx.recv().unwrap_or(RunEnd {
                     outcome: RunOutcome::AbandonedUsageUnknown,
                     usage: None,
+                    facts: None,
                     answer: None,
                     failure: None,
                 });
@@ -845,6 +846,7 @@ mod tests {
         RunEnd {
             outcome,
             usage: None,
+            facts: None,
             answer: answer.map(str::to_string),
             failure: failure.map(str::to_string),
         }
@@ -1274,6 +1276,39 @@ mod tests {
             "rename-other-vault",
         ] {
             turns_held().remove(id);
+        }
+    }
+
+    #[test]
+    fn a_batch_rename_moves_a_thread_binding_like_rename_note() {
+        let _lock = crate::runtime::sink::test_lock();
+        let config = crate::vault::testutil::temp_vault("thread-batch-move-config");
+        let vault = crate::vault::testutil::temp_vault("thread-batch-move");
+        crate::runtime::sink::arm(&config).unwrap();
+        crate::vault::testutil::write(&vault, "notes/plan.md", "# Plan\n");
+        register(
+            "batch-rename-binding",
+            Binding {
+                page: "notes/plan.md".into(),
+                ..binding_for(&vault, "placeholder")
+            },
+        );
+        crate::apply_batch(
+            vault.to_string_lossy().into_owned(),
+            vec![
+                json!({ "op": "rename", "from": "notes", "to": "archive" }),
+                json!({ "op": "rename", "from": "archive/plan.md", "to": "archive/launch.md" }),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            turns_held().get("batch-rename-binding").unwrap().page,
+            "archive/launch.md"
+        );
+        turns_held().remove("batch-rename-binding");
+        crate::runtime::sink::disarm();
+        for path in [vault, config] {
+            let _ = std::fs::remove_dir_all(path);
         }
     }
 

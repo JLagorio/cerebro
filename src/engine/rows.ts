@@ -143,7 +143,7 @@ export function buildRows({
       // renders six bands whether or not anything is in them, and a create
       // affordance under each turned a four-record table into seven ways to
       // create — one of which silently files the new record as "Void".
-      if (addRows && node.entries.length > 0) {
+      if (addRows && node.entries.length > 0 && node.seedable !== false) {
         out.push({
           kind: 'add',
           band: { field: node.field, key: node.key, label: node.label },

@@ -2,6 +2,11 @@ import React, { useState } from 'react';
 import { resolveBundleLink, type Source } from '@/engine/okf';
 import { MermaidDiagram } from '@/mermaid/MermaidDiagram';
 import { MermaidLightbox } from '@/mermaid/MermaidLightbox';
+import { fenceOpening, fenceCloses, parseSheetFence, SHEET_FENCE } from '@/engine/sheet/fence';
+import { SheetView } from '@/sheet/SheetView';
+import { useSheetWorkbook } from '@/sheet/useSheetWorkbook';
+import { parseWhiteboardRef, WHITEBOARD_FENCE } from '@/engine/whiteboardRef';
+import { WhiteboardEmbed } from '@/whiteboard/WhiteboardEmbed';
 
 /**
  * Read-only markdown for knowledge concepts (M5).
@@ -13,7 +18,7 @@ import { MermaidLightbox } from '@/mermaid/MermaidLightbox';
  * a citation can render as a chip that points at the source that backs it.
  *
  * OKF asks producers to favour structural markdown (§4.2), which is what
- * this covers: headings, lists, tables, fences, quotes, rules, and the
+ * this covers: headings, lists, tables, rendered or code fences, quotes, rules, and the
  * inline set. Anything unrecognised falls through as a paragraph rather
  * than being dropped — consumers must tolerate, not reject (§11).
  */
@@ -193,7 +198,7 @@ const LIST_ITEM = /^\s*([-*+]|\d+\.)\s+(.*)$/;
 const isContinuation = (line: string): boolean =>
   /^ {2,}\S/.test(line) &&
   !LIST_ITEM.test(line) &&
-  !/^\s*```/.test(line) &&
+  fenceOpening(line) === null &&
   !/^\s*(>|\|)/.test(line);
 
 const HEADING_CLASS: Record<number, string> = {
@@ -225,7 +230,9 @@ export function ConceptBody({
 }: ConceptBodyProps) {
   const ctx: InlineContext = { fromPath, sources, onOpenConcept, onCite, onOpenWikilink };
   const lines = markdown.split('\n');
-  const blocks: React.ReactNode[] = [];
+  const blocks: (React.ReactNode | { sheet: number; key: number })[] = [];
+  const sheetSources: string[] = [];
+  const unclosed: number[] = [];
   let key = 0;
   let i = 0;
 
@@ -240,18 +247,33 @@ export function ConceptBody({
     }
 
     // Fenced code — consumed first so nothing inside is parsed as markdown.
-    const fence = /^\s*```(\w*)/.exec(line);
+    const fence = fenceOpening(line);
     if (fence !== null) {
       const code: string[] = [];
       i += 1;
-      while (i < lines.length && !/^\s*```/.test(lines[i])) {
+      while (i < lines.length && !fenceCloses(lines[i], fence.marker)) {
         code.push(lines[i]);
         i += 1;
       }
+      const closed = i < lines.length;
       i += 1; // closing fence (or EOF — an unterminated fence still renders)
-      if (fence[1] === 'mermaid') {
+      if (fence.language === SHEET_FENCE) {
+        const sheet = sheetSources.length;
+        sheetSources.push(code.join('\n'));
+        if (!closed) unclosed.push(sheet);
+        blocks.push({ sheet, key: key++ });
+        continue;
+      }
+      if (fence.language === 'mermaid') {
         blocks.push(<ConceptMermaid key={key++} code={code.join('\n')} />);
         continue;
+      }
+      if (fence.language === WHITEBOARD_FENCE && closed) {
+        const ref = parseWhiteboardRef(code.join('\n'));
+        if (ref !== null) {
+          blocks.push(<WhiteboardEmbed key={key++} {...ref} />);
+          continue;
+        }
       }
       blocks.push(
         <pre
@@ -403,6 +425,7 @@ export function ConceptBody({
     while (
       i < lines.length &&
       lines[i].trim() !== '' &&
+      fenceOpening(lines[i]) === null &&
       !/^\s*(#{1,6}\s|```|>|[-*+]\s|\d+\.\s|---|\*\*\*|___)/.test(lines[i]) &&
       !isFootnoteDef(lines[i])
     ) {
@@ -420,5 +443,22 @@ export function ConceptBody({
     }
   }
 
-  return <div data-testid="concept-body">{blocks}</div>;
+  const sheets = useSheetWorkbook(sheetSources, unclosed);
+  return (
+    <div data-testid="concept-body">
+      {blocks.map((block) => {
+        if (typeof block !== 'object' || block === null || !('sheet' in block)) return block;
+        const source = sheetSources[block.sheet];
+        const parsed = parseSheetFence(source);
+        return (
+          <SheetView
+            key={block.key}
+            state={sheets[block.sheet]}
+            source={source}
+            cells={parsed.ok ? parsed.cells : []}
+          />
+        );
+      })}
+    </div>
+  );
 }

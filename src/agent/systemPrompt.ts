@@ -129,13 +129,22 @@ const KNOWLEDGE_SNAPSHOT: Fragment = {
 // fetch at all. Telling an agent to fetch and cache through tools it does not
 // have produces apologies, not sources.
 //
-// The connector inlet (M8.2): said when Settings switched connectors on. The
+// The cached-source inlet (M8.2): said when Settings switched connectors on. The
 // switch is not yet the run's own connector grant.
 const CACHE_SOURCES: Fragment = {
   id: 'cache-sources',
   kind: 'instruction',
   uses: ['cache_source'],
-  text: `External material you fetch through another MCP server must be written down with cache_source, which stores it under ${SOURCES_DIR}/. Search for an existing copy before fetching: one fetch, a permanent local file, and every later question reads the file.`,
+  text: `Tickets and pages you fetch through another MCP server must be written down with cache_source, which stores it under ${SOURCES_DIR}/. Search for an existing copy before fetching: one fetch, a permanent local file, and every later question reads the file. Mail is the exception: a message, a thread or a mail link is never written down as a web copy.`,
+  when: (_grant, options) => options.connectors === true,
+};
+
+/** Imported pages use the fetch's own result, not a model transcription. */
+const NOTION_IMPORT: Fragment = {
+  id: 'notion-import',
+  kind: 'instruction',
+  uses: ['import_notion_page'],
+  text: "When the user asks to import a Notion page, fetch it with their Notion connector in this same turn, then call import_notion_page with the page's link and a folder. Never write the page out yourself unless the import refuses and says you may.",
   when: (_grant, options) => options.connectors === true,
 };
 
@@ -163,6 +172,7 @@ export const SYSTEM_FRAGMENTS: readonly Fragment[] = [
   KNOWLEDGE,
   KNOWLEDGE_SNAPSHOT,
   CACHE_SOURCES,
+  NOTION_IMPORT,
   WEB_SOURCES,
 ];
 
@@ -211,6 +221,7 @@ export function buildSystemPrompt(
     ...say(KNOWLEDGE),
     ...say(KNOWLEDGE_SNAPSHOT),
     ...say(CACHE_SOURCES),
+    ...say(NOTION_IMPORT),
     ...say(WEB_SOURCES),
   ];
 

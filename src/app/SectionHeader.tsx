@@ -1,8 +1,10 @@
+import { Tooltip } from '@/components/ui/Tooltip';
 import { Icon } from '@/components/ui/Icon';
 
 export interface SectionAction {
   icon: string;
   label: string;
+  command?: string;
   onClick: () => void;
   /** e2e reaches for some actions by testid (new-collection). */
   testId?: string;
@@ -44,17 +46,17 @@ export function SectionHeader({
         {label}
       </button>
       {actions.map((a) => (
-        <button
-          key={a.label}
-          type="button"
-          aria-label={a.label}
-          title={a.label}
-          data-testid={a.testId}
-          onClick={a.onClick}
-          className="flex h-5 w-5 flex-none items-center justify-center rounded-xs border-0 bg-transparent text-n-400 opacity-0 hover:bg-n-200 hover:text-n-700 focus-visible:opacity-100 group-hover/sec:opacity-100"
-        >
-          <Icon name={a.icon} size={13} />
-        </button>
+        <Tooltip key={a.label} label={a.label} command={a.command}>
+          <button
+            type="button"
+            aria-label={a.label}
+            data-testid={a.testId}
+            onClick={a.onClick}
+            className="flex h-5 w-5 flex-none items-center justify-center rounded-xs border-0 bg-transparent text-n-400 opacity-0 hover:bg-n-200 hover:text-n-700 focus-visible:opacity-100 group-hover/sec:opacity-100"
+          >
+            <Icon name={a.icon} size={13} />
+          </button>
+        </Tooltip>
       ))}
     </div>
   );

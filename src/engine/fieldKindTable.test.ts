@@ -41,6 +41,7 @@ const statusJson = (s: StatusDef) => ({ ...optionJson(s), group: s.group });
 /** A FieldDef as the cases spell it: the parts Rust parses too. */
 const defJson = (d: FieldDef) => ({
   kind: d.kind,
+  formula: d.formula ?? null,
   options: d.options === undefined ? null : d.options.map(optionJson),
   target: d.target ?? null,
   limit: d.limit ?? null,
@@ -160,6 +161,7 @@ describe('the TS literal unions equal the artifact, in order', () => {
       'avg',
       'min',
       'max',
+      'percent_done',
     ]);
   });
 
@@ -213,4 +215,16 @@ describe("refuses malformed tables in Rust's words", () => {
       'field-kinds: collation sort has an unknown word icu',
     );
   });
+});
+
+it('replays the deadline cases through buildSchema', () => {
+  for (const c of FIELD_KIND_TABLE.deadline_cases) {
+    const doc = makeEntry({
+      path: 'types/task.md',
+      type: 'Type',
+      title: 'Task',
+      properties: { fields: c.fields, deadline: c.deadline },
+    });
+    expect(buildSchema([doc]).types.get('Task')?.deadline, c.name).toBe(c.expect);
+  }
 });

@@ -6,15 +6,20 @@ import { CreateMenu } from '@/app/CreateMenu';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { fixtureVault } from '@/test/factories';
+import { CreateLauncher } from './CreateLauncher';
+import { useLauncherStore } from '@/stores/launcherStore';
 
 afterEach(cleanup);
 
-// M12.5: the New menu creates the three things that exist — a record (a page
-// of a type), a doc (untyped prose), and a collection (a container). "New
-// item" and "New project" died with the system types that defined them.
 describe('CreateMenu', () => {
   beforeEach(() => {
-    useVaultStore.setState({ entries: fixtureVault() });
+    useVaultStore.setState({
+      vaultPath: '/demo-vault',
+      entriesVault: '/demo-vault',
+      status: 'ready',
+      entries: fixtureVault(),
+    });
+    useLauncherStore.setState({ open: false, flow: null, recents: {} });
     useUiStore.setState({ toasts: [] });
   });
 
@@ -22,9 +27,14 @@ describe('CreateMenu', () => {
     const user = userEvent.setup();
     const createItem = vi.fn().mockResolvedValue('records/work-items/ship-the-fix.md');
     useVaultStore.setState({ createItem });
-    render(<CreateMenu />);
+    render(
+      <>
+        <CreateMenu />
+        <CreateLauncher />
+      </>,
+    );
     await user.click(screen.getByRole('button', { name: 'New' }));
-    await user.click(screen.getByRole('menuitem', { name: 'New record' }));
+    await user.click(screen.getByRole('option', { name: 'Record' }));
     await user.type(screen.getByPlaceholderText('What is it called?'), 'Ship the fix');
     await user.selectOptions(screen.getByRole('combobox'), 'Work item');
     await user.click(screen.getByRole('button', { name: 'Create record' }));
@@ -33,7 +43,7 @@ describe('CreateMenu', () => {
     expect(createItem).toHaveBeenCalledWith({
       folder: 'records/work-items',
       slug: 'ship-the-fix',
-      frontmatter: { type: 'Work item' },
+      frontmatter: { type: 'Work item', status: 'todo' },
       body: '# Ship the fix\n',
     });
   });
@@ -42,11 +52,16 @@ describe('CreateMenu', () => {
     const user = userEvent.setup();
     const createItem = vi.fn().mockResolvedValue('meeting-notes.md');
     useVaultStore.setState({ createItem });
-    render(<CreateMenu />);
+    render(
+      <>
+        <CreateMenu />
+        <CreateLauncher />
+      </>,
+    );
     await user.click(screen.getByRole('button', { name: 'New' }));
-    await user.click(screen.getByRole('menuitem', { name: 'New doc' }));
-    await user.type(screen.getByPlaceholderText('Doc title'), 'Meeting notes');
-    await user.click(screen.getByRole('button', { name: 'Create doc' }));
+    await user.click(screen.getByRole('option', { name: 'Page' }));
+    await user.type(screen.getByPlaceholderText('Page title'), 'Meeting notes');
+    await user.click(screen.getByRole('button', { name: 'Create page' }));
     expect(createItem).toHaveBeenCalledWith({
       folder: '',
       slug: 'meeting-notes',
@@ -55,14 +70,41 @@ describe('CreateMenu', () => {
     });
   });
 
+  it('creates a named sheet page at the vault root', async () => {
+    const user = userEvent.setup();
+    const createItem = vi.fn().mockResolvedValue('plan-numbers.md');
+    useVaultStore.setState({ createItem });
+    render(
+      <>
+        <CreateMenu />
+        <CreateLauncher />
+      </>,
+    );
+    await user.click(screen.getByRole('button', { name: 'New' }));
+    await user.click(screen.getByRole('option', { name: 'Sheet' }));
+    expect(screen.getByRole('dialog', { name: 'New sheet' })).toBeTruthy();
+    await user.type(screen.getByPlaceholderText('Name the page'), 'Plan numbers');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+    expect(createItem).toHaveBeenCalledWith({
+      folder: '',
+      slug: 'plan-numbers',
+      frontmatter: {},
+      body: '# Plan numbers\n\n```cerebro-sheet\n---\nformat: 1\nname: "Sheet1"\n---\n```\n',
+    });
+  });
   it('offers New collection', async () => {
     const user = userEvent.setup();
-    render(<CreateMenu />);
+    render(
+      <>
+        <CreateMenu />
+        <CreateLauncher />
+      </>,
+    );
     await user.click(screen.getByRole('button', { name: 'New' }));
-    await user.click(screen.getByRole('menuitem', { name: 'New collection' }));
+    await user.click(screen.getByRole('option', { name: 'Collection' }));
     // The shared CollectionDialog opens; its behavior is covered by its own
     // tests — here it only matters that the menu reaches it.
-    expect(screen.getByText(/collection/i)).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'New collection' })).toBeTruthy();
   });
 
   // Deviation guards (16a/17b): createItem throws to callers by design — the
@@ -71,46 +113,58 @@ describe('CreateMenu', () => {
     const user = userEvent.setup();
     const createItem = vi.fn().mockRejectedValue(new Error('disk full'));
     useVaultStore.setState({ createItem });
-    render(<CreateMenu />);
+    render(
+      <>
+        <CreateMenu />
+        <CreateLauncher />
+      </>,
+    );
     await user.click(screen.getByRole('button', { name: 'New' }));
-    await user.click(screen.getByRole('menuitem', { name: 'New record' }));
+    await user.click(screen.getByRole('option', { name: 'Record' }));
     await user.type(screen.getByPlaceholderText('What is it called?'), 'Doomed');
     await user.click(screen.getByRole('button', { name: 'Create record' }));
     await vi.waitFor(() => {
       expect(useUiStore.getState().toasts.map((t) => t.message)).toContain(
-        'Couldn\'t create "Doomed"',
+        "Couldn't create “Doomed”",
       );
     });
     expect(screen.getByPlaceholderText('What is it called?')).toBeTruthy();
   });
 
-  // M15: the popup was a plain div — nothing announced a menu, focus stayed on
-  // the trigger, arrow keys did nothing, and Escape did not close it.
   describe('keyboard', () => {
-    it('announces a menu, focuses the first entry, and closes on Escape', async () => {
+    it('announces a dialog, focuses its filter, and restores focus on Escape', async () => {
       const user = userEvent.setup();
-      render(<CreateMenu />);
+      render(
+        <>
+          <CreateMenu />
+          <CreateLauncher />
+        </>,
+      );
       const trigger = screen.getByRole('button', { name: 'New' });
-      expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
-      expect(trigger.getAttribute('aria-expanded')).toBe('false');
+      expect(trigger.getAttribute('aria-haspopup')).toBe('dialog');
       await user.click(trigger);
       expect(trigger.getAttribute('aria-expanded')).toBe('true');
-      expect(screen.getByRole('menu')).toBeTruthy();
-      expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'New record' }));
+      expect(document.activeElement).toBe(
+        screen.getByRole('combobox', { name: 'What would you like to create?' }),
+      );
       await user.keyboard('{Escape}');
-      expect(screen.queryByRole('menu')).toBeNull();
-      // Focus goes back to the trigger, not to <body>.
-      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'New' }));
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(document.activeElement).toBe(trigger);
     });
-
-    it('walks the entries with the arrow keys and wraps', async () => {
+    it('walks the choices with arrow keys and wraps', async () => {
       const user = userEvent.setup();
-      render(<CreateMenu />);
+      render(
+        <>
+          <CreateMenu />
+          <CreateLauncher />
+        </>,
+      );
       await user.click(screen.getByRole('button', { name: 'New' }));
+      const choices = screen.getAllByRole('option');
+      await user.keyboard('{ArrowUp}');
+      expect(choices.at(-1)?.getAttribute('aria-selected')).toBe('true');
       await user.keyboard('{ArrowDown}');
-      expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'New doc' }));
-      await user.keyboard('{ArrowUp}{ArrowUp}');
-      expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'New collection' }));
+      expect(choices[0]?.getAttribute('aria-selected')).toBe('true');
     });
   });
 
@@ -120,9 +174,14 @@ describe('CreateMenu', () => {
     const user = userEvent.setup();
     const createItem = vi.fn(() => new Promise<string>(() => {}));
     useVaultStore.setState({ createItem });
-    render(<CreateMenu />);
+    render(
+      <>
+        <CreateMenu />
+        <CreateLauncher />
+      </>,
+    );
     await user.click(screen.getByRole('button', { name: 'New' }));
-    await user.click(screen.getByRole('menuitem', { name: 'New record' }));
+    await user.click(screen.getByRole('option', { name: 'Record' }));
     await user.type(screen.getByPlaceholderText('What is it called?'), 'Once only');
     const create = screen.getByRole('button', { name: 'Create record' });
     await user.click(create);

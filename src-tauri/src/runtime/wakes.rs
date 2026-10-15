@@ -21,7 +21,7 @@
 //! **Closed outcomes.** A wake finishes `succeeded`, `failed` or `interrupted`
 //! with its run (`finish_for_run`, inside `dispatch::finalize`), `coalesced`
 //! into another wake's run, or `cancelled` (`superseded` with a why, or
-//! `expired` after [`WAKE_TTL_DAYS`]). `skipped` is reserved for later parts.
+//! `expired` after [`WAKE_TTL_DAYS`]), or skipped when its writer chain cannot continue.
 //! The table's CHECKs bound lengths and the lifecycle; the shapes, kinds,
 //! reasons and whys are the closed lists below, and [`words`] says each end
 //! as the Agents lobby lists it (M63.1b, `fleet::wakes`).
@@ -38,6 +38,9 @@ use serde::{Deserialize, Serialize};
 
 use super::cause::{self, CauseKind, CauseRequest};
 use super::dispatch::RunOutcome;
+use super::write_log::EventWriter;
+#[cfg(test)]
+use super::write_log::UnrecordedWriter;
 use super::ReadOnly;
 
 /// How long a pending wake may wait before it expires, at the next vault
@@ -54,6 +57,8 @@ pub const BUDGET_RETRY_SECS: i64 = 600;
 
 /// The deferral a woken claim answers while its agent is already running.
 pub const AGENT_RUNNING: &str = "agent_running";
+pub const CONDITION_NOT_MET: &str = "condition_not_met";
+pub const CONDITION_UNAVAILABLE: &str = "condition_unavailable";
 
 /// A cancelled wake's reason when something made it moot; its detail names
 /// the [`CancelWhy`].
@@ -64,6 +69,9 @@ pub const EXPIRED: &str = "expired";
 /// Why an offer was not admitted: its shape, or a paused agent.
 pub const MALFORMED: &str = "malformed";
 pub const PAUSED: &str = "paused";
+pub const CYCLE: &str = "cycle";
+pub const HOP_LIMIT: &str = "hop_limit";
+pub const CHAIN_SPENT: &str = "chain_spent";
 
 /// Why a pending wake is cancelled as superseded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,6 +143,20 @@ pub fn words(outcome: Option<&str>, reason: Option<&str>, detail: Option<&str>) 
         (Some("cancelled"), Some(EXPIRED)) => {
             format!("expired — waited more than {WAKE_TTL_DAYS} days")
         }
+        (Some("skipped"), Some(CYCLE)) => {
+            "skipped — the change came from its own chain of runs, so it would wake itself".into()
+        }
+        (Some("skipped"), Some(HOP_LIMIT)) => {
+            "skipped — the change came from the second hop of a chain, and a chain stops there"
+                .into()
+        }
+        (Some("skipped"), Some(CHAIN_SPENT)) => {
+            "skipped — the chain that made the change has spent its allowance".into()
+        }
+        (Some("skipped"), Some(CONDITION_NOT_MET)) => "skipped — its check answered no".into(),
+        (Some("skipped"), Some(CONDITION_UNAVAILABLE)) => {
+            "skipped — its check couldn't answer".into()
+        }
         _ => unnamed(reason, detail),
     }
 }
@@ -156,6 +178,9 @@ pub struct WakeOffer {
     pub wake_key: String,
     pub trigger: String,
     pub cause: CauseRequest,
+    pub path: String,
+    pub hash: String,
+    pub event: String,
 }
 
 /// One offer admission refused, and why ([`MALFORMED`] or [`PAUSED`]).
@@ -189,6 +214,10 @@ pub struct PendingWake {
     pub not_before: Option<String>,
     /// The gate's reasons, comma-separated, from its last deferral.
     pub deferred: Option<String>,
+    /// NULL belongs to wakes recorded before writer attribution existed.
+    pub author: Option<String>,
+    pub author_actor: Option<String>,
+    pub parent_run_id: Option<String>,
 }
 
 /// Which wake a woken run claims, and the pending wakes of the same trigger
@@ -240,31 +269,99 @@ fn is_agent(raw: &str) -> bool {
 /// refused: an event wake's key is 64 lowercase hex, its trigger 16, and its
 /// cause passes M56.7's cleaning with kind `event`.
 fn admissible(offer: &WakeOffer) -> Option<String> {
-    if !is_agent(&offer.agent) || !is_lower_hex(&offer.wake_key, 64) {
+    if !is_agent(&offer.agent) {
+        return None;
+    }
+    if offer.path.is_empty()
+        || offer.path.len() > 1024
+        || !is_lower_hex(&offer.hash, 64)
+        || !matches!(offer.event.as_str(), "created" | "changed" | "moved")
+    {
         return None;
     }
     if !is_lower_hex(&offer.trigger, 16) {
         return None;
     }
     match cause::admit(false, Some(&offer.cause)) {
-        Ok(Some(cause)) if cause.kind() == CauseKind::Event => Some(cause.to_column()),
+        Ok(Some(cause))
+            if cause.kind() == CauseKind::Event && is_lower_hex(&offer.wake_key, 64) =>
+        {
+            Some(cause.to_column())
+        }
+        Ok(Some(cause))
+            if cause.kind() == CauseKind::Assigned
+                && assignment_key(&offer.wake_key)
+                && offer.cause.subject.as_deref() == Some(offer.path.as_str())
+                && matches!(offer.event.as_str(), "created" | "changed") =>
+        {
+            let column = cause.to_column();
+            // Cleaning cannot turn the subject into a different page.
+            let value: serde_json::Value = serde_json::from_str(&column).ok()?;
+            (value["subject"].as_str() == Some(offer.path.as_str())).then_some(column)
+        }
         _ => None,
     }
+}
+
+fn assignment_prefix(raw: &str) -> bool {
+    raw.strip_prefix("assigned:")
+        .and_then(|s| s.strip_suffix(':'))
+        .is_some_and(|s| is_lower_hex(s, 8))
+}
+
+fn assignment_key(raw: &str) -> bool {
+    raw.strip_prefix("assigned:")
+        .and_then(|s| s.split_once(':'))
+        .is_some_and(|(field, key)| is_lower_hex(field, 8) && is_lower_hex(key, 32))
+}
+
+/// Release matching pending assignments in one atomic UPDATE. Started work
+/// keeps its run; other agents, fields and pages are outside this predicate.
+pub fn release_assignment(
+    conn: &Connection,
+    vault_id: &str,
+    agent: &str,
+    subject: &str,
+    key_prefix: &str,
+    now: DateTime<Utc>,
+) -> Result<usize, String> {
+    if !assignment_prefix(key_prefix) {
+        return Err("an assignment prefix must be assigned: followed by eight lowercase hexadecimal characters and a colon. Nothing was released.".into());
+    }
+    conn.execute("UPDATE agent_wakes SET state = 'finished', outcome = 'cancelled', reason = 'superseded', finished_at = ?5, not_before = NULL, deferred = NULL WHERE vault_id = ?1 AND agent = ?2 AND state = 'pending' AND json_extract(cause, '$.kind') = 'assigned' AND json_extract(cause, '$.subject') = ?3 AND substr(wake_key, 1, 18) = ?4", rusqlite::params![vault_id, agent, subject, key_prefix, stamp(now)])
+        .map_err(|e| format!("releasing assignments: {e}"))
 }
 
 /// Admit `offers` in one transaction. A bad shape is refused [`MALFORMED`],
 /// an agent the runtime has paused [`PAUSED`]; every other offer is admitted,
 /// or counted live when its key's wake is pending or started. A settings read
 /// that fails fails the whole admission, so the renderer offers it again.
+#[cfg(test)]
 pub fn admit(
     conn: &Connection,
     vault_id: &str,
     offers: &[WakeOffer],
     now: DateTime<Utc>,
 ) -> Result<AdmitReport, String> {
+    let writers = vec![EventWriter::NotRecorded(UnrecordedWriter::NoRow); offers.len()];
+    admit_with_writers(conn, vault_id, offers, &writers, now)
+}
+
+/// The IPC reader supplies one recorded writer per offer. Chain ancestry is
+/// read inside the admission transaction, which also deduplicates skips.
+pub fn admit_with_writers(
+    conn: &Connection,
+    vault_id: &str,
+    offers: &[WakeOffer],
+    writers: &[EventWriter],
+    now: DateTime<Utc>,
+) -> Result<AdmitReport, String> {
+    if offers.len() != writers.len() {
+        return Err("each offered wake must have one writer verdict".into());
+    }
     conn.execute_batch("BEGIN IMMEDIATE")
         .map_err(|e| format!("admitting wakes: {e}"))?;
-    match admit_inner(conn, vault_id, offers, now) {
+    match admit_inner(conn, vault_id, offers, writers, now) {
         Ok(report) => {
             conn.execute_batch("COMMIT")
                 .map_err(|e| format!("admitting wakes: {e}"))?;
@@ -281,10 +378,11 @@ fn admit_inner(
     conn: &Connection,
     vault_id: &str,
     offers: &[WakeOffer],
+    writers: &[EventWriter],
     now: DateTime<Utc>,
 ) -> Result<AdmitReport, String> {
     let mut report = AdmitReport::default();
-    for offer in offers {
+    for (offer, writer) in offers.iter().zip(writers) {
         let Some(cause) = admissible(offer) else {
             report.refused.push(AdmitRefusal {
                 agent: offer.agent.clone(),
@@ -299,10 +397,61 @@ fn admit_inner(
             });
             continue;
         }
+        let live: bool = conn
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM agent_wakes WHERE vault_id = ?1 AND agent = ?2 \
+             AND wake_key = ?3 AND state IN ('pending', 'started'))",
+                rusqlite::params![vault_id, offer.agent, offer.wake_key],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("agent_wakes: {e}"))?;
+        if live {
+            report.live += 1;
+            continue;
+        }
+        let (author, author_actor, parent_run_id, skip) = match writer {
+            EventWriter::Person { actor } => ("person", Some(actor.as_str()), None, None),
+            EventWriter::NotRecorded(_) => ("not_recorded", None, None, None),
+            EventWriter::Run { actor, run_id } => {
+                let chain = super::dispatch::chain_actors(conn, run_id)?;
+                let skip = chain.as_ref().and_then(|chain| {
+                    if chain.contains(&offer.agent) {
+                        Some(CYCLE)
+                    } else if chain.len() >= 3 {
+                        Some(HOP_LIMIT)
+                    } else {
+                        None
+                    }
+                });
+                (
+                    "run",
+                    Some(actor.as_str()),
+                    chain.map(|_| run_id.as_str()),
+                    skip,
+                )
+            }
+        };
+        if let Some(reason) = skip {
+            conn.execute(
+                "INSERT INTO agent_wakes (wake_id, vault_id, agent, wake_key, trigger_digest, cause, \
+                 admitted_at, state, outcome, reason, finished_at, author, author_actor, parent_run_id) \
+                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, 'finished', 'skipped', ?8, ?7, ?9, ?10, ?11 \
+                 WHERE NOT EXISTS (SELECT 1 FROM agent_wakes WHERE vault_id = ?2 AND agent = ?3 \
+                     AND wake_key = ?4 AND reason = ?8 AND outcome = 'skipped')",
+                rusqlite::params![crate::ledger::new_id128(), vault_id, offer.agent, offer.wake_key,
+                    offer.trigger, cause, stamp(now), reason, author, author_actor, parent_run_id],
+            ).map_err(|e| format!("agent_wakes: {e}"))?;
+            report.refused.push(AdmitRefusal {
+                agent: offer.agent.clone(),
+                reason: reason.into(),
+            });
+            continue;
+        }
         let inserted = conn
             .execute(
                 "INSERT OR IGNORE INTO agent_wakes (wake_id, vault_id, agent, wake_key, \
-                 trigger_digest, cause, admitted_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                 trigger_digest, cause, admitted_at, author, author_actor, parent_run_id) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 rusqlite::params![
                     crate::ledger::new_id128(),
                     vault_id,
@@ -311,6 +460,9 @@ fn admit_inner(
                     offer.trigger,
                     cause,
                     stamp(now),
+                    author,
+                    author_actor,
+                    parent_run_id,
                 ],
             )
             .map_err(|e| format!("agent_wakes: {e}"))?;
@@ -332,7 +484,7 @@ pub fn pending(
     let mut statement = ro
         .prepare(
             "SELECT wake_id, agent, wake_key, trigger_digest, cause, admitted_at, not_before, \
-             deferred FROM agent_wakes WHERE vault_id = ?1 AND state = 'pending' \
+             deferred, author, author_actor, parent_run_id FROM agent_wakes WHERE vault_id = ?1 AND state = 'pending' \
              AND admitted_at > ?2 ORDER BY admitted_at, rowid",
         )
         .map_err(|e| format!("agent_wakes: {e}"))?;
@@ -348,11 +500,44 @@ pub fn pending(
                 admitted_at: row.get(5)?,
                 not_before: row.get(6)?,
                 deferred: row.get(7)?,
+                author: row.get(8)?,
+                author_actor: row.get(9)?,
+                parent_run_id: row.get(10)?,
             })
         })
         .map_err(|e| format!("agent_wakes: {e}"))?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("agent_wakes: {e}"))
+}
+
+/// Refuse one pending wake before it spends a run. Started and finished rows
+/// remain unchanged; this is called within the dispatch claim transaction.
+pub(crate) fn skip_pending(
+    conn: &Connection,
+    wake_id: &str,
+    reason: &str,
+    now: DateTime<Utc>,
+) -> Result<bool, String> {
+    skip_pending_with_note(conn, wake_id, reason, None, now)
+}
+
+pub(crate) fn skip_pending_with_note(
+    conn: &Connection,
+    wake_id: &str,
+    reason: &str,
+    note: Option<&serde_json::Value>,
+    now: DateTime<Utc>,
+) -> Result<bool, String> {
+    if !matches!(
+        reason,
+        CYCLE | HOP_LIMIT | CHAIN_SPENT | CONDITION_NOT_MET | CONDITION_UNAVAILABLE
+    ) {
+        return Err("this is not a reason to skip a wake".into());
+    }
+    conn.execute("UPDATE agent_wakes SET state = 'finished', outcome = 'skipped', reason = ?2, \
+        finished_at = ?3, not_before = NULL, deferred = NULL, note = ?4 WHERE wake_id = ?1 AND state = 'pending'",
+        rusqlite::params![wake_id, reason, stamp(now), note.map(serde_json::Value::to_string)])
+        .map(|n| n == 1).map_err(|e| format!("agent_wakes: {e}"))
 }
 
 /// Finish one pending wake `cancelled`, with `reason` and an optional
@@ -650,6 +835,9 @@ mod tests {
     fn offer(agent: &str, key: char, trigger: char, subject: &str) -> WakeOffer {
         WakeOffer {
             agent: agent.into(),
+            path: subject.into(),
+            hash: "a".repeat(64),
+            event: "changed".into(),
             wake_key: key.to_string().repeat(64),
             trigger: trigger.to_string().repeat(16),
             cause: CauseRequest {
@@ -659,6 +847,233 @@ mod tests {
                 due_at: None,
             },
         }
+    }
+
+    fn assigned(agent: &str, field: char, key: char, subject: &str) -> WakeOffer {
+        let mut offer = offer(agent, key, '1', subject);
+        offer.wake_key = format!(
+            "assigned:{}:{}",
+            field.to_string().repeat(8),
+            key.to_string().repeat(32)
+        );
+        offer.cause.kind = "assigned".into();
+        offer.cause.detail = Some("via agent".into());
+        offer
+    }
+
+    #[test]
+    fn an_assigned_wake_admits_once_per_key() {
+        let (dir, conn, vault) = fixture("assigned-once");
+        let now = at("2026-10-13T09:00:00Z");
+        let offered = assigned("process:scout", 'a', 'b', "tasks/a.md");
+        assert_eq!(
+            admit(&conn, &vault, std::slice::from_ref(&offered), now)
+                .unwrap()
+                .admitted,
+            1
+        );
+        assert_eq!(
+            admit(&conn, &vault, std::slice::from_ref(&offered), now)
+                .unwrap()
+                .live,
+            1
+        );
+        assert_eq!(rows(&conn).len(), 1);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn releasing_an_assignment_cancels_its_pending_wake_as_superseded() {
+        let (dir, conn, vault) = fixture("assigned-release");
+        let now = at("2026-10-13T09:00:00Z");
+        admit(
+            &conn,
+            &vault,
+            &[assigned("process:scout", 'a', 'b', "tasks/a.md")],
+            now,
+        )
+        .unwrap();
+        assert_eq!(
+            release_assignment(
+                &conn,
+                &vault,
+                "process:scout",
+                "tasks/a.md",
+                "assigned:aaaaaaaa:",
+                now
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            release_assignment(
+                &conn,
+                &vault,
+                "process:scout",
+                "tasks/a.md",
+                "assigned:aaaaaaaa:",
+                now
+            )
+            .unwrap(),
+            0
+        );
+        let row = &rows(&conn)[0];
+        assert_eq!(row.1, "finished");
+        assert_eq!(row.2.as_deref(), Some("cancelled"));
+        assert_eq!(row.3.as_deref(), Some("superseded"));
+        assert_eq!(row.4, None);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_finished_assignment_admits_again_on_a_re_add() {
+        let (dir, conn, vault) = fixture("assigned-readd");
+        let now = at("2026-10-13T09:00:00Z");
+        let offered = assigned("process:scout", 'a', 'b', "tasks/a.md");
+        admit(&conn, &vault, std::slice::from_ref(&offered), now).unwrap();
+        release_assignment(
+            &conn,
+            &vault,
+            "process:scout",
+            "tasks/a.md",
+            "assigned:aaaaaaaa:",
+            now,
+        )
+        .unwrap();
+        assert_eq!(admit(&conn, &vault, &[offered], now).unwrap().admitted, 1);
+        assert_eq!(rows(&conn).len(), 2);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn release_leaves_other_agents_pages_and_fields_alone() {
+        let (dir, conn, vault) = fixture("assigned-release-scope");
+        let now = at("2026-10-13T09:00:00Z");
+        admit(
+            &conn,
+            &vault,
+            &[
+                assigned("process:scout", 'a', 'b', "tasks/a.md"),
+                assigned("process:other", 'a', 'c', "tasks/a.md"),
+                assigned("process:scout", 'a', 'd', "tasks/b.md"),
+                assigned("process:scout", 'f', 'e', "tasks/a.md"),
+                offer("process:scout", 'e', '1', "tasks/a.md"),
+            ],
+            now,
+        )
+        .unwrap();
+        assert_eq!(
+            release_assignment(
+                &conn,
+                &"f".repeat(32),
+                "process:scout",
+                "tasks/a.md",
+                "assigned:aaaaaaaa:",
+                now
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            release_assignment(
+                &conn,
+                &vault,
+                "process:scout",
+                "tasks/a.md",
+                "assigned:aaaaaaaa:",
+                now
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(rows(&conn).iter().filter(|r| r.1 == "pending").count(), 4);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn release_leaves_a_running_wake_alone() {
+        let _lock = crate::runtime::status::test_lock();
+        crate::runtime::status::clear();
+        let (dir, conn, vault) = fixture("assigned-running");
+        let now = at("2026-10-13T09:00:00Z");
+        let offered = assigned("process:scout", 'a', 'b', "tasks/a.md");
+        admit(&conn, &vault, std::slice::from_ref(&offered), now).unwrap();
+        assert!(matches!(
+            dispatch::claim_woken(
+                &conn,
+                &vault,
+                "store",
+                "agent",
+                small(),
+                "process:scout",
+                &WakeRequest {
+                    claim: id_of(&conn, &offered.wake_key),
+                    coalesce: vec![]
+                },
+                now
+            )
+            .unwrap(),
+            Woken::Started { .. }
+        ));
+        assert_eq!(
+            release_assignment(
+                &conn,
+                &vault,
+                "process:scout",
+                "tasks/a.md",
+                "assigned:aaaaaaaa:",
+                now
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(rows(&conn)[0].1, "started");
+        drop(conn);
+        crate::runtime::status::clear();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn release_refuses_a_prefix_that_is_not_an_assignment() {
+        let (dir, conn, vault) = fixture("assigned-prefix");
+        let now = at("2026-10-13T09:00:00Z");
+        admit(
+            &conn,
+            &vault,
+            &[assigned("process:scout", 'a', 'b', "tasks/a.md")],
+            now,
+        )
+        .unwrap();
+        for prefix in [
+            "",
+            "assigned:",
+            "assigned:AAAAAAAA:",
+            "assigned:aaaaaaa%:",
+            "event:aaaaaaaa:",
+        ] {
+            assert_eq!(
+                release_assignment(&conn, &vault, "process:scout", "tasks/a.md", prefix, now)
+                    .unwrap_err(),
+                "an assignment prefix must be assigned: followed by eight lowercase hexadecimal characters and a colon. Nothing was released."
+            );
+        }
+        assert_eq!(rows(&conn)[0].1, "pending");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_agent_assigning_itself_is_skipped_as_a_cycle() {
+        attribution_case("assigned_cycle");
+    }
+
+    #[test]
+    fn an_unrecorded_assignment_wakes_a_root_whose_pending_row_says_so() {
+        attribution_case("assigned_unknown");
     }
 
     /// (key, state, outcome, reason, detail) for every wake, in admission
@@ -1105,8 +1520,8 @@ mod tests {
     #[test]
     fn an_unknown_reason_reads_as_unnamed() {
         assert_eq!(
-            words(Some("skipped"), Some("cycle"), None),
-            "skipped (or cancelled) for a reason this version does not name (cycle)"
+            words(Some("skipped"), Some("future_reason"), None),
+            "skipped (or cancelled) for a reason this version does not name (future_reason)"
         );
         assert_eq!(
             words(Some("cancelled"), Some(SUPERSEDED), Some("renamed")),
@@ -1165,6 +1580,25 @@ mod tests {
                             serde_json::from_value(step["offers"].clone()).unwrap();
                         let report = admit(&conn, &vault, &offers, now).unwrap();
                         assert_eq!(serde_json::to_value(&report).unwrap(), *expect, "{here}");
+                    }
+                    "release" => {
+                        let result = release_assignment(
+                            &conn,
+                            &vault,
+                            step["agent"].as_str().unwrap(),
+                            step["subject"].as_str().unwrap(),
+                            step["keyPrefix"].as_str().unwrap(),
+                            now,
+                        );
+                        if expect["error"] == true {
+                            assert!(result.is_err(), "{here}");
+                        } else {
+                            assert_eq!(
+                                result.unwrap() as u64,
+                                expect["released"].as_u64().unwrap(),
+                                "{here}"
+                            );
+                        }
                     }
                     "pause" => {
                         pause_agent(
@@ -1227,7 +1661,9 @@ mod tests {
                             continue;
                         }
                         match answer.unwrap() {
-                            Woken::Started { lease, cause, also } => {
+                            Woken::Started {
+                                lease, cause, also, ..
+                            } => {
                                 let started = &expect["started"];
                                 assert!(started.is_object(), "{here}: started, expected {expect}");
                                 assert_eq!(
@@ -1261,6 +1697,7 @@ mod tests {
                                 );
                             }
                             Woken::Gone => assert_eq!(expect, "gone", "{here}"),
+                            Woken::Skipped => assert_eq!(expect, "skipped", "{here}"),
                         }
                     }
                     "finish" => {
@@ -1314,5 +1751,170 @@ mod tests {
             let _ = std::fs::remove_dir_all(&dir);
         }
         crate::runtime::status::clear();
+    }
+    fn attribution_case(name: &str) {
+        let _lock = crate::runtime::status::test_lock();
+        crate::runtime::status::clear();
+        let cases: serde_json::Value = serde_json::from_str(CASES).unwrap();
+        let case = cases["attribution_cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["name"] == name)
+            .unwrap();
+        let (dir, conn, vault) = fixture("wake-attribution");
+        let now = at(case["at"].as_str().unwrap());
+        for run in case["runs"].as_array().unwrap() {
+            conn.execute("INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, ended_at, outcome, usage_state, input_tokens, output_tokens, cache_read, cache_write, reserved_total_tokens, reserved_output_tokens, proposals_submitted, applied, rejected, actor, parent_run_id) VALUES (?1, ?2, 'store', 'attended', 'agent', ?3, ?3, 'succeeded', 'exact', 0, 0, 0, 0, 0, 0, 0, 0, 0, ?4, ?5)", rusqlite::params![run["runId"].as_str(), vault, stamp(now), run["actor"].as_str(), run["parent"].as_str()]).unwrap();
+        }
+        for run in case["runs"].as_array().unwrap() {
+            if let Some(tokens) = run["tokens"].as_i64() {
+                conn.execute(
+                    "UPDATE runs SET input_tokens = ?2 WHERE run_id = ?1",
+                    rusqlite::params![run["runId"].as_str(), tokens],
+                )
+                .unwrap();
+            }
+        }
+        for row in case["writes"].as_array().unwrap() {
+            conn.execute("INSERT INTO vault_writes (vault_id, kind, path, to_path, content_hash, actor, run_id, first_at, recorded_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)", rusqlite::params![vault, row["kind"].as_str(), row["path"].as_str(), row["to"].as_str(), row["hash"].as_str(), row["actor"].as_str(), row["runId"].as_str(), row["at"].as_str()]).unwrap();
+        }
+        let ro = ReadOnly::open(&dir).unwrap();
+        let offers: Vec<WakeOffer> = serde_json::from_value(case["offers"].clone()).unwrap();
+        let writers = offers
+            .iter()
+            .map(|offer| {
+                super::super::write_log::writer_of(
+                    &ro,
+                    &vault,
+                    &offer.path,
+                    &offer.hash,
+                    &offer.event,
+                    case["seenAt"].as_str().map(at),
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let report = admit_with_writers(&conn, &vault, &offers, &writers, now).unwrap();
+        assert_eq!(
+            serde_json::to_value(report).unwrap(),
+            case["expect"],
+            "{name}"
+        );
+        if case["repeat"] == true {
+            assert_eq!(
+                serde_json::to_value(
+                    admit_with_writers(&conn, &vault, &offers, &writers, now).unwrap()
+                )
+                .unwrap(),
+                case["expect"],
+                "{name}: replay"
+            );
+        }
+        if case["claim"] == true {
+            let wake = id_of(&conn, &offers[0].wake_key);
+            assert_eq!(
+                dispatch::claim_woken(
+                    &conn,
+                    &vault,
+                    "store",
+                    "agent",
+                    small(),
+                    &offers[0].agent,
+                    &WakeRequest {
+                        claim: wake,
+                        coalesce: vec![]
+                    },
+                    now
+                )
+                .unwrap(),
+                Woken::Skipped
+            );
+        }
+        let mut statement = conn.prepare("SELECT author, author_actor, parent_run_id, state, outcome, reason FROM agent_wakes ORDER BY rowid").unwrap();
+        let got = statement.query_map([], |row| Ok(serde_json::json!({
+            "author": row.get::<_, Option<String>>(0)?, "authorActor": row.get::<_, Option<String>>(1)?,
+            "parentRunId": row.get::<_, Option<String>>(2)?, "state": row.get::<_, String>(3)?,
+            "outcome": row.get::<_, Option<String>>(4)?, "reason": row.get::<_, Option<String>>(5)?,
+        }))).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(serde_json::to_value(got).unwrap(), case["rows"], "{name}");
+        drop(statement);
+        drop(ro);
+        drop(conn);
+        crate::runtime::status::clear();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_shared_attribution_cases_replay_recorded_writers() {
+        let cases: serde_json::Value = serde_json::from_str(CASES).unwrap();
+        for case in cases["attribution_cases"].as_array().unwrap() {
+            attribution_case(case["name"].as_str().unwrap());
+        }
+    }
+    #[test]
+    fn an_agent_write_that_would_wake_its_author_is_skipped_as_a_cycle() {
+        attribution_case("cycle");
+    }
+    #[test]
+    fn a_write_two_hops_deep_is_skipped_as_hop_limit() {
+        attribution_case("hop_limit");
+    }
+    #[test]
+    fn a_hop_wake_books_its_writers_run_as_parent() {
+        attribution_case("hop");
+    }
+    #[test]
+    fn an_unrecorded_author_wakes_a_root_never_a_person() {
+        for name in ["unknown", "null_actor", "no_run", "outside"] {
+            attribution_case(name);
+        }
+    }
+    #[test]
+    fn a_persons_save_wakes_a_root_labelled_person() {
+        attribution_case("person");
+    }
+    #[test]
+    fn a_writer_whose_run_row_is_missing_wakes_a_root_with_its_actor() {
+        attribution_case("missing_run");
+    }
+    #[test]
+    fn a_client_session_write_wakes_a_hop_of_its_session() {
+        attribution_case("client");
+    }
+    #[test]
+    fn a_replayed_cycle_adds_no_second_skip_row() {
+        attribution_case("cycle");
+    }
+    #[test]
+    fn a_condition_skip_records_its_question_and_words() {
+        let (dir, conn, vault) = fixture("condition-skip-note");
+        let now = at("2026-10-15T12:00:00Z");
+        admit(
+            &conn,
+            &vault,
+            &[offer("process:scout", 'a', 'b', "tasks/a.md")],
+            now,
+        )
+        .unwrap();
+        let id: String = conn
+            .query_row("SELECT wake_id FROM agent_wakes", [], |row| row.get(0))
+            .unwrap();
+        let note = serde_json::json!({"question":"Is work needed?","reason":"Nothing changed.","check_run_id":"check-1"});
+        assert!(skip_pending_with_note(&conn, &id, CONDITION_NOT_MET, Some(&note), now).unwrap());
+        let stored: String = conn
+            .query_row("SELECT note FROM agent_wakes", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&stored).unwrap(),
+            note
+        );
+        assert_eq!(
+            words(Some("skipped"), Some(CONDITION_NOT_MET), None),
+            "skipped — its check answered no"
+        );
+        assert!(!skip_pending_with_note(&conn, &id, CONDITION_UNAVAILABLE, None, now).unwrap());
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

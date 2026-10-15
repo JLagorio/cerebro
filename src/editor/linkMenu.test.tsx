@@ -13,7 +13,6 @@ import {
   mentionAtWordStart,
   mentionNamesPage,
   readLinkQuery,
-  stemOfPath,
   type TriggerState,
 } from './linkMenu';
 import { blocksToMarkdown } from './markdown';
@@ -181,13 +180,6 @@ describe('charBeforeTrigger', () => {
       },
     };
     expect(charBeforeTrigger(broken, 'ab', '[')).toBeNull();
-  });
-});
-
-describe('stemOfPath', () => {
-  it('is the filename less .md', () => {
-    expect(stemOfPath('launch-notes.md')).toBe('launch-notes');
-    expect(stemOfPath('notes/archive/Launch-Notes.MD')).toBe('Launch-Notes');
   });
 });
 

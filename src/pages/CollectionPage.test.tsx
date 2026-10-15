@@ -1,3 +1,4 @@
+import { navSeed } from '@/test/navSeed';
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -62,7 +63,7 @@ function setup(
   });
   useNavStore.setState({
     selection: { kind: 'collection', folder: 'delivery' },
-    history: [{ kind: 'collection', folder: 'delivery' }],
+    history: [navSeed({ kind: 'collection', folder: 'delivery' })],
     historyIndex: 0,
   });
   render(<CollectionPage selection={{ kind: 'collection', folder: 'delivery' }} />);

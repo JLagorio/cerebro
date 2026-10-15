@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ViewCanvas } from '@/views/ViewCanvas';
 import { buildSchema } from '@/engine/schema';
 import { makeEntry } from '@/test/factories';
 import type { Entry, Presentation, ViewType } from '@/engine/types';
+import { useVaultStore } from '@/stores/vaultStore';
 import { useUiStore } from '@/stores/uiStore';
 
 /**
@@ -192,8 +193,88 @@ describe('a canvas registers no detail siblings (M29.46)', () => {
     expect(useUiStore.getState().detailSiblings).toEqual(['delivery/a.md', 'delivery/b.md']);
   });
 
+  it('registers a multi-band record once in visible order', () => {
+    const type = makeEntry({
+      path: 'types/note.md',
+      title: 'Note',
+      type: 'Type',
+      properties: { fields: { labels: { kind: 'multiselect', options: ['one', 'two'] } } } as never,
+    });
+    const both = makeEntry({
+      path: 'notes/both.md',
+      title: 'Both',
+      type: 'Note',
+      properties: { labels: ['one', 'two'] },
+    });
+    const second = makeEntry({
+      path: 'notes/second.md',
+      title: 'Second',
+      type: 'Note',
+      properties: { labels: ['two'] },
+    });
+    const entries = [type, both, second];
+    render(
+      <ViewCanvas
+        entries={[both, second]}
+        allEntries={entries}
+        presentation={{ type: 'list', group: [{ field: 'labels' }], sort: [], columns: [] }}
+        schema={buildSchema(entries)}
+        fields={[]}
+        scope="siblings:multi"
+        filtered={false}
+      />,
+    );
+    expect(screen.getAllByRole('button', { name: 'Open Both' })).toHaveLength(2);
+    expect(useUiStore.getState().detailSiblings).toEqual(['notes/both.md', 'notes/second.md']);
+  });
+
   it('registers none for a whiteboard, whose canvas decides what is on it', () => {
     renderKind('whiteboard');
     expect(useUiStore.getState().detailSiblings).toEqual([]);
+  });
+});
+
+describe('calendar creation belongs to its vault, view and date field', () => {
+  it.each(['vault', 'view', 'date field'])('drops a pending slot when the %s changes', (target) => {
+    useVaultStore.setState({ vaultPath: '/vault-a' });
+    const create = vi.fn(async () => true);
+    const show = (scope = 'type:Campaign:calendar', field = 'window') => (
+      <ViewCanvas
+        entries={[]}
+        allEntries={[TYPE_DOC]}
+        schema={schema}
+        fields={schema.types.get('Campaign')!.fields}
+        scope={scope}
+        filtered={false}
+        today="2026-07-28"
+        onCreateOn={create}
+        presentation={{
+          type: 'calendar',
+          group: [],
+          sort: [],
+          columns: [],
+          calendarSpan: 'day',
+          dateField: field,
+        }}
+      />
+    );
+    const rendered = render(show());
+    const event = (name: string) =>
+      new MouseEvent(name, { bubbles: true, button: 0, clientY: 480 });
+    fireEvent(screen.getByTestId('calendar-hours-day'), event('pointerdown'));
+    fireEvent(window, event('pointerup'));
+    fireEvent.change(screen.getByRole('textbox', { name: 'New record title' }), {
+      target: { value: 'Draft for the first calendar' },
+    });
+    if (target === 'vault') act(() => useVaultStore.setState({ vaultPath: '/vault-b' }));
+    else
+      rendered.rerender(
+        show(
+          target === 'view' ? 'type:Other:calendar' : undefined,
+          target === 'date field' ? 'due' : undefined,
+        ),
+      );
+    expect(screen.queryByTestId('calendar-new-slot')).toBeNull();
+    expect(create).not.toHaveBeenCalled();
   });
 });

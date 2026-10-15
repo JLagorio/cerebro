@@ -14,8 +14,36 @@ import {
   resolveLink,
   resolveTarget,
   targetIndexFor,
+  wikilinkSpans,
 } from './wikilink';
 import { makeEntry } from './testHelpers';
+
+describe('wikilinkSpans', () => {
+  it('names exact source offsets without absorbing spacing, sections or an alias', () => {
+    const text = 'before [[  page # Heading  | label ]] after [[next]]';
+    const spans = wikilinkSpans(text);
+    expect(spans.map((span) => text.slice(span.start, span.end))).toEqual([
+      '[[  page # Heading  | label ]]',
+      '[[next]]',
+    ]);
+    expect(spans.map((span) => text.slice(span.targetStart, span.targetEnd))).toEqual([
+      'page # Heading',
+      'next',
+    ]);
+    expect(spans.map((span) => span.target)).toEqual(['page # Heading', 'next']);
+  });
+
+  it.each([
+    ['[[]] [[ |alias]] [[ok]]', ['ok']],
+    ['[[outer[[inner]] [[after]]', ['after']],
+    ['[[a[b]] [[x]y]] [[last]]', ['last']],
+    ['[[first|a|b]] and [[unfinished', ['first']],
+    ['[[\t\u00a0page\n]]', ['page']],
+  ])('keeps the target scanner semantics for %j', (text, targets) => {
+    expect(wikilinkSpans(text).map((span) => span.target)).toEqual(targets);
+    expect(parseWikilinks(text)).toEqual(targets.length === 0 ? null : targets);
+  });
+});
 
 describe('parseWikilinks', () => {
   const cases: [string, unknown, string[] | null][] = [
@@ -316,6 +344,7 @@ describe('the item key pass', () => {
 describe('linkTargetOfPath and linkTargetOf', () => {
   it.each([
     ['notes/launch-notes.md', 'launch-notes'],
+    ['launch-notes.md', 'launch-notes'],
     ['notes/archive/Launch-Notes.MD', 'Launch-Notes'],
     ['projects/atlas/project.md', 'atlas'],
     ['projects/Atlas/Project.md', 'Atlas'],

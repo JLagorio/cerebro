@@ -11,9 +11,10 @@ this file and a README disagree, the README wins and this file gets fixed.
 ## Before the edit
 
 - Read the folder's README first: `shared/policy/README.md`,
-  `shared/runtime/README.md`, `shared/schema/README.md` (field kinds),
+  `shared/runtime/README.md`, `shared/schema/README.md` (field kinds and view vocabulary),
   `shared/calendar/README.md` (the date grammar) or `shared/files/README.md`
-  (file kinds). Its table names each
+  (file kinds), `shared/import/README.md` (import stamps and identity), or `shared/canvas/README.md` (JSON Canvas format and codecs).
+  Its table names each
   artifact's readers, its Regenerating section is the procedure, and the
   policy README adds the Ordering rules and the twin registry.
 - Rules are data (CV-04). A rule the table cannot express grows the format; it
@@ -44,6 +45,17 @@ this file and a README disagree, the README wins and this file gets fixed.
   every cargo run, these included, takes the crash skip list from the
   `cargo test` line in `.husky/pre-push`. Never `--skip kill`: it also skips
   the tests named for skills.
+- The mail policy digest writer is `policy::mail::tests::write_mail_digest`;
+  replay both mail readers, the pack tripwire and git exclusion checks.
+- The import vocabulary digest writer is `import::tests::write_sources_digest`;
+  replay `import::tests::` and the shared batch cases in both suites.
+- The JSON Canvas format digest writer is `canvas::format::tests::write_canvas_digest`;
+  replay its readers with the `canvas::` filter and `pnpm test:run src/engine/scene`.
+- Whiteboard agent limits use `canvas::agent_limits::tests::write_canvas_agent_limits_digest`;
+  replay `canvas::` plus `src/engine/scene/canvasLimits.test.ts`.
+- The view vocabulary digest writer is `vault::views::tests::write_views_digest`;
+  its raw-note cases are `src-tauri/fixtures/view-suggestion-cases.json`,
+  replayed by Rust and the TS checker.
 - Add or adjust goldens in `shared/policy/goldens/`,
   `shared/policy/goldens-critical/`, `shared/policy/goldens-trigger/` or
   `shared/policy/goldens-tool-approval/`. Both suites replay the same files,
@@ -57,7 +69,8 @@ this file and a README disagree, the README wins and this file gets fixed.
   `src-tauri/fixtures/file-kind-cases.json`.
 - Verify with `pnpm test:run src/lib/policy src/lib/attention src/lib/trigger`
   plus the TS reader the README names (`src/engine/fieldKindTable.test.ts`,
-  `src/engine/dateGrammar.test.ts`, `src/engine/fileKinds.test.ts`), then
+  `src/engine/dateGrammar.test.ts`, `src/engine/fileKinds.test.ts`,
+  `src/engine/viewVocabulary.test.ts`, `src/engine/viewSuggestion.test.ts`), then
   `cd src-tauri && cargo test --lib -- policy:: attention:: trigger:: dynamics:: vault::schema vault::dates files::`
   with the skip list, adding the module of any other reader.
 

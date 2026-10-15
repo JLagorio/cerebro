@@ -1,3 +1,4 @@
+import { navSeed } from '@/test/navSeed';
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createElement, type ComponentProps } from 'react';
@@ -38,12 +39,26 @@ describe('DocPage', () => {
     await useVaultStore.getState().openVault('/demo-vault');
     useNavStore.setState({
       selection: { kind: 'doc', path: DOC },
-      history: [{ kind: 'home' }],
+      history: [navSeed({ kind: 'home' })],
       historyIndex: 0,
     });
     useUiStore.setState({ docPanelOpen: true, docPanelTab: 'outline' });
   });
   afterEach(cleanup);
+
+  it('shows imported provenance on a plain page without exposing its stamp keys', async () => {
+    const path = 'notes/imported-copy.md';
+    fs().set(
+      path,
+      '---\ntitle: Imported copy\nsource_system: notion\nimported_at: "2026-10-13"\nimport_hash: abc\n---\n# Outside material\n',
+    );
+    await useVaultStore.getState().rescan();
+    render(<DocPage selection={{ kind: 'doc', path }} />);
+    expect((await screen.findByTestId('import-provenance')).textContent).toContain(
+      'Imported from Notion · 2026-10-13',
+    );
+    expect(screen.queryByText('Import hash')).toBeNull();
+  });
 
   // M58.4 (D18): the page's history is the side panel's History tab, not a
   // list under the editor.
@@ -77,6 +92,50 @@ describe('DocPage', () => {
     await waitFor(() => expect(screen.getByTestId('doc-outline')).toBeTruthy(), {
       timeout: 5_000,
     });
+  });
+
+  it('a project page offers Overview, Tasks, Docs, Agents and Runs and lists its twelve work items', () => {
+    const path = 'records/projects/guided-onboarding-ga.md';
+    render(<DocPage selection={{ kind: 'doc', path, tab: 'tasks' }} />);
+    expect(screen.getByTestId('record-tab-overview').textContent).toContain('Overview');
+    expect(screen.getByTestId('record-tab-tasks').textContent).toContain('Tasks');
+    expect(screen.getByTestId('record-tab-docs').textContent).toContain('Docs');
+    expect(screen.getByTestId('record-tab-agents').textContent).toContain('Agents');
+    expect(screen.getByTestId('record-tab-runs').textContent).toContain('Runs');
+    const embed = within(screen.getByTestId('view-tab-embed'));
+    expect(embed.getAllByTestId('table-row')).toHaveLength(12);
+    expect(embed.getByText('Blank-state coaching copy')).toBeTruthy();
+    expect(embed.queryByText('Campaign brief')).toBeNull();
+  });
+
+  it('a project Runs tab renders its own scoped feed', () => {
+    render(
+      <DocPage
+        selection={{ kind: 'doc', path: 'records/projects/guided-onboarding-ga.md', tab: 'runs' }}
+      />,
+    );
+    expect(screen.getByTestId('page-runs')).toBeTruthy();
+    expect(screen.getByTestId('page-runs-footnote').textContent).toContain(
+      "can't be placed on a page",
+    );
+    expect(screen.queryByTestId('view-tab-embed')).toBeNull();
+  });
+
+  it('a project Agents tab lists its seeded agent on the page', () => {
+    const path = 'records/projects/guided-onboarding-ga.md';
+    useVaultStore.setState({
+      entries: useVaultStore
+        .getState()
+        .entries.map((entry) =>
+          entry.path === path
+            ? { ...entry, relationships: { ...entry.relationships, agents: ['release-scout'] } }
+            : entry,
+        ),
+    });
+    render(<DocPage selection={{ kind: 'doc', path, tab: 'agents' }} />);
+    expect(screen.getByTestId('page-agents')).toBeTruthy();
+    expect(screen.getByTestId('page-agent-open').textContent).toBe('Release scout');
+    expect(screen.queryByTestId('view-tab-embed')).toBeNull();
   });
 
   // M38.2 — a record is a page too: the peek's property surface renders on
@@ -610,6 +669,7 @@ describe('DocPage', () => {
     expect(labels).toEqual([
       'Copy as prompt',
       'Copy path',
+      'Copy Cerebro link',
       'Reveal in Finder',
       'Open in default editor',
       'Claude Code on the web',
@@ -894,7 +954,7 @@ describe('a page icon and cover (M55.11)', () => {
     await useVaultStore.getState().openVault('/demo-vault');
     useNavStore.setState({
       selection: { kind: 'doc', path: PAGE },
-      history: [{ kind: 'home' }],
+      history: [navSeed({ kind: 'home' })],
       historyIndex: 0,
     });
     useUiStore.setState({ docPanelOpen: false, docPanelTab: 'outline' });
@@ -1055,7 +1115,7 @@ describe('a concept is a page (M50.1)', () => {
     await useVaultStore.getState().openVault('/demo-vault');
     useNavStore.setState({
       selection: { kind: 'doc', path: CONCEPT },
-      history: [{ kind: 'home' }],
+      history: [navSeed({ kind: 'home' })],
       historyIndex: 0,
     });
     useUiStore.setState({
@@ -1170,7 +1230,7 @@ describe('an agent is a page (M55.12)', () => {
     await useVaultStore.getState().openVault('/demo-vault');
     useNavStore.setState({
       selection: { kind: 'doc', path: AGENT },
-      history: [{ kind: 'home' }, { kind: 'doc', path: AGENT }],
+      history: [navSeed({ kind: 'home' }), navSeed({ kind: 'doc', path: AGENT })],
       historyIndex: 1,
     });
     useUiStore.setState({ docPanelOpen: false, docPanelTab: 'outline' });

@@ -1,3 +1,6 @@
+import { PageRunsTab } from '@/detail/PageRunsTab';
+import { PageAgentsTab } from '@/detail/PageAgentsTab';
+import { keycapText } from '@/components/ui/Keycaps';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { pageAsides } from '@/app/shellLayout';
 import { MoveDialog } from '@/components/MoveDialog';
@@ -23,6 +26,7 @@ import { PageCommentsContext } from '@/editor/PageCommentsContext';
 import { InlineDiff } from '@/git/InlineDiff';
 import { HeadingProperties, stripCells } from '@/detail/HeadingProperties';
 import { RecordProperties } from '@/detail/RecordProperties';
+import { ImportProvenance } from '@/detail/ImportProvenance';
 import { RecordTabs, recordTabSet } from '@/detail/RecordTabs';
 import { TabSections } from '@/detail/TabSections';
 import { addSubPage } from '@/app/pageActions';
@@ -886,7 +890,11 @@ export function DocPage({ selection }: { selection: DocSelection }) {
         {SAVE_LABEL[saveState] !== null && (
           <span
             data-testid="doc-save-state"
-            title={saveState === 'failed' ? undefined : 'Saves automatically — ⌘S to save now'}
+            title={
+              saveState === 'failed'
+                ? undefined
+                : `Saves automatically — ${keycapText('page.save')} to save now`
+            }
             className={[
               'mr-1 flex-none whitespace-nowrap text-xs',
               saveState === 'failed' ? 'font-medium text-danger-600' : 'text-[var(--text-meta)]',
@@ -1095,6 +1103,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                           />
                         </div>
                       )}
+                      <ImportProvenance entry={entry} />
                       {/* M44.5, re-placed by M46.1 — the tab strip divides
                           the record's own blocks from the ONE tab's content,
                           so it lives inside the content column now rather
@@ -1123,6 +1132,12 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                         </div>
                       )}
                       {activeTab.content === 'overview' && editorBlock}
+                      {activeTab.content === 'agents' && (
+                        <PageAgentsTab entry={entry} entries={entries} schema={schema} />
+                      )}
+                      {activeTab.content === 'runs' && (
+                        <PageRunsTab entry={entry} entries={entries} schema={schema} />
+                      )}
                       {activeTab.content === 'sections' && (
                         <TabSections
                           key={`${entry.path}#${activeTab.id}`}
@@ -1144,7 +1159,10 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                       )}
                     </>
                   ) : (
-                    editorBlock
+                    <>
+                      <ImportProvenance entry={entry} />
+                      {editorBlock}
+                    </>
                   )}
                 </>
               )}

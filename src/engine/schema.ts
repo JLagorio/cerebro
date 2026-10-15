@@ -16,6 +16,7 @@ import { DISPLAY_DEFAULTS, FIELD_KINDS, FIELD_VISIBILITIES, LAYOUT_DEFAULTS } fr
 import {
   DATE_DISPLAY_FORMATS,
   DEFAULT_TIME_FORMAT,
+  REMIND_OFFSETS,
   TIME_DISPLAY_FORMATS,
   formatDateValue,
   parseDateProperty,
@@ -36,6 +37,8 @@ import {
   VIRTUAL_FIELDS as TABLE_VIRTUAL_FIELDS,
 } from './fieldKindTable';
 import { buildRelationIndex, childrenOf } from './relations';
+import { parseRepeat, describeRepeat } from './recurrence';
+import { checkFormula, evaluateFormula, type CheckedFormula } from './formula';
 import { parseTabList, parseViewList } from './views';
 import { resolveTarget } from './wikilink';
 
@@ -88,6 +91,7 @@ function parseFieldDef(name: string, spec: unknown): FieldDef {
   }
   const s = spec as Record<string, unknown>;
   const def: FieldDef = { name, kind: asFieldKind(s.kind) };
+  if (typeof s.formula === 'string') def.formula = s.formula;
   if (Array.isArray(s.options)) {
     def.options = s.options.map(parseOption).filter((o): o is FieldOption => o !== null);
   }
@@ -128,6 +132,13 @@ function parseFieldDef(name: string, spec: unknown): FieldDef {
     (TIME_DISPLAY_FORMATS as readonly string[]).includes(s.timeFormat)
   ) {
     def.timeFormat = s.timeFormat as FieldDef['timeFormat'];
+  }
+  if (
+    (def.kind === 'date' || def.kind === 'daterange') &&
+    typeof s.remind === 'string' &&
+    (REMIND_OFFSETS as readonly string[]).includes(s.remind)
+  ) {
+    def.remind = s.remind as FieldDef['remind'];
   }
   // M16.10. An unrecognised value is dropped rather than guessed at: a
   // property nobody can find is worse than one shown when it need not be.
@@ -317,11 +328,19 @@ export function buildSchema(entries: Entry[]): Schema {
   const types = new Map<string, TypeDef>();
   for (const e of entries) {
     if (e.type !== 'Type') continue;
+    const fields = parseFields((e.properties as Record<string, unknown>).fields);
+    const deadline =
+      typeof e.properties.deadline === 'string' ? e.properties.deadline.trim() : null;
     types.set(e.title, {
+      deadline: fields.some(
+        (field) => field.name === deadline && (field.kind === 'date' || field.kind === 'daterange'),
+      )
+        ? deadline
+        : null,
       name: e.title,
       icon: typeof e.properties.icon === 'string' ? e.properties.icon : null,
       color: typeof e.properties.color === 'string' ? e.properties.color : null,
-      fields: parseFields((e.properties as Record<string, unknown>).fields),
+      fields,
       statuses: parseStatuses((e.properties as Record<string, unknown>).statuses),
       folder:
         typeof e.properties.folder === 'string' && e.properties.folder.trim() !== ''
@@ -412,17 +431,37 @@ export function buildSchema(entries: Entry[]): Schema {
 
   const derivedStems = (sources: Entry[]): string[] => sources.map((s) => fileStem(s.path));
 
-  // Per-schema, so a sort comparing n·log n pairs resolves each rollup once.
+  // Per-schema, so a sort comparing n·log n pairs resolves each computed value once.
   // buildSchema is rebuilt whenever entries change, which retires the memo.
   const memo = new WeakMap<Entry, Map<string, unknown>>();
+  const formulas = new WeakMap<FieldDef, CheckedFormula | null>();
+
+  function checkedFormula(e: Entry, def: FieldDef): CheckedFormula | null {
+    if (formulas.has(def)) return formulas.get(def) ?? null;
+    const type = e.type === null ? undefined : types.get(e.type);
+    const checked = checkFormula(def.formula ?? '', type?.fields ?? [], {
+      typeName: type?.name,
+      ownName: def.name,
+    });
+    const result = checked.ok ? checked : null;
+    formulas.set(def, result);
+    return result;
+  }
 
   function computeFieldValue(e: Entry, field: string): unknown {
     if (isVirtualField(field)) return virtualValue(e, field);
     const def = declaredDef(e, field);
     if (def?.kind === 'created_time') return e.createdAt;
     if (def?.kind === 'last_edited_time') return e.modifiedAt;
+    if (def?.kind === 'formula') {
+      const checked = checkedFormula(e, def);
+      return checked === null ? undefined : evaluateFormula(checked, (name) => fieldValue(e, name));
+    }
     if (def?.kind === 'rollup') {
-      const computed = computeRollup(e, def, entries, relations);
+      const computed = computeRollup(e, def, entries, relations, {
+        fieldDef: declaredDef,
+        statuses: statusSetFor,
+      });
       if (computed === '') return undefined;
       if (!rollupCalcMeta(def.calculate).yieldsNumber) return computed;
       const n = Number(computed);
@@ -473,7 +512,10 @@ export function buildSchema(entries: Entry[]): Schema {
       };
     }
     if (def?.kind === 'rollup') {
-      const computed = computeRollup(e, def, entries, relations);
+      const computed = computeRollup(e, def, entries, relations, {
+        fieldDef: declaredDef,
+        statuses: statusSetFor,
+      });
       return {
         def,
         raw: computed,
@@ -481,6 +523,25 @@ export function buildSchema(entries: Entry[]): Schema {
         color: null,
         ghost: false,
       };
+    }
+
+    if (def?.kind === 'formula') {
+      const computed = fieldValue(e, field);
+      const date = typeof computed === 'string' ? parseDateProperty(computed) : null;
+      const display =
+        typeof computed === 'number'
+          ? formatNumber(computed, def)
+          : date === null
+            ? ''
+            : formatDateValue(
+                {
+                  ...date,
+                  format: def.dateFormat ?? 'short',
+                  timeFormat: def.timeFormat ?? DEFAULT_TIME_FORMAT,
+                },
+                toIsoDate(new Date()),
+              );
+      return { def, raw: computed, display, color: null, ghost: false };
     }
 
     // A two-way relation's reciprocal side stores nothing (M12.4): its value
@@ -510,6 +571,21 @@ export function buildSchema(entries: Entry[]): Schema {
       const targets = Array.isArray(raw) ? raw.map(String) : [String(raw)];
       const display = targets.map((t) => resolveTarget(t, entries)?.title ?? t).join(', ');
       return { def, raw, display, color: null, ghost: false };
+    }
+
+    if (kind === 'repeat') {
+      const fields = e.type === null ? [] : (types.get(e.type)?.fields ?? []);
+      const date =
+        fields.find((field) => field.kind === 'daterange') ??
+        fields.find((field) => field.kind === 'date');
+      const anchor = date === undefined ? null : parseDateProperty(e.properties[date.name]);
+      return {
+        def,
+        raw,
+        display: describeRepeat(parseRepeat(raw), anchor),
+        color: null,
+        ghost: false,
+      };
     }
 
     if (kind === 'status') {

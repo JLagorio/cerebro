@@ -1,6 +1,7 @@
 ---
 type: Work item
 key: LNC-9
+project: "[[field-app-launch-campaign]]"
 status: todo
 priority: high
 assignee: "[[ana-rios]]"

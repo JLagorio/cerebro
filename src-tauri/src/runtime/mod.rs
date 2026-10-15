@@ -36,13 +36,17 @@
 //! leaves the previous complete version, which the next open finishes.
 
 pub mod activity;
+pub mod activity_tool;
 pub mod batch_journal;
 pub mod budget;
 pub mod catchup;
 pub mod cause;
+pub mod client_tokens;
 pub mod connector_status;
 pub mod dispatch;
+pub mod done_marks;
 pub mod fleet;
+pub mod followups;
 pub mod governance;
 pub mod health;
 pub mod import;
@@ -54,6 +58,7 @@ pub mod pending_writes;
 pub mod projection;
 pub mod read_only;
 pub mod recovery;
+pub mod reminders;
 pub mod scheduler;
 pub mod schema;
 pub mod scope;
@@ -120,7 +125,11 @@ pub const OPEN_MARKER: &str = "runtime.db.open";
 /// agent must answer, admitted once and claimed with its run's lease — at 25.
 /// M60.6 adds `batch_journal` — each database-wide change in flight, with
 /// the pre-images that put its pages back if it stopped partway — at 26.
-pub const USER_VERSION: i64 = 26;
+/// M64.3 adds durable reminder fires and Done marks at 27.
+/// M62.5 adds personal token fingerprints and the client cause at 28.
+/// M63.2 records wake authors and run ancestry at 29.
+/// M63.8 adds an agent's durable self-followups at 30.
+pub const USER_VERSION: i64 = 30;
 
 pub fn runtime_db_path(data_dir: &Path) -> PathBuf {
     data_dir.join(RUNTIME_DB)
@@ -338,7 +347,208 @@ const MIGRATIONS: &[Migration] = &[
         sql: schema::SCHEMA_V26,
         validate: validate_v26,
     },
+    Migration {
+        to: 27,
+        sql: schema::SCHEMA_V27,
+        validate: validate_v27,
+    },
+    Migration {
+        to: 28,
+        sql: schema::SCHEMA_V28,
+        validate: validate_v28,
+    },
+    Migration {
+        to: 29,
+        sql: schema::SCHEMA_V29,
+        validate: validate_v29,
+    },
+    Migration {
+        to: 30,
+        sql: schema::SCHEMA_V30,
+        validate: validate_v30,
+    },
 ];
+
+fn validate_v30(conn: &Connection) -> Result<(), String> {
+    conn.prepare("SELECT followup_id,vault_id,actor,note,due_at,requested_at,requested_by_run,state,claimed_at,run_id,ended_at,cancel_reason FROM agent_followups")
+        .map_err(|e| format!("validating agent_followups: {e}"))?;
+    let sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='agent_followups'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("validating agent_followups: {e}"))?;
+    for clause in [
+        "length(followup_id) = 32",
+        "NOT followup_id GLOB '*[^0-9a-f]*'",
+        "REFERENCES vault_registry (vault_id)",
+        "actor LIKE 'process:_%'",
+        "length(actor) <= 128",
+        "length(note) BETWEEN 1 AND 500",
+        "due_at LIKE '____-__-__T%Z'",
+        "requested_at LIKE '____-__-__T%Z'",
+        "length(requested_by_run) > 0",
+        "state IN ('pending', 'claimed', 'fired', 'cancelled')",
+        "claimed_at LIKE '____-__-__T%Z'",
+        "ended_at LIKE '____-__-__T%Z'",
+        "cancel_reason IN ('person', 'agent_gone', 'paused')",
+        "state != 'claimed' OR claimed_at IS NOT NULL",
+        "state != 'pending' OR claimed_at IS NULL",
+        "(state = 'fired') = (run_id IS NOT NULL)",
+        "(state = 'cancelled') = (cancel_reason IS NOT NULL)",
+        "(state IN ('fired', 'cancelled')) = (ended_at IS NOT NULL)",
+    ] {
+        if !sql.contains(clause) {
+            return Err(format!("agent_followups was created without {clause}"));
+        }
+    }
+    let index: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='index' AND name='agent_followups_by_due'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("validating agent_followups index: {e}"))?;
+    if !index.contains("(vault_id, state, due_at)") {
+        return Err("agent_followups_by_due has the wrong columns".into());
+    }
+    Ok(())
+}
+
+/// Wake attribution remains optional for older rows, with bounded closed
+/// author kinds and a real run foreign key for every recorded parent.
+fn validate_v29(conn: &Connection) -> Result<(), String> {
+    conn.prepare("SELECT author, author_actor, parent_run_id FROM agent_wakes")
+        .map_err(|e| format!("validating wake attribution: {e}"))?;
+    let sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_wakes'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("validating wake attribution: {e}"))?;
+    for clause in [
+        "author IN ('person', 'run', 'not_recorded')",
+        "length(author_actor) BETWEEN 1 AND 128",
+        "author IS NOT NULL",
+        "parent_run_id TEXT REFERENCES runs (run_id)",
+        "parent_run_id IS NULL OR author IS 'run'",
+    ] {
+        if !sql.contains(clause) {
+            return Err(format!("wake attribution was created without {clause}"));
+        }
+    }
+    Ok(())
+}
+
+/// Token fingerprints and the widened cause CHECK arrive together. SQLite
+/// quotes a renamed column; compare its normalized stored SQL, not the DDL
+/// string we intended to run.
+fn validate_v28(conn: &Connection) -> Result<(), String> {
+    conn.prepare("SELECT token_id, vault_id, name, slug, secret_sha256, toolsets, write_scope, read_scope, created_at, last_used_at FROM client_tokens")
+        .map_err(|e| format!("validating client_tokens: {e}"))?;
+    let sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'client_tokens'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("validating client_tokens: {e}"))?;
+    for clause in [
+        "length(token_id) = 32",
+        "NOT token_id GLOB '*[^0-9a-f]*'",
+        "REFERENCES vault_registry (vault_id)",
+        "length(name) BETWEEN 1 AND 100",
+        "length(slug) BETWEEN 1 AND 32",
+        "NOT slug GLOB '*[^a-z0-9-]*'",
+        "secret_sha256 TEXT NOT NULL UNIQUE",
+        "length(secret_sha256) = 64",
+        "NOT secret_sha256 GLOB '*[^0-9a-f]*'",
+        "json_type(toolsets) = 'array'",
+        "json_type(write_scope) = 'array'",
+        "json_type(read_scope) = 'array'",
+        "UNIQUE (vault_id, slug)",
+    ] {
+        if !sql.contains(clause) {
+            return Err(format!("client_tokens was created without {clause}"));
+        }
+    }
+    let index: Option<String> = conn.query_row("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'client_tokens_by_vault'", [], |r| r.get(0))
+        .map_err(|e| format!("validating client_tokens_by_vault: {e}"))?;
+    if !index.is_some_and(|sql| sql.contains("(vault_id, created_at)")) {
+        return Err("client_tokens_by_vault has the wrong columns".into());
+    }
+    let sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'runs'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("validating runs.cause: {e}"))?;
+    let sql = sql.replace('"', "");
+    let kinds = cause::CauseKind::ALL
+        .iter()
+        .map(|kind| format!("'{}'", kind.as_str()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !sql.contains(&format!("json_extract(cause, '$.kind') IN ({kinds})"))
+        || !sql.contains("length(cause) <= 2048")
+    {
+        return Err(
+            "runs.cause was created without the complete kind CHECK, client included".into(),
+        );
+    }
+    Ok(())
+}
+
+/// The readers' columns and the closed vocabularies must arrive together.
+fn validate_v27(conn: &Connection) -> Result<(), String> {
+    for (table, columns, clauses) in [
+        (
+            "reminder_fires",
+            "vault_id, path, chip, ordinal, fire_at, outcome, claimed_at",
+            &[
+                "outcome IN ('fired', 'missed', 'moved', 'imported')",
+                "PRIMARY KEY (vault_id, path, chip, ordinal, fire_at)",
+                "length(chip) = 16",
+                "ordinal >= 0",
+                "length(path) BETWEEN 1 AND 1024",
+                "length(fire_at) = 16",
+                "claimed_at LIKE '____-__-__T%Z'",
+            ][..],
+        ),
+        (
+            "done_marks",
+            "vault_id, lane, subject, until, revision, marked_at",
+            &[
+                "lane IN ('insight', 'run', 'reminder', 'change')",
+                "until IN ('revision', 'forever')",
+                "(until = 'revision') = (revision IS NOT NULL)",
+                "PRIMARY KEY (vault_id, lane, subject)",
+                "length(subject) BETWEEN 1 AND 1024",
+                "length(revision) BETWEEN 1 AND 256",
+                "marked_at LIKE '____-__-__T%Z'",
+            ][..],
+        ),
+    ] {
+        conn.prepare(&format!("SELECT {columns} FROM {table}"))
+            .map_err(|e| format!("validating {table}: {e}"))?;
+        let sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("validating {table}: {e}"))?;
+        for clause in clauses {
+            if !sql.contains(clause) {
+                return Err(format!("{table} was created without {clause}"));
+            }
+        }
+    }
+    Ok(())
+}
 
 /// v26's promise (M60.6): every column of `batch_journal` reads, and the
 /// by-vault index recovery reads it through exists. A step without the index
@@ -558,7 +768,10 @@ fn validate_v20(conn: &Connection) -> Result<(), String> {
             |row| row.get(0),
         )
         .map_err(|e| format!("validating runs: {e}"))?;
-    if !sql.contains("json_extract(cause, '$.kind')") {
+    if !sql
+        .replace('"', "")
+        .contains("json_extract(cause, '$.kind')")
+    {
         return Err("runs.cause was added without its kind CHECK".into());
     }
     Ok(())
@@ -1776,6 +1989,167 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn v28_preserves_runs_causes_leases_and_commit_attribution() {
+        let (dir, vault) = at_version_with_a_run("runtime-clients-upgrade", 27);
+        let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+        conn.execute(
+            "UPDATE runs SET cause = '{\"kind\":\"event\",\"subject\":\"kept\"}'",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO ambient_dispatch (run_id, vault_id, store_uuid, lane, acquired_at, lease_expires_at) VALUES ('before-causes', ?1, 'store', 'scheduled', '2026-10-15T01:00:00Z', '2026-10-15T02:00:00Z')", [&vault]).unwrap();
+        conn.execute("INSERT INTO run_commits (vault_id, commit_sha, run_id, committed_at) VALUES (?1, ?2, 'before-causes', '2026-10-15T01:00:00Z')", rusqlite::params![vault, "a".repeat(40)]).unwrap();
+        drop(conn);
+        let conn = open(&dir).unwrap();
+        validate_v28(&conn).unwrap();
+        let kept: (String, i64, i64) = conn.query_row("SELECT cause, (SELECT count(*) FROM ambient_dispatch), (SELECT count(*) FROM run_commits) FROM runs WHERE run_id='before-causes'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!(
+            kept,
+            ("{\"kind\":\"event\",\"subject\":\"kept\"}".into(), 1, 1)
+        );
+        conn.execute("UPDATE runs SET cause = '{\"kind\":\"client\"}'", [])
+            .unwrap();
+        assert!(conn
+            .execute("UPDATE runs SET cause = '{\"kind\":\"not-a-kind\"}'", [])
+            .is_err());
+        assert!(conn.execute("UPDATE runs SET cause = '{}'", []).is_err());
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn validate_v28_catches_a_cause_check_without_client() {
+        let (dir, _) = at_version_with_a_run("runtime-clients-check", 27);
+        let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+        conn.execute_batch(&schema::SCHEMA_V28.replace(", 'client'", ""))
+            .unwrap();
+        assert!(validate_v28(&conn).unwrap_err().contains("client included"));
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn client_token_column_checks_refuse_bad_rows() {
+        let dir = testutil::temp_vault("runtime-clients-columns");
+        let conn = open(&dir).unwrap();
+        let vault = scope::register(&conn, &dir).unwrap();
+        let good = [
+            "a".repeat(32),
+            vault,
+            "App".into(),
+            "app".into(),
+            "b".repeat(64),
+            "[\"read\"]".into(),
+            "[]".into(),
+            "[\"notes\"]".into(),
+        ];
+        for (index, invalid) in [
+            (0, "A".repeat(32)),
+            (0, "short".into()),
+            (1, "missing-vault".into()),
+            (2, "".into()),
+            (2, "x".repeat(101)),
+            (3, "Not slug".into()),
+            (3, "x".repeat(33)),
+            (4, "not a hash".into()),
+            (5, "{}".into()),
+            (6, "null".into()),
+            (7, "{}".into()),
+        ] {
+            let mut row = good.clone();
+            row[index] = invalid;
+            assert!(conn.execute("INSERT INTO client_tokens (token_id,vault_id,name,slug,secret_sha256,toolsets,write_scope,read_scope,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'2026-10-15T00:00:00Z')", rusqlite::params_from_iter(row)).is_err(), "column {index}");
+        }
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_kill_at_every_client_migration_boundary_preserves_history() {
+        for (suffix, expected) in [
+            ("begun", 27),
+            ("ddl", 27),
+            ("validated", 27),
+            ("committed", 28),
+        ] {
+            let (dir, _) = at_version_with_a_run("runtime-client-migration", 27);
+            let point = format!("runtime-db-migration-28-{suffix}");
+            let status = testutil::run_crash_scenario(
+                "runtime::tests::crash_scenario_migrate",
+                &point,
+                &dir,
+            );
+            assert!(!status.success());
+            let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+            assert_eq!(user_version(&conn).unwrap(), expected);
+            assert_eq!(
+                conn.query_row("SELECT count(*) FROM runs", [], |r| r.get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
+            assert_eq!(validate_v28(&conn).is_ok(), expected == 28);
+            drop(conn);
+            let conn = open(&dir).unwrap();
+            validate_v28(&conn).unwrap();
+            drop(conn);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn a_previous_version_database_gains_reminder_fires_and_done_marks() {
+        let (dir, _) = at_version_with_a_run("runtime-upgrade-26", 26);
+        let conn = open(&dir).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), USER_VERSION);
+        validate_v27(&conn).unwrap();
+        let rows: (i64,i64,i64) = conn.query_row("SELECT (SELECT count(*) FROM runs), (SELECT count(*) FROM reminder_fires), (SELECT count(*) FROM done_marks)", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+        assert_eq!(rows, (1, 0, 0));
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    #[test]
+    fn the_v27_validator_refuses_tables_without_their_checks() {
+        for table in ["reminder_fires", "done_marks"] {
+            let dir = testutil::temp_vault("runtime-checks-27");
+            let conn = open(&dir).unwrap();
+            conn.execute_batch(&format!("CREATE TABLE stripped AS SELECT * FROM {table}; DROP TABLE {table}; ALTER TABLE stripped RENAME TO {table};")).unwrap();
+            assert!(validate_v27(&conn).unwrap_err().contains(table));
+            drop(conn);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+    #[test]
+    fn a_kill_at_every_reminder_migration_boundary_preserves_history() {
+        for (suffix, expected) in [
+            ("begun", 26),
+            ("ddl", 26),
+            ("validated", 26),
+            ("committed", 27),
+        ] {
+            let (dir, _) = at_version_with_a_run("runtime-reminder-kill", 26);
+            let point = format!("runtime-db-migration-27-{suffix}");
+            let status = testutil::run_crash_scenario(
+                "runtime::tests::crash_scenario_migrate",
+                &point,
+                &dir,
+            );
+            assert!(!status.success());
+            let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+            assert_eq!(user_version(&conn).unwrap(), expected);
+            let count: i64 = conn
+                .query_row("SELECT count(*) FROM runs", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(count, 1);
+            assert_eq!(validate_v27(&conn).is_ok(), expected == 27);
+            drop(conn);
+            let conn = open(&dir).unwrap();
+            validate_v27(&conn).unwrap();
+            drop(conn);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
     /// v26 (M60.6): a database at 25 keeps its run and its wake, and comes
     /// back with an empty `batch_journal` and its index.
     #[test]
@@ -2437,5 +2811,174 @@ mod tests {
         );
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn at_version_28_with_a_wake(label: &str) -> std::path::PathBuf {
+        let (dir, vault) = at_version_with_a_run(label, 28);
+        let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+        conn.execute("INSERT INTO agent_wakes (wake_id, vault_id, agent, wake_key, trigger_digest, cause, admitted_at) VALUES (?1, ?2, 'process:scout', ?3, ?4, '{\"kind\":\"event\",\"subject\":\"notes/a.md\"}', '2026-10-15T09:00:00Z')",
+            rusqlite::params!["a".repeat(32), vault, "b".repeat(64), "1".repeat(16)]).unwrap();
+        drop(conn);
+        dir
+    }
+
+    #[test]
+    fn v29_keeps_existing_wakes_with_unrecorded_authors_and_checks_new_kinds() {
+        let dir = at_version_28_with_a_wake("runtime-wake-author-upgrade");
+        let conn = open(&dir).unwrap();
+        validate_v29(&conn).unwrap();
+        let kept: (i64, Option<String>, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT count(*), author, author_actor, parent_run_id FROM agent_wakes",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(kept, (1, None, None, None));
+        assert!(conn
+            .execute("UPDATE agent_wakes SET author = 'guessed'", [])
+            .is_err());
+        assert!(conn
+            .execute("UPDATE agent_wakes SET author_actor = 'human:me'", [])
+            .is_err());
+        conn.execute(
+            "UPDATE agent_wakes SET author = 'person', author_actor = 'human:me'",
+            [],
+        )
+        .unwrap();
+        assert!(conn
+            .execute("UPDATE agent_wakes SET author_actor = ''", [])
+            .is_err());
+        assert!(conn
+            .execute("UPDATE agent_wakes SET parent_run_id = 'before-causes'", [])
+            .is_err());
+        conn.execute("UPDATE agent_wakes SET author = 'run', author_actor = 'claude-code', parent_run_id = 'before-causes'", []).unwrap();
+        assert!(conn
+            .execute("UPDATE agent_wakes SET parent_run_id = 'missing-run'", [])
+            .is_err());
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn validate_v29_refuses_an_unbounded_author_kind() {
+        let dir = at_version_28_with_a_wake("runtime-wake-author-validator");
+        let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+        conn.execute_batch(&schema::SCHEMA_V29.replace(
+            "CHECK (author IS NULL OR author IN ('person', 'run', 'not_recorded'))",
+            "",
+        ))
+        .unwrap();
+        assert!(validate_v29(&conn).unwrap_err().contains("author IN"));
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_kill_at_every_wake_author_migration_boundary_keeps_the_wake() {
+        for (suffix, expected) in [
+            ("begun", 28),
+            ("ddl", 28),
+            ("validated", 28),
+            ("committed", 29),
+        ] {
+            let dir = at_version_28_with_a_wake("runtime-wake-author-kill");
+            let status = testutil::run_crash_scenario(
+                "runtime::tests::crash_scenario_migrate",
+                &format!("runtime-db-migration-29-{suffix}"),
+                &dir,
+            );
+            assert!(!status.success());
+            let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+            assert_eq!(user_version(&conn).unwrap(), expected);
+            assert_eq!(
+                conn.query_row("SELECT count(*) FROM agent_wakes", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
+            assert_eq!(validate_v29(&conn).is_ok(), expected == 29);
+            drop(conn);
+            let conn = open(&dir).unwrap();
+            validate_v29(&conn).unwrap();
+            drop(conn);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn a_previous_version_database_gains_followups_and_keeps_its_rows() {
+        let (dir, _) = at_version_with_a_run("runtime-followup-upgrade", 29);
+        let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+        assert!(validate_v30(&conn).is_err());
+        drop(conn);
+        let conn = open(&dir).unwrap();
+        validate_v30(&conn).unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM runs WHERE run_id='before-causes'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(user_version(&conn).unwrap(), USER_VERSION);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn validate_v30_refuses_followups_without_their_lifecycle_checks() {
+        for clause in [
+            "CHECK (state IN ('pending', 'claimed', 'fired', 'cancelled'))",
+            "CHECK (cancel_reason IS NULL OR cancel_reason IN ('person', 'agent_gone', 'paused'))",
+            "CHECK (state != 'claimed' OR claimed_at IS NOT NULL),",
+            "CHECK ((state = 'fired') = (run_id IS NOT NULL)),",
+            "CHECK ((state = 'cancelled') = (cancel_reason IS NOT NULL)),",
+        ] {
+            let (dir, _) = at_version_with_a_run("runtime-followup-validator", 29);
+            let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+            conn.execute_batch(&schema::SCHEMA_V30.replace(clause, ""))
+                .unwrap();
+            assert!(validate_v30(&conn).is_err(), "{clause}");
+            drop(conn);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn a_kill_at_every_followup_migration_boundary_keeps_existing_runs() {
+        for (suffix, expected) in [
+            ("begun", 29),
+            ("ddl", 29),
+            ("validated", 29),
+            ("committed", 30),
+        ] {
+            let (dir, _) = at_version_with_a_run("runtime-followup-kill", 29);
+            let status = testutil::run_crash_scenario(
+                "runtime::tests::crash_scenario_migrate",
+                &format!("runtime-db-migration-30-{suffix}"),
+                &dir,
+            );
+            assert!(!status.success());
+            let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+            assert_eq!(user_version(&conn).unwrap(), expected);
+            assert_eq!(
+                conn.query_row(
+                    "SELECT count(*) FROM runs WHERE run_id='before-causes'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                1
+            );
+            assert_eq!(validate_v30(&conn).is_ok(), expected == 30);
+            drop(conn);
+            let conn = open(&dir).unwrap();
+            validate_v30(&conn).unwrap();
+            drop(conn);
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 }

@@ -1,6 +1,7 @@
 ---
 type: Work item
 key: FLD-12
+project: "[[guided-onboarding-ga]]"
 status: todo
 priority: low
 assignee: "[[dana-fox]]"

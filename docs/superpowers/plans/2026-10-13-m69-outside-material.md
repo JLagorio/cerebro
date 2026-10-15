@@ -8,14 +8,16 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M69. House style and rails: the 
 
 ## Status
 
-- **Precondition:** M53–M57, M70 and M58–M68 closed, in that order: gates green, roadmap statuses updated. All are being built unstaged in this checkout, so this plan names their finished functions, never today's lines. M65 and M68 have no plan doc yet; their roadmap sections stand in.
-- **Built:** nothing. All 11 roadmap parts were scouted; all build. Four split by their own bullets, giving 18 parts.
+- **Owner scope change (2026-10-15):** Skip M69.4’s Linear importer. The owner explicitly kept the other planned Notion, mail, GitHub and local file features. M69.6 will supply the shared local-file inlet and import-kind plumbing that originally belonged to .4. Existing Linear connector presets and source identity support are not removed.
+
+- **Precondition:** M53–M57, M70 and M58–M68 closed, in that order: gates green, roadmap statuses updated. All are being built unstaged in this checkout, so this plan names their finished functions, never today's lines. M65 and M68 now have their own plan documents.
+- **Implementation (2026-10-15):** .1 and .2 were already present. .3 is now wired through the native and mock batch writers; its native concurrency, stale-read, Undo/Redo and shared-case checks pass. .3b now protects agent writes and shows provenance; its native, mock and browser checks pass. The remaining import/connector surfaces are still in progress. This is implementation evidence, not milestone closure. The plan has 18 parts.
 - **Effort:** 1 S + 8 M + 9 L ≈ 13.3 L; the roadmap said ≈6.8 L. Re-measured: .1 S → M; .3 L → L + M (.3b); .4 M → L (M66's kind table and dropped-path reader join it); .7 L → L + L (.7b) + L (.7c) + M (.7d) + M (.7e); .9 L → L + L (.9b); .10 S → M + M (.10b); .11 M → L.
 - **Crash risk:** .3, .5, .7, .7b, .9b, .11.
 - **Packaged checks** (owner, `./scripts/mac-build.sh`): .1, .4, .5, .6, .9b, .11. **Live checks** (owner; CLI 2.1.250; an isolated login, never the main `~/.claude`; the owner's own accounts only where named): .1, .5, .7, .7b, .10, .10b, .11, and .7c and .7e once the Gmail pack is accepted.
 - **Schema steps:** one (.9b). **New refusal codes:** one, `import_refused` (.5), operational. **New CV ids:** four (.3b, .7, .5, .10). **New MCP tool:** `import_notion_page` (.5); `cache_source` gains kind thread (.7c). **New IPC commands:** five (.7c one, .9b three, .11 one).
 - **Artifacts:** new `shared/import/sources.v1.json` (.3; v2 in .3b) and `shared/policy/mail.v1.json` (.7; bumped by .7b, .7c, .7e). `tools.v1` bumps five times (.5, .7b, .7c, .7d, .10); policy.v3 once (.5); tool-approval.v1 once (.7b); field-kinds.v1 once (.9); M66's `kinds.v1` twice (.4, .6). New case files (prettier, `\u` escapes, no digest): `connector-approvals` (.1), `notion-cases` (.5), `thread-digests` (.7c, .7d), `pr-urls`, `pr-cases` (.11).
-- **New dependency:** `free-email-domains` (MIT, .8). CLDR's Windows zone rows are generated data (.6). No new crate.
+- **New dependency:** `free-email-domains` (MIT, .8). CLDR's Windows zone rows are generated data (.6). The shared source URL grammar adds exact `regex` 1.13.1 as a direct dependency, already present in the lockfile.
 - **demo-vault:** untouched. Specs seed through mock seams.
 - **Closes:** M61's "provenance waits for M69" for Linear, Notion and `.ics` (.3; M61.5's and M67.4's own imports stay plain, Q46); M66.7b's "M69 adopts `vault-import-v1`" (.3b); INTEGRATIONS-16's stamp forgery (.3b); EMAIL-0, mail cached as web pages (.7b).
 
@@ -159,6 +161,23 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M69. House style and rails: the 
 
 ### M69.3 One import writer: one file per record, stamped in Rust, replaced only if unchanged since import
 
+**Implementation evidence (2026-10-15):** The shared artifact and digest, both
+readers and planners, native import mutex, mock serialization, checked batch
+replacement, outcomes and cache-kind derivation are implemented. Native batch
+39 checks passed, including concurrent imports of one identity, a human edit
+or move after planning, and one Undo/Redo for creates and replacements. Shared
+cases also cover YAML carriers that cannot accept appended stamps, folding-disk
+protected roots, and copies hidden inside non-note folders. TypeScript import,
+mock, ingestion and rails checks passed. All-target Clippy and all three TypeScript configs passed; Linux crash-job
+verification remains part of the full gate.
+
+**Refinement:** Source URLs use one portable grammar from the artifact, with
+DNS/IPv4-shaped ASCII hosts and a valid port range. Credentials and bracketed
+IPv6 literals are refused; the shipped source systems do not need them. This
+avoids runtime-dependent whitespace and authority parsing. Composed YAML is
+read back before any write, so an otherwise valid scalar-null or explicit
+end-of-document carrier cannot receive corrupt stamps.
+
 - **What:** no import path exists. A CSV or connector import would mint a second file every run, couldn't tell an edited page from a stale copy, and would carry whatever provenance its caller typed. INTEGRATIONS-2. The roadmap row splits: .3 is vocabulary, stamps, identity and the replace rule; .3b the agent guard and D15's authority.
 - **Files:** `shared/import/{sources.v1.json, sources.v1.sha256, README.md}` (new), `shared/policy/README.md`, `src-tauri/src/import/{mod.rs, plan.rs}` (new), `src-tauri/src/{lib.rs, mcp.rs, vault/batch.rs}`, `src-tauri/fixtures/batch-cases.json`, `src/engine/{importSources,importPlan}{,.test}.ts` (new), `src/engine/{batch,ingest}{,.test}.ts`, `src/lib/{mockIpc,mockIpc.test}.ts`, `.prettierignore`, `eslint.config.js`, `scripts/lint-rails.test.ts`, `AGENTS.md`, `.claude/skills/policy-artifact-edit/SKILL.md`. Only if needed: `src/lib/ipc.ts` (applyBatch types its own op union), `src-tauri/src/vault/write.rs` (a `pub(crate)` full-bytes reader), `src/engine/undoPlan{,.test}.ts` (M60.7's revert lacks a `replace_file` arm).
 - **Approach:**
@@ -180,6 +199,18 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M69. House style and rails: the 
 
 ### M69.3b Stamps belong to their writer, and imported pages say where they came from (D15 adopted)
 
+**Implementation evidence (2026-10-15):** All six agent note doors preserve
+writer-owned stamps; create checks composed bytes and set_fields checks the
+raw patch before schema diagnostics. Shared cases cover tags, typed mapping
+keys, explicit null, large integers, NaN, aliases and malformed YAML. Native
+31 stamp checks and six import/authority checks passed; the stamping writers
+still stamp, and an imported record's status remains editable. The receipt
+inventory now includes both import batch helpers. TypeScript 290 focused
+checks, all three typeconfigs, scoped lint and all-target Clippy passed.
+Chromium proves the visible provenance line, byte-identical refused stamp
+edit, and successful ordinary append; its screenshot was reviewed. The
+broader full gate and owner connector proofs remain milestone work.
+
 - **What:** agent `update_frontmatter`, `set_fields` or `create_note` can strip or forge `source_url`, `generated` and every import key; the guard holds only in knowledge/ (INTEGRATIONS-16). Stripping `source_system` would even re-mint an import as your own word, since M66.7b keys items by source. The keys would also show as plain properties. D15 (i)'s registration is already M66.7b's `vault-import-v1`.
 - **Files:** `shared/import/{sources.v1.json, sources.v1.sha256, README.md}`, `src-tauri/src/{import/mod.rs, mcp.rs, ingest/source.rs}`, `src/engine/{importSources,properties}{,.test}.ts`, `src/detail/ImportProvenance{,.test}.tsx` (new), `src/detail/{DetailPanel,DetailPanel.test}.tsx`, `src/pages/{DocPage,DocPage.test}.tsx`, `src/lib/{mockIpc,mockIpc.test}.ts`, `e2e/import-stamps.spec.ts` (new), `AGENTS.md`, `SECURITY.md`.
 - **Approach:**
@@ -195,6 +226,8 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M69. House style and rails: the 
 - **Commit:** `feat(import): agents can't touch stamped provenance, and imported pages say where they came from (M69.3b)`.
 
 ### M69.4 Linear CSV onto any status-bearing database, keyed on the UUID
+
+**Skipped by the owner (2026-10-15).** No Linear CSV importer will be built. Shared file-inlet prerequisites move to M69.6; the design below remains historical context.
 
 - **What:** no CSV imports into an existing database (M61.5 only makes a new one), and nothing reads Linear exports. INTEGRATIONS-4. Macro's `linearImport.ts` is read for behaviour and corrected: key on the UUID (Macro duplicates on re-import), check Completed before Canceled and Archived (Linear auto-archives closed issues), keep an honest footer.
 - **Files:** `shared/files/{kinds.v1.json, kinds.v1.sha256, README.md}`, `src-tauri/src/files/{kinds.rs, dropped.rs}`, `src-tauri/fixtures/{file-kind-cases.json, dropped-cases.json}`, `src/engine/fileKinds{,.test}.ts`, `src/engine/{importLinear,inlets}{,.test}.ts` (new), `src/app/linearImportActions{,.test}.ts` (new), `src/app/{LinearImportDialog,ImportInlet}{,.test}.tsx` (new), `src/app/CsvImportDialog{,.test}.tsx`, `src/views/ViewSettingsPanel{,.test}.tsx`, `src/pages/{TypePage,InboxPage}{,.test}.tsx`, `src/lib/{ingest,ingest.test,mockIpc,mockIpc.test}.ts`, `e2e/linear-import.spec.ts` (new).
@@ -237,6 +270,8 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M69. House style and rails: the 
 - **Commit:** `feat(import): a Notion page the agent fetched imports as a page, converted by code, never retyped (M69.5)`.
 
 ### M69.6 A dropped `.ics` becomes pages in a dated database, point events and time zones kept
+
+**Implementation evidence (2026-10-15, unstaged):** Parser/time/planner and the shared local-file inlet are implemented. Calendar drops queue previews; a dated database also offers the picker in View settings. The import uses one batch and one Undo, rechecks the schema, permanently retires reads after a vault round trip, and preserves pending previews until the last import. Shared file kinds v4 and native dropped-file replays passed; current artifact ownership has moved to M66.7c. Focused UI/action/ingest/type tests passed (161 initially, then 86 affected tests after queue/report refinements); final calendar core/actions/dialog checks 47 passed. All three type configurations and scoped lint passed. Time/planner checks also passed under Australia/Sydney (27). The Chromium journey passed: preview, three pages with Paris offset and redacted addresses, one Undo/Redo, unchanged re-import, and opening a page without a write. Screenshot inspected. Review found and fixed alternate email aliases/encoded URLs and malformed recurring overrides. The packaged Finder/Outlook and WKWebView Intl checks remain owed; this does not close the milestone.
 
 - **What:** no `.ics` reader exists. The roadmap cell's CALENDAR-10 is the connector overlay; `.ics` import is CALENDAR-8. TS-only like M61.5's CSV, written through .3. Macro's parser is read for behaviour (point events, TZID with Windows ids, RFC 5545 duration order); its gaps aren't copied (it flattens errors and drops UID-less events silently; here every skip is counted). Windows zones come from CLDR, never Macro's AGPL table.
 - **Files:** `shared/files/{kinds.v1.json, kinds.v1.sha256}`, `src-tauri/fixtures/file-kind-cases.json`, `src/engine/{ics,icsImport,windowsZones}{,.test}.ts` (new), `scripts/windows-zones.ts` (new), `src/engine/inlets{,.test}.ts`, `src/app/icsActions{,.test}.ts` (new), `src/app/IcsImportDialog{,.test}.tsx` (new), `src/app/ImportInlet{,.test}.tsx`, `src/pages/TypePage{,.test}.tsx`, `src/pages/InboxPage.test.tsx`, `THIRD_PARTY_NOTICES.md`, `e2e/ics-import.spec.ts` (new).

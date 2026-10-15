@@ -20,11 +20,25 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M65. House style and rails: the 
 ## Status
 
 - **Precondition:** M53–M57, M70 and M58–M64 are closed, in that order, with green gates and updated roadmap statuses. They are being built unstaged in this checkout, so this plan names their finished functions, never today's lines.
-- **Built:** nothing. Today's tree has:
-  - no `src/lib/keys`, `src/app/commands`, panes or deep links;
-  - one canvas in navStore;
-  - no URL type in `Info.plist`;
-  - 21 raw keydown listeners in 18 files and 92 `stopPropagation` calls (the roadmap counted 96).
+- **Built, unstaged:** .1, .1b, .2, .3, .3b, .4, .5, .6, .7, .8, .9 and .10. `src/lib/keys` and `src/app/commands` now provide one capture dispatcher and catalog; g/c chords, generated keycaps/tooltips/Settings, save and find are integrated. Pane ownership, the visible row, saved layouts and shared rename propagation are integrated. Packaged checks remain owed on the final rebuilt bundle.
+- **.1b verification (2026-10-15):** 350 focused unit checks across the keymap, commands, hints, editor and shell pass; three-config typecheck and scoped lint/format checks pass. All eight keyboard browser scenarios, ten column scenarios and find have current passing proof across isolated runs. The chord hint and Settings screenshots were reviewed. Broad parallel HMR interrupted two runs; unchanged isolated retries passed. Packaged WKWebView check awaits the final rebuilt bundle.
+
+- **.2 verification (2026-10-15):** The palette snapshots its opening scope, filters five categories, and provides theme, favorite and agent choosers. Unmatched Enter never asks the assistant. 129 focused checks and all three palette browser scenarios pass; the theme screenshot was reviewed. Scoped lint/format pass. All three TypeScript checks pass with the current integration. The browser run also found and fixed Favorites pruning before the current vault completed its scan, with startup, error and vault-switch regressions. Packaged keyboard proof remains owed.
+
+- **.5 verification (2026-10-15):** The grouped New launcher, per-vault recents, landing details and all eleven creation commands are implemented. Existing dialogs and Library creators are reused; every blank database now seeds starter statuses. 212 focused checks pass across the launcher, catalog, stores, creators, sidebar, Library, App and shortcut rails (211 in the combined gate, plus the new every-command regression); all three TypeScript checks and scoped lint pass. All eight keyboard browser scenarios and both launcher scenarios pass, including collapsed navigation, keyboard scrolling and typing in the page body. The launcher screenshot was reviewed. No commit or staging was performed.
+
+
+- **.3/.3b verification (2026-10-15):** A shared keyed cursor now drives My work, Concepts, Inbox and Home; TableView selection uses its pure model while retaining its existing keyboard. Peek j/k and focus return preserve one Escape per layer. Home event selection sends the rendered revisions with one exact Undo and stops across vault switches. 386 focused checks, then 17 finishing checks, all three typechecks and scoped lint pass. The 38-scenario surface/state-lab browser run passed 37; its sole failure was a heading-only fixture being deliberately edited by the typing probe. After seeding a body paragraph, all four new keyboard scenarios pass, with persisted typing checked. All seven existing Home scenarios pass. Home and My work screenshots were reviewed. Packaged WKWebView focus/menu checks remain owed.
+
+**.7 verification (2026-10-15):** Non-editor saves compare the loaded whole-file hash, including knowledge captures under the ledger writer lock. Task ticks refresh without retry; Library drafts retain the conflict and offer load or explicit overwrite. 220 focused Rust checks pass with all-target clippy and rustfmt clean. 548 focused TypeScript checks pass across the eight affected suites (545 in the combined run, three added cases in the final gate); the final IPC/conventions/Library/mock/state-lab gate passes all 654 checks. Both browser scenarios pass and the Library conflict screenshot was reviewed. Scoped lint/format pass; shared write-door cases agree in Rust and the browser mock. All changes remain unstaged and uncommitted.
+
+- **.4 verification (2026-10-15):** History slots retain each visit's search, controls and table scroll; deleted destinations are pruned and last places restore only after the correct vault is ready. 590 of 591 shared fixture regression checks passed initially; .6 updated the Open with menu assertion and the entire 65-test DocPage suite now passes. All 57 focused history/page/root checks, all three TypeScript configurations and scoped lint pass. Five browser scenarios pass, including exact scroll restoration, valid and missing last pages, transient peek removal, and Back/Forward across a trashed page. The restored table screenshot was reviewed. Packaged relaunch remains owed. Changes remain unstaged and uncommitted.
+
+- **.8 verification (2026-10-15):** The pure pane engine enforces file and single-place claims over 40,000 seeded transitions; 2,000 store transitions also keep the peek separate. Pane-context selectors/actions, histories/captors, editor holders and Inbox's Show placeholder are integrated. 229 focused model/shell checks and 183 editor/routing checks pass, along with all three TypeScript configurations. All 40 existing history, keyboard, list, Home and shell-layout browser scenarios pass with one pane. CV-52 records the ownership rule. Changes remain unstaged and uncommitted; the visible row follows in .9.
+
+- **.9 verification (2026-10-15):** The visible pane row, modified-click/Shift+Enter opens, capacity and parking, and three catalog commands are integrated. All 28 pane and existing shell-layout browser scenarios pass, including exact zero-width parking and immediate-close save preservation. Browser testing found and repaired focus restoration into an old pane after Quick open reused another pane. Two-pane and parked screenshots were reviewed. Focused component, routing, keymap and capacity tests and all three TypeScript checks pass. Packaged WKWebView and native menu checks await the final bundle.
+
+- **.10 verification (2026-10-15):** Per-vault layouts restore once after scanning, prune dead or duplicate claims, and yield to pending deep links or navigation already made by the person. Rename and Undo move pane history, favorites, recents and last place through one hook, with pruning held across the write. All three new browser scenarios pass, alongside five history, four deep-link and five rename/Undo regressions. Restored-layout and renamed-pointer screenshots were reviewed. The final combined pane/keymap suite passes 160 checks; persistence, rename and convention suites pass 52 checks, with App and Sidebar integration also green. Three-config typecheck and scoped lint/format pass. CV-53 records shared pointer propagation. Packaged relaunch and native menu checks await the final rebuilt bundle; no staging or commit was performed.
 
   All 10 roadmap parts build. .1 and .3 split by their own bullets, giving 12 parts.
 - **Effort:** 3 M + 9 L ≈ 10.5 L; the roadmap said ≈6.3 L. Re-measured:
@@ -47,6 +61,8 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M65. House style and rails: the 
   - M64's `e` for Home's Done (.3b). ⌘Z stays off Done, per M64 Q27;
   - M64 Q9's body-write guard (.7);
   - M61's "⌘Enter is composer-local until M65's registry": it stays local (Q6).
+
+- **.6 verification (2026-10-15):** App links are parsed and buffered in Rust, resolved only through the read-only vault registry, and delivered after the listener and scan are ready. Linked records open as full pages so Back returns to the exact record. 161 focused TypeScript checks and 64 focused Rust checks pass (the Rust gate also includes bytes containment and project-run queries); all three TypeScript configurations and scoped lint pass. Four browser scenarios pass, including cold PRD navigation over a stored last place, one starting history entry, no-create refusals, a cross-vault confirmation, and live navigation. The confirmation screenshot was inspected; a live browser probe recorded zero vault writes. Rustfmt and the final all-target clippy pass are clean. LaunchServices cold-start delivery and the copied link across real registered vaults remain packaged checks. All changes remain unstaged and uncommitted.
 
 ## Decisions
 
@@ -1058,7 +1074,7 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M65. House style and rails: the 
 
 ## Done or dropped
 
-- **Done:** none. **Dropped:** none; all 10 roadmap parts build.
+- **Implemented, unstaged:** all 10 roadmap parts and the .1b/.3b splits. Browser and focused checks are recorded above; final broad and packaged gates remain. **Dropped:** none.
 - **Split,** each by its own roadmap bullets:
   - .1 → .1b: chords, keycaps and the Settings list, plus the last listeners (⌘S, ⌘F).
   - .3 → .3b: Home's cursor and `e`.

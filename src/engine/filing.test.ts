@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { filingPlan, type OrganizeAsk } from './filing';
+import {
+  filingFields,
+  filedTypesOf,
+  pagesFiledUnder,
+  hostsOf,
+  filingPlan,
+  type OrganizeAsk,
+} from './filing';
 import { buildSchema } from './schema';
 import { makeEntry } from './testHelpers';
 import type { Entry } from './types';
@@ -195,4 +202,139 @@ describe('filingPlan: transcripts', () => {
     const p = plan({ type: 'Gathering', properties: { attendees: [] } }, transcript(null));
     expect(p.transcript).toEqual({ summary: null, field: null, joined: [], why: null });
   });
+});
+
+describe('declared filing hosts', () => {
+  it('a related view tab files Work items under Project and Epic, while blocked_by files nothing', () => {
+    const tabs = [
+      {
+        id: 'work',
+        name: 'Tasks',
+        content: 'view',
+        source: { type: 'Work item' },
+        scope: 'related',
+      },
+    ];
+    const definitions = [
+      makeEntry({
+        path: 'types/work-item.md',
+        type: 'Type',
+        title: 'Work item',
+        properties: {
+          fields: {
+            project: { kind: 'relation', target: 'Project' },
+            epic: { kind: 'relation', target: 'Epic' },
+            blocked_by: { kind: 'relation', target: 'Work item' },
+          },
+        },
+      }),
+      ...['Project', 'Epic'].map((title) =>
+        makeEntry({ path: `types/${title}.md`, type: 'Type', title, properties: { tabs } }),
+      ),
+    ];
+    const project = makeEntry({
+      path: 'projects/launch.md',
+      filename: 'launch.md',
+      title: 'Launch',
+      type: 'Project',
+    });
+    const epic = makeEntry({
+      path: 'epics/ship.md',
+      filename: 'ship.md',
+      title: 'Ship',
+      type: 'Epic',
+    });
+    const entry = makeEntry({
+      type: 'Work item',
+      relationships: { project: ['launch', 'missing'], epic: ['Ship'], blocked_by: ['launch'] },
+    });
+    const all = [...definitions, project, epic, entry];
+    const schema = buildSchema(all);
+    expect(filingFields('Work item', schema)).toEqual([
+      { hostType: 'Project', field: 'project' },
+      { hostType: 'Epic', field: 'epic' },
+    ]);
+    expect(hostsOf(entry, all, schema).map((host) => host.path)).toEqual([
+      'epics/ship.md',
+      'projects/launch.md',
+    ]);
+    expect(hostsOf({ ...entry, parseError: 'unreadable' }, all, schema)).toEqual([]);
+  });
+});
+
+it('filedTypesOf names a unique receiving field and leaves zero or several unselected', () => {
+  const entries = [
+    makeEntry({
+      path: 'types/project.md',
+      type: 'Type',
+      title: 'Project',
+      properties: {
+        tabs: [
+          {
+            id: 'tasks',
+            name: 'Tasks',
+            content: 'view',
+            source: { type: 'Task' },
+            scope: 'related',
+          },
+          { id: 'docs', name: 'Docs', content: 'view', source: { type: 'Spec' }, scope: 'related' },
+          { id: 'many', name: 'Many', content: 'view', source: { type: 'Many' }, scope: 'related' },
+        ],
+      } as never,
+    }),
+    ...[
+      ['Task', { agent: { kind: 'relation', target: 'Agent' } }],
+      ['Spec', {}],
+      [
+        'Many',
+        {
+          first: { kind: 'relation', target: 'Agent' },
+          second: { kind: 'relation', target: 'Agent' },
+        },
+      ],
+    ].map(([title, fields]) =>
+      makeEntry({
+        path: `types/${title}.md`,
+        type: 'Type',
+        title: String(title),
+        properties: {
+          fields: { project: { kind: 'relation', target: 'Project' }, ...(fields as object) },
+        } as never,
+      }),
+    ),
+  ];
+  expect(
+    filedTypesOf('Project', buildSchema(entries)).map(({ tab, recordType, field, receiving }) => [
+      tab.name,
+      recordType,
+      field,
+      receiving,
+    ]),
+  ).toEqual([
+    ['Tasks', 'Task', 'project', 'agent'],
+    ['Docs', 'Spec', 'project', null],
+    ['Many', 'Many', 'project', null],
+  ]);
+});
+
+it('pagesFiledUnder includes the demo host, its twelve work items and related specs only once', async () => {
+  const golden = await import('../../conformance/scan/entries.json');
+  const entries = golden.default.demo_vault as unknown as Entry[];
+  const schema = buildSchema(entries);
+  const ga = entries.find((entry) => entry.path === 'records/projects/guided-onboarding-ga.md')!;
+  const pages = pagesFiledUnder(ga, entries, schema);
+  expect(pages).toEqual(
+    [
+      ga.path,
+      ...entries
+        .filter(
+          (entry) =>
+            entry.relationships.project?.includes('guided-onboarding-ga') &&
+            ['Work item', 'Spec'].includes(entry.type ?? ''),
+        )
+        .map((entry) => entry.path),
+    ].sort(),
+  );
+  expect(pages).toHaveLength(13);
+  expect(pagesFiledUnder(at('plain.md'), entries, schema)).toEqual(['plain.md']);
 });

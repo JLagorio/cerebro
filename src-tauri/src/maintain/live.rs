@@ -146,8 +146,8 @@ fn request(prompt: &str, token: &str, url: &str) -> AgentRequest {
         // (M34.2.4's lane field is the renderer's path to the same gate).
         lane: None,
         // Cerebro's own run, on cerebro's own schedule: the tool-approval
-        // table's internal run kind denies every CLI built-in. Only the three
-        // internal spawn sites ever set this.
+        // table's internal run kind denies every CLI built-in. Only internal
+        // spawn sites ever set this.
         internal: true,
     }
 }
@@ -221,7 +221,7 @@ mod tests {
     #[test]
     fn a_maintenance_run_is_marked_as_cerebros_own() {
         // The marker the tool-approval table's internal run kind keys on. Only the
-        // three internal spawn sites ever set it.
+        // internal spawn sites ever set it.
         assert!(request("f", "t", "u").internal);
     }
 }

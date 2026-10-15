@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { buildSchema } from './schema';
-import { bandDef, bandWritable, groupEntries, groupTree } from './grouping';
+import {
+  bandDef,
+  bandWritable,
+  groupEntries,
+  groupTree,
+  bandKeysOf,
+  bandsEveryValue,
+  bandSeedFor,
+  movedBandValue,
+  NO_VALUE_KEY,
+} from './grouping';
 import { makeEntry } from './testHelpers';
 import type { FieldDef } from './types';
 import { bigTasks, computedVault, epics, smallTasks } from '@/test/computedVault';
@@ -240,8 +250,13 @@ describe('groupEntries — computed values (M60.1)', () => {
   it('bands each record of a derived relation under its linking record', () => {
     const groups = groupEntries(epics(), 'tasks', schema);
     expect(groups.map((g) => [g.key, g.label, g.entries.map((e) => e.title)])).toEqual([
-      ['big-1', 'big 1', ['Big']],
-      ['small-1', 'small 1', ['Small']],
+      ...[...bigTasks, ...smallTasks]
+        .sort((a, b) => a.title.localeCompare(b.title))
+        .map((task) => [
+          task.filename.replace(/\.md$/, ''),
+          task.title,
+          [task.relationships.epic[0] === 'big' ? 'Big' : 'Small'],
+        ]),
       ['__none__', 'No tasks', ['Empty']],
     ]);
   });
@@ -261,6 +276,75 @@ describe('groupEntries — computed values (M60.1)', () => {
       ['big', 'Big', 10],
       ['small', 'Small', 9],
     ]);
+  });
+});
+
+describe('multi-value band membership and writes (M61.1)', () => {
+  const person: FieldDef = { name: 'assignee', kind: 'person' };
+  it('puts a record in each distinct person band with each target’s own complete label', () => {
+    const multi = { ...i1, relationships: { assignee: ['ana-marte', 'zed-quill', 'ana-marte'] } };
+    const comma = { ...zed, title: 'Quill, Zed' };
+    const groups = groupEntries([multi], 'assignee', buildSchema([typeNote, ana, comma, multi]));
+    expect(groups.map((g) => [g.key, g.label, g.entries.length])).toEqual([
+      ['ana-marte', 'Ana Marte', 1],
+      ['zed-quill', 'Quill, Zed', 1],
+    ]);
+  });
+
+  it('honours limit one, expands undeclared lists and ignores empty values', () => {
+    expect(bandsEveryValue(person, ['a', 'b'])).toBe(true);
+    expect(bandKeysOf(['a', 'b', 'a'], person)).toEqual(['a', 'b']);
+    expect(bandKeysOf(['a', 'b'], { ...person, limit: 1 })).toEqual(['a']);
+    expect(bandKeysOf(['a', null, '', 'b', 'a'], null)).toEqual(['a', 'b']);
+    expect(bandKeysOf(false, null)).toEqual(['false']);
+    expect(bandKeysOf([], null)).toEqual([]);
+    expect(bandKeysOf(['a', 'b'], { name: 'text', kind: 'text' })).toEqual(['a']);
+  });
+
+  it('seeds multiselect lists, links and boolean values, while computed bands seed nothing', () => {
+    expect(bandSeedFor('a', { name: 'tags', kind: 'multiselect' })).toEqual(['a']);
+    expect(bandSeedFor('ana-marte', person)).toBe('[[ana-marte]]');
+    expect(bandSeedFor('true', { name: 'done', kind: 'checkbox' })).toBe(true);
+    expect(bandSeedFor(NO_VALUE_KEY, person)).toBeNull();
+    expect(bandSeedFor('1', { name: 'count', kind: 'rollup' })).toBeUndefined();
+    expect(
+      bandSeedFor('a', { ...person, from: { type: 'Person', field: 'assigned' } }),
+    ).toBeUndefined();
+  });
+
+  it.each([
+    [['a', 'b'], 'a', 'c', ['[[c]]', '[[b]]']],
+    [['a', 'b'], 'a', 'b', ['[[b]]']],
+    [['a', 'b'], 'b', 'c', ['[[a]]', '[[c]]']],
+    [['a', 'b'], 'a', NO_VALUE_KEY, ['[[b]]']],
+    [['a'], 'a', NO_VALUE_KEY, null],
+    [[], NO_VALUE_KEY, 'c', ['[[c]]']],
+  ])('moves %j from %s to %s without losing other memberships', (values, from, to, value) => {
+    const entry = { ...i1, relationships: { assignee: values as string[] } };
+    expect(movedBandValue(entry, 'assignee', from as string, to as string, schema)).toEqual({
+      value,
+    });
+  });
+
+  it('keeps undeclared list types, keeps limit-one scalar, and refuses computed values', () => {
+    const undeclared = makeEntry({ properties: { values: [1, 2] } });
+    expect(movedBandValue(undeclared, 'values', '1', '3', buildSchema([undeclared]))).toEqual({
+      value: ['3', 2],
+    });
+    const undeclaredLinks = makeEntry({ relationships: { peers: ['a', 'b'] } });
+    expect(
+      movedBandValue(undeclaredLinks, 'peers', 'a', 'c', buildSchema([undeclaredLinks])),
+    ).toEqual({ value: ['[[c]]', '[[b]]'] });
+    const limitedType = makeEntry({
+      ...typeNote,
+      properties: { fields: { assignee: { kind: 'person', limit: 1 } } },
+    });
+    expect(
+      movedBandValue(i1, 'assignee', 'ana-marte', 'zed-quill', buildSchema([limitedType, i1])),
+    ).toEqual({ value: '[[zed-quill]]' });
+    expect(
+      movedBandValue(epics()[0], 'tasks', 'big-1', 'small-1', buildSchema(computedVault())),
+    ).toEqual({ refused: "Can't move cards grouped by a computed property" });
   });
 });
 
@@ -292,4 +376,172 @@ describe('bandWritable (M60.1)', () => {
     expect(bandWritable(defOf('colour'))).toBe(true);
     expect(bandWritable(null)).toBe(true);
   });
+});
+
+describe('date bands (M61.3)', () => {
+  const ctx = { today: '2026-07-28', weekStart: 0 as const };
+  const doc = makeEntry({
+    path: 'types/dated.md',
+    title: 'Dated',
+    type: 'Type',
+    properties: {
+      fields: {
+        due: { kind: 'date' },
+        span: { kind: 'daterange' },
+        stamp: { kind: 'created_time' },
+      },
+    },
+  });
+  const records = [
+    makeEntry({ path: 'tomorrow.md', type: 'Dated', properties: { due: '2026-07-29 14:30' } }),
+    makeEntry({ path: 'week.md', type: 'Dated', properties: { due: '2026-07-31' } }),
+    makeEntry({ path: 'junk.md', type: 'Dated', properties: { due: 'sometime' } }),
+    makeEntry({ path: 'none.md', type: 'Dated' }),
+  ];
+  const schema = buildSchema([doc, ...records]);
+  it('emits relative empties in scale order, with ghosts distinct from absent values', () => {
+    const groups = groupEntries(records, 'due', schema, { ctx });
+    expect(groups.map((g) => g.label)).toEqual([
+      'Earlier',
+      'Today',
+      'Tomorrow',
+      'This week',
+      'Next week',
+      'Later',
+      'sometime',
+      'No due',
+    ]);
+    expect(groups.map((g) => g.entries.length)).toEqual([0, 0, 1, 1, 0, 0, 1, 1]);
+    expect(groups.map((g) => g.seedable !== false)).toEqual([
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+    ]);
+    expect(groups[6].ghost).toBe(true);
+  });
+  it('emits filled calendar months in ascending order and only filled future stamp bands', () => {
+    expect(
+      groupEntries(records, 'due', schema, { ctx, dateBucket: 'month' }).map((g) => [
+        g.label,
+        g.entries.length,
+      ]),
+    ).toEqual([
+      ['July 2026', 2],
+      ['sometime', 1],
+      ['No due', 1],
+    ]);
+    const old = makeEntry({ path: 'old.md', type: 'Dated', createdAt: '2026-07-27T12:00:00Z' });
+    const future = makeEntry({
+      path: 'future.md',
+      type: 'Dated',
+      createdAt: '2026-08-03T12:00:00Z',
+    });
+    expect(groupEntries([old], 'stamp', schema, { ctx })[0].label).toBe('Today');
+    expect(
+      groupEntries([old], 'stamp', schema, { ctx }).every((group) => group.seedable === false),
+    ).toBe(true);
+    expect(groupEntries([future, old], 'stamp', schema, { ctx })[0]).toMatchObject({
+      label: 'Later',
+      entries: [future],
+    });
+  });
+  it('passes date mode and one context through nested empty groups', () => {
+    const tree = groupTree(
+      records,
+      [{ field: 'due', dateBucket: 'month' }, { field: 'due' }],
+      schema,
+      0,
+      '',
+      ctx,
+    );
+    expect(tree[0].key).toBe('month:2026-07');
+    expect(tree[0].children.map((g) => g.label)).toEqual([
+      'Earlier',
+      'Today',
+      'Tomorrow',
+      'This week',
+      'Next week',
+      'Later',
+    ]);
+    expect(tree[0].children.every((g) => g.seedable === false)).toBe(true);
+    const empty = groupTree(records, [{ field: 'due' }, { field: 'span' }], schema, 0, '', ctx);
+    expect(empty.find((g) => g.label === 'Today')?.children.map((g) => g.label)).toContain(
+      'Tomorrow',
+    );
+  });
+  it('seeds only days and moves to them without losing time or a range end', () => {
+    expect(bandSeedFor(ctx.today, { name: 'due', kind: 'date' })).toBe(ctx.today);
+    expect(bandSeedFor(ctx.today, { name: 'span', kind: 'daterange' })).toEqual({
+      start: ctx.today,
+      end: null,
+    });
+    for (const key of ['rel:this-week', 'month:2026-07', 'invalid:sometime'])
+      expect(bandSeedFor(key, { name: 'due', kind: 'date' })).toBeUndefined();
+    expect(movedBandValue(records[0], 'due', '2026-07-29', ctx.today, schema)).toEqual({
+      value: '2026-07-28 14:30',
+    });
+    expect(movedBandValue(records[0], 'due', '2026-07-29', 'rel:this-week', schema)).toHaveProperty(
+      'refused',
+    );
+    expect(
+      movedBandValue(records[0], 'due', '2026-07-29', 'invalid:sometime', schema),
+    ).toHaveProperty('refused');
+  });
+});
+
+it('bands mixed deadline types by end and completion, with Overdue always present (M61.3b)', () => {
+  const doc = makeEntry({
+    path: 'types/dated.md',
+    type: 'Type',
+    title: 'Dated',
+    properties: {
+      deadline: 'due',
+      fields: { due: { kind: 'daterange' }, status: { kind: 'status' } },
+      statuses: [
+        { id: 'open', group: 'active' },
+        { id: 'done', group: 'done' },
+      ],
+    },
+  });
+  const ordinary = makeEntry({
+    path: 'types/note.md',
+    type: 'Type',
+    title: 'Note',
+    properties: { fields: { due: { kind: 'date' } } },
+  });
+  const row = (path: string, status: string, end: string) =>
+    makeEntry({ path, type: 'Dated', properties: { status, due: { start: '2026-07-20', end } } });
+  const open = row('open.md', 'open', '2026-07-27');
+  const unknown = row('unknown.md', 'unknown', '2026-07-27');
+  const done = row('done.md', 'done', '2026-07-27');
+  const tomorrow = row('tomorrow.md', 'open', '2026-07-29');
+  const note = makeEntry({ path: 'note.md', type: 'Note', properties: { due: '2026-07-26' } });
+  const entries = [open, unknown, done, tomorrow, note];
+  const schema = buildSchema([doc, ordinary, ...entries]);
+  const groups = groupEntries(entries, 'due', schema, {
+    ctx: { today: '2026-07-28', weekStart: 0 },
+  });
+  expect(groups.find((g) => g.key === 'rel:overdue')?.entries).toEqual([open, unknown]);
+  expect(groups.find((g) => g.key === 'rel:earlier')?.entries).toEqual([done, note]);
+  expect(groups.find((g) => g.label === 'Tomorrow')?.entries).toEqual([tomorrow]);
+  expect(movedBandValue(tomorrow, 'due', '2026-07-29', '2026-07-28', schema)).toEqual({
+    value: { start: '2026-07-19', end: '2026-07-28' },
+  });
+  expect(
+    groupEntries([tomorrow], 'due', schema, { ctx: { today: '2026-07-28', weekStart: 0 } }).map(
+      (g) => g.key,
+    ),
+  ).toEqual([
+    'rel:overdue',
+    '2026-07-28',
+    '2026-07-29',
+    'rel:this-week',
+    'rel:next-week',
+    'rel:later',
+  ]);
 });

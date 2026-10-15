@@ -8,6 +8,7 @@ import {
   filterOpsFor,
   filterStatusSet,
   limitEntries,
+  numericText,
   searchEntries,
   seedFilterRule,
 } from './viewFilters';
@@ -39,6 +40,190 @@ const entry = makeEntry({
 const schema = buildSchema([entry]);
 
 const wrap = (rule: FilterRule): FilterGroup => ({ all: [rule] });
+
+describe('strict scalar comparisons (M62.1)', () => {
+  it('numericText reads decimal text only', () => {
+    for (const [raw, expected] of [
+      ['5', 5],
+      ['-3.5', -3.5],
+      ['+5', 5],
+      ['5.', 5],
+      ['.5', 0.5],
+      ['1e3', 1000],
+      [' 5 ', 5],
+      ['\t5\n', 5],
+      ['\f5\r', 5],
+      [0, 0],
+      [-1.5, -1.5],
+    ] as const) {
+      expect(numericText(raw), JSON.stringify(raw)).toBe(expected);
+    }
+    for (const raw of [
+      '',
+      ' ',
+      '0x10',
+      '0o7',
+      '0b1',
+      'Infinity',
+      '1e400',
+      '5 apples',
+      '1,200',
+      '\u00a05',
+      true,
+      false,
+      null,
+      undefined,
+      [],
+      [5],
+      {},
+      Infinity,
+      NaN,
+    ]) {
+      expect(numericText(raw), String(raw)).toBeNull();
+    }
+  });
+  it('text in a number field never orders against a number', () => {
+    const page = makeEntry({ properties: { n: 'abc' } });
+    const own = buildSchema([page]);
+    for (const op of ['gt', 'gte', 'lt', 'lte'] as const) {
+      expect(evaluateFilters(page, wrap({ field: 'n', op, value: 5 }), own)).toBe(false);
+    }
+    expect(
+      evaluateFilters(
+        makeEntry({ properties: { n: 5 } }),
+        wrap({ field: 'n', op: 'lt', value: 'abc' }),
+        own,
+      ),
+    ).toBe(false);
+    expect(
+      evaluateFilters(
+        makeEntry({ properties: { n: ' ' } }),
+        wrap({ field: 'n', op: 'equals', value: 0 }),
+        own,
+      ),
+    ).toBe(false);
+    expect(
+      evaluateFilters(
+        makeEntry({ properties: { n: '0x10' } }),
+        wrap({ field: 'n', op: 'equals', value: 16 }),
+        own,
+      ),
+    ).toBe(false);
+  });
+  it('a mapping or nested list never matches a text condition', () => {
+    for (const value of [{ a: 1 }, [['alpha']]]) {
+      const page = makeEntry({ properties: { note: value } });
+      const own = buildSchema([page]);
+      for (const op of ['contains', 'starts_with', 'ends_with', 'equals'] as const) {
+        for (const text of ['object', 'alpha']) {
+          expect(evaluateFilters(page, wrap({ field: 'note', op, value: text }), own)).toBe(false);
+        }
+      }
+    }
+  });
+});
+
+describe('relative date filters use an injected clock (M61.3c)', () => {
+  const ctx = { today: '2026-07-28', weekStart: 0 as const };
+  const answers = (days: unknown[], op: FilterRule['op'], value: FilterRule['value']) =>
+    days.map((due) => {
+      const page = makeEntry({ properties: { due } as Entry['properties'] });
+      return evaluateFilters(page, wrap({ field: 'due', op, value }), buildSchema([page]), ctx);
+    });
+
+  it.each([
+    ['today', ['2026-07-27', '2026-07-28', '2026-07-29']],
+    ['today-7', ['2026-07-20', '2026-07-21', '2026-07-22']],
+    ['this_week', ['2026-07-25', '2026-07-26', '2026-07-28', '2026-08-01', '2026-08-02']],
+  ])('every date operator compares %s as an inclusive day range', (token, days) => {
+    const inside = days.map((_, i) => i > 0 && i < days.length - 1);
+    expect(answers(days, 'equals', token)).toEqual(inside);
+    expect(answers(days, 'not_equals', token)).toEqual(inside.map((value) => !value));
+    expect(answers(days, 'before', token)).toEqual(days.map((_, i) => i === 0));
+    expect(answers(days, 'after', token)).toEqual(days.map((_, i) => i === days.length - 1));
+    expect(answers(days, 'on_or_before', token)).toEqual(days.map((_, i) => i < days.length - 1));
+    expect(answers(days, 'on_or_after', token)).toEqual(days.map((_, i) => i > 0));
+  });
+
+  it('compares two relative bounds inclusively and ranges by their start', () => {
+    expect(
+      answers(['2026-07-20', '2026-07-21', '2026-07-28', '2026-07-29'], 'is_between', [
+        'today-7',
+        'today',
+      ]),
+    ).toEqual([false, true, true, false]);
+    expect(answers([{ start: '2026-07-28', end: '2026-08-05' }], 'equals', 'today')).toEqual([
+      true,
+    ]);
+  });
+
+  it('moves with the injected clock, and a token never equals non-date prose', () => {
+    const page = makeEntry({ properties: { due: '2026-07-28' } });
+    const own = buildSchema([page]);
+    const rule = wrap({ field: 'due', op: 'equals', value: 'today' });
+    expect(evaluateFilters(page, rule, own, ctx)).toBe(true);
+    expect(evaluateFilters(page, rule, own, { ...ctx, today: '2026-07-29' })).toBe(false);
+    expect(answers(['today', 'not a date', 7, null], 'equals', 'today')).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ]);
+    expect(answers(['today', 'not a date', 7], 'before', 'today')).toEqual([false, false, false]);
+  });
+
+  it('keeps date-like words literal in prose and option fields', () => {
+    const type = makeEntry({
+      path: 'types/task.md',
+      type: 'Type',
+      title: 'Task',
+      properties: {
+        fields: {
+          phase: { kind: 'select', options: [{ id: 'today', label: 'Ready today' }] },
+          note: 'text',
+        },
+      },
+    });
+    const page = makeEntry({
+      type: 'Task',
+      title: 'today',
+      properties: { phase: 'today', note: 'this_week' },
+    });
+    const own = buildSchema([type, page]);
+    for (const [field, value] of [
+      ['title', 'today'],
+      ['phase', 'today'],
+      ['note', 'this_week'],
+    ]) {
+      expect(evaluateFilters(page, wrap({ field, op: 'equals', value }), own, ctx)).toBe(true);
+    }
+    expect(
+      describeFilterRule(
+        { field: 'phase', op: 'equals', value: 'today' },
+        'Phase',
+        own.types.get('Task')?.fields[0],
+      ),
+    ).toBe('Phase is Ready today');
+    expect(
+      describeFilterRule(
+        { field: 'note', op: 'equals', value: 'this_week' },
+        'Note',
+        own.types.get('Task')?.fields[1],
+      ),
+    ).toBe('Note is this_week');
+  });
+
+  it('reads an instant as its local day', () => {
+    const previous = process.env.TZ;
+    process.env.TZ = 'America/Los_Angeles';
+    try {
+      expect(answers(['2026-07-29T02:00:00Z'], 'equals', 'today')).toEqual([true]);
+    } finally {
+      if (previous === undefined) delete process.env.TZ;
+      else process.env.TZ = previous;
+    }
+  });
+});
 
 describe('evaluateFilters — single ops', () => {
   const cases: [string, FilterRule, boolean][] = [

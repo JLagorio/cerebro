@@ -1,10 +1,21 @@
 import { configDefaults, coverageConfigDefaults, defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
+import { pdfjsAssets } from './scripts/pdfjsAssets';
 import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath, URL } from 'node:url';
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), pdfjsAssets()],
+  // Scan only the app's entry documents, never HTML inside vendored reference repos.
+  optimizeDeps: {
+    entries: ['index.html', 'state-lab.html'],
+    exclude: ['@ironcalc/wasm'],
+    include: [
+      'pdfjs-dist/legacy/build/pdf.mjs',
+      'pdfjs-dist/legacy/web/pdf_viewer.mjs',
+      'pdfjs-dist/legacy/build/pdf.worker.mjs',
+    ],
+  },
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },

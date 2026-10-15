@@ -456,3 +456,10 @@ describe('sourceFreshness (M34.5.2)', () => {
     expect(sourceFreshness(cached({ stale_after: 7, fetched_at: '' }), TODAY)).toBeNull();
   });
 });
+
+it('mail links never ask the cached-page inlet for a fetch', () => {
+  expect(
+    findExternalRefs('Read https://mail.google.com/mail/a and https://eu.mail.zoho.com/a'),
+  ).toEqual([]);
+  expect(findExternalRefs('Read https://docs.google.com/a')).toHaveLength(1);
+});

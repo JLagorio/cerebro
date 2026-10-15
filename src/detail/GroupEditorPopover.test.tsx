@@ -171,6 +171,11 @@ describe('eyes and the three-state menu', () => {
     expect(shellOf('g1').textContent).toContain('All properties hidden');
     // The editor row is still there, eye flipped to the hidden state.
     expect(editor().getByRole('button', { name: 'Show Priority' })).toBeTruthy();
+    await act(async () => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+    fireEvent.scroll(screen.getByTestId('layout-preview'));
+    expect(editor().getByRole('button', { name: 'Show Priority' })).toBeTruthy();
     fireEvent.keyDown(document, { key: 'Escape' });
 
     const patch = await apply(patchFrontmatter);

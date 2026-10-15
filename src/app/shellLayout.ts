@@ -1,3 +1,4 @@
+import { MAX_PANES } from '@/engine/panes';
 import {
   CANVAS_MIN_WIDTH,
   DOC_COLUMN_MIN_WIDTH,
@@ -24,16 +25,17 @@ import {
  *   1. the canvas, down to CANVAS_MIN_WIDTH (it is `flex-1`, so flex does it);
  *   2. the record, down to RIGHT_PANEL_MIN_WIDTH;
  *   3. the sidebar, down to SIDEBAR_WIDTH_MIN (`mainColumnFloor`);
- *   4. the assistant, down to RIGHT_PANEL_MIN_WIDTH;
- *   5. below SHELL_TWO_PANEL_MIN the sidebar steps down to its rail;
- *   6. below SHELL_RAIL_TWO_PANEL_MIN the assistant is parked (`shellPlan`),
+ *   4. panes beyond the focused one park, least recently focused first;
+ *   5. the assistant, down to RIGHT_PANEL_MIN_WIDTH;
+ *   6. below SHELL_TWO_PANEL_MIN the sidebar steps down to its rail;
+ *   7. below SHELL_RAIL_TWO_PANEL_MIN the assistant is parked (`shellPlan`),
  *      and the sidebar has its column back;
- *   7. below SHELL_PARKED_COLUMN_MIN the sidebar takes its rail again, or
+ *   8. below SHELL_PARKED_COLUMN_MIN the sidebar takes its rail again, or
  *      the parked assistant's tab is pushed off the window's edge.
  *
- * All seven are CSS, so a window drag settles in one layout pass: the record
+ * These steps are CSS, so a window drag settles in one layout pass: the record
  * is the one panel in the slot that shrinks, the assistant is capped at the
- * slot less the record's floor, and steps 5 to 7 are media queries
+ * slot less the record's floor, and steps 6 to 8 are media queries
  * (`SHELL_CLASSES`). Anything React decides from a measurement or a
  * `matchMedia` listener lands a frame after the window has been drawn at its
  * new size, and for that frame the slot clipped the assistant — at 1300→1000
@@ -54,7 +56,7 @@ export const SIDEBAR_RAIL_WIDTH = 44;
 /** The parked assistant's tab on the canvas row's right edge (M52). */
 export const PARKED_TAB_WIDTH = 32;
 
-/** Canvas, record and assistant, each at its floor. */
+/** The focused pane, record and assistant, each at its floor. */
 const TWO_PANEL_ROW = CANVAS_MIN_WIDTH + 2 * RIGHT_PANEL_MIN_WIDTH;
 
 /**
@@ -299,7 +301,7 @@ export function dragCeiling(room: number | null, max: number): number {
 }
 
 /**
- * The main column's floor, as CSS: the canvas floor, the page's own side
+ * The main column's floor, as CSS: every pane's floor, the focused page's side
  * panel, the record's floor, and the assistant's whole width — flex takes any
  * shortfall out of the sidebar, so the sidebar gives before the assistant
  * does, and before a page's reading column does. Capped at what the window
@@ -321,6 +323,7 @@ export interface FloorPanels {
   pageAside?: boolean;
   /** The assistant is parked, and its tab takes a strip of the row. */
   parked?: boolean;
+  panes?: number;
 }
 
 /** `mainColumnFloor`'s uncapped sum, in px. */
@@ -330,9 +333,10 @@ export function mainColumnFloorPx({
   assistantWidth,
   pageAside = false,
   parked = false,
+  panes = 1,
 }: FloorPanels): number {
   return (
-    CANVAS_MIN_WIDTH +
+    paneRowFloor(panes) +
     (pageAside ? DOC_PANEL_WIDTH : 0) +
     (detail ? RIGHT_PANEL_MIN_WIDTH : 0) +
     (assistant ? assistantWidth : 0) +
@@ -401,4 +405,28 @@ export function pageAsides({
   // the Pages panel folds first to make it so.
   const sideFits = fits(false, true);
   return { pages: pages && fits(true, side && sideFits), sideFits };
+}
+
+/** One reading column never yields; extra panes reserve a tab strip. */
+export function paneRowFloor(count: number): number {
+  return count <= 1 ? CANVAS_MIN_WIDTH : count * CANVAS_MIN_WIDTH + PARKED_TAB_WIDTH;
+}
+export function paneCapacity(row: number): number {
+  return Math.max(1, Math.min(MAX_PANES, Math.floor((row - PARKED_TAB_WIDTH) / CANVAS_MIN_WIDTH)));
+}
+/** Literal classes so CSS parks in the same layout pass as a resize. */
+export const PANE_PARK = [
+  '',
+  '@max-[832px]/panes:w-0 @max-[832px]/panes:min-w-0 @max-[832px]/panes:flex-none @max-[832px]/panes:border-0',
+  '@max-[1232px]/panes:w-0 @max-[1232px]/panes:min-w-0 @max-[1232px]/panes:flex-none @max-[1232px]/panes:border-0',
+  '@max-[1632px]/panes:w-0 @max-[1632px]/panes:min-w-0 @max-[1632px]/panes:flex-none @max-[1632px]/panes:border-0',
+] as const;
+export const PANE_TAB = [
+  'hidden',
+  'hidden @max-[832px]/panes:flex',
+  'hidden @max-[1232px]/panes:flex',
+  'hidden @max-[1632px]/panes:flex',
+] as const;
+export function paneParked(rank: number, row: number): boolean {
+  return rank > 0 && row < paneRowFloor(rank + 1);
 }

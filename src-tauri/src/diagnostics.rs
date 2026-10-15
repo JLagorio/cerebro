@@ -464,8 +464,9 @@ const SECRET_KEYS: [&str; 13] = [
 const SCHEMES: [&str; 4] = ["bearer", "basic", "token", "digest"];
 
 /// The prefixes of keys a connector is likely to hold: Anthropic and OpenAI,
-/// GitHub, Slack, GitLab and AWS.
-const KEY_PREFIXES: [&str; 12] = [
+/// GitHub, Slack, GitLab, AWS and Cerebro's personal tokens.
+const KEY_PREFIXES: [&str; 13] = [
+    "cbr_",
     "sk-",
     "ghp_",
     "gho_",
@@ -1045,6 +1046,15 @@ mod tests {
             assert_eq!(redact(&raw), masked, "{raw}");
             assert_eq!(redact(&masked), masked, "redacting twice changes nothing");
         }
+    }
+
+    #[test]
+    fn a_personal_token_is_redacted() {
+        let token = format!("cbr_{}", "a".repeat(64));
+        assert_eq!(redact(&token), "cbr_[redacted]");
+        let bearer = redact(&format!("Bearer {token}"));
+        assert!(!bearer.contains(&token));
+        assert!(bearer.contains("[redacted]"));
     }
 
     #[test]

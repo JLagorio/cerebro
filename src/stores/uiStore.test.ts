@@ -486,8 +486,8 @@ describe('favorites', () => {
     useUiStore.getState().toggleFavorite(VAULT, 'notes/plan.md');
     useUiStore.getState().toggleFavorite(VAULT, 'notes/doc/child.md');
     useUiStore.getState().toggleFavorite(OTHER, 'notes/plan.md');
-    useUiStore.getState().replaceFavoritePath(VAULT, 'notes/plan.md', 'notes/plan/plan.md');
-    useUiStore.getState().replaceFavoritePath(VAULT, 'notes/doc', 'notes/plan/doc');
+    useUiStore.getState().remapFavorites(VAULT, 'notes/plan.md', 'notes/plan/plan.md');
+    useUiStore.getState().remapFavorites(VAULT, 'notes/doc', 'notes/plan/doc');
     expect(useUiStore.getState().favorites[VAULT]).toEqual([
       'first.md',
       'notes/plan/plan.md',
@@ -690,4 +690,30 @@ describe('the thread a detached run belongs to (M57.6)', () => {
     useUiStore.getState().openDiff('notes/a.md');
     expect(useUiStore.getState().diffView).toEqual({ path: 'notes/a.md', commit: null });
   });
+});
+
+it('mirrors and restores a dismissed insight without writing the global legacy key', () => {
+  useUiStore.setState({ dismissedInsights: [] });
+  const stored = localStorage.getItem('cerebro.dismissedInsights');
+  useUiStore.getState().dismissInsight('knowledge/one.md');
+  useUiStore.getState().dismissInsight('knowledge/one.md');
+  expect(useUiStore.getState().dismissedInsights).toEqual(['knowledge/one.md']);
+  useUiStore.getState().restoreInsight('knowledge/one.md');
+  expect(useUiStore.getState().dismissedInsights).toEqual([]);
+  expect(localStorage.getItem('cerebro.dismissedInsights')).toBe(stored);
+});
+
+it('the peek keeps its pane siblings and steps over held files (M65.8)', () => {
+  const ui = useUiStore.getState();
+  ui.setDetailSiblings(['a', 'held', 'b'], 'p1');
+  ui.setDetailSiblings(['x', 'y'], 'p2');
+  ui.openDetail('a', 'p1');
+  expect(useUiStore.getState().detailSiblings).toEqual(['a', 'held', 'b']);
+  ui.stepDetail(1, (path) => path === 'held');
+  expect(useUiStore.getState().detailPath).toBe('b');
+  expect(useUiStore.getState().detailPane).toBe('p1');
+  ui.setDetailSiblings(['new'], 'p2');
+  expect(useUiStore.getState().detailSiblings).toEqual(['a', 'held', 'b']);
+  ui.closeDetail();
+  expect(useUiStore.getState().detailPane).toBeNull();
 });

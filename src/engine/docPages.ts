@@ -59,7 +59,8 @@ export function subPageFolder(entry: Entry): string {
  * bundle is written through the ledger, templates are stationery, agents and
  * skills are how the vault works (and moving an agent's file changes its
  * identity), a Type doc is the schema, a Collection page is its container,
- * `project.md` belongs to its project and a `.mmd` is raw diagram source.
+ * `project.md` belongs to its project. Only markdown pages can grow sub-pages;
+ * diagrams and whiteboards are separate file formats.
  */
 export function canHaveSubPages(entry: Entry): boolean {
   if (!entry.filename.endsWith('.md')) return false;

@@ -1,6 +1,7 @@
 ---
 type: Work item
 key: LNC-5
+project: "[[field-app-launch-campaign]]"
 status: backlog
 priority: low
 assignee: "[[maya-chen]]"

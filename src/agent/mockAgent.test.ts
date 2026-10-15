@@ -558,6 +558,91 @@ describe('runMockAgent', () => {
     });
   });
 
+  describe('the sheet edit script', () => {
+    const path = 'notes/budget.md';
+    const args = {
+      ops: [{ op: 'set_cells', sheet: 'Budget', cells: [{ address: 'B4', value: '=SUM(B2:B3)' }] }],
+    };
+    const report = JSON.stringify({ path, wrote: true, changed: [{ value: 1500 }] });
+    const gated = globalThis as { __cerebroAgentWriteGate?: Promise<void> };
+    afterEach(() => {
+      delete gated.__cerebroAgentWriteGate;
+    });
+    function runSheet(
+      json: string,
+      onEditSheet?: (path: string, args: Record<string, unknown>) => Promise<string>,
+    ) {
+      const events: AgentStreamEvent[] = [];
+      const actions: UiAction[] = [];
+      const done = new Promise<void>((resolve) => {
+        runMockAgent(
+          `edit sheet in ${path}: ${json}`,
+          (event) => {
+            events.push(event);
+            if (event.kind === 'Done') resolve();
+          },
+          { delayMs: 0, onEditSheet, onUiAction: (action) => void actions.push(action) },
+        );
+      });
+      return done.then(() => ({ events, actions }));
+    }
+    it('passes source inputs through the writer and announces the page after its report', async () => {
+      const writer = vi.fn(async () => report);
+      const { events, actions } = await runSheet(JSON.stringify(args), writer);
+      expect(toolNames(events)).toEqual(['edit_sheet']);
+      expect(JSON.parse(toolInputs(events)[0])).toEqual({ path, ...args });
+      expect(writer).toHaveBeenCalledWith(path, args);
+      expect(actions).toEqual([{ action: 'vault_changed', paths: [path] }]);
+      expect(events.find((e) => e.kind === 'ToolDone')).toMatchObject({ output: report });
+      expect(replyOf(events)).toBe(`I edited the sheets on ${path}.`);
+    });
+    it('waits for the write gate before calling the writer', async () => {
+      let release = () => {};
+      gated.__cerebroAgentWriteGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const writer = vi.fn(async () => report);
+      const run = runSheet(JSON.stringify(args), writer);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(writer).not.toHaveBeenCalled();
+      release();
+      await run;
+      expect(writer).toHaveBeenCalledOnce();
+    });
+    it('reports the first refusal line, preserves the full tool error and announces nothing', async () => {
+      const refusal =
+        'edit_sheet takes at most 25 ops in one call; this call has 26.\nNothing was written.';
+      const { events, actions } = await runSheet(JSON.stringify(args), async () => {
+        throw new Error(refusal);
+      });
+      expect(actions).toEqual([]);
+      expect(events.find((e) => e.kind === 'ToolDone')).toMatchObject({
+        is_error: true,
+        output: refusal,
+      });
+      expect(replyOf(events)).toBe(
+        `I could not edit the sheets on ${path}: ${refusal.split('\n')[0]}`,
+      );
+    });
+    it('refuses without a writer', async () => {
+      const { events, actions } = await runSheet(JSON.stringify(args));
+      expect(actions).toEqual([]);
+      expect(replyOf(events)).toBe(
+        `I could not edit the sheets on ${path}: edit_sheet is not available here`,
+      );
+    });
+    it.each(['not json', 'null', '[]', '"text"'])(
+      'refuses malformed arguments %s without a write',
+      async (json) => {
+        const writer = vi.fn(async () => report);
+        const { events, actions } = await runSheet(json, writer);
+        expect(writer).not.toHaveBeenCalled();
+        expect(actions).toEqual([]);
+        expect(replyOf(events)).toContain('edit_sheet needs `ops`, a list of operations');
+      },
+    );
+  });
+
   // M60.4 — the set script: set_fields through its handler, which writes
   // the record's frontmatter and announces a rescan, as Rust does.
   describe('the set script', () => {
@@ -1447,5 +1532,101 @@ describe('the review-notes script (M58.5)', () => {
     const { events } = await drain(notesPrompt([reviewNote('a`b.md', 3, 'Fix.')]));
     expect(toolNames(events)).toEqual([]);
     expect(replyOf(events)).toBe('I have 1 review note to work through, on a`b.md.');
+  });
+});
+
+it('suggests a checked view with a tool result and no UI action or write', async () => {
+  const suggestion = {
+    database: 'Work',
+    view: { name: 'Board', presentation: { type: 'board', group: [{ field: 'status' }] } },
+  };
+  const output = JSON.stringify({
+    suggested: suggestion,
+    note: 'The user sees this view as a card with a live preview. Nothing is written unless they add it.',
+  });
+  const events: AgentStreamEvent[] = [],
+    actions: UiAction[] = [];
+  const onSuggestView = vi.fn(async () => output);
+  await new Promise<void>((resolve) =>
+    runMockAgent(
+      'suggest view ' + JSON.stringify(suggestion),
+      (event) => {
+        events.push(event);
+        if (event.kind === 'Done') resolve();
+      },
+      { delayMs: 0, onSuggestView, onUiAction: (action) => actions.push(action) },
+    ),
+  );
+  expect(onSuggestView).toHaveBeenCalledWith(suggestion);
+  expect(events).toContainEqual({ kind: 'ToolDone', tool_id: 't-1', output });
+  expect(replyOf(events)).toBe('I suggested a view; it is on the card above.');
+  expect(actions).toEqual([]);
+});
+
+it('reports a refused suggestion from its first problem and never claims a card', async () => {
+  const events: AgentStreamEvent[] = [];
+  await new Promise<void>((resolve) =>
+    runMockAgent(
+      'suggest view {}',
+      (event) => {
+        events.push(event);
+        if (event.kind === 'Done') resolve();
+      },
+      {
+        delayMs: 0,
+        onSuggestView: async () =>
+          'schema_invalid: this view of Work can\'t be shown, so no card was made.\n- presentation.group[0]: Work has no field "owenr". Did you mean "owner"?',
+      },
+    ),
+  );
+  expect(replyOf(events)).toBe(
+    'I could not suggest that view: Work has no field "owenr". Did you mean "owner"?',
+  );
+  expect(events.find((event) => event.kind === 'ToolDone')).toMatchObject({ is_error: true });
+  const missing = await drain('suggest view {}');
+  expect(replyOf(missing.events)).toBe(
+    'I could not suggest that view: suggest_view is not available here',
+  );
+  expect(missing.actions).toEqual([]);
+});
+
+describe('skill invocation dispatch', () => {
+  it('reads a recipe that mentions the Inbox without proposing a filing', async () => {
+    const { events, actions } = await drain(
+      'The user invoked the skill "Catch me up" (records/skills/catch-me-up.md). Follow its instructions:\nRead the Inbox with list_inbox and read_activity.',
+    );
+    expect(actions).toEqual([]);
+    expect(toolNames(events)).toEqual(expect.arrayContaining(['list_inbox', 'read_activity']));
+    expect(toolNames(events)).not.toContain('propose_organize');
+    expect(replyOf(events)).toContain('Catch me up');
+  });
+});
+
+describe('follow-up booking script', () => {
+  it('passes the exact quoted note and requested offset to its real handler', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-15T12:00:00Z'));
+    const events: AgentStreamEvent[] = [];
+    const onScheduleFollowup = vi.fn(async () => 'Booked a follow-up. Waiting now: 1 of 3.');
+    runMockAgent(
+      '@release-scout follow up "check [[reply]] <b>plain</b>" in 2 hours',
+      (event) => events.push(event),
+      { delayMs: 0, onScheduleFollowup },
+    );
+    await vi.runAllTimersAsync();
+    vi.useRealTimers();
+    expect(onScheduleFollowup).toHaveBeenCalledWith({
+      at: '2026-10-15T14:00:00.000Z',
+      note: 'check [[reply]] <b>plain</b>',
+    });
+    expect(toolNames(events)).toEqual(['schedule_followup']);
+    expect(replyOf(events)).toBe('Booked a follow-up. Waiting now: 1 of 3.');
+  });
+  it('never claims it booked a refused follow-up', async () => {
+    const result = await drain('follow up "check later" in 1 minute');
+    expect(result.events.find((event) => event.kind === 'ToolDone')).toMatchObject({
+      is_error: true,
+    });
+    expect(replyOf(result.events)).toContain('I could not book that follow-up');
   });
 });

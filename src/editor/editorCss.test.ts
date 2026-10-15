@@ -72,6 +72,31 @@ function page(sections: boolean, blocks: string[]): Element[] {
   return [...document.querySelectorAll('.bn-block-content')];
 }
 
+describe('sheet sizing inside the editor', () => {
+  it.each([true, false])(
+    'keeps sheet columns readable in either block DOM shape: %s',
+    (wrapped) => {
+      const sheet =
+        '<div class="bn-block-content" data-content-type="sheet"><section><table><thead><tr><th>Row</th><th>A</th></tr></thead><tbody><tr><th>1</th><td>Value</td></tr></tbody></table></section></div>';
+      page(false, [
+        block(wrapped ? `<div class="react-renderer">${sheet}</div>` : sheet),
+        block(
+          '<div data-content-type="table"><table><tbody><tr><td>Ordinary</td></tr></tbody></table></div>',
+        ),
+      ]);
+      const table = document.querySelector('[data-content-type="sheet"] table')!;
+      expect(reaching(table, 'width')).toEqual(['max-content']);
+      expect(reaching(table, 'table-layout')).toEqual(['auto']);
+      expect(reaching(table.querySelectorAll('th')[1], 'min-width')).toEqual(['6rem !important']);
+      expect(reaching(table.querySelector('td')!, 'min-width')).toEqual(['6rem !important']);
+      expect(reaching(table.querySelector('th')!, 'min-width')).toEqual([]);
+      expect(
+        reaching(document.querySelector('[data-content-type="table"] td')!, 'min-width'),
+      ).toEqual([]);
+    },
+  );
+});
+
 describe('section spacing', () => {
   const body = [
     heading(1, 'Definition'),

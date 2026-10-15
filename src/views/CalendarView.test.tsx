@@ -433,3 +433,80 @@ describe('CalendarView hours (M61.8)', () => {
     expect(dayCell('2026-08-12').textContent).toContain('standup');
   });
 });
+
+it('repeats a series across the month, opens its occurrence menu and never drags a repeat or unknown rule', () => {
+  const type = makeEntry({
+    path: 'types/standup.md',
+    title: 'Standup',
+    type: 'Type',
+    properties: { fields: { window: { kind: 'daterange' }, repeat: { kind: 'repeat' } } },
+  } as never);
+  const series = makeEntry({
+    path: 'standup.md',
+    title: 'Standup',
+    type: 'Standup',
+    properties: {
+      window: { start: '2026-07-28 09:00', end: '2026-07-28 09:15' },
+      repeat: 'FREQ=WEEKLY;BYDAY=TU,TH;COUNT=4',
+    },
+  } as never);
+  const odd = makeEntry({
+    path: 'odd.md',
+    title: 'Odd sync',
+    type: 'Standup',
+    properties: { window: '2026-07-29', repeat: 'FREQ=MONTHLY;BYSETPOS=2' },
+  });
+  const entries = [type, series, odd];
+  const schema = buildSchema(entries);
+  const patch = vi.fn();
+  useVaultStore.setState({ entries, patchFrontmatter: patch });
+  render(
+    <CalendarView
+      entries={[series, odd]}
+      presentation={presentation}
+      schema={schema}
+      fields={columnUniverse({ type: 'Standup', project: null }, entries, schema)}
+      today="2026-08-01"
+    />,
+  );
+  const chips = screen
+    .getAllByTestId('calendar-chip')
+    .filter((chip) => chip.hasAttribute('data-occurrence'));
+  expect(chips).toHaveLength(4);
+  expect(chips.map((chip) => chip.closest('[data-day]')?.getAttribute('data-day'))).toEqual([
+    '2026-07-28',
+    '2026-07-30',
+    '2026-08-04',
+    '2026-08-06',
+  ]);
+  fireEvent.keyDown(chips[2], { key: 'ArrowRight' });
+  const unknown = screen
+    .getAllByTestId('calendar-chip')
+    .find((chip) => chip.getAttribute('data-repeat') === 'not-understood')!;
+  expect(unknown.textContent).toContain('Odd sync');
+  fireEvent.keyDown(unknown, { key: 'ArrowRight' });
+  expect(patch).not.toHaveBeenCalled();
+  fireEvent.click(chips[2]);
+  expect(screen.getByTestId('occurrence-menu').textContent).toContain('Tuesday, August 4');
+  fireEvent.keyDown(window, { key: 'Escape' });
+  expect(screen.queryByTestId('occurrence-menu')).toBeNull();
+});
+
+it('shows file-time calendars and leaves their computed dates fixed', () => {
+  const patch = vi.fn().mockResolvedValue(undefined);
+  useVaultStore.setState({ patchFrontmatter: patch });
+  const entry = makeEntry({
+    path: 'records/campaigns/file.md',
+    title: 'File timestamp',
+    type: 'Campaign',
+    createdAt: TODAY,
+    properties: { createdAt: '1999-01-01' },
+  });
+  setup([entry], { dateField: 'createdAt' }, vi.fn());
+  expect(screen.queryByRole('button', { name: /New record on/ })).toBeNull();
+  const card = screen.getByRole('button', { name: /File timestamp/ });
+  expect(dayCell(TODAY).getAttribute('data-count')).toBe('1');
+  fireEvent.keyDown(card, { key: 'ArrowRight' });
+  expect(patch).not.toHaveBeenCalled();
+  expect(card.getAttribute('aria-label')).not.toContain('Arrow keys');
+});

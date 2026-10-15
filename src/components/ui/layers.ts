@@ -73,6 +73,18 @@ interface Layer {
 }
 
 const stack: Layer[] = [];
+const listeners = new Set<() => void>();
+
+/** The keymap cancels an armed chord as soon as a modal opens. */
+export function subscribeLayers(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+function changed(): void {
+  for (const listener of listeners) listener();
+}
 
 /** The default for a layer that registers no surface — including the bare
  * `pushLayer(id)` calls tests make. It claims nothing, so it never suppresses
@@ -87,11 +99,15 @@ export function pushLayer(id: string, options: LayerOptions = {}): void {
     contains: options.contains ?? OWNS_NOTHING,
     modal: options.modal ?? true,
   });
+  changed();
 }
 
 export function popLayer(id: string): void {
   const at = stack.findIndex((l) => l.id === id);
-  if (at !== -1) stack.splice(at, 1);
+  if (at !== -1) {
+    stack.splice(at, 1);
+    changed();
+  }
 }
 
 /** Everything that blocks. A tooltip floats over a surface without owning it,
@@ -155,6 +171,7 @@ export function isInsideLayerAbove(id: string, node: Node): boolean {
 /** Test seam — the stack is module state and would otherwise leak between cases. */
 export function resetLayers(): void {
   stack.length = 0;
+  changed();
 }
 
 /**

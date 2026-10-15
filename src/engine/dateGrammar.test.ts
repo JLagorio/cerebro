@@ -76,6 +76,32 @@ describe("refuses malformed grammars in Rust's words", () => {
   ])('%s', (_label, edit, words) => {
     expect(() => parseDateGrammar({ ...base(), ...edit })).toThrow(words);
   });
+
+  it('refuses malformed relative sections in the shared words', () => {
+    const edits: [string, unknown, string][] = [
+      ['relative', null, 'dates: relative has an invalid shape'],
+      ['days', [], 'dates: relative tokens must be non-empty and unique'],
+      ['week_starts', [1, 0], 'dates: relative week_starts must be 0, 1 in order'],
+      ['words', {}, 'dates: relative words must name {n}'],
+    ];
+    for (const [key, value, words] of edits) {
+      const edited = structuredClone(DATE_GRAMMAR);
+      if (key === 'relative') (edited as unknown as Record<string, unknown>)[key] = value;
+      else (edited.relative as unknown as Record<string, unknown>)[key] = value;
+      expect(() => parseDateGrammar(edited)).toThrow(words);
+    }
+    const badOffsets = structuredClone(DATE_GRAMMAR);
+    badOffsets.relative.offsets.max = 1000;
+    expect(() => parseDateGrammar(badOffsets)).toThrow('dates: relative offsets are invalid');
+    const badPeriod = structuredClone(DATE_GRAMMAR);
+    Object.assign(badPeriod.relative.periods[0], { unit: 'year' });
+    expect(() => parseDateGrammar(badPeriod)).toThrow(
+      'dates: relative period unit has an unknown word year',
+    );
+    expect(() => parseDateGrammar({ ...DATE_GRAMMAR, relative_cases: [] })).toThrow(
+      'dates: no relative cases',
+    );
+  });
 });
 
 describe('the dates.ts adapters read through the grammar', () => {

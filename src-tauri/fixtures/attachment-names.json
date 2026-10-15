@@ -1,0 +1,80 @@
+[
+  {
+    "name": "report.pdf",
+    "size": 10,
+    "safe": "report.pdf",
+    "refusal": null
+  },
+  {
+    "name": "/outside/a#b%20?.PNG",
+    "size": 5,
+    "safe": "a-b-20-.PNG",
+    "refusal": null
+  },
+  {
+    "name": "C:\\drop\\x<y>:|*.txt",
+    "size": 5,
+    "safe": "x-y----.txt",
+    "refusal": null
+  },
+  {
+    "name": "  hello\u0000world\n.txt  ",
+    "size": 0,
+    "safe": "hello-world-.txt",
+    "refusal": null
+  },
+  {
+    "name": ".env",
+    "size": 50000001,
+    "safe": ".env",
+    "refusal": ".env is hidden"
+  },
+  {
+    "name": "\u200c.hidden.md",
+    "size": 5,
+    "safe": "\u200c.hidden.md",
+    "refusal": "\u200c.hidden.md is hidden"
+  },
+  {
+    "name": " .hidden.md ",
+    "size": 5,
+    "safe": ".hidden.md",
+    "refusal": ".hidden.md is hidden"
+  },
+  {
+    "name": "big.mov",
+    "size": 50000001,
+    "safe": "big.mov",
+    "refusal": "big.mov is over 50 MB"
+  },
+  {
+    "name": "edge.mov",
+    "size": 50000000,
+    "safe": "edge.mov",
+    "refusal": null
+  },
+  {
+    "name": "",
+    "size": 0,
+    "safe": "file",
+    "refusal": "a file needs a name"
+  },
+  {
+    "name": "   ",
+    "size": 0,
+    "safe": "file",
+    "refusal": "a file needs a name"
+  },
+  {
+    "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png",
+    "size": 0,
+    "safe": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png",
+    "refusal": null
+  },
+  {
+    "name": "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9.png",
+    "size": 0,
+    "safe": "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9.png",
+    "refusal": null
+  }
+]

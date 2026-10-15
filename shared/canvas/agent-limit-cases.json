@@ -1,0 +1,14 @@
+[
+  {"name":"null","value":null,"error":"Canvas agent limits format must be 1."},
+  {"name":"format","path":["format"],"value":2,"error":"Canvas agent limits format must be 1."},
+  {"name":"unknown root","path":["extra"],"value":1,"error":"Canvas agent limits root must contain only format, artifact_version, read."},
+  {"name":"version","path":["artifact_version"],"value":0,"error":"Canvas agent limits artifact_version must be a positive whole number."},
+  {"name":"missing read fields","path":["read"],"value":{},"error":"Canvas agent limits read must contain only nodes, bytes, ids."},
+  {"name":"unknown read field","path":["read","extra"],"value":1,"error":"Canvas agent limits read must contain only nodes, bytes, ids."},
+  {"name":"zero nodes","path":["read","nodes"],"value":0,"error":"Canvas agent limits read.nodes must be a positive whole number."},
+  {"name":"negative bytes","path":["read","bytes"],"value":-1,"error":"Canvas agent limits read.bytes must be a positive whole number."},
+  {"name":"fractional ids","path":["read","ids"],"value":1.5,"error":"Canvas agent limits read.ids must be a positive whole number."},
+  {"name":"text number","path":["read","ids"],"value":"500","error":"Canvas agent limits read.ids must be a positive whole number."},
+  {"name":"unsafe number","path":["read","bytes"],"value":9007199254740992,"error":"Canvas agent limits read.bytes must be a positive whole number."},
+  {"name":"whole decimal","path":["read","nodes"],"value":500.0}
+]

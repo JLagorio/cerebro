@@ -1,3 +1,5 @@
+import { commandDef } from '@/app/commands';
+import { Keycaps } from './Keycaps';
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useEscapeLayer } from '@/components/ui/Popover';
@@ -57,6 +59,8 @@ function TooltipEscapeLayer({ onClose }: { onClose: () => void }) {
 export interface TooltipProps {
   /** The text. Nothing renders when this is empty. */
   label: string;
+  /** The catalog row whose keys follow the label. */
+  command?: string;
   /**
    * A single element. Handlers are cloned onto it rather than onto a wrapper,
    * so the tooltip adds NO node to the tree — a wrapper, even
@@ -80,11 +84,13 @@ export interface TooltipProps {
 
 export function Tooltip({
   label,
+  command,
   children,
   side = 'top',
   delayMs = DELAY_MS,
   disabled = false,
 }: TooltipProps) {
+  if (command !== undefined) commandDef(command);
   const id = useId();
   const anchorRef = useRef<HTMLElement | null>(null);
   const bubbleRef = useRef<HTMLDivElement | null>(null);
@@ -191,7 +197,10 @@ export function Tooltip({
                 : { left: pos.left, top: pos.top }
             }
           >
-            {label}
+            <span className="inline-flex items-center gap-2">
+              {label}
+              {command !== undefined && <Keycaps command={command} className="text-n-200" />}
+            </span>
           </div>,
           document.body,
         )}

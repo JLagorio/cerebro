@@ -28,7 +28,7 @@ two readers, shared cases" below.
 | `freshness.v1.json` + `.sha256` | When a claim goes stale, by predicate class (M27.1) — `time_basis`, `staleness`, and whether an attestation may anchor. Loaded by `src-tauri/src/dynamics/freshness.rs`. `rule_version` is stamped into every `freshness.transitioned` event. |
 | `coverage-fold.v1.json` + `.sha256` | The Coverage dimension precedence and summary fold (M27.2). Loaded by `src-tauri/src/dynamics/coverage.rs`; `fold_rule_version` is carried on every folded answer. |
 | `staleness.v1.json` | When a concept is stale (M49.8): inclusive of its `stale_after` date, and a value that is not exactly a YYYY-MM-DD date (a non-string included) reads as stale — an unknown horizon is surfaced, never treated as "never". Read by `knowledge::is_stale` (Rust) and `staleFrom` (src/engine/okf.ts); both replay its `cases`, so the two evaluators cannot drift, and Rust also checks that `validate_stale_after` refuses every malformed case. |
-| `links.v1.json` | Where the webview may go (M53.12): its entry document (`tauri://localhost` at one of `entry.paths`, or the devUrl under `tauri dev`, with no credentials and no query) loads, an `external_schemes` address leaves for the system browser, and everything else is refused. A path or query on the app's own origin is refused too, because tauri's asset fallback serves `index.html` for any path it cannot find (tauri-2.11.5 manager/mod.rs:405-425), so following one reloads the app and drops unsaved state. Read by `shell::links` (Rust), which routes every navigation and every new-window request through it, and by `isWebUrl` (src/mermaid/flowchart/linkTargets.ts) for the scheme list; both replay its `cases`, and Rust also checks the artifact is closed and canonical. |
+| `links.v1.json` | Where the webview may go (M53.12): its entry document (`tauri://localhost` at one of `entry.paths`, or the devUrl under `tauri dev`, with no credentials and no query) loads, an `external_schemes` address leaves for the system browser, and everything else is refused. A path or query on the app's own origin is refused too, because tauri's asset fallback serves `index.html` for any path it cannot find (tauri-2.12.4 manager/mod.rs:402-415), so following one reloads the app and drops unsaved state. Read by `shell::links` (Rust), which routes every navigation and every new-window request through it, and by `isWebUrl` (src/mermaid/flowchart/linkTargets.ts) for the scheme list; both replay its `cases`, and Rust also checks the artifact is closed and canonical. |
 | `agent-links.v1.json` | Open with's agent links (M55.9): four targets in menu order, each an id, a label, a base and a query param, and `max_url_bytes` (8192, the whole URL). A link is the base, `?`, the param, `=` and the prompt percent-encoded with `encodeURIComponent`'s set; a longer one is never opened and the prompt is copied instead. Rust (`shell::open`) builds every URL, checks the cap and replays the `cases`; TypeScript (`OpenWithMenu`) reads only the ids and labels and never builds a URL or checks a length, so no rule is twinned. No digest, like `links.v1.json`. |
 | `run-options.v1.json` | What a run may ask Claude Code for (M56.5): the five `effort_levels` 2.1.250's `--effort` takes, with labels; the model-name shape (`max_chars`, an ASCII letter or digit `first`, then the `also` characters); the `model_suggestions` the pickers offer; the refusal `messages` and `value_chars`, the cut a refused value is quoted at. Absent or blank is unset, which passes no flag. Read by `agent::run_options` (Rust, strict parse), which refuses a run before it starts in `run_agent`, `hand_to` and `spawn_run`, and by `src/engine/runOptions.ts`, which draws the agent page's rows and the composer's picker and gives the browser mock Rust's refusals word for word; both replay its `cases`. No digest, like `links.v1.json`. |
 | `lanes.v1.json` + `.sha256` | The four attention lanes (M27.6): lane order, the reason codes each lane may emit and their within-lane order, the reliance vocabulary, whether the debt lane requires reliance, and (M27.7) which lanes are PROTECTED under §33. Loaded by `src-tauri/src/attention/lanes.rs`, which refuses to start if the artifact and the code disagree about EITHER set — a lane or reason declared with no code behind it renders as permanently empty, which reads as "nothing here" — and refuses an artifact that protects nothing, because a firewall with no protected class is a comment. M27.9 added the three §78/§80 hygiene reasons to the debt lane — `dynamics::hygiene` had computed them since M27.2 with no caller, which is the same as not computing them. M49.10 (K31) stopped emitting `coverage_unassessed` as a lane item: no coverage assessor has shipped, so it pinned every belief in the protected blindness lane. It stays declared for the day an assessor leaves only some beliefs unassessed; until then the lanes COUNT unassessed beliefs (`Lanes::unassessed`) and the view says so — in the empty blindness lane's line, or in `incomplete` when the lane holds assessed items — so an empty lane never reads as "no coverage gaps". |
@@ -38,8 +38,9 @@ two readers, shared cases" below.
 | `goldens-trigger/*.json` | The trigger registry's parity mechanism (M28.0), replayed by `cargo test` and `pnpm test:run` from the same bytes. Each golden is a full `TriggerEvaluation` record (sometimes with its parent) and the outcome both validators must land on: `accepted`, or a refusal named by its CLOSED code — codes are the contract, prose is not. Both suites also assert every refusal code has at least one golden, so a code with no fixture fails the build. Accepted goldens carry ids that genuinely recompute (`sha256(domain\0gate\0scope\0rule_version\0snapshot_hash)`). |
 | `goldens/*.json` | Proposal + preconditions → expected verdict + destiny. Replayed by `cargo test` and `pnpm test:run` from these same files. A fixture may declare `signals` (server-derived escalators), `versions` (`"<class>/<id>": n`, the M22 `state_versions` its expected-version CAS runs against), `ancestry` (the support graph M26.3's preventive walk runs over), and `table` (a FROZEN table to replay against — `"v1"` or `"v2"` — for a refusal the shipped table can no longer produce; M27.4 made every shipped capability available, so `capability_unavailable` lives on against v2 rather than losing its shared fixture). Declaring either state field requires `rust_only: true` — both read reducer state that is out of the mock's scope by declaration, so the TS runner skips the *verdict replay* loudly rather than the directory quietly missing the case. It still asserts the artifact half of every such file: that the op declares the code possible, and that the code declares a destiny. |
 | `concept-types.v1.json` + `.sha256` | The words the agent may type a concept with (M33a.1), and a one-line hint for each. Loaded by `src-tauri/src/knowledge.rs`; the tool manifest's one token, `{{concept_types}}`, renders it into `write_concept`'s type description. Rust-only for now: the read side (`okf.ts`) resolves a concept's type against the vault's own catalog and tolerates unknown values by OKF §4.1, so there is no twin to disagree with. |
-| `tools.v1.json` + `.sha256` | **The tool manifest** (M54.1): one row per hand-written MCP tool in served order — title, kind, idempotence, door, grant axis and target argument, picker summary and toolset, renderer, fold phrases (M56.8), icon, whether an ask-first agent's call waits for the person (`confirmable`, M57.4), search hint, description and input schema — the facts every generated `propose_<op>` tool shares, the picker's toolsets, and the CLI's own built-ins in argv order, each with its tool-approval `family` and the input field its card names it by (`subject`, M57.2). Read by `src-tauri/src/policy/tools.rs`: `mcp.rs` serves `tools/list` from it with annotations, and derives the scope and read targets, the open-page announcements and the read-to-replace guard; `tool-approval.v1.json` plans the CLI's built-ins by its family column. TS reads the same file through `src/lib/policy/tools.ts` (M54.2), refusal for refusal, and derives the picker's toolsets, summaries and writes flags, the transcript's icons, write cards, row renderers and read folds (M56.8), the turn checkpoint's trigger and the run log's paths from it. Both sides hash against `tools.v1.sha256`, and both replay `src-tauri/fixtures/tool-cases.json`, its shared case file. navigate's `to` enum is `src/engine/destinations.ts`'s ids plus view, held there by `destinations.test.ts`; Rust refuses any `to` the served enum doesn't list (M59.1). |
+| `tools.v1.json` + `.sha256` | **The tool manifest** (M54.1): one row per hand-written MCP tool in served order — title, kind, idempotence, door, grant axis and target argument (`file` is a contained-file read and `canvas` a whiteboard read, both on axis read and door none), picker summary and toolset, renderer, fold phrases (M56.8), icon, whether an ask-first agent's call waits for the person (`confirmable`, M57.4), search hint, description and input schema — the facts every generated `propose_<op>` tool shares, the picker's toolsets, and the CLI's own built-ins in argv order, each with its tool-approval `family` and the input field its card names it by (`subject`, M57.2). Read by `src-tauri/src/policy/tools.rs`: `mcp.rs` serves `tools/list` from it with annotations, and derives the scope and read targets, the open-page announcements and the read-to-replace guard; `tool-approval.v1.json` plans the CLI's built-ins by its family column. TS reads the same file through `src/lib/policy/tools.ts` (M54.2), refusal for refusal, and derives the picker's toolsets, summaries and writes flags, the transcript's icons, write cards, row renderers and read folds (M56.8), the turn checkpoint's trigger and the run log's paths from it. Both sides hash against `tools.v1.sha256`, and both replay `src-tauri/fixtures/tool-cases.json`, its shared case file. navigate's `to` enum is `src/engine/destinations.ts`'s ids plus view, held there by `destinations.test.ts`; Rust refuses any `to` the served enum doesn't list (M59.1). |
 
+| `mail.v1.json` + `.sha256` | Mail's private folders, scoped default-closed R14 gate, mail hosts and unattended connector reader denials. Rust `policy/mail.rs` and TS `engine/mailPolicy.ts` load it strictly; `mail/mod.rs` and TS replay the host cases. Runtime reads the artifact alone; tests verify the evidence pack before an open gate can ship. |
 | `tool-approval.v1.json` + `.sha256` | **What Claude Code may run** (M57.2): for each tool family of the manifest, in its order, a grid of run kind (attended, unattended, internal) by ceiling (`none`, the shell's off, ask and on, or since M57.7 the web's off and on) to one of six decisions, the read scope's overrides, the permission modes, a card (title, kind and the answers it offers) on every family that asks and a message on every family that refuses (a `deny` cell says it too, where the family has one), and the words the model and the person read. Since M57.3 the question family (AskUserQuestion) asks on an attended run with a `question` card and is denied wherever nobody watches. Since M57.4 it also decides an ask-first agent's page writes: the `confirmable` family, whose members are the manifest's confirmable rows, is read by the agent's `ask_first` (yes or no) where the other families read a ceiling, and the `ask_first` block holds the record key and the values a record may hold. Since M57.4c an unattended ask-first write queues for Review (`queue`, the ask-first family's alone) within `queue_limits`. Since M57.7 the web family (WebFetch, WebSearch) reads the `web` ceiling, the Settings Web access switch: off denies it, on allows it, and internal runs are denied it either way. Since M60.8b `hidden_paths` names the vault folders (`.trash`) the CLI's own tools may not open, and which tools' path rules close them (Read, Edit). Interpreted by `src-tauri/src/policy/tool_approval.rs` (argv, the init's mode check and the ask gate's `host_answer`) and `src/lib/policy/toolApproval.ts` (the mock, the panel's prompts), refusal for refusal. Both hash against the `.sha256`. |
 | `goldens-tool-approval/*.json` | The table's parity mechanism, replayed by `cargo test` and `pnpm test:run` from the same bytes: one plan golden per run kind × shell ceiling (each with the web off), one per run kind with the web on and one narrowed to WebFetch (M57.7), two read-scoped and two narrowed ones, five ask-first ones (M57.4; the unattended one waits in Review since M57.4c) (each pinning the mode, both lists, the hidden folders' path rules ending every attended and unattended deny list since M60.8b, the gate's matcher, what is withheld and every tool's decision), and `host-answers.json`, the gate's answer for single calls, beside the two question files (`question-attended-asks.json`, `question-unattended-denied.json`, M57.3). Both suites assert every cell and every host outcome has a golden. |
 
@@ -90,6 +91,7 @@ A part that adds a shared case file adds its row here in the same commit.
 
 | Twin | Rust replay | TS replay | Held by | Since |
 | --- | --- | --- | --- | --- |
+| mail storage, URL hosts and the scoped admission gate | `src-tauri/src/policy/mail.rs`, `src-tauri/src/mail/mod.rs` | `src/engine/mailPolicy.test.ts` | `shared/policy/mail.v1.json` | M69.7–.7b |
 | the policy table and its goldens | `src-tauri/src/policy/goldens.rs` | `src/lib/policy/goldens.test.ts` | `shared/policy/policy.v3.json`, `shared/policy/goldens/` | M24 |
 | critical attention and its goldens | `src-tauri/src/attention/critical.rs` | `src/lib/attention/critical.test.ts` | `shared/policy/critical-attention.v1.json`, `shared/policy/goldens-critical/` | M27.7 |
 | the trigger registry and its goldens | `src-tauri/src/trigger/evaluation.rs` | `src/lib/trigger/evaluation.test.ts` | `shared/policy/trigger-registry.v1.json`, `shared/policy/goldens-trigger/` | M28.0 |
@@ -97,8 +99,9 @@ A part that adds a shared case file adds its row here in the same commit.
 | staleness | `src-tauri/src/knowledge.rs` | `src/engine/okf.test.ts` | `shared/policy/staleness.v1.json` | M49.8 |
 | note targets the write guards refuse | `src-tauri/src/vault/write.rs` | `src/lib/mockIpc.test.ts`, `src/engine/docPages.test.ts` | `src-tauri/fixtures/note-targets.json` | M53.4 |
 | where the webview may navigate | `src-tauri/src/shell/links.rs` | `src/mermaid/flowchart/linkTargets.test.ts` | `shared/policy/links.v1.json` | M53.12 |
+| personal token names and grants | `src-tauri/src/runtime/client_tokens.rs` | `src/lib/mockIpc.test.ts` | `src-tauri/fixtures/client-tokens.json` | M62.5 |
 | source slugs | `src-tauri/src/mcp.rs` | `src/engine/ingest.test.ts` | `src-tauri/fixtures/source-slugs.json` | M53.17 |
-| the scan golden | `src-tauri/src/vault/scan.rs` | `src/lib/scanGolden.test.ts` | `conformance/scan/entries.json` | M53.22, M55.2 |
+| the scan golden, including the first H1 and its replacement (`firstH1LineIndex` / `replaceH1` in frontmatter.ts against `first_h1_line_start` / `replace_h1` in parse.rs / write.rs) | `src-tauri/src/vault/scan.rs` | `src/lib/scanGolden.test.ts`, `src/engine/frontmatter.test.ts` | `conformance/scan/entries.json` | M53.22, M55.2, M60.11 |
 | knowledge bundle paths | `src-tauri/src/knowledge.rs` | `src/engine/okf.test.ts` | `src-tauri/fixtures/bundle-paths.json` | M53.28 |
 | projection claims | `src-tauri/src/ledger/conformance.rs` | `src/lib/epistemic/schema.test.ts` | `conformance/projection-claims.json` | M53.29 |
 | the tool manifest's cases | `src-tauri/src/mcp.rs` | `src/lib/policy/tools.test.ts`, `src/engine/tools.test.ts` | `src-tauri/fixtures/tool-cases.json` | M54.1, M54.2 |
@@ -114,16 +117,37 @@ A part that adds a shared case file adds its row here in the same commit.
 | an agent's read scope | `src-tauri/src/mcp.rs` | `src/engine/agentAccess.test.ts` | `src-tauri/fixtures/grant-scope.json` | M58.6 |
 | searchable values | `src-tauri/src/search.rs` | `src/engine/searchable.test.ts` | `src-tauri/fixtures/searchable-values.json` | M59.2 |
 | the in-app Trash | `src-tauri/src/vault/trash.rs` | `src/engine/trash.test.ts`, `src/lib/mockIpc.test.ts` | `src-tauri/fixtures/trash-cases.json` | M60.8 |
-| the batch writer's order, words and outcomes | `src-tauri/src/vault/batch.rs` | `src/lib/mockIpc.test.ts`, `src/engine/batch.test.ts` | `src-tauri/fixtures/batch-cases.json` | M60.6 |
-| field kinds, value shapes and the status chain | `src-tauri/src/vault/schema.rs` | `src/engine/fieldKindTable.test.ts` | `shared/schema/field-kinds.v1.json` | M60.3 |
-| the date grammar | `src-tauri/src/vault/dates.rs` | `src/engine/dateGrammar.test.ts` | `shared/calendar/dates.v1.json` | M60.3 |
-| durable wakes: admission, claims, finishes, cancels and expiry | `src-tauri/src/runtime/wakes.rs` | `src/lib/mockIpc.test.ts` | `src-tauri/fixtures/wake-cases.json` | M63.1 |
+| batch writes and import plans: order, words and outcomes | `src-tauri/src/vault/batch.rs` | `src/lib/mockIpc.test.ts`, `src/engine/batch.test.ts` | `src-tauri/fixtures/batch-cases.json` | M60.6 |
+| field kinds (including text-only repeat), value shapes, formula definitions, the status chain and declared deadlines (`replays_the_deadline_cases`) | `src-tauri/src/vault/schema.rs` | `src/engine/fieldKindTable.test.ts` | `shared/schema/field-kinds.v1.json` | M60.3, M61.3b, M61.4, M61.10 |
+| the date grammar, including injected-clock relative tokens | `src-tauri/src/vault/dates.rs` | `src/engine/dateGrammar.test.ts`, `src/engine/relativeDates.test.ts` | `shared/calendar/dates.v1.json` | M60.3, M61.3c |
+| structured query filters, sorts and decimal number readings | `src-tauri/src/vault/query.rs` | `src/engine/filterCases.test.ts` | `src-tauri/fixtures/filter-cases.json` | M62.2 |
+| stored date placement, half-open agenda windows and recurrence pairing | `src-tauri/src/vault/agenda.rs` | `src/engine/agendaCases.test.ts` | `src-tauri/fixtures/agenda-cases.json` | M62.3 |
+| checked view vocabulary | `src-tauri/src/vault/views.rs` | `src/engine/viewVocabulary.test.ts` | `shared/schema/views.v1.json` | M62.4 |
+| upstream sheet calculation, limits and refusal words | `src-tauri/src/sheet/engine.rs` | `src/lib/mockSheet.ironcalc.test.ts` | `src-tauri/fixtures/sheet-calc-cases.json` | M67.1 |
+| sheet fence headers, raw CSV records and source spans, including page bodies | `src-tauri/src/sheet/fence.rs` | `src/engine/sheet/fence.test.ts` | `src-tauri/fixtures/sheet-fence-cases.json` | M67.2, M67.2b |
+| sheet source edit plans, refusal order and exact calculation reports | `src-tauri/src/sheet/edit.rs`, `src-tauri/src/sheet/ai.rs` | `src/engine/sheet/edit.test.ts`, `src/lib/mockSheetEdit.ironcalc.test.ts` | `src-tauri/fixtures/sheet-edit-cases.json` | M67.2b |
+| structural sheet reference rewriting, bounded fill and formula completion | `src-tauri/src/sheet/grid.rs` | `src/lib/mockSheet.ironcalc.test.ts` | `src-tauri/fixtures/sheet-grid-ops.json` | M67.3, M67.3b |
+| checked view suggestion answers and refusals | `src-tauri/src/vault/views.rs` | `src/engine/viewSuggestion.test.ts`, `src/lib/mockIpc.test.ts` | `src-tauri/fixtures/view-suggestion-cases.json` | M62.4 |
+| pre-run check eligible wakes and retry windows | `src-tauri/src/agent/condition.rs` | `src/lib/mockIpc.test.ts` | `src-tauri/fixtures/condition-cases.json` | M63.7 |
+| self-followup booking, claims and cancellation words | `src-tauri/src/runtime/followups.rs` | `src/lib/mockIpc.test.ts` | `src-tauri/fixtures/followup-cases.json` | M63.8 |
+| durable wakes: admission, recorded writers, chain bounds, assignment releases, claims, finishes, cancels and expiry | `src-tauri/src/runtime/wakes.rs` | `src/lib/mockIpc.test.ts` | `src-tauri/fixtures/wake-cases.json` | M63.1, .2, .3b |
+| durable reminder claims and revision-aware Done marks | `src-tauri/src/runtime/reminders.rs`, `src-tauri/src/runtime/done_marks.rs` | `src/lib/mockIpc.test.ts` | `src-tauri/fixtures/reminder-state-cases.json` | M64.3 |
 | History's activity window and its refusals | `src-tauri/src/runtime/activity.rs` | `src/lib/mockIpc.test.ts` | `src-tauri/fixtures/activity-window-cases.json` | M64.2 |
 | connector approvals | `src-tauri/src/connectors.rs` | `src/engine/connectors.test.ts` | `src-tauri/fixtures/connector-approvals.json` | M69.1 |
 | comment sidecars | `src-tauri/src/vault/comments.rs` | `src/engine/comments.test.ts`, `src/lib/mockIpc.test.ts` | `src-tauri/fixtures/comment-cases.json` | M70.2 |
 | the agent comment tools' quote filter and words | `src-tauri/src/comment_tools.rs` | `src/engine/quote.test.ts`, `src/lib/mockIpc.test.ts` | `src-tauri/fixtures/comment-tools.json` | M70.3 |
 | a page thread's turns | `src-tauri/src/agent/thread_turn.rs` | `src/lib/mockIpc.test.ts` | `src-tauri/fixtures/thread-turns.json` | M70.4 |
 | file kinds, their refusals and the open verdict's cases | `src-tauri/src/files/kinds.rs` | `src/engine/fileKinds.test.ts` | `shared/files/kinds.v1.json`, `src-tauri/fixtures/file-kind-cases.json` | M66.1 |
+| contained root file addresses, byte doors and refusal words | `src-tauri/src/files/bytes.rs` | `src/engine/fileBytes.test.ts`, `src/lib/mockBytes.test.ts` | `shared/files/bytes.v1.json` | M66.2 |
+| explicitly dropped file metadata and bounded capture text | `src-tauri/src/files/dropped.rs` | `src/lib/mockDropped.test.ts` | `src-tauri/fixtures/dropped-cases.json` | M66.3 |
+| whole-line page media and contained picture destinations | `src-tauri/src/files/media.rs` | `src/engine/pageMedia.test.ts` | `src-tauri/fixtures/media-lines.json` | M66.8b |
+| contained document paths and refusal order | `src-tauri/src/files/extract/mod.rs` | `src/lib/mockExtract.test.ts` | `src-tauri/fixtures/document-paths.json` | M66.7c |
+| inert extracted document text | `src-tauri/src/files/extract/markdown.rs` | `src/engine/extracted.test.ts` | `src-tauri/fixtures/extract-escape.json` | M66.7c |
+| extraction outcome wire shapes | `src-tauri/src/files/extract/mod.rs` | `src/engine/extracted.test.ts`, `src/lib/mockExtract.test.ts` | `src-tauri/fixtures/extract-wire.json` | M66.7c |
+| attachment names, hidden refusal and size cap | `src-tauri/src/vault/write.rs` | `src/engine/attachments.test.ts`, `src/lib/mockAttachments.test.ts` | `src-tauri/fixtures/attachment-names.json` | M66.6 |
+| import identity, stamps and their protection, hash and URL grammar | `src-tauri/src/import/mod.rs`, `src-tauri/src/import/stamps.rs` | `src/engine/importSources.test.ts` | `shared/import/sources.v1.json` | M69.3–.3b |
+| JSON Canvas format, reader and writer, unknown values and refusal words | `src-tauri/src/canvas/format.rs`, `src-tauri/src/canvas/read.rs`, `src-tauri/src/canvas/write.rs` | `src/engine/scene/format.test.ts`, `src/engine/scene/jsonCanvas.test.ts` | `shared/canvas/format.v1.json`, `shared/canvas/format-cases.json`, `shared/canvas/cases.json` | M68.2, M68.7 |
+| whiteboard agent caps and loader refusal words | `src-tauri/src/canvas/agent_limits.rs` | `src/engine/scene/canvasLimits.test.ts` | `shared/canvas/agent-limits.v1.json`, `shared/canvas/agent-limit-cases.json` | M68.7 |
 
 ## Regenerating
 
@@ -152,6 +176,7 @@ cargo test --lib policy::tools::tests::write_tools_digest -- --ignored
 # after an edit to tool-approval.v1.json (bump artifact_version, set
 # rule_version to tool-approval/<date>, and rewrite the goldens it changes)
 cargo test --lib policy::tool_approval::tests::write_tool_approval_digest -- --ignored
+cargo test --lib policy::tool_approval::tests::write_tool_approval_goldens -- --ignored
 ```
 
 A new snapshot must also be added to `RESOLVABLE_ARTIFACTS` in
@@ -180,6 +205,42 @@ come first in each language.
 order and its `cli_tools` in argv order, so neither is sorted.
 
 ## Judgment calls recorded here
+
+- **M67.2b — sheet edits are one checked source batch:** only `set_cells`
+  and `add_sheet` are admitted. An empty value clears a cell; canonical CSV
+  encoding rewrites only touched fences, with the surrounding page and
+  frontmatter preserved. Reported formula errors do not repair or refuse a
+  valid source edit. Reports compare exact cached values, never formatted
+  numbers. The npm binding lacks that getter, so the browser decodes its
+  just-calculated carrier through a project-owned facade of the same pinned,
+  unchanged engine. `scripts/sheet-values/README.md` documents the measured
+  gap, reproducible build, provenance and shared report replay.
+
+- **M67.2 — `calculate_sheet` is a read:** hypothetical inputs live only in
+  the call's private workbook. It uses read scope, produces no write receipt
+  and announces no page change. Its source strings and computed values are
+  page data, never prompt instructions.
+
+- **Agenda placement (M62.3):** `agenda-cases.json` holds points, inclusive
+  date ends, midnight ends, open and backwards ranges and recurrence pairing.
+  Timed windows are Rust-only: the calendar asks for days, the agenda for
+  minutes. Start, end and labels are Rust's display words; TS verifies the
+  shared point, day-span and conversion facts. Absent and unreadable values
+  both produce no span in TS; Rust counts them separately. An open or
+  backwards range preserves its start. Recurrence is never expanded here;
+  only the first-daterange-else-first-date pairing is shared. Read scope
+  applies to Type docs as well as records, so an unseen schema cannot supply
+  dates. An invalid stored value is counted as unreadable, never as absent.
+- **Structured query parity (M62.2):** `filter-cases.json` holds only queries
+  Rust admits. The app skips unfinished conditions while a query refuses them.
+  Text sorts caseless by code point in Rust and by locale in the app; the cases
+  pin ASCII ordering, including lowercase first on a tie. Decimal text uses
+  `numericText` / `numeric_text`, never JavaScript's hex or empty-string
+  coercion. Rollups, formulas and derived relations are not evaluated by Rust.
+  Relative tokens resolve on the case's injected day with Sunday weeks.
+  UTF-16 versus code-point ordering and exotic `String(number)` spellings stay
+  unpinned; the query answer names the text-sort difference.
+
 
 - **`thresholds.lineage_fan_in_high = 5`.** The design fixes the *mechanism*
   (fan-in above a named threshold floors risk at HIGH) and leaves the number
@@ -425,6 +486,10 @@ order and its `cli_tools` in argv order, so neither is sorted.
   write door, under the note's lock, before a byte is written. It bounds one
   call and claims nothing about the world, so it is operational, no op lists
   it, and `Rejection::new` keeps it out of the ledger, like M54.10's codes.
+  Human saves outside the editor also compare their loaded version (M65.7):
+  `save_note` refuses stale `expect_hash` before writing or capturing a knowledge
+  edit, and records one operational row under the `save_note` surface. Task
+  ticks refresh without retrying; Library drafts wait for the person's choice.
 - **It is neither of the other two stale codes.** `stale_target_version` is
   the ledger's `expected_version` check on a proposal, and `stale_view` is a
   person's verify against a projection that moved. Neither is borrowed for a
@@ -435,7 +500,7 @@ order and its `cli_tools` in argv order, so neither is sorted.
 - **A hashed write is also a read.** The hash proves the run read the note,
   so `call_tool` holds the target to the read scope too, under
   `read_outside_scope`, and a write-only run cannot use the hash to probe a
-  note it may not read. Human saves never compare: the last write wins.
+  note it may not read. Editor saves never compare: the last write wins.
 
 ## No longer waiting (M57.1)
 
@@ -501,6 +566,17 @@ order and its `cli_tools` in argv order, so neither is sorted.
   calls in parallel, so the hint is kept for tools that write nothing at all;
   a door that writes may not allow it, and a tool that only moves the UI or
   starts a run is `additive`, not read-only.
+- **File targets are read-only (M66.8).** A `file` target requires a schema
+  argument, the read axis and door none. `read_document` checks scope before
+  opening and again against its contained descriptor's canonical path. It is
+  granted by the read toolset, including personal-token clients.
+- **Canvas targets are read-only (M68.7).** A `canvas` target requires a
+  schema argument, the read axis and door none. `read_canvas` checks scope
+  before bytes and again against the pinned descriptor's canonical path.
+  It reads one board up to the shared 8 MiB file cap. A file card is looked
+  up only within read scope; outside that scope its target is `unchecked`,
+  whether or not it exists. A card's contents and web links are never opened.
+  The shared canvas limits cap the JSON answer independently of the file.
 - **Note writers are always write-scoped.** Door `note` allows only the write
   and read_write axes, and both need a target argument that the schema
   requires (a note or folder on the write axis, a note on read_write), so a
@@ -523,22 +599,27 @@ order and its `cli_tools` in argv order, so neither is sorted.
   quotes the page, so a comment never needs write scope. Both loaders accept
   the door only with axis read, a note target, kind additive and renderer
   step, in one refusal's words, and its rows are never `confirmable`.
+- **Computed record fields are never agent writes.** `set_fields` names
+  formulas alongside rollups, timestamps and reverse relations (M61.4);
+  the shared schema table declares which kinds are computed, and both
+  planners refuse them before writing any part of the request.
 - **Picker copy lives here.** Toolset labels and hints and each row's summary
   are the picker's words, and `src/engine/tools.ts` reads them from here
   (M54.2). A copy edit is an artifact edit with a digest regeneration.
-- **Fold phrases are owner-read copy (M56.8).** A read row's `fold {one,
+- **Fold phrases are owner-read copy (M56.8).** A step-rendered read row's `fold {one,
   many}` is how a run of its consecutive calls reads in a transcript ("Read
   5 notes"), so a phrase edit is an artifact edit with a digest regeneration.
-  Only reads fold, cerebro's `read_only` rows and the CLI's readers, so a
+  Only step-rendered reads fold, cerebro's `read_only` rows and the CLI's readers, so a
   write keeps its path in view; a failed or interrupted read is never folded
   out of sight. Phrases are lowercase (the row capitalizes the label it
   joins), at most 40 characters, `one` without `{n}` and `many` with exactly
   one.
 - **The renderer vocabulary is data (M56.8).** `step` and `change` serve any
-  row; `concept`, `handoff` and `commit` draw one door's work and sit only on
+  row; `concept`, `handoff`, `commit` and `view` draw one door's work and sit only on
   it: `concept` on door `concept` (write_concept, recheck_concept), `handoff`
   on door `run` (hand_to), `commit` on door `ledger` and the proposals
-  surface (commit_proposals). The generated `propose_*` tools stay `step`, a
+  surface (commit_proposals), and `view` only on door `none` (suggest_view).
+  A checked view has its own card and never folds. The generated `propose_*` tools stay `step`, a
   CLI row takes only `step` or `change`, and a `concept` row, like a
   `change` row, needs a target. A new renderer is an artifact edit and a
   loader change on both sides.
@@ -550,20 +631,26 @@ order and its `cli_tools` in argv order, so neither is sorted.
   `anthropic/searchHint` is served on every tool and `anthropic/alwaysLoad`
   only where a row sets it; a key the CLI does not know is ignored, never
   fatal.
-- **Six tools load early, and no others (M54.5).** The CLI defers every MCP
+- **Seven tools load early, and no others (M54.5).** The CLI defers every MCP
   tool behind its tool search, so a run spent a turn finding
   `get_vault_context` before it could call it. An early tool's schema rides
   every turn of every run that lists it, so `always_load` is set only where
   it earns that: on the read core
   (`get_vault_context`, `search_notes`, `get_note`, `knowledge_about`), which
-  nearly every run reaches for first, and on the two held tools
-  (`report_window_outcome`, `submit_answer`), which `tools/list` shows only to
-  the run holding their window or question (M54.4), so no other run pays for
+  nearly every run reaches for first, and on the three held tools
+  (`report_window_outcome`, `submit_answer`, `submit_condition`), which `tools/list` shows only to
+  the run holding their window, question or pre-run check (M54.4), so no other run pays for
   them and a synthesis run skips the search. Every other tool stays deferred:
   a write or a UI move comes later in a turn, if at all. Only a read-only row
   or a held tool may load early, and
   `agent::tests::only_the_read_core_and_held_tools_load_without_a_search` pins
-  the six.
+  the seven.
+- **A follow-up targets only its caller (M63.8).** `schedule_followup` is
+  listed only to a `process:` run, and its handler resolves exactly one own
+  Agent record. It has no target argument. At most three pending or claimed
+  bookings wait for that agent in that vault, each five minutes to thirty
+  days out, with a note of one to five hundred Unicode characters. The
+  `later` toolset grants that booking alone; a personal client cannot hold it.
 - **A CLI row names its family, never its decision (M57.2).** `family`
   is required and `subject` is null or an input field; what a family may do
   in a run is `tool-approval.v1.json`'s alone. The three shell columns M54.1
@@ -758,3 +845,54 @@ which must also carry M26.2's semantic-receipt-v2 validator — last.
   speculatively — the same reasoning as R14's deliberately empty
   `registered_connectors`: a registration added to satisfy a validator would
   be worse than the gap.
+
+
+### Personal-token toolsets (M62.5, D17 (b), default taken)
+
+The manifest's top-level `clients` block names one `default` toolset and its
+`grantable` additions, with a nonempty `why`. Both loaders refuse a default
+that is not declared or whose rows are not all read-only on non-writing
+doors. Both refuse undeclared, duplicate, default or generated grantable ids,
+and any grantable set with a row on axis none: every call must have a folder
+scope that bounds it. A token always includes the default; tool names retain
+served order. `toolset_writes` / `toolsetWrites` read each row's door rather
+than maintaining a second list. Comment tools remain read-scoped and do not
+claim a page-writing grant.
+
+The token-case twin counts Unicode scalar characters in names and UTF-8
+bytes in folders. It trims slug separators after the 32-character ASCII cut,
+collapses repeated folder separators, rejects backslashes and controls, and
+counts unique normalized folders toward its limit. These narrow choices keep
+the grant shown in Settings the same grant the runtime checks. Plaintext
+secrets never persist; token rows and the mock retain SHA-256 fingerprints.
+
+
+## Mail storage and scoped admission (M69.7)
+
+`mail.v1.json` and `mail.v1.sha256` are read by
+`src-tauri/src/policy/mail.rs` and `src/engine/mailPolicy.ts`. The artifact
+names the mail folder, the folders kept out of git and the gate's connector,
+kinds, evidence pack and one vault-store scope. Its `path_cases`, `gate_cases`
+and `refusals` replay in both readers. Folder names are plain ASCII paths and
+matching ignores ASCII case at separators. Gitignore rows include derived
+case-folding patterns so this remains true on case-sensitive filesystems.
+
+The gate is closed by default. Only the owner acceptance procedure in the
+named pack opens it, for the listed kinds in that one vault store. Tests
+refuse an open gate without a dated, fired pack and R14 registration. Runtime
+admission reads the artifact flag and scope, never the trigger registry or the
+pack. Removing a file from git's index preserves it on disk and does not
+remove it from older commits.
+
+After a deliberate edit, bump the artifact version and run:
+
+```sh
+cd src-tauri
+cargo test --lib policy::mail::tests::write_mail_digest -- --ignored \
+  --skip crash --skip killed_ --skip kill_and_restart --skip a_kill_ \
+  --skip kill_point --skip interrupted_overwrite
+```
+
+Replay `policy::mail::tests` and `src/engine/mailPolicy.test.ts`, then the git
+checkpoint/run changeset checks whenever kept-out paths change. There is no
+runtime digest check. Never format the hashed JSON.

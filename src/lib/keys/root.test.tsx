@@ -1,3 +1,5 @@
+import * as commands from '@/app/commands';
+import { HINT_MS, pendingChord } from './chords';
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CommandDef } from '@/app/commands';
@@ -10,6 +12,7 @@ import { activeChain, keyAdmits, ROOT_PAGE_ID } from './root';
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   resetLayers();
   document.body.replaceChildren();
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
@@ -139,7 +142,7 @@ describe('editors, claims and layers', () => {
 });
 
 describe('letters', () => {
-  // No letter row ships before M65.1b, so the gate is asked directly.
+  // Ask the single-letter gate directly as well as exercising shipped chords.
   const LETTER: CommandDef = {
     id: 'test.down',
     label: 'Down',
@@ -227,4 +230,91 @@ describe('which scope a key resolves in', () => {
   it('with no page in the DOM, the root keeps a fallback page', () => {
     expect(activeChain()).toEqual([ROOT_PAGE_ID, 'app']);
   });
+});
+
+describe('chords through the root', () => {
+  it('g h resolves through the active chain and consumes both keys', () => {
+    const home = vi.fn();
+    bind(APP_SCOPE, 'go.home', { run: home });
+    mountScopes();
+    expect(keydown(document.body, { key: 'g' }).defaultPrevented).toBe(true);
+    expect(keydown(document.body, { key: 'h' }).defaultPrevented).toBe(true);
+    expect(home).toHaveBeenCalledOnce();
+  });
+
+  it('letters stand down in editors, claimed elements, and modal layers', () => {
+    const { at } = mountScopes();
+    bind(APP_SCOPE, 'go.home', { run: vi.fn() });
+    for (const id of ['field', 'area', 'pick', 'prose', 'claimed']) {
+      expect(keydown(at(id), { key: 'g' }).defaultPrevented).toBe(false);
+      expect(pendingChord()).toBeNull();
+    }
+    pushLayer('dialog');
+    expect(keydown(document.body, { key: 'g' }).defaultPrevented).toBe(false);
+  });
+
+  it('blur, pointerdown and a newly opened modal cancel immediately', () => {
+    bind(APP_SCOPE, 'go.home', { run: vi.fn() });
+    for (const cancel of [
+      () => window.dispatchEvent(new Event('blur')),
+      () => fireEvent.pointerDown(document.body),
+      () => pushLayer('dialog'),
+    ]) {
+      keydown(document.body, { key: 'g' });
+      expect(pendingChord()).not.toBeNull();
+      cancel();
+      expect(pendingChord()).toBeNull();
+      popLayer('dialog');
+    }
+  });
+
+  it('a fast miss passes, a hinted miss is swallowed, and Escape always passes', () => {
+    vi.useFakeTimers();
+    bind(APP_SCOPE, 'go.home', { run: vi.fn() });
+    keydown(document.body, { key: 'g' });
+    expect(keydown(document.body, { key: 'x' }).defaultPrevented).toBe(false);
+    keydown(document.body, { key: 'g' });
+    vi.advanceTimersByTime(HINT_MS);
+    expect(keydown(document.body, { key: 'x' }).defaultPrevented).toBe(true);
+    keydown(document.body, { key: 'g' });
+    vi.advanceTimersByTime(HINT_MS);
+    expect(keydown(document.body, { key: 'Escape' }).defaultPrevented).toBe(false);
+    expect(pendingChord()).toBeNull();
+  });
+});
+
+it('g g reaches a list binding in the active page scope', () => {
+  const first: CommandDef = {
+    id: 'list.first',
+    label: 'Top of list',
+    keys: ['g g'],
+    scope: 'page',
+    group: 'Lists',
+  };
+  const readDef = commands.commandDef;
+  const readCatalog = commands.catalog;
+  const catalog = vi.spyOn(commands, 'catalog').mockImplementation(() => [...readCatalog(), first]);
+  const def = vi
+    .spyOn(commands, 'commandDef')
+    .mockImplementation((id) => (id === first.id ? first : readDef(id)));
+  try {
+    const run = vi.fn();
+    bind(PAGE, first.id, { run });
+    const { at } = mountScopes();
+    at('in-page').focus();
+    expect(keydown(at('in-page'), { key: 'g' }).defaultPrevented).toBe(true);
+    expect(keydown(at('in-page'), { key: 'g' }).defaultPrevented).toBe(true);
+    expect(run).toHaveBeenCalledOnce();
+  } finally {
+    catalog.mockRestore();
+    def.mockRestore();
+  }
+});
+
+it('falls back to the active pane and forgets a parked pointer scope', () => {
+  document.body.innerHTML =
+    '<section data-testid="pane" data-active="false" data-parked="true" data-key-scope-page data-key-scope="page" data-key-scope-id="first"><button id="parked">old</button></section><section data-testid="pane" data-active="true" data-parked="false" data-key-scope-page data-key-scope="page" data-key-scope-id="second"></section>';
+  expect(activeChain()[0]).toBe('second');
+  fireEvent.pointerDown(document.getElementById('parked')!);
+  expect(activeChain()[0]).toBe('second');
 });

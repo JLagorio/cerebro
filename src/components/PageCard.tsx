@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useOpenPath } from '@/app/useOpenPath';
 import { EntryIcon, PageIconGlyph } from '@/components/PageIcon';
 import { Icon } from '@/components/ui/Icon';
@@ -73,7 +73,7 @@ export function PageCardView({
       className="my-1 w-full rounded-lg border border-n-200 bg-n-0 px-3 py-2 text-sm"
     >
       {state === 'resolved' && entry !== null ? (
-        <ResolvedFace entry={entry} alias={alias} schema={schema} onOpen={onOpen} />
+        <ResolvedPageCard entry={entry} alias={alias} schema={schema} onOpen={onOpen} />
       ) : state === 'missing' && !choosing ? (
         <div className="flex items-center gap-2">
           <Icon name="file-x" size={16} color="var(--n-400)" />
@@ -104,16 +104,18 @@ export function PageCardView({
   );
 }
 
-function ResolvedFace({
+export function ResolvedPageCard({
   entry,
   alias,
   schema,
   onOpen,
+  openControl,
 }: {
   entry: Entry;
   alias: string;
   schema: Schema;
   onOpen: (path: string) => void;
+  openControl?: ReactNode;
 }) {
   const field = statusFieldOf(entry, schema);
   const status = field === null ? null : schema.resolveField(entry, field.name);
@@ -131,14 +133,16 @@ function ResolvedFace({
           <FieldChip resolved={status} />
         </span>
       )}
-      <button
-        type="button"
-        data-testid="page-card-open"
-        onClick={() => onOpen(entry.path)}
-        className="flex-none rounded-md border border-n-300 bg-n-0 px-2 py-0.5 text-xs text-n-700 hover:bg-n-50"
-      >
-        Open
-      </button>
+      {openControl ?? (
+        <button
+          type="button"
+          data-testid="page-card-open"
+          onClick={() => onOpen(entry.path)}
+          className="flex-none rounded-md border border-n-300 bg-n-0 px-2 py-0.5 text-xs text-n-700 hover:bg-n-50"
+        >
+          Open
+        </button>
+      )}
     </div>
   );
 }

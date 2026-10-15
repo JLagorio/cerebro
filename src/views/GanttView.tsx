@@ -10,6 +10,7 @@ import {
   axisTicks,
   axisWidth,
   barGeometry,
+  canReschedule,
   dateKindOf,
   dayOffset,
   dependenciesOf,
@@ -136,10 +137,10 @@ export function GanttView({
     // source query never selected — otherwise a descendant's bar falls off the
     // end of the ruler its own parent defined.
     const spans = rows
-      .flatMap((r) => (r.kind === 'row' ? [spanOf(r.entry, dateField)] : []))
+      .flatMap((r) => (r.kind === 'row' ? [spanOf(r.entry, dateField, schema)] : []))
       .filter((s): s is Span => s !== null);
     return axisSpan(spanBounds(spans), zoom, today);
-  }, [rows, dateField, zoom, today]);
+  }, [rows, dateField, zoom, today, schema]);
 
   const ticks = useMemo(() => axisTicks(axis, zoom), [axis, zoom]);
 
@@ -147,11 +148,14 @@ export function GanttView({
   // predecessor is filtered out or collapsed away is dropped rather than drawn
   // to an arbitrary position.
   const edges = useMemo(
-    () => resolveEdges(rows, presentation.dependencyField, dateField, allEntries),
-    [rows, presentation.dependencyField, dateField, allEntries],
+    () => resolveEdges(rows, presentation.dependencyField, dateField, allEntries, schema),
+    [rows, presentation.dependencyField, dateField, allEntries, schema],
   );
 
-  const undated = useMemo(() => unscheduled(entries, dateField), [entries, dateField]);
+  const undated = useMemo(
+    () => unscheduled(entries, dateField, schema),
+    [entries, dateField, schema],
+  );
   const slips = useMemo(() => edges.filter((e) => e.slipping), [edges]);
   // The counts used to be spans styled like links that did nothing — red
   // medium-weight text that resists clicking is worse than no indicator. Both
@@ -282,7 +286,7 @@ export function GanttView({
                     />
                   );
                 }
-                const stored = spanOf(row.entry, dateField);
+                const stored = spanOf(row.entry, dateField, schema);
                 const span = stored === null ? null : drag.preview(row.key, stored);
                 const isParent = row.childCount > 0;
                 const geo = span === null ? null : barGeometry(span, axis, zoom);
@@ -323,13 +327,15 @@ export function GanttView({
                           data-path={row.entry.path}
                           data-start={span.start}
                           data-end={span.end}
-                          {...drag.handle.handleProps(row.key)}
+                          {...(canReschedule(row.entry, dateField, schema)
+                            ? drag.handle.handleProps(row.key)
+                            : {})}
                           onClick={() => {
                             if (drag.handle.consumeClick()) return;
                             openPath(row.entry.path);
                           }}
                           title={`${row.entry.title} · ${span.start}${span.end === span.start ? '' : ` → ${span.end}`}`}
-                          aria-label={`${row.entry.title}, ${span.start} to ${span.end}. Arrow keys move it; hold Shift to change its end.`}
+                          aria-label={`${row.entry.title}, ${span.start} to ${span.end}${canReschedule(row.entry, dateField, schema) ? '. Arrow keys move it; hold Shift to change its end.' : ''}`}
                           // A row with children is a summary: drawn as a thin
                           // spine so it reads as the roll-up of what is under it
                           // rather than as another task competing with them.
@@ -341,17 +347,18 @@ export function GanttView({
                           ].join(' ')}
                           style={{ ...geo, height: isParent ? 5 : ROW_H - 12 }}
                         />
-                        {dateKindOf(row.entry, dateField, schema) === 'daterange' && (
-                          <ResizeGrips
-                            id={row.key}
-                            title={row.entry.title}
-                            left={geo.left}
-                            width={geo.width}
-                            top={isParent ? 12 : 6}
-                            height={isParent ? 5 : ROW_H - 12}
-                            drag={drag.handle}
-                          />
-                        )}
+                        {canReschedule(row.entry, dateField, schema) &&
+                          dateKindOf(row.entry, dateField, schema) === 'daterange' && (
+                            <ResizeGrips
+                              id={row.key}
+                              title={row.entry.title}
+                              left={geo.left}
+                              width={geo.width}
+                              top={isParent ? 12 : 6}
+                              height={isParent ? 5 : ROW_H - 12}
+                              drag={drag.handle}
+                            />
+                          )}
                       </>
                     )}
                   </div>
@@ -394,6 +401,7 @@ export function resolveEdges(
   dependencyField: string | undefined,
   dateField: string | null,
   allEntries: Entry[],
+  schema?: Schema,
 ): Edge[] {
   if (dependencyField === undefined || dependencyField === '' || dateField === null) return [];
 
@@ -407,12 +415,12 @@ export function resolveEdges(
   const edges: Edge[] = [];
   rows.forEach((row, toRow) => {
     if (row.kind !== 'row') return;
-    const to = spanOf(row.entry, dateField);
+    const to = spanOf(row.entry, dateField, schema);
     if (to === null) return;
     for (const predecessor of dependenciesOf(row.entry, dependencyField, allEntries)) {
       const fromRow = rowOf.get(predecessor.path);
       if (fromRow === undefined) continue;
-      const from = spanOf(predecessor, dateField);
+      const from = spanOf(predecessor, dateField, schema);
       if (from === null) continue;
       edges.push({
         fromRow,

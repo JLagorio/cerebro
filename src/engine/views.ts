@@ -14,6 +14,7 @@ import type {
   DashboardRow,
   DashboardSpec,
   DashboardWidget,
+  DateBucketing,
   FilterGroup,
   FilterOp,
   FilterRule,
@@ -37,6 +38,7 @@ import {
   CHART_HEIGHTS,
   CHART_KINDS,
   CHART_SORTS,
+  DATE_BUCKETINGS,
   FILTER_OPS,
   MAX_ROW_WIDGETS,
   ROW_HEIGHT_MAX,
@@ -639,6 +641,9 @@ function parseGroupChain(obj: Record<string, unknown>): GroupSpec[] {
       const spec: GroupSpec = { field: g.field.trim() };
       if (g.dir === 'asc' || g.dir === 'desc') spec.dir = g.dir;
       if (g.hideEmpty === true) spec.hideEmpty = true;
+      if (DATE_BUCKETINGS.includes(g.dateBucket as DateBucketing)) {
+        spec.dateBucket = g.dateBucket as DateBucketing;
+      }
       levels.push(spec);
     }
   } else if (typeof obj.groupBy === 'string' && obj.groupBy.trim() !== '') {

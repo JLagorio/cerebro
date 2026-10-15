@@ -1,0 +1,26 @@
+[
+  {
+    "input": "plain words",
+    "expected": "plain words"
+  },
+  {
+    "input": "[[page]] @agent :::ai",
+    "expected": "\\[\\[page\\]\\] &#64;agent &#58;&#58;&#58;ai"
+  },
+  {
+    "input": "![alt](https://x) <script> &nbsp;",
+    "expected": "\\!\\[alt\\]\\(https&#58;//x\\) &lt;script&gt; &amp;nbsp;"
+  },
+  {
+    "input": "# title\n- next",
+    "expected": "\\# title - next"
+  },
+  {
+    "input": "1. list",
+    "expected": "\\1. list"
+  },
+  {
+    "input": "x\u0000y\tvalue | cell",
+    "expected": "xy value \\| cell"
+  }
+]

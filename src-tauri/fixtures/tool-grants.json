@@ -2,16 +2,73 @@
   "format": 1,
   "why": "Which cerebro tools a run holds once its declared tools narrow it (M54.7), as Rust's narrow and its one name test, names_tool (M54.4), decide it: an entry names a tool when, trimmed of the whitespace Rust's str::trim strips and lowercased in ASCII only, it equals the tool's name with or without the mcp__cerebro__ prefix. `allowed_tools` null narrows nothing. `granted` lists what a run the app's TypeScript starts then holds, sorted, and `all` is every such tool: the manifest's base rows that a picker offers. Such a run holds no window, answer or generated proposal tool, and TypeScript cannot read the proposal switch, so none ever appears here; Rust drops them before comparing. The CLI's own tools are not cerebro's and are not listed. Replayed by granted_tools_match_the_shared_cases in src-tauri/src/agent/mod.rs and by src/engine/toolGrant.test.ts, the TS half that decides what a prompt may name.",
   "cases": [
-    { "allowed_tools": null, "granted": "all" },
-    { "allowed_tools": [], "granted": [] },
-    { "allowed_tools": ["search_notes"], "granted": ["search_notes"] },
-    { "allowed_tools": ["Get_Note"], "granted": ["get_note"] },
-    { "allowed_tools": ["mcp__cerebro__get_note"], "granted": ["get_note"] },
+    {
+      "allowed_tools": [" MCP__CEREBRO__IMPORT_NOTION_PAGE "],
+      "granted": ["import_notion_page"],
+      "why": "Notion import is the import writer's scoped note door (M69.5)."
+    },
+    {
+      "allowed_tools": [" MCP__CEREBRO__READ_CANVAS "],
+      "granted": ["read_canvas"],
+      "why": "Whiteboards narrow through the same scoped read grant (M68.7)."
+    },
+    {
+      "allowed_tools": [" MCP__CEREBRO__READ_DOCUMENT "],
+      "granted": ["read_document"],
+      "why": "Office document reads narrow through the same grant (M66.8)."
+    },
+    {
+      "allowed_tools": ["read_sheet", "MCP__CEREBRO__CALCULATE_SHEET"],
+      "granted": ["calculate_sheet", "read_sheet"],
+      "why": "Sheet reads and private hypothetical inputs are scoped read tools (M67.2)."
+    },
+    {
+      "allowed_tools": ["schedule_followup"],
+      "granted": ["schedule_followup"]
+    },
+    {
+      "allowed_tools": [" MCP__CEREBRO__READ_ACTIVITY "],
+      "granted": ["read_activity"],
+      "why": "Recorded activity is a scoped read tool (M64.2c)."
+    },
+    {
+      "allowed_tools": [" SUGGEST_VIEW "],
+      "granted": ["suggest_view"],
+      "why": "A checked view suggestion is a read-only base tool in the propose picker (M62.4)."
+    },
+    {
+      "allowed_tools": ["mcp__cerebro__query_records", " Describe_Database "],
+      "granted": ["describe_database", "query_records"],
+      "why": "Structured database reads narrow through the same names as every other tool (M62.2)."
+    },
+    {
+      "allowed_tools": null,
+      "granted": "all"
+    },
+    {
+      "allowed_tools": [],
+      "granted": []
+    },
+    {
+      "allowed_tools": ["search_notes"],
+      "granted": ["search_notes"]
+    },
+    {
+      "allowed_tools": ["Get_Note"],
+      "granted": ["get_note"]
+    },
+    {
+      "allowed_tools": ["mcp__cerebro__get_note"],
+      "granted": ["get_note"]
+    },
     {
       "allowed_tools": [" Search_Notes ", "MCP__CEREBRO__GET_NOTE"],
       "granted": ["get_note", "search_notes"]
     },
-    { "allowed_tools": ["Bash", "Read", "list_inbox"], "granted": ["list_inbox"] },
+    {
+      "allowed_tools": ["Bash", "Read", "list_inbox"],
+      "granted": ["list_inbox"]
+    },
     {
       "allowed_tools": ["MCP__CEREBRO__SET_FIELDS", "get_note"],
       "granted": ["get_note", "set_fields"],
@@ -31,13 +88,19 @@
       "granted": ["propose_organize"],
       "why": "A manifest row that carries the generated prefix by exception (M9.5), held like any other row."
     },
-    { "allowed_tools": ["report_window_outcome", "submit_answer"], "granted": [] },
+    {
+      "allowed_tools": ["report_window_outcome", "submit_answer", "submit_condition"],
+      "granted": []
+    },
     {
       "allowed_tools": ["comment_on_note", "mcp__cerebro__reply_to_comment", " Resolve_Comment "],
       "granted": ["comment_on_note", "reply_to_comment", "resolve_comment"],
       "why": "The comment tools (M70.3) are base rows a picker offers, held like any other."
     },
-    { "allowed_tools": ["no_such_tool", "", "mcp__cerebro__"], "granted": [] },
+    {
+      "allowed_tools": ["no_such_tool", "", "mcp__cerebro__"],
+      "granted": []
+    },
     {
       "allowed_tools": ["\u0085get_note\u3000"],
       "granted": ["get_note"],

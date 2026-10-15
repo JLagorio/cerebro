@@ -1,83 +1,155 @@
+import { useState } from 'react';
+import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
-import { parseSchedule } from '@/engine/skills';
+import {
+  MAX_SCHEDULE_ITEMS,
+  formatSchedule,
+  nextFire,
+  parseSchedule,
+  type Schedule,
+} from '@/engine/skills';
+import { parseSchedulePhrase } from '@/engine/schedulePhrase';
 
-/**
- * Build a schedule instead of typing its grammar (M18.4).
- *
- * `schedule:` accepts four shapes — `hourly`, `daily HH:MM`, `weekdays HH:MM`,
- * `weekly <day> HH:MM` — and a string that does not parse is not an error. It
- * is simply not a schedule: the agent never runs, and there is nowhere in the
- * app that would ever mention it. That is the worst possible failure for a
- * field whose entire job is "this happens without me watching".
- *
- * The controls only ever emit strings that parse. The free-text escape hatch is
- * gone on purpose — the file is still hand-editable, and a hand-written value
- * this cannot represent is preserved and shown rather than overwritten.
- */
-
-const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-const DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-
-type Repeat = 'never' | 'hourly' | 'daily' | 'weekdays' | 'weekly';
-
-function readRepeat(value: string): Repeat {
-  const parsed = parseSchedule(value);
-  if (parsed === null) return 'never';
-  return parsed.kind;
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+type Repeat = 'never' | Schedule['kind'];
+const REPEATS: { value: Repeat; label: string }[] = [
+  { value: 'never', label: 'Not on a clock' },
+  { value: 'hourly', label: 'Every hour' },
+  { value: 'daily', label: 'Every day' },
+  { value: 'weekdays', label: 'Every weekday' },
+  { value: 'weekly', label: 'Every week' },
+  { value: 'days', label: 'Certain days' },
+  { value: 'monthly', label: 'Every month' },
+  { value: 'once', label: 'Once' },
+];
+const pad = (n: number) => String(n).padStart(2, '0');
+export function scheduleZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'local time';
 }
 
-function readTime(value: string): string {
-  const parsed = parseSchedule(value);
-  if (parsed === null || parsed.kind === 'hourly') return '09:00';
-  return `${String(parsed.hour).padStart(2, '0')}:${String(parsed.minute).padStart(2, '0')}`;
-}
-
-function readDay(value: string): number {
-  const parsed = parseSchedule(value);
-  return parsed !== null && parsed.kind === 'weekly' ? parsed.day : 1;
-}
-
+/** Controls change only their own authored item. A phrase parses before it
+ * replaces the list, so no unrecognized prose reaches a live schedule. */
 export function ScheduleField({
   value,
   onChange,
+  now = new Date(),
 }: {
-  value: string;
-  onChange: (next: string) => void;
+  value: string[];
+  onChange: (next: string[]) => void;
+  now?: Date;
 }) {
-  const repeat = readRepeat(value);
-  const time = readTime(value);
-  const day = readDay(value);
-  // A value that is neither blank nor parseable came from a hand-edit or an
-  // older build. Shown rather than silently normalised away — the controls
-  // below would otherwise rewrite somebody's file the moment they looked at it.
-  const unparseable = value.trim() !== '' && parseSchedule(value) === null;
-
-  const emit = (next: { repeat?: Repeat; time?: string; day?: number }) => {
-    const r = next.repeat ?? repeat;
-    const t = next.time ?? time;
-    const d = next.day ?? day;
-    if (r === 'never') return onChange('');
-    if (r === 'hourly') return onChange('hourly');
-    if (r === 'weekly') return onChange(`weekly ${DAYS[d]} ${t}`);
-    return onChange(`${r} ${t}`);
+  const [phrase, setPhrase] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const replace = (index: number, item: string | null) => {
+    if (item === null) onChange(value.filter((_, i) => i !== index));
+    else if (value.length === 0) onChange([item]);
+    else onChange(value.map((old, i) => (i === index ? item : old)));
   };
-
   return (
     <div className="flex flex-col gap-2">
+      <Input
+        size="sm"
+        value={phrase}
+        ariaLabel="Type a schedule"
+        placeholder="Or type it — weekdays at 9am"
+        onChange={(e) => {
+          setPhrase(e.target.value);
+          setError(null);
+        }}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter') return;
+          e.preventDefault();
+          const parsed = parseSchedulePhrase(phrase, now);
+          if (!parsed.ok) {
+            setError(parsed.reason);
+            return;
+          }
+          onChange([parsed.schedule]);
+          setPhrase('');
+          setError(null);
+        }}
+      />
+      {error !== null && (
+        <p className="m-0 text-2xs text-danger-600" role="alert">
+          {error}
+        </p>
+      )}
+      {(value.length === 0 ? [''] : value).map((item, index) => (
+        <TimeRow key={index} value={item} now={now} onChange={(next) => replace(index, next)} />
+      ))}
+      {value.length > 0 && value.length < MAX_SCHEDULE_ITEMS && (
+        <div>
+          <Button variant="ghost" size="sm" onClick={() => onChange([...value, 'daily 09:00'])}>
+            Add a time
+          </Button>
+        </div>
+      )}
+      <p data-testid="schedule-clock" className="m-0 text-2xs text-n-500">
+        Times use this computer&apos;s clock ({scheduleZone()}). If Cerebro was closed when a run
+        came due, it runs once when Cerebro opens, not once per missed time. Resuming or changing
+        the schedule waits for its next time.
+      </p>
+    </div>
+  );
+}
+function TimeRow({
+  value,
+  onChange,
+  now,
+}: {
+  value: string;
+  onChange: (item: string | null) => void;
+  now: Date;
+}) {
+  const parsed = parseSchedule(value);
+  const repeat: Repeat = parsed?.kind ?? 'never';
+  const timed = parsed !== null && parsed.kind !== 'hourly' ? parsed : { hour: 9, minute: 0 };
+  const time = `${pad(timed.hour)}:${pad(timed.minute)}`;
+  const day = parsed?.kind === 'weekly' ? parsed.day : 1;
+  const days = parsed?.kind === 'days' ? parsed.days : [1, 4];
+  const monthDay = parsed?.kind === 'monthly' ? parsed.day : 1;
+  const date =
+    parsed?.kind === 'once'
+      ? parsed.date
+      : `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const emit = (next: {
+    repeat?: Repeat;
+    time?: string;
+    day?: number;
+    days?: number[];
+    monthDay?: number | 'last';
+    date?: string;
+  }) => {
+    const kind = next.repeat ?? repeat;
+    if (kind === 'never') return onChange(null);
+    if (kind === 'hourly') return onChange('hourly');
+    const [hour, minute] = (next.time ?? time).split(':').map(Number);
+    if (!Number.isInteger(hour) || !Number.isInteger(minute)) return;
+    const at = { hour, minute };
+    const schedule: Schedule =
+      kind === 'weekly'
+        ? { kind, day: next.day ?? day, ...at }
+        : kind === 'days'
+          ? { kind, days: next.days ?? days, ...at }
+          : kind === 'monthly'
+            ? { kind, day: next.monthDay ?? monthDay, ...at }
+            : kind === 'once'
+              ? { kind, date: next.date ?? date, ...at }
+              : { kind, ...at };
+    const formatted = formatSchedule(schedule);
+    if (parseSchedule(formatted) !== null) onChange(formatted);
+  };
+  return (
+    <div className="flex flex-col gap-2" data-testid="schedule-item">
       <div className="flex flex-wrap items-center gap-2">
         <Select
           size="sm"
           width={168}
           value={repeat}
           ariaLabel="Repeat"
+          options={REPEATS}
           onChange={(e) => emit({ repeat: e.target.value as Repeat })}
-          options={[
-            { value: 'never', label: 'Not on a clock' },
-            { value: 'hourly', label: 'Every hour' },
-            { value: 'daily', label: 'Every day' },
-            { value: 'weekdays', label: 'Every weekday' },
-            { value: 'weekly', label: 'Every week' },
-          ]}
         />
         {repeat === 'weekly' && (
           <Select
@@ -85,8 +157,35 @@ export function ScheduleField({
             width={130}
             value={String(day)}
             ariaLabel="Day"
+            options={DAYS.map((label, i) => ({ value: String(i), label }))}
             onChange={(e) => emit({ day: Number(e.target.value) })}
-            options={DAY_LABELS.map((label, i) => ({ value: String(i), label }))}
+          />
+        )}
+        {repeat === 'monthly' && (
+          <Select
+            size="sm"
+            width={130}
+            value={String(monthDay)}
+            ariaLabel="Day of month"
+            options={[
+              ...Array.from({ length: 28 }, (_, i) => ({
+                value: String(i + 1),
+                label: `${i + 1}${i === 0 || i === 20 ? 'st' : i === 1 || i === 21 ? 'nd' : i === 2 || i === 22 ? 'rd' : 'th'}`,
+              })),
+              { value: 'last', label: 'Last day' },
+            ]}
+            onChange={(e) =>
+              emit({ monthDay: e.target.value === 'last' ? 'last' : Number(e.target.value) })
+            }
+          />
+        )}
+        {repeat === 'once' && (
+          <input
+            type="date"
+            value={date}
+            aria-label="Date"
+            onChange={(e) => emit({ date: e.target.value })}
+            className="rounded-md border border-n-200 bg-n-0 px-2 py-1 text-xs text-n-800 outline-none focus-visible:border-cortex-400"
           />
         )}
         {repeat !== 'never' && repeat !== 'hourly' && (
@@ -102,15 +201,34 @@ export function ScheduleField({
             />
           </>
         )}
+        {value !== '' && (
+          <Button variant="ghost" size="sm" onClick={() => onChange(null)}>
+            Remove this time
+          </Button>
+        )}
       </div>
-      {repeat !== 'never' && (
-        <p className="m-0 text-2xs text-n-500">
-          {/* The catch-up rule, said where it matters: people assume a missed
-              week means seven runs, and decline to schedule anything. */}
-          Your machine’s clock. An app that was closed all week owes one catch-up run, not seven.
+      {repeat === 'days' && (
+        <div className="flex flex-wrap gap-2">
+          {DAYS.map((label, i) => (
+            <label key={label} className="flex items-center gap-1 text-xs text-n-600">
+              <input
+                type="checkbox"
+                checked={days.includes(i)}
+                onChange={() =>
+                  emit({ days: days.includes(i) ? days.filter((d) => d !== i) : [...days, i] })
+                }
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+      )}
+      {parsed?.kind === 'once' && nextFire(parsed, now) === null && (
+        <p className="m-0 text-2xs text-warn-700">
+          That time has passed, so this never runs. Pick a later one.
         </p>
       )}
-      {unparseable && (
+      {value.trim() !== '' && parsed === null && (
         <p className="m-0 text-2xs text-danger-600" role="alert">
           This record says <code className="font-mono">{value}</code>, which this app cannot read —
           so it is not running on a clock. Pick a schedule above to replace it.

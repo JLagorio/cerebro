@@ -1,7 +1,9 @@
+import { withOpenBesideIntent } from './openIntent';
+import { navSeed } from '@/test/navSeed';
 // @vitest-environment jsdom
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { useNavStore } from '@/stores/navStore';
+import { PaneContext, useNavStore } from '@/stores/navStore';
 import { useOpenLogStore } from '@/stores/openLogStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -12,10 +14,19 @@ describe('useOpenPath .mmd routing (M29.21)', () => {
   beforeEach(() => {
     useNavStore.setState({
       selection: { kind: 'home' },
-      history: [{ kind: 'home' }],
+      history: [navSeed({ kind: 'home' })],
       historyIndex: 0,
     });
     useVaultStore.setState({ entries: [] });
+  });
+
+  it('routes an unscanned .canvas to the board page selection', () => {
+    const { result } = renderHook(() => useOpenPath());
+    act(() => result.current('boards/plan.canvas'));
+    expect(useNavStore.getState().selection).toEqual({
+      kind: 'diagram',
+      path: 'boards/plan.canvas',
+    });
   });
 
   it('routes a .mmd to the diagram page', () => {
@@ -45,6 +56,14 @@ describe('useOpenPath .mmd routing (M29.21)', () => {
     act(() => result.current('notes/loose.md'));
     expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'notes/loose.md' });
   });
+  it.each(['attachments/brief.pdf', 'attachments/poster.png', 'attachments/notes.txt'])(
+    'opens %s as a file page without a scanned entry',
+    (path) => {
+      const { result } = renderHook(() => useOpenPath());
+      act(() => result.current(path));
+      expect(useNavStore.getState().selection).toEqual({ kind: 'file', path });
+    },
+  );
 });
 
 /*
@@ -56,7 +75,7 @@ describe('useOpenPath collection pages (M48.7)', () => {
   beforeEach(() => {
     useNavStore.setState({
       selection: { kind: 'home' },
-      history: [{ kind: 'home' }],
+      history: [navSeed({ kind: 'home' })],
       historyIndex: 0,
     });
   });
@@ -80,7 +99,7 @@ describe('useOpenPath library records (M55.12)', () => {
   beforeEach(() => {
     useNavStore.setState({
       selection: { kind: 'home' },
-      history: [{ kind: 'home' }],
+      history: [navSeed({ kind: 'home' })],
       historyIndex: 0,
     });
     useUiStore.setState({ detailPath: null });
@@ -130,7 +149,7 @@ describe('useOpenPath comment sidecars (M70.2b)', () => {
   beforeEach(() => {
     useNavStore.setState({
       selection: { kind: 'home' },
-      history: [{ kind: 'home' }],
+      history: [navSeed({ kind: 'home' })],
       historyIndex: 0,
     });
     useUiStore.setState({
@@ -190,7 +209,7 @@ describe('useOpenPath and the open log (M59.3)', () => {
   beforeEach(() => {
     useNavStore.setState({
       selection: { kind: 'home' },
-      history: [{ kind: 'home' }],
+      history: [navSeed({ kind: 'home' })],
       historyIndex: 0,
     });
     useUiStore.setState({ detailPath: null });
@@ -284,5 +303,87 @@ describe('useOpenPath and the open log (M59.3)', () => {
     act(() => result.current('notes/loose.md'));
     expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'notes/loose.md' });
     expect(useOpenLogStore.getState().logs).toEqual({});
+  });
+});
+
+describe('pane-aware routing (M65.8)', () => {
+  beforeEach(() => {
+    useNavStore.getState().reset();
+    useNavStore.getState().setPaneCapacity(4);
+    useUiStore.setState({ toasts: [], detailPath: null, detailPane: null });
+  });
+  it('reuses a held record before routing its backdrop and leaves the source untouched', () => {
+    useVaultStore.setState({ entries: [makeEntry({ path: 'record.md', type: 'Work' })] });
+    const first = useNavStore.getState().active;
+    useNavStore.getState().navigate({ kind: 'list', id: 'all' });
+    const second = useNavStore.getState().openPane({ kind: 'doc', path: 'record.md' }).pane;
+    const { result } = renderHook(() => useOpenPath(), {
+      wrapper: ({ children }) => <PaneContext value={first}>{children}</PaneContext>,
+    });
+    act(() => {
+      expect(result.current('record.md')).toEqual({ kind: 'reused', pane: second });
+    });
+    expect(useNavStore.getPaneState(first).selection).toEqual({ kind: 'list', id: 'all' });
+    expect(useUiStore.getState().detailPath).toBeNull();
+    expect(useNavStore.getState().active).toBe(second);
+  });
+  it('a call in an inactive pane opens there, and agent reuse stays silent without focusing the DOM', () => {
+    useVaultStore.setState({ entries: [] });
+    const first = useNavStore.getState().active;
+    const second = useNavStore.getState().openPane({ kind: 'doc', path: 'other.md' }).pane;
+    const { result } = renderHook(() => useOpenPath('navigate', { byAgent: true }), {
+      wrapper: ({ children }) => <PaneContext value={first}>{children}</PaneContext>,
+    });
+    const input = document.createElement('input');
+    document.body.append(input);
+    input.focus();
+    act(() => {
+      result.current('new.md');
+    });
+    expect(useNavStore.getPaneState(first).selection).toEqual({ kind: 'doc', path: 'new.md' });
+    act(() => {
+      result.current('other.md');
+    });
+    expect(useNavStore.getState().active).toBe(second);
+    expect(useUiStore.getState().toasts).toEqual([]);
+    expect(document.activeElement).toBe(input);
+    input.remove();
+  });
+});
+
+describe('opening beside', () => {
+  beforeEach(() => {
+    useNavStore.getState().reset();
+    useNavStore.getState().setPaneCapacity(2);
+    useUiStore.getState().closeDetail();
+    useVaultStore.setState({
+      entries: [makeEntry({ path: 'tasks/one.md', title: 'One', type: 'Work item' })],
+    });
+  });
+  it('opens a record as a full page in a second pane, without a backdrop or peek', () => {
+    const { result } = renderHook(() => useOpenPath());
+    act(() => result.current('tasks/one.md', { newPane: true }));
+    expect(useNavStore.getState().paneIds).toHaveLength(2);
+    expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'tasks/one.md' });
+    expect(useUiStore.getState().detailPath).toBeNull();
+  });
+  it('falls back to a full page in place when the row is full', () => {
+    useNavStore.getState().setPaneCapacity(1);
+    const { result } = renderHook(() => useOpenPath());
+    let kind: string | undefined;
+    act(() => {
+      kind = result.current('tasks/one.md', { newPane: true }).kind;
+    });
+    expect(kind).toBe('full');
+    expect(useNavStore.getState().paneIds).toHaveLength(1);
+    expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'tasks/one.md' });
+  });
+  it('consumes captured intent for a human, but an agent never opens a pane', () => {
+    const { result } = renderHook(() => useOpenPath('navigate', { byAgent: true }));
+    act(() => withOpenBesideIntent(true, () => result.current('untyped.md', { newPane: true })));
+    expect(useNavStore.getState().paneIds).toHaveLength(1);
+    const human = renderHook(() => useOpenPath());
+    act(() => withOpenBesideIntent(true, () => human.result.current('another.md')));
+    expect(useNavStore.getState().paneIds).toHaveLength(2);
   });
 });

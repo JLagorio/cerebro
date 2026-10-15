@@ -3,7 +3,7 @@ import type { Entry } from './types';
 
 /**
  * All wikilink targets in a string: `[[target]]` and `[[target|alias]]`.
- * Scanner (not a regex) whose semantics deliberately match
+ * The span scanner's targets deliberately match
  * `wikilinkTargets` in src/lib/mockParse.ts and `wikilink_targets` in
  * src-tauri/src/vault/parse.rs: the target is the text before the first
  * `|`, trimmed; empty targets and targets containing brackets are
@@ -11,20 +11,48 @@ import type { Entry } from './types';
  * golden in conformance/scan holds both to parse.rs.
  */
 function extractTargets(text: string): string[] {
-  const out: string[] = [];
-  let rest = text;
+  return wikilinkSpans(text).map((span) => span.target);
+}
+
+/** A valid wikilink and its trimmed target; every offset is end-exclusive. */
+export interface WikilinkSpan {
+  start: number;
+  end: number;
+  target: string;
+  targetStart: number;
+  targetEnd: number;
+}
+
+/**
+ * The scanner shared by link readers and byte-preserving rewrites (M60.10).
+ * The target ends at the first pipe; its surrounding whitespace and the
+ * alias remain outside targetStart/targetEnd. Invalid spans are consumed in
+ * the same order as the vault's scanner, so nested brackets never gain a
+ * second interpretation during a rename.
+ */
+export function wikilinkSpans(text: string): WikilinkSpan[] {
+  const out: WikilinkSpan[] = [];
+  let cursor = 0;
   for (;;) {
-    const start = rest.indexOf('[[');
+    const start = text.indexOf('[[', cursor);
     if (start === -1) break;
     const innerStart = start + 2;
-    const endRel = rest.indexOf(']]', innerStart);
-    if (endRel === -1) break;
-    const inner = rest.slice(innerStart, endRel);
-    const target = (inner.split('|')[0] ?? '').trim();
+    const close = text.indexOf(']]', innerStart);
+    if (close === -1) break;
+    const inner = text.slice(innerStart, close);
+    const rawTarget = inner.split('|')[0] ?? '';
+    const target = rawTarget.trim();
     if (target !== '' && !target.includes('[') && !target.includes(']')) {
-      out.push(target);
+      const targetStart = innerStart + rawTarget.length - rawTarget.trimStart().length;
+      out.push({
+        start,
+        end: close + 2,
+        target,
+        targetStart,
+        targetEnd: targetStart + target.length,
+      });
     }
-    rest = rest.slice(endRel + 2);
+    cursor = close + 2;
   }
   return out;
 }

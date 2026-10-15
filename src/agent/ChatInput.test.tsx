@@ -142,7 +142,7 @@ describe('ChatInput slash completion (M13.1)', () => {
     // The review's first major: with the stale index this threw on Enter when
     // the wikilink menu had fewer rows than the slash menu had.
     fireEvent.keyDown(box(), { key: 'Enter' });
-    expect(box().value).toBe('[[Risk sweep]]');
+    expect(box().value).toBe('[[risk-sweep]]');
   });
 });
 

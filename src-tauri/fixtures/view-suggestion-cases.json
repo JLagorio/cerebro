@@ -1,0 +1,2160 @@
+{
+  "format": 1,
+  "about": "Checked view suggestions, replayed by Rust vault/views.rs and TypeScript viewSuggestion.test.ts plus the browser mock.",
+  "corpus": [
+    {
+      "path": "knowledge/work.md",
+      "content": "---\ntype: Work\nknowledge_only: hidden\n---\n# Knowledge\n"
+    },
+    {
+      "path": "projects/launch/8.md",
+      "content": "---\ntype: Work\nstatus: local\npriority: high\nestimate: 8\n---\n# Item 8\n"
+    },
+    {
+      "path": "projects/launch/project.md",
+      "content": "---\ntype: Project\nstatuses:\n  - { id: local, label: Local review, group: active }\n  - { id: done, label: Done, group: done }\n---\n# Launch\n"
+    },
+    {
+      "path": "templates/work.md",
+      "content": "---\ntype: Work\ntemplate_only: hidden\n---\n# Template\n"
+    },
+    {
+      "path": "types/broken.md",
+      "content": "---\ntype: Type\nfields: [broken\n---\n# Broken\n"
+    },
+    {
+      "path": "types/work.md",
+      "content": "---\ntype: Type\nstatuses:\n  - { id: open, label: Open, group: active }\n  - { id: done, label: Done, group: done }\n  - { id: cancelled, label: Cancelled, group: closed }\nfields:\n  status: status\n  priority: { kind: select, options: [{ id: high, label: High priority }, low] }\n  tags: { kind: multiselect, options: [red, blue] }\n  owner: { kind: person }\n  due: date\n  window: daterange\n  estimate: number\n  score: { kind: formula, formula: 'estimate * 2' }\n  files: files\n  blocked_by: { kind: relation, target: Work }\n---\n# Work\n"
+    },
+    {
+      "path": "work/1.md",
+      "content": "---\ntype: Work\nstatus: ghost\npriority: retired\nestimate: 1\nheld_key: something\ndue: 2026-07-21\n---\n# Item 1\n"
+    },
+    {
+      "path": "work/2.md",
+      "content": "---\ntype: Work\nstatus: open\npriority: high\nestimate: 2\ndue: 2026-07-22\ntags: [red]\nowner: [\"[[Ada]]\"]\nfiles: [cover.png]\n---\n# Item 2\n"
+    },
+    {
+      "path": "work/3.md",
+      "content": "---\ntype: Work\nstatus: open\npriority: high\nestimate: 3\ndue: 2026-07-23\n---\n# Item 3\n"
+    },
+    {
+      "path": "work/4.md",
+      "content": "---\ntype: Work\nstatus: open\npriority: high\nestimate: 4\ndue: 2026-07-24\n---\n# Item 4\n"
+    },
+    {
+      "path": "work/5.md",
+      "content": "---\ntype: Work\nstatus: open\npriority: high\nestimate: 5\ndue: 2026-07-25\n---\n# Item 5\n"
+    },
+    {
+      "path": "work/6.md",
+      "content": "---\ntype: Work\nstatus: open\npriority: high\nestimate: 6\ndue: 2026-07-26\n---\n# Item 6\n"
+    },
+    {
+      "path": "work/7.md",
+      "content": "---\ntype: Work\nstatus: open\npriority: high\nestimate: 7\n---\n# Item 7\n"
+    }
+  ],
+  "cases": [
+    {
+      "name": "overdue board on relative today",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Overdue",
+          "filters": {
+            "all": [
+              {
+                "field": "due",
+                "op": "before",
+                "value": "today"
+              },
+              {
+                "field": "status",
+                "op": "none_of",
+                "value": ["done", "cancelled"]
+              }
+            ]
+          },
+          "presentation": {
+            "type": "board",
+            "group": [
+              {
+                "field": "status",
+                "dir": "asc"
+              }
+            ],
+            "sort": [
+              {
+                "field": "due",
+                "dir": "asc"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "answer": "{\"suggested\":{\"database\":\"Work\",\"view\":{\"name\":\"Overdue\",\"filters\":{\"all\":[{\"field\":\"due\",\"op\":\"before\",\"value\":\"today\"},{\"field\":\"status\",\"op\":\"none_of\",\"value\":[\"done\",\"cancelled\"]}]},\"presentation\":{\"type\":\"board\",\"group\":[{\"field\":\"status\",\"dir\":\"asc\"}],\"sort\":[{\"field\":\"due\",\"dir\":\"asc\"}]}}},\"note\":\"The user sees this view as a card with a live preview. Nothing is written unless they add it.\"}"
+      }
+    },
+    {
+      "name": "number chart needs no axis",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "chart",
+            "chart": {
+              "kind": "number",
+              "agg": "count"
+            }
+          }
+        }
+      },
+      "expect": {
+        "answer": "{\"suggested\":{\"database\":\"Work\",\"view\":{\"name\":\"Suggested\",\"presentation\":{\"type\":\"chart\",\"chart\":{\"kind\":\"number\",\"agg\":\"count\"}}}},\"note\":\"The user sees this view as a card with a live preview. Nothing is written unless they add it.\"}"
+      }
+    },
+    {
+      "name": "bar chart with axis and series",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "chart",
+            "chart": {
+              "kind": "bar",
+              "agg": "sum",
+              "value": "estimate",
+              "xField": "status",
+              "groupBy": "priority",
+              "sort": "value-desc"
+            }
+          }
+        }
+      },
+      "expect": {
+        "answer": "{\"suggested\":{\"database\":\"Work\",\"view\":{\"name\":\"Suggested\",\"presentation\":{\"type\":\"chart\",\"chart\":{\"kind\":\"bar\",\"agg\":\"sum\",\"value\":\"estimate\",\"xField\":\"status\",\"groupBy\":\"priority\",\"sort\":\"value-desc\"}}}},\"note\":\"The user sees this view as a card with a live preview. Nothing is written unless they add it.\"}"
+      }
+    },
+    {
+      "name": "calendar names a range and week span",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "calendar",
+            "dateField": "window",
+            "calendarSpan": "week"
+          }
+        }
+      },
+      "expect": {
+        "answer": "{\"suggested\":{\"database\":\"Work\",\"view\":{\"name\":\"Suggested\",\"presentation\":{\"type\":\"calendar\",\"dateField\":\"window\",\"calendarSpan\":\"week\"}}},\"note\":\"The user sees this view as a card with a live preview. Nothing is written unless they add it.\"}"
+      }
+    },
+    {
+      "name": "timeline names its date and zoom",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "timeline",
+            "dateField": "due",
+            "zoom": "quarter"
+          }
+        }
+      },
+      "expect": {
+        "answer": "{\"suggested\":{\"database\":\"Work\",\"view\":{\"name\":\"Suggested\",\"presentation\":{\"type\":\"timeline\",\"dateField\":\"due\",\"zoom\":\"quarter\"}}},\"note\":\"The user sees this view as a card with a live preview. Nothing is written unless they add it.\"}"
+      }
+    },
+    {
+      "name": "gallery uses a files cover",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "gallery",
+            "gallery": {
+              "cover": "files"
+            }
+          }
+        }
+      },
+      "expect": {
+        "answer": "{\"suggested\":{\"database\":\"Work\",\"view\":{\"name\":\"Suggested\",\"presentation\":{\"type\":\"gallery\",\"gallery\":{\"cover\":\"files\"}}}},\"note\":\"The user sees this view as a card with a live preview. Nothing is written unless they add it.\"}"
+      }
+    },
+    {
+      "name": "a table bands by calendar week",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table",
+            "group": [
+              {
+                "field": "due",
+                "dateBucket": "week"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "answer": "{\"suggested\":{\"database\":\"Work\",\"view\":{\"name\":\"Suggested\",\"presentation\":{\"type\":\"table\",\"group\":[{\"field\":\"due\",\"dateBucket\":\"week\"}]}}},\"note\":\"The user sees this view as a card with a live preview. Nothing is written unless they add it.\"}"
+      }
+    },
+    {
+      "name": "a formula filters and measures a chart",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "filters": {
+            "all": [
+              {
+                "field": "score",
+                "op": "gt",
+                "value": 5
+              }
+            ]
+          },
+          "presentation": {
+            "type": "chart",
+            "chart": {
+              "kind": "number",
+              "agg": "avg",
+              "value": "score"
+            }
+          }
+        }
+      },
+      "expect": {
+        "answer": "{\"suggested\":{\"database\":\"Work\",\"view\":{\"name\":\"Suggested\",\"filters\":{\"all\":[{\"field\":\"score\",\"op\":\"gt\",\"value\":5}]},\"presentation\":{\"type\":\"chart\",\"chart\":{\"kind\":\"number\",\"agg\":\"avg\",\"value\":\"score\"}}}},\"note\":\"The user sees this view as a card with a live preview. Nothing is written unless they add it.\"}"
+      }
+    },
+    {
+      "name": "held ghost option and held key pass",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "filters": {
+            "all": [
+              {
+                "field": "priority",
+                "op": "equals",
+                "value": "retired"
+              }
+            ]
+          },
+          "presentation": {
+            "type": "table",
+            "columns": [
+              {
+                "field": "held_key"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "answer": "{\"suggested\":{\"database\":\"Work\",\"view\":{\"name\":\"Suggested\",\"filters\":{\"all\":[{\"field\":\"priority\",\"op\":\"equals\",\"value\":\"retired\"}]},\"presentation\":{\"type\":\"table\",\"columns\":[{\"field\":\"held_key\"}]}}},\"note\":\"The user sees this view as a card with a live preview. Nothing is written unless they add it.\"}"
+      }
+    },
+    {
+      "name": "project status options are read",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "filters": {
+            "all": [
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "local"
+              }
+            ]
+          },
+          "presentation": {
+            "type": "table"
+          }
+        }
+      },
+      "expect": {
+        "answer": "{\"suggested\":{\"database\":\"Work\",\"view\":{\"name\":\"Suggested\",\"filters\":{\"all\":[{\"field\":\"status\",\"op\":\"equals\",\"value\":\"local\"}]},\"presentation\":{\"type\":\"table\"}}},\"note\":\"The user sees this view as a card with a live preview. Nothing is written unless they add it.\"}"
+      }
+    },
+    {
+      "name": "relative offsets pass",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "filters": {
+            "all": [
+              {
+                "field": "due",
+                "op": "on_or_before",
+                "value": "today-7"
+              }
+            ]
+          },
+          "presentation": {
+            "type": "table"
+          }
+        }
+      },
+      "expect": {
+        "answer": "{\"suggested\":{\"database\":\"Work\",\"view\":{\"name\":\"Suggested\",\"filters\":{\"all\":[{\"field\":\"due\",\"op\":\"on_or_before\",\"value\":\"today-7\"}]},\"presentation\":{\"type\":\"table\"}}},\"note\":\"The user sees this view as a card with a live preview. Nothing is written unless they add it.\"}"
+      }
+    },
+    {
+      "name": "canonical echo follows artifact key order",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "  Tidy  ",
+          "presentation": {
+            "limit": 20,
+            "columns": [
+              {
+                "field": "title"
+              }
+            ],
+            "sort": [
+              {
+                "dir": "desc",
+                "field": "due"
+              }
+            ],
+            "type": "table"
+          }
+        },
+        "reasoning": "Keep this exact reason."
+      },
+      "expect": {
+        "answer": "{\"suggested\":{\"database\":\"Work\",\"view\":{\"name\":\"Tidy\",\"presentation\":{\"type\":\"table\",\"sort\":[{\"field\":\"due\",\"dir\":\"desc\"}],\"columns\":[{\"field\":\"title\"}],\"limit\":20}},\"reasoning\":\"Keep this exact reason.\"},\"note\":\"The user sees this view as a card with a live preview. Nothing is written unless they add it.\"}"
+      }
+    },
+    {
+      "name": "virtual file times can place a calendar",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "calendar",
+            "dateField": "createdAt"
+          }
+        }
+      },
+      "expect": {
+        "answer": "{\"suggested\":{\"database\":\"Work\",\"view\":{\"name\":\"Suggested\",\"presentation\":{\"type\":\"calendar\",\"dateField\":\"createdAt\"}}},\"note\":\"The user sees this view as a card with a live preview. Nothing is written unless they add it.\"}"
+      }
+    },
+    {
+      "name": "args must be an object",
+      "args": null,
+      "expect": {
+        "malformed": "suggest_view needs an object"
+      }
+    },
+    {
+      "name": "database must be a string",
+      "args": {
+        "database": 3,
+        "view": {}
+      },
+      "expect": {
+        "malformed": "suggest_view needs database: the database's name"
+      }
+    },
+    {
+      "name": "view must be an object",
+      "args": {
+        "database": "Work",
+        "view": []
+      },
+      "expect": {
+        "malformed": "suggest_view needs view: an object"
+      }
+    },
+    {
+      "name": "reasoning must be text",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table"
+          }
+        },
+        "reasoning": 1
+      },
+      "expect": {
+        "malformed": "reasoning must be a string of at most 280 characters"
+      }
+    },
+    {
+      "name": "reasoning has a character cap",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table"
+          }
+        },
+        "reasoning": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+      },
+      "expect": {
+        "malformed": "reasoning must be a string of at most 280 characters"
+      }
+    },
+    {
+      "name": "arguments have a byte cap",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table"
+          }
+        },
+        "reasoning": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "expect": {
+        "malformed": "suggest_view takes at most 16384 bytes"
+      }
+    },
+    {
+      "name": "unknown database names closest readable Type doc",
+      "args": {
+        "database": "Wrok",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table"
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: type: no note this run can read has type \"Wrok\". Closest: \"Work\". Types in use: Work"
+      }
+    },
+    {
+      "name": "broken YAML cannot supply a schema",
+      "args": {
+        "database": "Broken",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table"
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: Broken's Type doc has YAML errors, so its fields can't be checked."
+      }
+    },
+    {
+      "name": "name refuses empty",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "",
+          "presentation": {
+            "type": "table"
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- name: a view needs a name of 1 to 80 characters on one line."
+      }
+    },
+    {
+      "name": "name refuses too long",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "presentation": {
+            "type": "table"
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- name: a view needs a name of 1 to 80 characters on one line."
+      }
+    },
+    {
+      "name": "name refuses newlines",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Line\nTwo",
+          "presentation": {
+            "type": "table"
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- name: a view needs a name of 1 to 80 characters on one line."
+      }
+    },
+    {
+      "name": "ids are not suggested",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table"
+          },
+          "id": "minted-by-agent"
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- id: a suggested view takes name, filters and presentation; leave \"id\" out."
+      }
+    },
+    {
+      "name": "database display settings are not suggested",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table",
+            "rowHeight": "tall"
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.rowHeight: \"rowHeight\" is set on the database's page, not suggested."
+      }
+    },
+    {
+      "name": "calendar does not read grouping",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "calendar",
+            "group": [
+              {
+                "field": "status"
+              }
+            ],
+            "dateField": "due"
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.group: a calendar doesn't read group."
+      }
+    },
+    {
+      "name": "dashboard is built by hand",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "dashboard"
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.type: a dashboard is built on its page by hand, not suggested."
+      }
+    },
+    {
+      "name": "whiteboard is built by hand",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "whiteboard"
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.type: a whiteboard is built on its page by hand, not suggested."
+      }
+    },
+    {
+      "name": "a board needs its band",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "board"
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.group: a board needs a group level naming the field its columns band by."
+      }
+    },
+    {
+      "name": "a calendar needs its date field",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "calendar"
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.dateField: a calendar needs a dateField."
+      }
+    },
+    {
+      "name": "a chart needs its chart kind",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "chart"
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.chart: a chart view needs chart.kind."
+      }
+    },
+    {
+      "name": "a bar chart needs its axis",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "chart",
+            "chart": {
+              "kind": "bar"
+            }
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.chart.xField: a bar chart needs chart.xField or a group level."
+      }
+    },
+    {
+      "name": "sum needs a value",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "chart",
+            "chart": {
+              "kind": "number",
+              "agg": "sum"
+            }
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.chart.value: sum needs a value field to measure."
+      }
+    },
+    {
+      "name": "count reads no value",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "chart",
+            "chart": {
+              "kind": "number",
+              "agg": "count",
+              "value": "estimate"
+            }
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.chart.value: count measures no value; leave value out."
+      }
+    },
+    {
+      "name": "unknown field names closest field",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "board",
+            "group": [
+              {
+                "field": "owenr"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.group[0]: Work has no field \"owenr\". Did you mean \"owner\"?"
+      }
+    },
+    {
+      "name": "unknown field without close name lists bounded fields",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table",
+            "columns": [
+              {
+                "field": "xyzzy"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.columns[0]: Work has no field \"xyzzy\". Its fields: status, priority, tags, owner, due, window, estimate, score and 7 more."
+      }
+    },
+    {
+      "name": "template_only is not a record key",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table",
+            "columns": [
+              {
+                "field": "template_only"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.columns[0]: Work has no field \"template_only\". Its fields: status, priority, tags, owner, due, window, estimate, score and 7 more."
+      }
+    },
+    {
+      "name": "knowledge_only is not a record key",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table",
+            "columns": [
+              {
+                "field": "knowledge_only"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.columns[0]: Work has no field \"knowledge_only\". Its fields: status, priority, tags, owner, due, window, estimate, score and 7 more."
+      }
+    },
+    {
+      "name": "operator must fit field",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "filters": {
+            "all": [
+              {
+                "field": "estimate",
+                "op": "contains",
+                "value": "a"
+              }
+            ]
+          },
+          "presentation": {
+            "type": "table"
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- filters.all[0]: \"contains\" doesn't apply to estimate, a number field. It takes equals, not_equals, gt, gte, lt, lte, is_between, is_empty or is_not_empty."
+      }
+    },
+    {
+      "name": "an option label names the id",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "filters": {
+            "all": [
+              {
+                "field": "priority",
+                "op": "equals",
+                "value": "High priority"
+              }
+            ]
+          },
+          "presentation": {
+            "type": "table"
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- filters.all[0]: \"High priority\" is the label of high; filters take option ids, so use \"high\"."
+      }
+    },
+    {
+      "name": "unknown option names closest id",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "filters": {
+            "all": [
+              {
+                "field": "priority",
+                "op": "equals",
+                "value": "hihg"
+              }
+            ]
+          },
+          "presentation": {
+            "type": "table"
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- filters.all[0]: priority has no option \"hihg\". Did you mean \"high\"?"
+      }
+    },
+    {
+      "name": "dateBucket requires a date field",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table",
+            "group": [
+              {
+                "field": "status",
+                "dateBucket": "week"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.group[0].dateBucket: dateBucket needs a date field; status is a status field."
+      }
+    },
+    {
+      "name": "calendarSpan enum",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "calendar",
+            "dateField": "due",
+            "calendarSpan": "year"
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.calendarSpan: \"year\" is not one of month or week."
+      }
+    },
+    {
+      "name": "zoom enum",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "timeline",
+            "dateField": "due",
+            "zoom": "year"
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.zoom: \"year\" is not one of day, week, month or quarter."
+      }
+    },
+    {
+      "name": "sort direction enum",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table",
+            "sort": [
+              {
+                "field": "due",
+                "dir": "up"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.sort[0].dir: \"up\" is not one of asc or desc."
+      }
+    },
+    {
+      "name": "date bucket enum",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table",
+            "group": [
+              {
+                "field": "due",
+                "dateBucket": "quarter"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.group[0].dateBucket: \"quarter\" is not one of day, week, month or year."
+      }
+    },
+    {
+      "name": "chart aggregate enum",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "chart",
+            "chart": {
+              "kind": "number",
+              "agg": "median"
+            }
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.chart.agg: \"median\" is not one of count, sum or avg."
+      }
+    },
+    {
+      "name": "donut never reads a series",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "chart",
+            "chart": {
+              "kind": "donut",
+              "xField": "status",
+              "groupBy": "priority"
+            }
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.chart.groupBy: a donut chart doesn't read groupBy."
+      }
+    },
+    {
+      "name": "cap on group levels",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table",
+            "group": [
+              {
+                "field": "status"
+              },
+              {
+                "field": "status"
+              },
+              {
+                "field": "status"
+              },
+              {
+                "field": "status"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.group: at most 3 group levels"
+      }
+    },
+    {
+      "name": "cap on sort keys",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table",
+            "sort": [
+              {
+                "field": "due",
+                "dir": "asc"
+              },
+              {
+                "field": "due",
+                "dir": "asc"
+              },
+              {
+                "field": "due",
+                "dir": "asc"
+              },
+              {
+                "field": "due",
+                "dir": "asc"
+              },
+              {
+                "field": "due",
+                "dir": "asc"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.sort: at most 4 sort keys"
+      }
+    },
+    {
+      "name": "cap on columns",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table",
+            "columns": [
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              },
+              {
+                "field": "title"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.columns: at most 40 columns"
+      }
+    },
+    {
+      "name": "view limit 0",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table",
+            "limit": 0
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.limit: limit is a whole number from 1 to 500."
+      }
+    },
+    {
+      "name": "view limit 1.5",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table",
+            "limit": 1.5
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.limit: limit is a whole number from 1 to 500."
+      }
+    },
+    {
+      "name": "view limit 501",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table",
+            "limit": 501
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.limit: limit is a whole number from 1 to 500."
+      }
+    },
+    {
+      "name": "walk order caps displayed problems",
+      "args": {
+        "database": "Work",
+        "view": {
+          "extra0": true,
+          "extra1": true,
+          "extra2": true,
+          "extra3": true,
+          "extra4": true,
+          "extra5": true,
+          "extra6": true,
+          "extra7": true,
+          "extra8": true,
+          "extra9": true,
+          "extra10": true,
+          "extra11": true,
+          "extra12": true,
+          "extra13": true,
+          "extra14": true,
+          "extra15": true,
+          "extra16": true,
+          "extra17": true,
+          "extra18": true,
+          "extra19": true,
+          "extra20": true,
+          "name": "Suggested",
+          "presentation": {
+            "type": "table"
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- extra0: a suggested view takes name, filters and presentation; leave \"extra0\" out.\n- extra1: a suggested view takes name, filters and presentation; leave \"extra1\" out.\n- extra2: a suggested view takes name, filters and presentation; leave \"extra2\" out.\n- extra3: a suggested view takes name, filters and presentation; leave \"extra3\" out.\n- extra4: a suggested view takes name, filters and presentation; leave \"extra4\" out.\n- extra5: a suggested view takes name, filters and presentation; leave \"extra5\" out.\n- extra6: a suggested view takes name, filters and presentation; leave \"extra6\" out.\n- extra7: a suggested view takes name, filters and presentation; leave \"extra7\" out.\n- extra8: a suggested view takes name, filters and presentation; leave \"extra8\" out.\n- extra9: a suggested view takes name, filters and presentation; leave \"extra9\" out.\n- extra10: a suggested view takes name, filters and presentation; leave \"extra10\" out.\n- extra11: a suggested view takes name, filters and presentation; leave \"extra11\" out.\n- extra12: a suggested view takes name, filters and presentation; leave \"extra12\" out.\n- extra13: a suggested view takes name, filters and presentation; leave \"extra13\" out.\n- extra14: a suggested view takes name, filters and presentation; leave \"extra14\" out.\n- extra15: a suggested view takes name, filters and presentation; leave \"extra15\" out.\n- extra16: a suggested view takes name, filters and presentation; leave \"extra16\" out.\n- extra17: a suggested view takes name, filters and presentation; leave \"extra17\" out.\n- extra18: a suggested view takes name, filters and presentation; leave \"extra18\" out.\n- extra19: a suggested view takes name, filters and presentation; leave \"extra19\" out.\n- and 1 more."
+      }
+    },
+    {
+      "name": "slot rejects group",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table",
+            "group": [
+              {
+                "field": "estimate"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.group[0]: estimate, a number field, can't band a view. Fields that can: status, priority, tags, owner, due, window, blocked_by, createdAt and 1 more."
+      }
+    },
+    {
+      "name": "slot rejects sort",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table",
+            "sort": [
+              {
+                "field": "files",
+                "dir": "asc"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.sort[0]: files, a files field, can't sort a view. Fields that can: status, priority, due, window, estimate, score, title, type and 3 more."
+      }
+    },
+    {
+      "name": "slot rejects axis",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "chart",
+            "chart": {
+              "kind": "bar",
+              "xField": "estimate"
+            }
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.chart.xField: estimate, a number field, can't be a chart axis. Fields that can: status, priority, tags, owner, due, window, blocked_by, createdAt and 1 more."
+      }
+    },
+    {
+      "name": "slot rejects series",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "chart",
+            "chart": {
+              "kind": "bar",
+              "xField": "status",
+              "groupBy": "score"
+            }
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.chart.groupBy: score, a formula field, can't split a chart. Fields that can: status, priority, tags, owner, due, window, blocked_by, createdAt and 1 more."
+      }
+    },
+    {
+      "name": "slot rejects value",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "chart",
+            "chart": {
+              "kind": "number",
+              "agg": "sum",
+              "value": "status"
+            }
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.chart.value: status, a status field, can't be summed or averaged. Fields that can: estimate, score."
+      }
+    },
+    {
+      "name": "slot rejects date",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "calendar",
+            "dateField": "status"
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.dateField: status, a status field, can't place records on dates. Fields that can: due, window, createdAt, modifiedAt."
+      }
+    },
+    {
+      "name": "slot rejects cover",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "gallery",
+            "gallery": {
+              "cover": "owner"
+            }
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.gallery.cover: owner, a person field, can't cover a card. Fields that can: files."
+      }
+    },
+    {
+      "name": "unknown view type",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "cards"
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.type: \"cards\" is not one of table, list, board, calendar, gantt, timeline, gallery, chart, dashboard or whiteboard."
+      }
+    },
+    {
+      "name": "unknown chart kind",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "chart",
+            "chart": {
+              "kind": "pie"
+            }
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.chart.kind: \"pie\" is not one of bar, line, donut or number."
+      }
+    },
+    {
+      "name": "unknown chart sort",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "chart",
+            "chart": {
+              "kind": "bar",
+              "xField": "status",
+              "sort": "value"
+            }
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.chart.sort: \"value\" is not one of value-desc, value-asc or label."
+      }
+    },
+    {
+      "name": "nested key is refused",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table",
+            "group": [
+              {
+                "field": "status",
+                "extra": 1
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.group[0].extra: leave \"extra\" out."
+      }
+    },
+    {
+      "name": "hideEmpty must be boolean",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table",
+            "group": [
+              {
+                "field": "status",
+                "hideEmpty": 0
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.group[0].hideEmpty: expected true or false"
+      }
+    },
+    {
+      "name": "presentation shape",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": null
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation: expected an object"
+      }
+    },
+    {
+      "name": "group shape",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table",
+            "group": {}
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.group: expected an array"
+      }
+    },
+    {
+      "name": "row shape",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table",
+            "columns": [null]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.columns[0]: expected an object"
+      }
+    },
+    {
+      "name": "gallery shape",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "gallery",
+            "gallery": []
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.gallery: expected an object"
+      }
+    },
+    {
+      "name": "field name shape",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table",
+            "columns": [
+              {
+                "field": 3
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.columns[0]: expected a field name"
+      }
+    },
+    {
+      "name": "sort needs direction",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table",
+            "sort": [
+              {
+                "field": "status"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.sort[0].dir: expected asc or desc"
+      }
+    },
+    {
+      "name": "filter group shape",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table"
+          },
+          "filters": {
+            "all": [],
+            "any": []
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- filters: expected {\"all\": [...]} or {\"any\": [...]}"
+      }
+    },
+    {
+      "name": "filter row shape",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table"
+          },
+          "filters": {
+            "all": [
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open",
+                "extra": 1
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- filters.all[0]: expected {field, op, value?}"
+      }
+    },
+    {
+      "name": "filter field shape",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table"
+          },
+          "filters": {
+            "all": [
+              {
+                "op": "equals",
+                "value": 3
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- filters.all[0].field: expected a field name"
+      }
+    },
+    {
+      "name": "filter operator shape",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table"
+          },
+          "filters": {
+            "all": [
+              {
+                "field": "status",
+                "value": 3
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- filters.all[0].op: expected an operator name"
+      }
+    },
+    {
+      "name": "unknown operator",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table"
+          },
+          "filters": {
+            "all": [
+              {
+                "field": "estimate",
+                "op": "equal",
+                "value": 3
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- filters.all[0]: \"equal\" is not an operator."
+      }
+    },
+    {
+      "name": "empty takes no value even null",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table"
+          },
+          "filters": {
+            "all": [
+              {
+                "field": "estimate",
+                "op": "is_empty",
+                "value": null
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- filters.all[0]: is_empty takes no value"
+      }
+    },
+    {
+      "name": "equals needs nonempty scalar",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table"
+          },
+          "filters": {
+            "all": [
+              {
+                "field": "estimate",
+                "op": "equals",
+                "value": ""
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- filters.all[0]: equals takes one value"
+      }
+    },
+    {
+      "name": "membership needs nonempty list",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table"
+          },
+          "filters": {
+            "all": [
+              {
+                "field": "status",
+                "op": "any_of",
+                "value": []
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- filters.all[0]: any_of takes a list of values"
+      }
+    },
+    {
+      "name": "between needs pair",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table"
+          },
+          "filters": {
+            "all": [
+              {
+                "field": "estimate",
+                "op": "is_between",
+                "value": [1]
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- filters.all[0]: is_between takes two values, [low, high]"
+      }
+    },
+    {
+      "name": "number refuses junk",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table"
+          },
+          "filters": {
+            "all": [
+              {
+                "field": "estimate",
+                "op": "equals",
+                "value": "0x10"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- filters.all[0]: estimate compares numbers, and \"0x10\" is not a number"
+      }
+    },
+    {
+      "name": "date refuses junk",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table"
+          },
+          "filters": {
+            "all": [
+              {
+                "field": "due",
+                "op": "before",
+                "value": "today+0"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- filters.all[0]: due compares dates, and \"today+0\" is not a date: use YYYY-MM-DD, YYYY-MM-DD HH:MM or a relative date such as today-7 or this_week"
+      }
+    },
+    {
+      "name": "number bounds ordered",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table"
+          },
+          "filters": {
+            "all": [
+              {
+                "field": "estimate",
+                "op": "is_between",
+                "value": [5, 1]
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- filters.all[0]: is_between takes [low, high]; 5 is after 1"
+      }
+    },
+    {
+      "name": "filter rule cap",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table"
+          },
+          "filters": {
+            "all": [
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              },
+              {
+                "field": "status",
+                "op": "equals",
+                "value": "open"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- filters: at most 40 filter rules"
+      }
+    },
+    {
+      "name": "filter depth cap",
+      "args": {
+        "database": "Work",
+        "view": {
+          "name": "Suggested",
+          "presentation": {
+            "type": "table"
+          },
+          "filters": {
+            "all": [
+              {
+                "any": [
+                  {
+                    "all": [
+                      {
+                        "any": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "refusal": "schema_invalid: this view of Work can't be shown, so no card was made.\n- filters: at most 3 levels of nested filters"
+      }
+    },
+    {
+      "name": "empty database is malformed",
+      "args": {
+        "database": " ",
+        "view": {
+          "name": "x",
+          "presentation": {
+            "type": "table"
+          }
+        }
+      },
+      "expect": {
+        "malformed": "suggest_view needs database: the database's name"
+      }
+    }
+  ]
+}

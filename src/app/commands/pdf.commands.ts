@@ -1,0 +1,58 @@
+import type { CommandDef } from './index';
+export const group = 'PDF';
+export const commands: readonly CommandDef[] = [
+  { id: 'pdf.outline', label: 'PDF outline', keys: ['alt+mod+3'], scope: 'pdf-viewer', group },
+  {
+    id: 'pdf.page',
+    label: 'Go to PDF page',
+    keys: ['alt+mod+g'],
+    scope: 'pdf-viewer',
+    group,
+    inEditor: true,
+  },
+  {
+    id: 'pdf.zoomIn',
+    label: 'Zoom into PDF',
+    keys: ['mod+=', 'mod+shift+='],
+    scope: 'pdf-viewer',
+    group,
+  },
+  { id: 'pdf.zoomOut', label: 'Zoom out of PDF', keys: ['mod+-'], scope: 'pdf-viewer', group },
+  { id: 'pdf.actual', label: 'PDF at 100%', keys: ['mod+0'], scope: 'pdf-viewer', group },
+  {
+    id: 'pdf.fit',
+    label: 'Fit PDF width',
+    keys: ['mod+9'],
+    scope: 'pdf-viewer',
+    group,
+    desktopOnly: true,
+    shadows: ['work.focusGroup'],
+  },
+  {
+    id: 'pdf.find',
+    label: 'Find in PDF',
+    keys: ['mod+f'],
+    scope: 'pdf-viewer',
+    group,
+    inEditor: true,
+    shadows: ['find.open'],
+  },
+  {
+    id: 'pdf.next',
+    label: 'Next PDF match',
+    keys: ['mod+g'],
+    scope: 'pdf-viewer',
+    group,
+    inEditor: true,
+    shadows: ['find.next'],
+  },
+  {
+    id: 'pdf.previous',
+    label: 'Previous PDF match',
+    keys: ['mod+shift+g'],
+    scope: 'pdf-viewer',
+    group,
+    inEditor: true,
+    shadows: ['find.prev'],
+  },
+];

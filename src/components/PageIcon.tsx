@@ -1,4 +1,5 @@
 import { Icon } from '@/components/ui/Icon';
+import { FileThumb } from './FileThumb';
 import { pageIconOf, type PageIcon } from '@/engine/pageChrome';
 import type { Entry } from '@/engine/types';
 import { resolveOptionColor } from '@/lib/swatch';
@@ -9,9 +10,8 @@ import { useEntry } from '@/stores/vaultStore';
  * the Pages panel, the crumbs, ⌘K and the page itself.
  *
  * - An emoji draws as text.
- * - A file draws as the lucide `image` glyph titled with its path, never as an
- *   `<img>`: the webview loads no vault bytes before M66.2, the same rule
- *   GalleryView keeps.
+ * - A contained file draws through FileThumb; unreadable files and URLs keep
+ *   the image glyph without making a remote request.
  * - A lucide name draws through `Icon`, its colour through
  *   `resolveOptionColor`, the one gate a vault colour passes to reach CSS.
  * - Nothing set draws the surface's fallback, which is never written.
@@ -20,6 +20,14 @@ import { useEntry } from '@/stores/vaultStore';
 export interface GlyphFallback {
   name: string;
   color?: string | null;
+}
+
+function FileIcon({ path, size }: { path: string; size: number }) {
+  return /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(path) ? (
+    <Icon name="image" size={size} color="var(--n-500)" />
+  ) : (
+    <FileThumb rootId="0" path={path} size={128} compact className="h-full w-full" />
+  );
 }
 
 export function PageIconGlyph({
@@ -71,9 +79,15 @@ export function PageIconGlyph({
         title={icon.path}
         data-icon-kind="file"
         className={className}
-        style={{ display: 'inline-flex', flex: 'none' }}
+        style={{
+          display: 'inline-flex',
+          flex: 'none',
+          width: size,
+          height: size,
+          overflow: 'hidden',
+        }}
       >
-        <Icon name="image" size={size} color="var(--n-500)" />
+        <FileIcon path={icon.path} size={size} />
       </span>
     );
   }

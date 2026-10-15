@@ -3,13 +3,11 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
 import { IconPicker } from '@/components/ui/IconPicker';
 import { Input } from '@/components/ui/Input';
-import { ensureTypeDoc } from '@/app/typeActions';
+import { createDatabase, ensureTypeDoc, renameDatabase } from '@/app/typeActions';
 import { trashPath } from '@/app/trashActions';
 import type { TypeListing } from '@/engine/typeCatalog';
-import { homeFolderFor } from '@/engine/createRecord';
 import { TRASH_WORDS } from '@/engine/trash';
 import { isReservedTypeName, isSystemType, listTypes } from '@/engine/typeCatalog';
-import { slugify } from '@/lib/slug';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
@@ -26,8 +24,6 @@ export const TYPE_COLORS = [
   '#A8AFC2',
 ];
 
-const DEFAULT_ICON = 'file-text';
-
 function useTypeNames(): Set<string> {
   const entries = useVaultStore((s) => s.entries);
   const schema = useSchema();
@@ -38,11 +34,7 @@ function useTypeNames(): Set<string> {
 }
 
 export function NewTypeDialog({ onClose }: { onClose: () => void }) {
-  const createItem = useVaultStore((s) => s.createItem);
-  const entries = useVaultStore((s) => s.entries);
-  const schema = useSchema();
   const navigate = useNavStore((s) => s.navigate);
-  const toast = useUiStore((s) => s.toast);
   const taken = useTypeNames();
   const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -56,28 +48,15 @@ export function NewTypeDialog({ onClose }: { onClose: () => void }) {
   const create = async () => {
     if (trimmed === '' || duplicate || reserved || submitting) return;
     setSubmitting(true);
-    try {
-      await createItem({
-        folder: 'types',
-        slug: slugify(trimmed) || 'type',
-        frontmatter: {
-          type: 'Type',
-          icon: DEFAULT_ICON,
-          color: TYPE_COLORS[4],
-          // Declared at birth, like the inline door (`createDatabase`): an
-          // implied `records/<plural>` home is shared by Task and Tasks, and
-          // `homeFolderFor` is what keeps two databases out of one folder.
-          folder: homeFolderFor(trimmed, schema, entries),
-        },
-        body: `# ${trimmed}\n`,
-      });
-    } catch {
-      toast(`Couldn't create type "${trimmed}"`);
+    const vault = useVaultStore.getState().vaultPath;
+    const created = await createDatabase(trimmed);
+    if (created === null) {
       setSubmitting(false);
       return;
     }
+    if (useVaultStore.getState().vaultPath !== vault) return;
     onClose();
-    navigate({ kind: 'type', name: trimmed });
+    navigate({ kind: 'type', name: created });
   };
 
   return (
@@ -130,11 +109,8 @@ export function RenameTypeDialog({
   listing: TypeListing;
   onClose: () => void;
 }) {
-  const entries = useVaultStore((s) => s.entries);
-  const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
   const navigate = useNavStore((s) => s.navigate);
   const selection = useNavStore((s) => s.selection);
-  const toast = useUiStore((s) => s.toast);
   const taken = useTypeNames();
   const [name, setName] = useState(listing.name);
   const [submitting, setSubmitting] = useState(false);
@@ -154,26 +130,11 @@ export function RenameTypeDialog({
   const rename = async () => {
     if (invalid || submitting) return;
     setSubmitting(true);
-    const { vaultPath, rescan } = useVaultStore.getState();
-    try {
-      const docPath = await ensureTypeDoc(listing);
-      if (vaultPath !== null) {
-        const ipc = await import('@/lib/ipc');
-        await ipc.setNoteTitle(vaultPath, docPath, trimmed);
-      }
-      // Records reference types by name: retag every one so they follow.
-      const records = entries.filter((e) => e.type === listing.name);
-      for (const record of records) {
-        await patchFrontmatter(record.path, { type: trimmed });
-      }
-      await rescan();
-    } catch {
-      toast(`Couldn't rename "${listing.name}"`);
+    if (!(await renameDatabase(listing, trimmed))) {
       setSubmitting(false);
       return;
     }
     onClose();
-    toast(`Renamed "${listing.name}" to "${trimmed}"`);
     if (selection.kind === 'type' && selection.name === listing.name) {
       navigate({ kind: 'type', name: trimmed });
     }
@@ -191,11 +152,7 @@ export function RenameTypeDialog({
         disabled: invalid || submitting,
       }}
       secondaryAction={{ label: 'Cancel', onClick: onClose }}
-      footerNote={
-        listing.count > 0
-          ? `Updates ${listing.count} ${listing.count === 1 ? 'record' : 'records'}`
-          : undefined
-      }
+      footerNote={`Updates ${listing.count} records and every view, relation and page block that names it`}
     >
       <label className="flex flex-col gap-1 text-xs text-n-600">
         Display name

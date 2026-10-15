@@ -1,0 +1,162 @@
+{
+  "now": "2026-07-28T12:00:00.000Z",
+  "later": "2026-07-28T12:01:00.000Z",
+  "fire": {
+    "path": "inbox/plan.md",
+    "chip": "0123456789abcdef",
+    "ordinal": 0,
+    "fireAt": "2026-07-28T12:00",
+    "outcome": "fired"
+  },
+  "outcomes": ["fired", "missed", "moved"],
+  "importOutcome": "imported",
+  "fresh": [true, false],
+  "cap": {
+    "count": 501,
+    "error": "At most 500 reminders can be claimed at once."
+  },
+  "badFires": [
+    {
+      "patch": {
+        "path": ""
+      },
+      "error": "A reminder path must have 1 to 1024 characters."
+    },
+    {
+      "patch": {
+        "path": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "error": "A reminder path must have 1 to 1024 characters."
+    },
+    {
+      "patch": {
+        "chip": "0123456789abcdeF"
+      },
+      "error": "A reminder chip must be 16 lowercase hexadecimal characters."
+    },
+    {
+      "patch": {
+        "chip": 3
+      },
+      "error": "A reminder chip must be 16 lowercase hexadecimal characters."
+    },
+    {
+      "patch": {
+        "ordinal": -1
+      },
+      "error": "A reminder ordinal must be a nonnegative integer."
+    },
+    {
+      "patch": {
+        "ordinal": 0.5
+      },
+      "error": "A reminder ordinal must be a nonnegative integer."
+    },
+    {
+      "patch": {
+        "fireAt": "2026-02-30T09:00"
+      },
+      "error": "A reminder time must be a floating local minute."
+    },
+    {
+      "patch": {
+        "fireAt": "2026-07-28T12:00Z"
+      },
+      "error": "A reminder time must be a floating local minute."
+    },
+    {
+      "patch": {
+        "fireAt": "0000-07-28T12:00"
+      },
+      "error": "A reminder time must be a floating local minute."
+    },
+    {
+      "patch": {
+        "outcome": "imported"
+      },
+      "error": "A reminder claim must be fired, missed or moved."
+    },
+    {
+      "patch": {
+        "outcome": "unknown"
+      },
+      "error": "A reminder claim must be fired, missed or moved."
+    }
+  ],
+  "mark": {
+    "lane": "insight",
+    "subject": "knowledge/concepts/one.md",
+    "until": "revision",
+    "revision": "rev-a"
+  },
+  "replacement": {
+    "lane": "insight",
+    "subject": "knowledge/concepts/one.md",
+    "until": "revision",
+    "revision": "rev-b"
+  },
+  "lanes": ["insight", "run", "reminder", "change"],
+  "badMarks": [
+    {
+      "patch": {
+        "lane": "todo"
+      },
+      "error": "A Done lane must be insight, run, reminder or change."
+    },
+    {
+      "patch": {
+        "subject": ""
+      },
+      "error": "A Done subject must have 1 to 1024 characters."
+    },
+    {
+      "patch": {
+        "subject": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "error": "A Done subject must have 1 to 1024 characters."
+    },
+    {
+      "patch": {
+        "until": "today"
+      },
+      "error": "A Done mark must last for a revision or forever."
+    },
+    {
+      "patch": {
+        "revision": null
+      },
+      "error": "A revision Done mark needs a revision; a forever mark must have none."
+    },
+    {
+      "patch": {
+        "revision": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "error": "A revision Done mark needs a revision; a forever mark must have none."
+    },
+    {
+      "patch": {
+        "until": "forever"
+      },
+      "error": "A revision Done mark needs a revision; a forever mark must have none."
+    }
+  ],
+  "badStamp": {
+    "markedAt": "not-a-time",
+    "error": "A Done mark must name its recorded UTC time."
+  },
+  "badRestore": {
+    "subject": "another",
+    "error": "Undo must restore the same Done subject and lane."
+  },
+  "importedMark": {
+    "lane": "change",
+    "subject": "legacy",
+    "until": "forever",
+    "revision": null
+  },
+  "importCounts": {
+    "first": 1,
+    "second": 0,
+    "afterUndo": 0
+  }
+}

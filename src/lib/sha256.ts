@@ -31,12 +31,16 @@ const rotr = (x: number, n: number): number => (x >>> n) | (x << (32 - n));
 declare const TextEncoder: { new (): { encode(input?: string): Uint8Array } };
 
 export function sha256Hex(input: string): string {
+  return sha256Bytes(new TextEncoder().encode(input));
+}
+
+/** Raw file bytes, with no UTF-8 decoding or replacement characters. */
+export function sha256Bytes(bytes: Uint8Array): string {
   // First 32 bits of the fractional parts of the square roots of the first
   // 8 primes — the initial hash value of §5.3.3.
   const H = [
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
   ];
-  const bytes = new TextEncoder().encode(input);
   const bitLen = bytes.length * 8;
   // Pad to a multiple of 64 bytes: 0x80, zeros, 64-bit big-endian length.
   const padded = new Uint8Array((((bytes.length + 8) >> 6) + 1) << 6);

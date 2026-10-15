@@ -1,3 +1,5 @@
+import { createClientToken, __seedClientTokens } from '@/lib/mockIpc';
+import { useClientAccessStore } from '@/stores/clientAccessStore';
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -27,6 +29,7 @@ const panelRow = () => rows().find((r) => r.dataset.panel === 'yes');
 
 beforeEach(async () => {
   resetMockFs();
+  useClientAccessStore.getState().reset(VAULT);
   opened.mockReset();
   await useVaultStore.getState().openVault(VAULT);
   useUiStore.setState({ agentShell: 'off', panelAgents: { [VAULT]: null } });
@@ -98,5 +101,50 @@ describe('PageAccess', () => {
         .getAllByTestId('page-access-reason')
         .map((r) => r.textContent),
     ).toContain('Answers as Release scout here.');
+  });
+});
+
+describe('other apps on the Info tab', () => {
+  it('names a writing token and preserves read-only attribution without claiming a writer', async () => {
+    await createClientToken(VAULT, {
+      name: 'Editor',
+      toolsets: ['read', 'write'],
+      writeScope: ['records/risks'],
+      readScope: null,
+    });
+    await createClientToken(VAULT, {
+      name: 'Reader',
+      toolsets: ['read'],
+      writeScope: [],
+      readScope: null,
+    });
+    render(<PageAccess entry={page(RISK)} />);
+    await screen.findByText('Other apps that can change this page: Editor.');
+    expect(rowOf('client:editor')?.dataset).toMatchObject({ write: 'yes', read: 'yes' });
+    expect(rowOf('client:reader')?.dataset).toMatchObject({ write: 'no', read: 'yes' });
+  });
+  it('protects governed pages and ignores tokens for a different vault', async () => {
+    await createClientToken(VAULT, {
+      name: 'Editor',
+      toolsets: ['read', 'write'],
+      writeScope: ['types'],
+      readScope: null,
+    });
+    await createClientToken('/other', {
+      name: 'Other',
+      toolsets: ['read', 'write'],
+      writeScope: ['types'],
+      readScope: null,
+    });
+    render(<PageAccess entry={page(TYPE_DOC)} />);
+    await screen.findByText('No other app can change this page.');
+    expect(rowOf('client:editor')?.dataset.write).toBe('no');
+    expect(rowOf('client:other')).toBeUndefined();
+  });
+  it('says a failed token read is unavailable, never that no app can write', async () => {
+    __seedClientTokens(null);
+    render(<PageAccess entry={page(RISK)} />);
+    await screen.findByText("Couldn't read which other apps have tokens.");
+    expect(screen.queryByText('No other app can change this page.')).toBeNull();
   });
 });

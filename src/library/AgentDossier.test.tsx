@@ -1,3 +1,12 @@
+import { useFollowupStore } from '@/stores/followupStore';
+import { agentRef } from '@/engine/agents';
+import { stampActivation } from '@/agent/activation';
+vi.mock('@/agent/activation', async (original) => ({
+  ...(await original<typeof import('@/agent/activation')>()),
+  stampActivation: vi.fn(async () => true),
+}));
+import { runAgentNow } from '@/agent/runNow';
+import { useUiStore } from '@/stores/uiStore';
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,7 +22,7 @@ import { AgentDossier } from './AgentDossier';
  * Two properties: **absent is never zero** (a lifetime total names the runs
  * it could not include, a failed read says so), and **nothing about the agent
  * is stored outside the vault** — on duty is derived from the record, and the
- * only thing read from SQLite is the actor's summary.
+ * summary read comes from SQLite. Run now uses the shared job action.
  *
  * The clock is PINNED. Every date this component renders is relative to
  * `now`, and an unpinned test has a shelf life (M26's lesson, which cost
@@ -41,6 +50,11 @@ vi.mock('@/lib/ipc', async () => {
     fleetRuns: (filter?: unknown) => fleetRuns(filter),
   };
 });
+
+vi.mock('@/agent/runNow', () => ({
+  runAgentNow: vi.fn(async () => false),
+  useRunNowStarting: () => false,
+}));
 
 afterEach(cleanup);
 
@@ -73,9 +87,96 @@ describe('AgentDossier', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(stampActivation).mockResolvedValue(true);
+    useUiStore.setState({ runs: [] });
     fleetActorSummary.mockResolvedValue(summary());
     fleetRuns.mockResolvedValue([]);
-    useVaultStore.setState({ patchFrontmatter: patchFrontmatter as never });
+    useVaultStore.setState({ vaultPath: '/vault', patchFrontmatter: patchFrontmatter as never });
+  });
+
+  it('Resume stamps first, keeps resuming on stamp failure, and Pause stamps nothing', async () => {
+    const entry = agent({ paused: true });
+    const view = render(<AgentDossier entry={entry} now={NOW} />);
+    vi.mocked(stampActivation).mockImplementationOnce(async () => {
+      expect(patchFrontmatter).not.toHaveBeenCalled();
+      return false;
+    });
+    const toast = vi.spyOn(useUiStore.getState(), 'toast');
+    fireEvent.click(screen.getByTestId('agent-duty-toggle'));
+    await waitFor(() => expect(patchFrontmatter).toHaveBeenCalled());
+    expect(stampActivation).toHaveBeenCalledWith(
+      '/vault',
+      'slug:weekly-digest',
+      ['daily 09:00'],
+      NOW,
+    );
+    expect(toast).toHaveBeenCalledWith(
+      "Resumed. Cerebro couldn't record when, so a run its schedule missed may start now.",
+    );
+    vi.mocked(stampActivation).mockClear();
+    view.rerender(<AgentDossier entry={agent()} now={NOW} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-duty-toggle')).toHaveProperty('disabled', false),
+    );
+    fireEvent.click(screen.getByTestId('agent-duty-toggle'));
+    await waitFor(() => expect(patchFrontmatter).toHaveBeenCalledTimes(2));
+    expect(stampActivation).not.toHaveBeenCalled();
+    toast.mockRestore();
+  });
+  it('Resume uses the click time when an open page has aged past another fire', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date(2026, 6, 28, 8));
+      render(<AgentDossier entry={agent({ paused: true })} />);
+      vi.setSystemTime(new Date(2026, 6, 28, 14));
+      fireEvent.click(screen.getByTestId('agent-duty-toggle'));
+      await waitFor(() => expect(stampActivation).toHaveBeenCalled());
+      expect(vi.mocked(stampActivation).mock.lastCall?.[3]).toEqual(new Date(2026, 6, 28, 14));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('lists show the soonest future time and a passed once reads passed and off duty', () => {
+    const view = render(
+      <AgentDossier
+        entry={agent({ schedule: ['monthly last 18:00', 'weekdays 08:30'] })}
+        now={NOW}
+      />,
+    );
+    expect(screen.getByTestId('dossier-next-fire').textContent).toContain('2026-07-29 08:30');
+    expect(screen.getByTestId('dossier-next-fire').title).toContain("This computer's clock (");
+    view.rerender(<AgentDossier entry={agent({ schedule: 'once 2026-07-27 09:00' })} now={NOW} />);
+    expect(screen.getByTestId('dossier-next-fire').textContent).toContain(
+      'its one time has passed',
+    );
+    expect(screen.getByTestId('dossier-duty').dataset.onDuty).toBe('false');
+  });
+
+  it('Run now invokes the shared action and a registry job shows Running', () => {
+    const entry = agent();
+    const view = render(<AgentDossier entry={entry} now={NOW} />);
+    fireEvent.click(screen.getByTestId('agent-run-now'));
+    expect(runAgentNow).toHaveBeenCalledWith(entry.path);
+    useUiStore.setState({
+      runs: [
+        {
+          id: 'job',
+          owner: 'job',
+          path: entry.path,
+          label: entry.title,
+          place: null,
+          conversationId: null,
+          run: 1,
+          startedAt: 0,
+        },
+      ],
+    });
+    view.rerender(<AgentDossier entry={entry} now={NOW} />);
+    const button = screen.getByTestId('agent-run-now') as HTMLButtonElement;
+    expect(button.textContent).toBe('Running…');
+    expect(button.disabled).toBe(true);
+    expect(button.parentElement?.title).toBe('Weekly digest is already running');
   });
 
   it('shows lifetime tokens with the unmetered runs called out separately', async () => {
@@ -179,4 +280,41 @@ describe('AgentDossier', () => {
     await screen.findByTestId('dossier-last');
     expect(fleetRuns).not.toHaveBeenCalled();
   });
+});
+
+it('a waiting follow-up keeps off-duty words honest and a paused record stays paused', async () => {
+  const entry = agent({ schedule: null });
+  useFollowupStore.setState({
+    vault: useVaultStore.getState().vaultPath,
+    read: {
+      state: 'ready',
+      rows: [
+        {
+          followupId: 'id',
+          actor: agentRef(entry).actor,
+          note: 'check',
+          dueAt: NOW.toISOString(),
+          requestedAt: NOW.toISOString(),
+          requestedByRun: 'run',
+          state: 'pending',
+          claimedAt: null,
+          runId: null,
+          endedAt: null,
+          cancelReason: null,
+        },
+      ],
+    },
+  });
+  const { rerender } = render(<AgentDossier entry={entry} now={NOW} />);
+  expect(screen.getByTestId('dossier-duty').textContent).toContain(
+    'Off duty — only a follow-up it booked will run it, while Learn on its own is on',
+  );
+  rerender(
+    <AgentDossier
+      entry={{ ...entry, properties: { ...entry.properties, paused: true } }}
+      now={NOW}
+    />,
+  );
+  expect(screen.getByTestId('dossier-duty').textContent).toContain('Paused');
+  useFollowupStore.getState().reset(null);
 });

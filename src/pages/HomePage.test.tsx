@@ -1,6 +1,9 @@
+import { navSeed } from '@/test/navSeed';
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as ipc from '@/lib/ipc';
+import { emptyMockVault, resetMockFs } from '@/lib/mockIpc';
 import type { Entry } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -70,6 +73,7 @@ describe('HomePage', () => {
   beforeEach(() => {
     useVaultStore.setState({
       vaultPath: '/demo-vault',
+      entriesVault: '/demo-vault',
       entries: [project, itemDone, itemOpen],
       views: [],
       collections: [],
@@ -78,17 +82,23 @@ describe('HomePage', () => {
     });
     useNavStore.setState({
       selection: { kind: 'home' },
-      history: [{ kind: 'home' }],
+      history: [navSeed({ kind: 'home' })],
       historyIndex: 0,
     });
   });
 
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    resetMockFs();
+  });
 
   // M12.5: the grid shows Collections. A legacy project folder reads as one
   // — named after its project.md, nothing rewritten on disk.
-  it('renders a legacy project folder as a collection card', () => {
-    render(<HomePage />);
+  it('renders a legacy project folder as a collection card', async () => {
+    await act(async () => {
+      render(<HomePage />);
+    });
     expect(screen.getByText('1 collection')).toBeTruthy();
     const card = screen.getByTestId('home-collection-card');
     expect(card.textContent).toContain('Foundations');
@@ -99,12 +109,18 @@ describe('HomePage', () => {
     });
   });
 
-  // M1.x fresh-vault empty state: a brand-new vault rendered a bare section
-  // heading with nothing actionable under it.
-  it('shows an empty state when the vault has no collections', () => {
+  it('offers a kit when the vault has no pages', async () => {
+    emptyMockVault();
     useVaultStore.setState({ entries: [] });
     render(<HomePage />);
-    expect(screen.getByText('Nothing here yet')).toBeTruthy();
-    expect(screen.getByText('Use New to create your first collection.')).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Add the starter kit' })).toBeTruthy();
+  });
+  it('never reads the starter marker for the populated demo', async () => {
+    const read = vi.spyOn(ipc, 'starterMarker');
+    await act(async () => {
+      render(<HomePage />);
+    });
+    expect(read).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('starter-offer')).toBeNull();
   });
 });

@@ -39,6 +39,20 @@ function setup(overrides: Partial<React.ComponentProps<typeof ViewTabs>> = {}) {
 afterEach(cleanup);
 
 describe('ViewTabs (M11)', () => {
+  it('exports the tab whose menu was opened without changing selection', () => {
+    const onExport = vi.fn();
+    const props = setup({ onExport });
+    fireEvent.contextMenu(screen.getByTestId('view-tab-risk'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Export as CSV…' }));
+    expect(onExport).toHaveBeenCalledWith('risk');
+    expect(props.onSelect).not.toHaveBeenCalled();
+  });
+
+  it.each(['chart', 'dashboard', 'whiteboard'] as const)('does not offer CSV for %s', (type) => {
+    setup({ onExport: vi.fn(), views: [view('grid', 'All work', type)] });
+    fireEvent.click(screen.getByTestId('view-tab-grid'));
+    expect(screen.queryByRole('menuitem', { name: 'Export as CSV…' })).toBeNull();
+  });
   it('renders one tab per view and marks the open one', () => {
     setup();
     expect(screen.getByTestId('view-tab-grid').getAttribute('aria-selected')).toBe('true');

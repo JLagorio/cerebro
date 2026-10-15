@@ -88,8 +88,12 @@ export type ChartBlocked =
 
 export interface ChartData {
   slices: ChartSlice[];
-  /** Sum of every slice — the donut's whole, and its centre label. */
+  /** The measure over distinct records drawn, even when bands overlap. */
   total: number;
+  /** Sum of visible slice values: arcs and shares measure memberships. */
+  ringTotal: number;
+  /** Records represented more than once among visible bands/series. */
+  overlap: number;
   /** `total` through the value field's formatting — what a big stat prints. */
   totalDisplay: string;
   /** Largest slice value; 0 when there are none. The bar/line Y extent. */
@@ -158,7 +162,11 @@ export function computeChart(
   const kind = chart?.kind ?? 'bar';
   const agg: ChartAgg = chart?.agg ?? 'count';
   const band: GroupSpec | undefined =
-    chart?.xField !== undefined ? { field: chart.xField } : bandLevels(presentation.group)[0];
+    chart?.xField !== undefined
+      ? (bandLevels(presentation.group).find((spec) => spec.field === chart.xField) ?? {
+          field: chart.xField,
+        })
+      : bandLevels(presentation.group)[0];
   // `all-hidden` is the one blocked state with rosters: the legend must
   // still list what was hidden, or there is no way back.
   const empty = (
@@ -168,6 +176,8 @@ export function computeChart(
   ): ChartData => ({
     slices: [],
     total: 0,
+    ringTotal: 0,
+    overlap: 0,
     totalDisplay: '',
     max: 0,
     axis: band === undefined ? '' : humanize(band.field),
@@ -202,6 +212,8 @@ export function computeChart(
       return {
         slices: [],
         total: n,
+        ringTotal: n,
+        overlap: 0,
         totalDisplay: def === null ? String(n) : formatNumber(n, def),
         max: n,
         axis: '',
@@ -218,6 +230,8 @@ export function computeChart(
     return {
       slices: [],
       total: n,
+      ringTotal: n,
+      overlap: 0,
       totalDisplay: def === null ? String(n) : formatNumber(n, def),
       max: n,
       axis: '',
@@ -319,7 +333,10 @@ export function computeChart(
     // empty bands — and the hue a series gets here is the hue it keeps.
     const subsFor = new Map<string, Group[]>();
     for (const s of slices) {
-      const subs = groupEntries(s.entries, groupBy, schema);
+      const subs = groupEntries(s.entries, groupBy, schema, {
+        dateBucket: bandLevels(presentation.group).find((spec) => spec.field === groupBy)
+          ?.dateBucket,
+      });
       subsFor.set(s.key, subs);
       for (const sub of subs) {
         if (seriesHue.has(sub.key)) continue;
@@ -381,7 +398,22 @@ export function computeChart(
   else if (chart?.sort === 'value-asc') visible.sort((a, b) => a.value - b.value);
   else if (chart?.sort === 'label') visible.sort((a, b) => a.label.localeCompare(b.label));
 
-  const total = visible.reduce((sum, s) => sum + s.value, 0);
+  const ringTotal = visible.reduce((sum, s) => sum + s.value, 0);
+  const memberships = new Map<string, { entry: Entry; count: number }>();
+  for (const slice of visible) {
+    const rows =
+      slice.parts === undefined ? slice.entries : slice.parts.flatMap((part) => part.entries);
+    for (const entry of rows) {
+      const prior = memberships.get(entry.path);
+      memberships.set(entry.path, { entry, count: (prior?.count ?? 0) + 1 });
+    }
+  }
+  const unique = [...memberships.values()];
+  const overlap = unique.filter((row) => row.count > 1).length;
+  const total =
+    agg === 'count'
+      ? unique.length
+      : (aggregateNumbers(measuredValues(unique.map((row) => row.entry)), agg) ?? 0);
   // Running totals only where bands have an order to run along — never a
   // donut, whose whole is the sum and would double-count. The run covers the
   // visible bands only: what the eye adds up is what the line draws. A
@@ -441,6 +473,8 @@ export function computeChart(
   return {
     slices: visible,
     total,
+    ringTotal,
+    overlap,
     totalDisplay: def === null ? String(total) : formatNumber(total, def),
     max: visible.reduce((top, s) => Math.max(top, s.value), 0),
     axis: humanize(band.field),

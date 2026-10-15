@@ -63,6 +63,20 @@
   background: var(--n-25);
 }
 
+/* BlockNote's global .ProseMirror table rules force 100% fixed tables and
+   !important cell minima. Measured in Chromium: 26 sheet columns collapsed
+   to 21px each. These descendant selectors cover both custom-block DOM
+   shapes; the sheet's own overflow container remains the scroll owner. */
+.cerebro-editor .bn-block-content[data-content-type='sheet'] table {
+  width: max-content;
+  min-width: 100%;
+  table-layout: auto;
+}
+.cerebro-editor .bn-block-content[data-content-type='sheet'] th:not(:first-child),
+.cerebro-editor .bn-block-content[data-content-type='sheet'] td {
+  min-width: 6rem !important;
+}
+
 /* Inline chips must fit INSIDE the text line box — anything taller grows the
    line and pushes content down (user-reported with @ mentions in bullets). */
 .cerebro-editor [data-chip] {

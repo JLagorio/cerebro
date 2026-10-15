@@ -80,7 +80,7 @@ describe('RecordTabs (M44.5)', () => {
     expect(screen.queryByRole('button', { name: 'Properties' })).toBeNull();
     // The other three survive — `getByRole` throws if one goes missing, so
     // this is the vacuity guard on the absence above.
-    for (const kind of ['Sections', 'Overview', 'View']) {
+    for (const kind of ['Sections', 'Overview', 'Agents', 'Runs', 'View']) {
       screen.getByRole('button', { name: kind });
     }
   });
@@ -264,6 +264,8 @@ describe('RecordTabs view tabs (M45.4)', () => {
     fireEvent.click(screen.getByTestId('new-record-tab'));
     const tiles = screen.getAllByTestId(/^new-tab-kind-/);
     expect(tiles.at(-1)?.getAttribute('data-testid')).toBe('new-tab-kind-view');
+    expect(tiles.at(-3)?.getAttribute('data-testid')).toBe('new-tab-kind-agents');
+    expect(tiles.at(-2)?.getAttribute('data-testid')).toBe('new-tab-kind-runs');
     // The drill-in belongs to the View tile alone.
     expect(screen.queryByTestId('view-tab-source')).toBeNull();
     fireEvent.click(screen.getByTestId('new-tab-kind-view'));

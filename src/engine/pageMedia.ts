@@ -1,3 +1,4 @@
+import { kindFor, extOf } from './fileKinds';
 /**
  * Page media as markdown image lines (M55.4).
  *
@@ -15,7 +16,7 @@
  * link line, `[x](y.pdf)`, is never read as a block, so a working link in a
  * hand-written file stays a link.
  *
- * Pure string code with no imports: the engine typechecks with no DOM, so
+ * Pure string code: the engine typechecks with no DOM, so
  * there is no `URL` class here, and a relative path is the common case anyway.
  * The block-tree passes that use it live in `src/editor/markdown.ts`.
  */
@@ -33,52 +34,16 @@ export interface PageMedia {
   width?: number;
 }
 
-/** BlockNote's own video list (`isVideoUrl`), so a video it parses is one here too. */
-export const VIDEO = ['mp4', 'webm', 'ogg', 'mov', 'mkv', 'flv', 'avi', 'wmv', 'm4v'];
-export const AUDIO = ['mp3', 'wav', 'm4a', 'aac', 'flac', 'oga', 'opus', 'weba'];
-export const FILE = [
-  'pdf',
-  'doc',
-  'docx',
-  'xls',
-  'xlsx',
-  'ppt',
-  'pptx',
-  'odt',
-  'ods',
-  'odp',
-  'rtf',
-  'csv',
-  'tsv',
-  'txt',
-  'json',
-  'xml',
-  'zip',
-  'gz',
-  'tgz',
-  'tar',
-  '7z',
-  'rar',
-  'epub',
-  'key',
-  'numbers',
-  'pages',
-];
-
-/**
- * The kind of block a url is, read from its path's extension: the query and
- * fragment dropped, case folded. Anything unknown, or no extension, is an
- * image, which is what `![…](…)` means everywhere else.
- */
+/** Known media uses the same file-kind table as native viewers. Unknown
+ * vault files are file blocks; remote/extensionless markdown images retain
+ * the conventional image default. */
 export function mediaKindOf(url: string): MediaKind {
   const path = url.split('#')[0].split('?')[0];
-  const last = path.slice(path.lastIndexOf('/') + 1);
-  const dot = last.lastIndexOf('.');
-  const ext = dot <= 0 ? '' : last.slice(dot + 1).toLowerCase();
-  if (VIDEO.includes(ext)) return 'video';
-  if (AUDIO.includes(ext)) return 'audio';
-  if (FILE.includes(ext)) return 'file';
-  return 'image';
+  const kind = kindFor(path).kind;
+  if (kind === 'image' || kind === 'audio' || kind === 'video') return kind;
+  if (kind !== 'unknown') return 'file';
+  if (/^[a-z][a-z0-9+.-]*:/i.test(url) || extOf(path) === null) return 'image';
+  return 'file';
 }
 
 /** Kinds whose block carries a width (BlockNote's `previewWidth`). */

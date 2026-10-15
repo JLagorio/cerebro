@@ -17,8 +17,10 @@ import {
 } from '@/lib/policy/toolApproval';
 import { answersFor, type QuestionAnswer } from '@/engine/questionForm';
 import { changedKeys } from '@/engine/writeDraft';
-import { isConfirmable, toolFacts } from '@/lib/policy/tools';
+import { TOOLS, isConfirmable, toolFacts } from '@/lib/policy/tools';
 import { slugify } from '@/lib/slug';
+import { mentionedTools } from '@/engine/toolGrant';
+import { parseSuggestionResult } from '@/engine/viewSuggestion';
 
 /**
  * Scripted agent for browser dev, vitest, and Playwright (M6).
@@ -31,6 +33,8 @@ import { slugify } from '@/lib/slug';
  *
  * It is deliberately keyword-driven rather than random: a test that asserts
  * on the reply needs the reply to be a function of the prompt.
+ * `edit sheet in <path>.md: <json>` carries its checked batch through
+ * onEditSheet and the same write gate as the other page writers (M67.2b).
  */
 
 interface Script {
@@ -55,9 +59,14 @@ interface Script {
   appends?: { path: string; content: string }[];
   /** What its `edit_note` call replaces (M55.5) — another. */
   edit?: { path: string; edits: QuoteEdit[] };
+  sheetEdit?: { path: string; json: string };
+  notionImport?: { page: string; folder: string };
   /** What its `set_fields` call sets (M60.4) — another: one field, to one
    * value, checked against the record's database. */
   fields?: SetFieldsCall;
+  /** A checked suggestion answers with a card payload and emits no UI event. */
+  suggestion?: string;
+  followup?: { at: string; note: string };
   /** Its comment tool's call (M70.3): it posts beside a page and changes no
    * file the vault lists, so a run of it announces the page's comments. */
   comment?: CommentCall;
@@ -583,6 +592,33 @@ function reviewNotesScript(message: string): Script | null {
 }
 
 function scriptFor(message: string, systemPrompt?: string): Script {
+  const later =
+    /(?:^|\n)(?:@[\w-]+\s+)?follow up "([^"\n]*)" in (\d+) (minutes?|hours?|days?)$/i.exec(
+      message.trim(),
+    );
+  if (later !== null) {
+    const multiplier = later[3].toLowerCase().startsWith('minute')
+      ? 60_000
+      : later[3].toLowerCase().startsWith('hour')
+        ? 3_600_000
+        : 86_400_000;
+    const followup = {
+      at: new Date(Date.now() + Number(later[2]) * multiplier).toISOString(),
+      note: later[1],
+    };
+    return {
+      tools: [{ name: 'schedule_followup', input: JSON.stringify(followup) }],
+      followup,
+      text: '',
+    };
+  }
+  const suggestion = /^suggest view ([\s\S]+)$/.exec(message.trim());
+  if (suggestion !== null)
+    return {
+      tools: [{ name: 'suggest_view', input: suggestion[1] }],
+      suggestion: suggestion[1],
+      text: 'I suggested a view; it is on the card above.',
+    };
   const notes = reviewNotesScript(message);
   if (notes !== null) return notes;
   const cli = cliScript(message, systemPrompt);
@@ -596,6 +632,28 @@ function scriptFor(message: string, systemPrompt?: string): Script {
   }
   // First, and on the raw message: the content is quoted as typed, and a
   // note path may name an inbox or a risk without this being about either.
+  const notion = /^import notion (\S+) to (.*)$/.exec(message.trim());
+  if (notion !== null) {
+    const args = { page: notion[1], folder: notion[2] };
+    return { tools: [{ name: 'import_notion_page', input: JSON.stringify(args) }], notionImport: args, text: '' };
+  }
+  const sheetEdit = /^edit sheet in (\S+\.md):\s*([\s\S]+)$/.exec(message.trim());
+  if (sheetEdit !== null) {
+    const [, path, json] = sheetEdit;
+    let args: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = JSON.parse(json);
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed))
+        args = parsed as Record<string, unknown>;
+    } catch {
+      /* The mock door reports malformed ops after the gate. */
+    }
+    return {
+      tools: [{ name: 'edit_sheet', input: JSON.stringify({ ...args, path }) }],
+      sheetEdit: { path, json },
+      text: `I edited the sheets on ${path}.`,
+    };
+  }
   const edit = EDIT.exec(message.trim());
   if (edit !== null) {
     const [, old, replacement, path] = edit;
@@ -637,6 +695,17 @@ function scriptFor(message: string, systemPrompt?: string): Script {
       })),
       appends,
       text: `I appended that to ${appends.map((a) => a.path).join(' and ')}.`,
+    };
+  }
+  // A skill's prose may name the Inbox; it is an invocation, never a filing request.
+  const skill = /^The user invoked the skill "([^"]+)"/.exec(message);
+  if (skill) {
+    const named = new Set(mentionedTools(message));
+    return {
+      tools: TOOLS.tools
+        .filter((row) => row.kind === 'read_only' && named.has(row.name))
+        .map((row) => ({ name: row.name, input: '{}', output: `Read for ${skill[1]}.` })),
+      text: `${skill[1]}: I read its sources. This recipe writes nothing.`,
     };
   }
   const create = CREATE.exec(message.trim());
@@ -869,7 +938,11 @@ export function runMockAgent(
     onUiAction,
     onAppend,
     onEdit,
+    onEditSheet,
+    onImportNotion,
     onSetFields,
+    onSuggestView,
+    onScheduleFollowup,
     onCreate,
     onComment,
     onReply,
@@ -892,10 +965,14 @@ export function runMockAgent(
      * `agentEdit`, which answers with the tool's report. Absent, the tool
      * refuses. */
     onEdit?: (path: string, edits: QuoteEdit[]) => Promise<string>;
+    onEditSheet?: (path: string, args: Record<string, unknown>) => Promise<string>;
+    onImportNotion?: (args: { page: string; folder: string }) => Promise<{ path: string; reply: string; wrote: boolean }>;
     /** Carries out the set script's `set_fields` (M60.4): the mock backend's
      * `agentSetFields`, which answers with the tool's report. Absent, the
      * tool refuses. */
     onSetFields?: (path: string, args: Record<string, unknown>) => Promise<string>;
+    onSuggestView?: (args: unknown) => Promise<string>;
+    onScheduleFollowup?: (args: { at: string; note: string }) => Promise<string>;
     /** Carries out the create script's `create_note` (M57.4): the mock
      * backend's `agentCreate`, which answers with the path it landed and
      * the tool's report (M61.6b). Absent, the tool refuses. */
@@ -1032,6 +1109,42 @@ export function runMockAgent(
       (refusal) => `I could not edit ${target.path}: ${refusal}`,
     );
 
+  const importNotion = async (id: string, args: { page: string; folder: string }) => {
+    await writeGate();
+    if (cancelled) return;
+    try {
+      if (onImportNotion === undefined) throw new Error('import_notion_page is not available here');
+      const result = await onImportNotion(args);
+      reply = result.reply;
+      if (!cancelled) {
+        if (result.wrote) onUiAction?.({ action: 'vault_changed', paths: [result.path] });
+        emit({ kind: 'ToolDone', tool_id: id, output: result.reply });
+      }
+    } catch (error) {
+      reply = error instanceof Error ? error.message : String(error);
+      if (!cancelled) emit({ kind: 'ToolDone', tool_id: id, output: reply, is_error: true });
+    }
+  };
+
+  const editSheet = (id: string, target: { path: string; json: string }) =>
+    writeStep(
+      id,
+      target.path,
+      async () => {
+        if (onEditSheet === undefined) throw new Error('edit_sheet is not available here');
+        let args: unknown;
+        try {
+          args = JSON.parse(target.json);
+        } catch {
+          throw new Error('edit_sheet needs `ops`, a list of operations');
+        }
+        if (args === null || typeof args !== 'object' || Array.isArray(args))
+          throw new Error('edit_sheet needs `ops`, a list of operations');
+        return onEditSheet(target.path, args as Record<string, unknown>);
+      },
+      (refusal) => `I could not edit the sheets on ${target.path}: ${refusal.split('\n')[0]}`,
+    );
+
   /** The set script's call (M60.4): its report comes from the tool, and a
    * landed write announces the vault with no paths, as Rust's rescan branch
    * does for the frontmatter writers. A refusal rewrites the reply. */
@@ -1050,6 +1163,45 @@ export function runMockAgent(
     }
     onUiAction?.({ action: 'vault_changed' });
     if (!cancelled) emit({ kind: 'ToolDone', tool_id: id, output });
+  };
+
+  const scheduleFollowup = async (id: string, args: { at: string; note: string }) => {
+    try {
+      if (onScheduleFollowup === undefined)
+        throw new Error('schedule_followup is not available here');
+      reply = await onScheduleFollowup(args);
+      if (!cancelled) emit({ kind: 'ToolDone', tool_id: id, output: reply });
+    } catch (error) {
+      const refusal = error instanceof Error ? error.message : String(error);
+      reply = `I could not book that follow-up: ${refusal}`;
+      if (!cancelled) emit({ kind: 'ToolDone', tool_id: id, output: refusal, is_error: true });
+    }
+  };
+
+  const suggestView = async (id: string, input: string) => {
+    let output: string;
+    try {
+      if (onSuggestView === undefined) throw new Error('suggest_view is not available here');
+      let args: unknown;
+      try {
+        args = JSON.parse(input);
+      } catch {
+        throw new Error('suggest_view needs an object');
+      }
+      output = await onSuggestView(args);
+    } catch (error) {
+      output = error instanceof Error ? error.message : String(error);
+    }
+    const failed = parseSuggestionResult(output) === null;
+    if (failed)
+      reply = `I could not suggest that view: ${
+        output
+          .split('\n')
+          .find((line) => line.startsWith('- '))
+          ?.replace(/^- [^:]+: /, '') ?? output
+      }`;
+    if (!cancelled)
+      emit({ kind: 'ToolDone', tool_id: id, output, ...(failed ? { is_error: true } : {}) });
   };
 
   /** A comment script's call (M70.3): the report comes from the tool, and a
@@ -1107,26 +1259,38 @@ export function runMockAgent(
     const appended = name === 'append_to_note' ? script.appends?.[appendAt++] : undefined;
     if (i < resumeAt) return;
     const edited = name === 'edit_note' ? script.edit : undefined;
+    const sheetEdited = name === 'edit_sheet' ? script.sheetEdit : undefined;
+    const notionImported = name === 'import_notion_page' ? script.notionImport : undefined;
     const fielded = name === 'set_fields' ? script.fields : undefined;
+    const suggested = name === 'suggest_view' ? script.suggestion : undefined;
+    const later = name === 'schedule_followup' ? script.followup : undefined;
     const created = name === 'create_note' ? script.create : undefined;
     const commented = name === script.comment?.tool ? script.comment : undefined;
     const completion: Step =
-      appended !== undefined
-        ? () => append(id, appended)
-        : edited !== undefined
-          ? () => edit(id, edited)
-          : fielded !== undefined
-            ? () => setFields(id, fielded)
-            : created !== undefined
-              ? () => create(id, created)
-              : commented !== undefined
-                ? () => comment(id, commented)
-                : () =>
-                    emit(
-                      output === undefined
-                        ? { kind: 'ToolDone', tool_id: id }
-                        : { kind: 'ToolDone', tool_id: id, output },
-                    );
+      notionImported !== undefined
+        ? () => importNotion(id, notionImported)
+        : sheetEdited !== undefined
+        ? () => editSheet(id, sheetEdited)
+        : later !== undefined
+          ? () => scheduleFollowup(id, later)
+          : suggested !== undefined
+            ? () => suggestView(id, suggested)
+            : appended !== undefined
+              ? () => append(id, appended)
+              : edited !== undefined
+                ? () => edit(id, edited)
+                : fielded !== undefined
+                  ? () => setFields(id, fielded)
+                  : created !== undefined
+                    ? () => create(id, created)
+                    : commented !== undefined
+                      ? () => comment(id, commented)
+                      : () =>
+                          emit(
+                            output === undefined
+                              ? { kind: 'ToolDone', tool_id: id }
+                              : { kind: 'ToolDone', tool_id: id, output },
+                          );
     // M57.2: a CLI tool's call decides through the run's plan. Argv denies
     // what the plan disallows; the host answers the rest.
     const table = approval !== undefined && isCliTool(approval, name);

@@ -201,7 +201,7 @@ export function pastedMarkdown(clipboard: DataTransfer | null): string | null {
  * stops on load (markdown.ts). A paste whose format BlockNote would read as
  * markdown, and that holds a marker, goes through the same escape. Everything
  * else is BlockNote's own — HTML, a VS Code copy, the editor's own clipboard,
- * files, and anything pasted into a code block.
+ * and anything pasted into a code block. Files run through attachments first.
  *
  * The pasted markers stay text until the page is next loaded. The bytes they
  * save are the citation either way; the chip is the next load's.

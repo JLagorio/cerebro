@@ -27,6 +27,97 @@ const bet = (n: number, stake: string) =>
 
 afterEach(cleanup);
 
+describe('the deadline switch', () => {
+  it.each(['date', 'daterange'] as const)('declares and clears a stored %s field', async (kind) => {
+    const doc = makeEntry({
+      path: 'types/recipe.md',
+      title: 'Recipe',
+      type: 'Type',
+      properties: { fields: { due: { kind } } } as unknown as Entry['properties'],
+    });
+    const entries = [doc];
+    const patch = vi.fn(async () => true);
+    useVaultStore.setState({ entries, patchFrontmatter: patch });
+    const schema = buildSchema(entries);
+    const def = schema.types.get('Recipe')!.fields[0];
+    const rendered = render(<PropertyEditor sourceType="Recipe" def={def} schema={schema} />);
+    await userEvent.click(screen.getByRole('switch', { name: 'Deadline' }));
+    expect(patch).toHaveBeenCalledWith(doc.path, { deadline: 'due' });
+    const next = { ...doc, properties: { ...doc.properties, deadline: 'due' } };
+    useVaultStore.setState({ entries: [next] });
+    rendered.rerender(
+      <PropertyEditor sourceType="Recipe" def={def} schema={buildSchema([next])} />,
+    );
+    expect((screen.getByRole('switch', { name: 'Deadline' }) as HTMLInputElement).checked).toBe(
+      true,
+    );
+    await userEvent.click(screen.getByRole('switch', { name: 'Deadline' }));
+    expect(patch).toHaveBeenLastCalledWith(doc.path, { deadline: null });
+  });
+  it.each(['number', 'created_time', 'last_edited_time'] as const)(
+    'offers no deadline switch for %s',
+    (kind) => {
+      render(
+        <PropertyEditor
+          sourceType="Recipe"
+          def={{ name: 'stamp', kind }}
+          schema={buildSchema([])}
+        />,
+      );
+      expect(screen.queryByTestId('property-deadline')).toBeNull();
+    },
+  );
+});
+
+describe('the type-level reminder setting', () => {
+  it.each(['date', 'daterange'] as const)(
+    'writes and clears a %s reminder on the Type doc',
+    async (kind) => {
+      const doc = makeEntry({
+        path: 'types/recipe.md',
+        title: 'Recipe',
+        type: 'Type',
+        properties: { fields: { due: { kind } } } as unknown as Entry['properties'],
+      });
+      const patch = vi.fn(async () => true);
+      useVaultStore.setState({ entries: [doc], patchFrontmatter: patch });
+      const schema = buildSchema([doc]);
+      const def = schema.types.get('Recipe')!.fields[0];
+      const rendered = render(<PropertyEditor sourceType="Recipe" def={def} schema={schema} />);
+      expect(screen.getByTestId('property-remind').textContent).toContain(
+        'Every Recipe with a Due reminds. Dates without a time remind at 9:00 AM.',
+      );
+      await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Remind' }), '1d');
+      expect(patch).toHaveBeenCalledWith(doc.path, { fields: { due: { kind, remind: '1d' } } });
+      const next = {
+        ...doc,
+        properties: { fields: { due: { kind, remind: '1d' } } } as unknown as Entry['properties'],
+      };
+      useVaultStore.setState({ entries: [next] });
+      const nextSchema = buildSchema([next]);
+      rendered.rerender(
+        <PropertyEditor
+          sourceType="Recipe"
+          def={nextSchema.types.get('Recipe')!.fields[0]}
+          schema={nextSchema}
+        />,
+      );
+      await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Remind' }), 'none');
+      expect(patch).toHaveBeenLastCalledWith(doc.path, { fields: { due: { kind } } });
+    },
+  );
+  it('offers no type-level reminder on a text field', () => {
+    render(
+      <PropertyEditor
+        sourceType="Recipe"
+        def={{ name: 'words', kind: 'text' }}
+        schema={buildSchema([])}
+      />,
+    );
+    expect(screen.queryByTestId('property-remind')).toBeNull();
+  });
+});
+
 function setup(stakes: string[]) {
   const entries = [betDoc, ...stakes.map((s, i) => bet(i + 1, s))];
   const patches: { path: string; patch: Record<string, unknown> }[] = [];
@@ -134,7 +225,10 @@ describe('PropertyEditor rename and delete (M60.2)', () => {
     await user.type(input, 'Wager size{Enter}');
     await waitFor(() => expect(onRenamed).toHaveBeenCalledWith('wager_size'));
     expect(batches).toHaveLength(1);
-    expect(batches[0].map((op) => op.path)).toEqual(['types/bet.md', 'records/bets/bet-1.md']);
+    expect(batches[0].map((op) => op.op !== 'rename' && op.path)).toEqual([
+      'types/bet.md',
+      'records/bets/bet-1.md',
+    ]);
     expect(onColumnsChange).not.toHaveBeenCalled();
   });
 

@@ -25,27 +25,38 @@ import { ASSISTANT_ACTOR } from '@/engine/authors';
 import type { RunCauseRequest } from '@/engine/jobs';
 import { runOptionsRefusal } from '@/engine/runOptions';
 import { namesTool } from '@/engine/toolGrant';
-import { withheldRun } from '@/lib/demoOperational';
+import { conditionRun, withheldRun } from '@/lib/demoOperational';
 import { settleMockRun } from '@/lib/mockGit';
 import {
   agentAppend,
   agentComment,
   agentCreate,
   agentEdit,
+  agentEditSheet,
+  agentImportNotion,
+  beginMockNotionRun,
+  endMockNotionRun,
   agentReply,
   agentResolve,
   agentSetFields,
+  agentSuggestView,
+  agentScheduleFollowup,
+  unfireMockFollowup,
   beginMockRun,
   bookMockRun,
   claimMockWake,
+  checkMockWake,
   endMockRun,
   finishMockRun,
   finishMockWake,
+  readyMockFollowup,
+  fireMockFollowup,
   postThreadPlaceholder,
   queueAgentWrite,
   readMockCliTranscript,
   recordMockCliTranscript,
   refuseIfAgentPaused,
+  refuseIfAgentRunning,
   settleThreadPlaceholder,
   settleWords,
   threadTurnRefusal,
@@ -237,6 +248,7 @@ export interface RunOptions {
    * `wake`: Rust claims it inside the dispatch transaction and records the
    * wake's own cause, so a woken run is unattended, on lane `agent`, and
    * names no `cause`. The answer can be `{ settled: 'gone' }`. */
+  followup?: string | null;
   wake?: { claim: string; coalesce: string[] } | null;
 }
 
@@ -256,6 +268,7 @@ const REPLAYED = new Set<AgentStreamEvent['kind']>([
  * three module singletons could only ever describe a single child, so the mock
  * could not reproduce the concurrency the real backend now has. */
 const mockRuns = new Map<number, MockRun>();
+const mockRunOwners = new Map<number, { vault: string; actor: string | null }>();
 let mockRunSeq = 0;
 
 /**
@@ -292,7 +305,8 @@ export interface RunHandle {
  * woken run settled without starting (M63.1).
  *
  * `deferred` is the ambient gate saying "not now" — over a ceiling, paused,
- * accounting unknown — and only an unattended run that named a `lane` can
+ * accounting unknown — with parallel `words` for the human sentence. Only
+ * an unattended run that named a `lane` can
  * receive it. It is a RESULT the caller must read, not an error to toast
  * away: the runner logs one honest row and surrenders the fire key so the
  * run happens when the window resets; a woken run's wake waits pending.
@@ -300,7 +314,24 @@ export interface RunHandle {
  * pending, expired, or was cancelled by its agent's pause, so nothing
  * started and nothing is owed; `skipped` is held for a later part's check.
  */
-export type RunStart = RunHandle | { deferred: string[] } | { settled: 'gone' | 'skipped' };
+export type RunStart =
+  RunHandle | { deferred: string[]; words?: string[] } | { settled: 'gone' | 'skipped' };
+
+/** The bounded pre-run check answers only the pending wakes it found. */
+export type WakeCheck =
+  | { state: 'met' | 'not_met' | 'gone'; wakes: string[] }
+  | { state: 'unavailable'; wakes: string[]; retry_at: string | null; skipped: boolean }
+  | { state: 'deferred'; wakes: string[]; reasons: string[]; words: string[] };
+export function checkWake(
+  vault: string,
+  actor: string,
+  wakes: string[],
+  question: string,
+): Promise<WakeCheck> {
+  return inTauri()
+    ? invokeTauri('check_wake', { vault, actor, wakes, question })
+    : checkMockWake(vault, actor, wakes, question);
+}
 
 /** Narrow a RunStart to its handle. Attended callers — every call without a
  * `lane` or a `wake` — are never gated, deferred or settled, so reaching
@@ -318,7 +349,7 @@ export function startedOrThrow(start: RunStart): RunHandle {
 
 /** Start a run. Resolves to the process tag and, where one exists, the
  * durable id of the row this run will be recorded in — or to a typed
- * deferral when the ambient gate refused an unattended, laned run. */
+ * deferral with codes and human words when the ambient gate refused an unattended, laned run. */
 export async function runAgent(vault: string, options: RunOptions): Promise<RunStart> {
   if (!inTauri()) {
     // M33b.5 — the browser mirrors the Rust guard rather than skipping it. In
@@ -328,6 +359,8 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunS
     // makes that parity a rule, and spec §6 makes this particular one the
     // point of the phase.
     refuseIfAgentPaused(vault, options.actor);
+    if (options.cause?.kind === 'manual')
+      refuseIfAgentRunning(vault, options.actor, [...mockRunOwners.values()]);
     // M56.5: the same refusal Rust's run_options gives, in its words, from
     // the same artifact, before anything starts.
     const refused = runOptionsRefusal({ model: options.model, effort: options.effort });
@@ -335,6 +368,17 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunS
     // M63.1: the same refusal Rust's `wakes::refuse_request` gives a woken
     // request that is attended, off lane agent, not an agent's, or names a
     // cause of its own, in its words.
+    if (
+      options.followup != null &&
+      (options.attended ||
+        options.lane !== 'agent' ||
+        !options.actor?.startsWith('process:') ||
+        options.actor.length <= 8 ||
+        options.wake != null)
+    )
+      throw new Error(
+        'A follow-up starts only its own agent, unattended on lane agent, without a wake.',
+      );
     const wokenRefused = options.wake == null ? null : wokenRunRefusal(options);
     if (wokenRefused !== null) throw new Error(wokenRefused);
     // No cause check here (M56.7), unlike the pause: the vocabulary and its
@@ -359,26 +403,75 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunS
     if (options.wake != null) {
       const woken = claimMockWake(vault, options.actor ?? '', options.wake, mockAttach(run));
       if (woken === 'gone') return { settled: 'gone' };
-      if ('deferred' in woken) return { deferred: woken.deferred };
+      if ('deferred' in woken)
+        return {
+          deferred: woken.deferred,
+          words: woken.deferred.map((reason) =>
+            reason === 'agent_running' ? 'this agent is already running' : reason,
+          ),
+        };
     }
+    if (options.followup != null) {
+      const later = readyMockFollowup(vault, options.actor!, options.followup);
+      if (later === null) return { settled: 'gone' };
+      options = {
+        ...options,
+        cause: { kind: 'followup', subject: later.note, due_at: later.dueAt },
+      };
+      if (!fireMockFollowup(vault, options.actor!, later.followupId, mockAttach(run)))
+        return { settled: 'gone' };
+    } else if (options.cause?.kind === 'followup')
+      throw new Error(
+        'cause "followup" is refused: a followup run is started by the runtime, never named by the renderer. Nothing was started.',
+      );
     const approval = mockApproval(options);
-    const booked = bookWithheld(options, approval, sessionId);
-    startMockRun(
-      vault,
+    let booked = bookWithheld(
       options,
+      approval,
       sessionId,
-      [{ kind: 'UserPrompt', text: options.message }],
-      undefined,
-      booked,
-      run,
+      options.followup == null ? undefined : { vault, id: mockAttach(run) },
     );
-    // The browser keeps no runtime database: only a run that withheld tools
+    if (options.followup != null && booked === null) {
+      const id = mockAttach(run);
+      const detail = conditionRun({
+        runId: id,
+        vault,
+        actor: options.actor!,
+        at: new Date().toISOString(),
+        parent: null,
+        cause: {
+          kind: 'followup',
+          why: 'a follow-up it asked for came due',
+          subject: options.cause!.subject ?? null,
+          detail: null,
+          due_at: options.cause!.due_at ?? null,
+        },
+      });
+      detail.run.ended_at = null;
+      detail.run.outcome = 'running';
+      if (bookMockRun(detail)) booked = id;
+    }
+    try {
+      startMockRun(
+        vault,
+        options,
+        sessionId,
+        [{ kind: 'UserPrompt', text: options.message }],
+        undefined,
+        booked,
+        run,
+      );
+    } catch (error) {
+      if (options.followup != null) unfireMockFollowup(vault, options.followup, mockAttach(run));
+      throw error;
+    }
+    // The browser keeps no runtime database: a run that withheld tools or was a follow-up
     // books a row (the mock fleet's), and every other has no id to name.
     return { run, durableId: booked, sessionId, attach: mockAttach(run) };
   }
   return invokeTauri<
     | { run: number; run_id: string; session_id: string }
-    | { deferred: string[] }
+    | { deferred: string[]; words?: string[] }
     | { settled: 'gone' | 'skipped' }
   >('run_agent', {
     vault,
@@ -404,6 +497,7 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunS
       cause: options.cause ?? null,
     },
     wake: options.wake ?? null,
+    followup: options.followup ?? null,
   }).then((result) =>
     'deferred' in result || 'settled' in result
       ? result
@@ -468,10 +562,11 @@ function bookWithheld(
   options: RunOptions,
   approval: RunApproval,
   sessionId: string,
+  followup?: { vault: string; id: string },
 ): string | null {
   if (approval.withheld.length === 0) return null;
   mockRowSeq += 1;
-  const runId = `mock-run-${String(mockRowSeq).padStart(4, '0')}`;
+  const runId = followup?.id ?? `mock-run-${String(mockRowSeq).padStart(4, '0')}`;
   const detail = `${APPROVAL_MESSAGES.withheld} ${approval.withheld.join(', ')}`;
   const holder = window as unknown as { __cerebroMockRefusals?: unknown[] };
   holder.__cerebroMockRefusals ??= [];
@@ -481,17 +576,26 @@ function bookWithheld(
     surface: 'agent.ask',
     detail,
   });
-  const booked = bookMockRun(
-    withheldRun({
-      runId,
-      actor: options.actor ?? null,
-      mode: options.lane === undefined ? 'attended' : 'ambient',
-      lane: options.lane ?? 'agent',
-      sessionId,
-      at: new Date().toISOString(),
-      detail,
-    }),
-  );
+  const row = withheldRun({
+    runId,
+    actor: options.actor ?? null,
+    mode: options.lane === undefined ? 'attended' : 'ambient',
+    lane: options.lane ?? 'agent',
+    sessionId,
+    at: new Date().toISOString(),
+    detail,
+  });
+  if (followup !== undefined) {
+    row.run.vault_id = followup.vault;
+    row.run.cause = {
+      kind: 'followup',
+      why: 'a follow-up it asked for came due',
+      subject: options.cause?.subject ?? null,
+      detail: null,
+      due_at: options.cause?.due_at ?? null,
+    };
+  }
+  const booked = bookMockRun(row);
   return booked ? runId : null;
 }
 
@@ -511,12 +615,14 @@ function startMockRun(
   run: number = ++mockRunSeq,
 ): number {
   mockJournal.open(run);
+  mockRunOwners.set(run, { vault, actor: options.actor ?? null });
   // M58.1: every write the run makes is stamped with its actor (blank reads
   // as the assistant, as Rust's normalize_actor reads it) and its run, the
   // attach id every mock run has, so none is logged as an IPC write's (the
   // person's, with no run).
   const actor = options.actor?.trim() ? options.actor : ASSISTANT_ACTOR;
   const stamp: WriteStamp = { actor, runId: mockAttach(run) };
+  beginMockNotionRun(stamp.runId!, options.allowedTools == null || options.allowedTools.some((tool) => namesTool(tool, 'import_notion_page')));
   // M58.3: the run's paths are its own from here until its commit lands, as
   // Rust's claim holds them; the commit comes before its closing events.
   beginMockRun(stamp.runId, actor);
@@ -551,7 +657,8 @@ function startMockRun(
           replay.push({ kind: 'TurnInterrupted', reason: 'stopped' });
         }
         recordMockCliTranscript(sessionId, replay.splice(0));
-        if (booked !== null) finishMockRun(booked, 'succeeded');
+        if (booked !== null)
+          finishMockRun(booked, stopped ? 'cancelled' : errored ? 'failed' : 'succeeded');
       }
       // M58.3: the run's Changeset, once, before Cancelled or Done.
       if (event.kind === 'Cancelled' || event.kind === 'Done') settle();
@@ -560,7 +667,9 @@ function startMockRun(
       emitLocal({ ...event, run, seq });
       // Reap at the terminal event, mirroring the reader thread's finish().
       if (event.kind === 'Done') {
+        endMockNotionRun(stamp.runId!);
         mockRuns.delete(run);
+        mockRunOwners.delete(run);
         mockJournal.finish(run);
       }
     },
@@ -568,13 +677,30 @@ function startMockRun(
     // Knowledge can read the snapshot the real agent would. The write
     // scripts land on the mock disk through the same refusals as Rust's:
     // the append as tool_append's (M53.6), the edit as tool_edit_note's
-    // (M55.5), the set as set_fields_write's (M60.4), and the comment
+    // (M55.5), the sheet edit as edit_sheet_write's (M67.2b), the set as
+    // set_fields_write's (M60.4), and the comment
     // scripts in the page's sidecar as comment_tools.rs's (M70.3).
     {
       onUiAction: emitUiAction,
       onAppend: (path, content) => agentAppend(vault, path, content, undefined, stamp),
       onEdit: (path, edits) => agentEdit(vault, path, edits, undefined, stamp),
+      onEditSheet: (path, args) =>
+        agentEditSheet(vault, path, args, stamp, { alive: () => !stopped && !settled }),
+      onImportNotion: (args) => {
+        if (options.allowedTools != null && !options.allowedTools.some((tool) => namesTool(tool, 'import_notion_page')))
+          return Promise.reject(new Error('import_notion_page is not available here'));
+        return agentImportNotion(vault, args, stamp, { write: options.scope, read: options.readScope });
+      },
       onSetFields: (path, args) => agentSetFields(vault, path, args, stamp),
+      onSuggestView: (args) => agentSuggestView(vault, args),
+      onScheduleFollowup: (args) => {
+        if (
+          options.allowedTools != null &&
+          !options.allowedTools.some((tool) => namesTool(tool, 'schedule_followup'))
+        )
+          return Promise.reject(new Error('schedule_followup is not available here'));
+        return agentScheduleFollowup(vault, args, stamp);
+      },
       // M57.4: the create script's create_note, through tool_create_note's
       // refusals, and its if_exists (M61.6b).
       onCreate: (args) => agentCreate(vault, args, stamp, args.if_exists ?? null),

@@ -147,6 +147,7 @@ describe('resolveViewTab', () => {
     // keys the embed's column universe and quick-create; a filterless,
     // unscoped tab is NOT filtered — its empty state may say "no items yet".
     expect(res.sourceType).toBe('Task');
+    expect(res.filedUnder).toBeNull();
     expect(res.filtered).toBe(false);
   });
 
@@ -384,9 +385,9 @@ describe('resolveViewTab', () => {
     // both survive the strict any_of; zeus's task and the unlinked task do
     // not. This is the filter matching resolution semantics, not luck.
     expect(res.surface.entries.map((e) => e.path).sort()).toEqual(['tasks/t1.md', 'tasks/t2.md']);
-    // Related IS a narrowing: the embed's empty state must say "nothing
-    // matches", never "no items yet".
-    expect(res.filtered).toBe(true);
+    // A related host without saved filters invites its first record.
+    expect(res.filtered).toBe(false);
+    expect(res.filedUnder).toEqual({ host, field: 'project' });
   });
 
   it('a shadowed stem cannot over-sweep the related rows', () => {
@@ -477,6 +478,42 @@ describe('resolveViewTab', () => {
     // A value-less any_of is "not ready" to evaluateFilters and would be
     // SKIPPED — every row, the forbidden reading. Zero rows is the truth.
     expect(res.surface.entries).toEqual([]);
+  });
+
+  it('a cycle view filters the host’s related work by its window', () => {
+    const { entries, host } = setup();
+    const type = entries.find((entry) => entry.title === 'Task' && entry.type === 'Type')!;
+    type.properties = {
+      fields: { project: { kind: 'relation', target: 'Project' }, window: { kind: 'daterange' } },
+    } as never;
+    entries.find((entry) => entry.path === 'tasks/t1.md')!.properties.window = {
+      start: '2026-10-15',
+      end: '2026-10-18',
+    } as never;
+    entries.find((entry) => entry.path === 'tasks/t2.md')!.properties.window = {
+      start: '2026-11-01',
+      end: '2026-11-05',
+    } as never;
+    entries.find((entry) => entry.path === 'tasks/t4.md')!.properties.window = {
+      start: '2026-10-15',
+      end: '2026-10-18',
+    } as never;
+    const list = makeList();
+    list.definition.views[0].filters = {
+      all: [{ field: 'window', op: 'is_between', value: ['2026-10-01', '2026-10-31'] }],
+    };
+    const res = resolveViewTab(
+      viewTab({ source: { list: 'work' }, scope: 'related' }),
+      host,
+      entries,
+      buildSchema(entries),
+      [list],
+    );
+    expect(res.kind).toBe('ok');
+    if (res.kind !== 'ok') return;
+    expect(res.surface.entries.map((entry) => entry.path)).toEqual(['tasks/t1.md']);
+    expect(res.filtered).toBe(true);
+    expect(res.filedUnder).toEqual({ host, field: 'project' });
   });
 
   it('related without a qualifying relation is broken, naming both types', () => {

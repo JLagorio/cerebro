@@ -1,3 +1,8 @@
+import { useEntryScroll } from '@/app/useEntryState';
+import type { EntryStateKey } from '@/stores/navStore';
+import * as listCursor from '@/engine/listCursor';
+import { copyPageLinks } from '@/app/recordActions';
+import { formatWikilink, linkTargetOf } from '@/engine/wikilink';
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
@@ -11,7 +16,13 @@ import { Tooltip } from '@/components/ui/Tooltip';
 import { AddPropertyPanel, type RelationConfig } from '@/detail/AddPropertyPanel';
 import { FieldEditor } from '@/detail/FieldEditor';
 import { useDragGesture } from '@/hooks/useDragGesture';
-import { aggregate, aggregateMeta, aggregatesFor, type AggregateCalc } from '@/engine/aggregate';
+import {
+  aggregate,
+  aggregateMeta,
+  aggregateSkipped,
+  aggregatesFor,
+  type AggregateCalc,
+} from '@/engine/aggregate';
 import {
   MIN_COL_W,
   columnOwner,
@@ -28,7 +39,7 @@ import { buildRows, entryRows } from '@/engine/rows';
 import type { KindChangePreview } from '@/engine/castRules';
 import { GROUPABLE_KINDS, kindMeta, progressRatio } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
-import { movedRecordsToast, movedToast, TRASH_WORDS } from '@/engine/trash';
+import { TRASH_WORDS } from '@/engine/trash';
 import { typeStyle } from '@/engine/typeCatalog';
 import { groupByField, sortBy } from '@/engine/views';
 import type {
@@ -57,7 +68,9 @@ import {
   PropertyEditor,
   runKindChange,
 } from '@/views/PropertyEditor';
-import { duplicateRecord } from '@/app/recordActions';
+import { bulkDelete, bulkDuplicate, bulkSetField, type BulkResult } from '@/app/bulkActions';
+import { bulkFailureText } from '@/engine/bulkPlan';
+import { BulkSetMenu } from '@/views/BulkSetMenu';
 import { QuickAddInline } from '@/views/QuickAdd';
 import {
   GroupBand,
@@ -91,9 +104,6 @@ const MIN_TITLE_W = 200;
  * frontmatter key is not guaranteed to be a legal custom-property name. */
 const widthVar = (index: number) => `--cb-cw-${index}`;
 const TITLE_VAR = '--cb-cw-title';
-
-/** Kinds whose editor is a popover/inline control the cell hosts directly. */
-const READ_ONLY = new Set(['rollup', 'created_time', 'last_edited_time']);
 
 /**
  * Read-only cell body. Rendered for computed kinds and as the resting state
@@ -210,7 +220,7 @@ const TableCell = memo(function TableCell({
    * shows one kind (with the warning beside it), and each cell is right.
    */
   const cellDef = resolved.def ?? def;
-  const readOnly = !owned || READ_ONLY.has(cellDef.kind);
+  const readOnly = !owned || kindMeta(cellDef.kind).computed;
   /**
    * A progress bar is what a read-only kind LOOKS like here, not what makes a
    * cell read-only (M20.3).
@@ -219,7 +229,7 @@ const TableCell = memo(function TableCell({
    * the record panel let you edit could not be edited in the grid — the format
    * had become a permission. The bar is now the resting state of the ordinary
    * number editor (`FieldEditor`), and this branch draws it only for the kinds
-   * that are genuinely computed: a rollup that formats as progress.
+   * that are computed and format as progress.
    */
   const isProgress = cellDef.format === 'progress';
   const editable = !readOnly;
@@ -426,7 +436,8 @@ export type RowAction = 'open' | 'copy-link' | 'copy-path' | 'delete';
  *
  * `TableRow` had none of these. The `maximize-2` glyph in the title cell was
  * `aria-hidden` decoration, and bulk selection did not exist anywhere in the
- * app — `useRowKeyboard` holds a scalar cursor index, not a set.
+ * app. Focus now belongs to `useRowKeyboard`; keyed selection belongs to
+ * the shared list cursor.
  *
  * The grip is Notion's `⠿`, and here it OPENS the row menu rather than
  * reordering. Row order in this app is the view's sort chain; there is no
@@ -650,6 +661,7 @@ function InsertRow({
 
 const TableRow = memo(function TableRow({
   entry,
+  bulkFailure,
   cells,
   titlePos,
   titleFrozen,
@@ -674,6 +686,7 @@ const TableRow = memo(function TableRow({
   cellProps,
 }: {
   entry: Entry;
+  bulkFailure?: string;
   cells: { def: ColumnDef; wrap: boolean }[];
   /** M12.8: the name column's index among the visible columns. */
   titlePos: number;
@@ -728,6 +741,7 @@ const TableRow = memo(function TableRow({
       role="row"
       {...rowProps}
       data-testid="table-row"
+      data-bulk-failed={bulkFailure === undefined ? undefined : true}
       data-path={entry.path}
       data-depth={depth}
       // M20.4: a click puts the cursor on the CELL it landed in, not just on
@@ -840,6 +854,11 @@ const TableRow = memo(function TableRow({
         )}
         <Icon name={style.icon} size={13} color={style.color ?? 'var(--n-400)'} />
         <TitleCell entry={entry} onCommit={(title) => onRename(entry, title)} />
+        {bulkFailure !== undefined && (
+          <span title={bulkFailure} aria-label={bulkFailure} className="flex-none text-danger-500">
+            <Icon name="circle-alert" size={13} />
+          </span>
+        )}
         {childCount > 0 && (
           <span className="flex-none [font-family:var(--font-mono)] text-2xs text-n-400">
             {childCount}
@@ -1048,6 +1067,7 @@ function ColumnResizer({
 }
 
 export interface TableViewProps {
+  entryScrollKey?: EntryStateKey;
   entries: Entry[];
   presentation: Presentation;
   schema: Schema;
@@ -1170,6 +1190,7 @@ function CalcCell({
   field,
   calc,
   result,
+  skipped,
   className,
   style,
 }: {
@@ -1177,6 +1198,7 @@ function CalcCell({
   calc: AggregateCalc | undefined;
   /** Already computed by the table — one pass over the rows, not one per cell. */
   result: string;
+  skipped: number;
   className: string;
   style: React.CSSProperties;
 }) {
@@ -1192,6 +1214,15 @@ function CalcCell({
           <span className="flex-none font-medium text-n-700 [font-variant-numeric:tabular-nums]">
             {result === '' ? '—' : result}
           </span>
+          {skipped > 0 && (
+            <span
+              data-testid={`calc-skipped-${field}`}
+              className="min-w-0 truncate text-n-400"
+              title={`${skipped} ${skipped === 1 ? 'row has' : 'rows have'} no number here, so the ${meta.label.toLowerCase()} leaves ${skipped === 1 ? 'it' : 'them'} out.`}
+            >
+              · {skipped} skipped
+            </span>
+          )}
         </span>
       )}
     </div>
@@ -1960,17 +1991,54 @@ export function TableView({
   onCreate,
   filtered,
   sourceType = null,
+  entryScrollKey,
   onFilterField,
 }: TableViewProps) {
   // M9.1: collapse lives in the store, keyed by surface — it used to be
   // component state and reset on every navigation.
+  const [selection, setSelection] = useState(listCursor.emptyCursor);
+  const checkedPaths = selection.selected;
+  const setCheckedPaths = useCallback(
+    (next: ReadonlySet<string> | ((previous: ReadonlySet<string>) => ReadonlySet<string>)) => {
+      setSelection((state) => ({
+        ...state,
+        selected: typeof next === 'function' ? next(state.selected) : next,
+        base: null,
+      }));
+    },
+    [],
+  );
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkReport, setBulkReport] = useState<{
+    action: 'set' | 'delete' | 'duplicate';
+    failed: Map<string, string>;
+    entries: Entry[];
+  } | null>(null);
   const collapsedMap = useUiStore((s) => s.collapsed[scope]);
+  const bulkVault = useVaultStore((s) => s.vaultPath);
+  const bulkGeneration = useRef(0);
+  const bulkMounted = useRef(true);
+  const bulkPlace = useRef({ vault: bulkVault, scope });
+  bulkPlace.current = { vault: bulkVault, scope };
+  useEffect(() => {
+    bulkMounted.current = true;
+    bulkGeneration.current += 1;
+    setCheckedPaths(new Set());
+    setBulkReport(null);
+    setBulkBusy(false);
+    return () => {
+      bulkMounted.current = false;
+      bulkGeneration.current += 1;
+    };
+  }, [bulkVault, scope, setCheckedPaths]);
   const toggleCollapsed = useUiStore((s) => s.toggleCollapsed);
   // M12.1: keyboard Enter follows the same routing rule as the hover Open
   // button — it used to force the panel open for docs too.
   const openPath = useOpenPath('in-place');
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  useEntryScroll(scrollRef, entryScrollKey ?? null);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [available, setAvailable] = useState(0);
   // True while columns remain to the right of the fold. The horizontal
@@ -2168,7 +2236,11 @@ export function TableView({
     // floating bar — Escape, which clears every other transient state in the
     // app, did nothing at all. Last in the one-press-one-step-out chain the
     // hook already documents: cell → row → selection.
-    onEscape: () => setCheckedPaths(new Set()),
+    onEscape: () => {
+      bulkGeneration.current += 1;
+      setCheckedPaths(new Set());
+      setBulkReport(null);
+    },
     // M16.17: +1 for the name column, which is a display slot with no
     // ColumnSpec behind it.
     colCount: resolved.length + 1,
@@ -2180,24 +2252,24 @@ export function TableView({
   // the cursor, any number are checked. Paths rather than indices, because a
   // rescan renumbers the rows and would otherwise slide the selection onto
   // whatever now occupies those slots.
-  const [checkedPaths, setCheckedPaths] = useState<ReadonlySet<string>>(() => new Set());
-  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
-  const anchorRow = useRef(-1);
-  const applyBatch = useVaultStore((s) => s.applyBatch);
+  const previousSelectionKeys = useRef<readonly string[]>([]);
   const toast = useUiStore((s) => s.toast);
 
   const rowPaths = useMemo(() => flatRows.map((r) => r.entry.path), [flatRows]);
-  // A record the filter, a delete, or a rename removed is not selected — it
-  // is gone, and a bulk delete must not be holding a path that resolves to
-  // nothing.
+  const selectionKeys = useMemo(() => flatRows.map((row) => row.key), [flatRows]);
+  const selectedPathByKey = useMemo(
+    () => new Map(flatRows.map((row) => [row.key, row.entry.path])),
+    [flatRows],
+  );
+  const selectionKey = useCallback(
+    (key: string) => selectedPathByKey.get(key) ?? key,
+    [selectedPathByKey],
+  );
   useEffect(() => {
-    setCheckedPaths((prev) => {
-      if (prev.size === 0) return prev;
-      const live = new Set(rowPaths);
-      const next = new Set([...prev].filter((p) => live.has(p)));
-      return next.size === prev.size ? prev : next;
-    });
-  }, [rowPaths]);
+    const before = previousSelectionKeys.current;
+    setSelection((state) => listCursor.reconcile(state, before, selectionKeys, selectionKey));
+    previousSelectionKeys.current = selectionKeys;
+  }, [selectionKeys, selectionKey]);
 
   /**
    * The selected records, de-duplicated by path (M20.5).
@@ -2225,83 +2297,65 @@ export function TableView({
 
   const toggleChecked = useCallback(
     (index: number, range: boolean) => {
-      setCheckedPaths((prev) => {
-        const next = new Set(prev);
-        // Shift extends from the last box you touched, the way every file
-        // list does — without an anchor a range select is a second click.
-        const from = range && anchorRow.current >= 0 ? anchorRow.current : index;
-        const [lo, hi] = from <= index ? [from, index] : [index, from];
-        const add = !prev.has(rowPaths[index]);
-        for (let i = lo; i <= hi; i += 1) {
-          if (add) next.add(rowPaths[i]);
-          else next.delete(rowPaths[i]);
-        }
-        return next;
-      });
-      anchorRow.current = index;
+      bulkGeneration.current += 1;
+      setBulkReport(null);
+      const key = selectionKeys[index];
+      if (key === undefined) return;
+      setSelection((state) =>
+        range
+          ? listCursor.rangeToggle(state, selectionKeys, key, selectionKey)
+          : listCursor.toggle(state, key, selectionKey),
+      );
     },
-    [rowPaths],
+    [selectionKeys, selectionKey, setBulkReport],
   );
 
-  const clearChecked = useCallback(() => setCheckedPaths(new Set()), []);
+  const clearChecked = useCallback(() => {
+    bulkGeneration.current += 1;
+    setCheckedPaths(new Set());
+    setBulkReport(null);
+  }, [setCheckedPaths, setBulkReport]);
 
-  /**
-   * M20.5: the bulk bar could delete twenty records and duplicate none — the
-   * only Duplicate in the app was in the record panel's header, so copying one
-   * meant opening it first. The write itself lives in `app/recordActions`,
-   * shared with that header rather than written twice.
-   */
-  const duplicateChecked = useCallback(() => {
-    const targets = checked;
-    void (async () => {
-      let made = 0;
-      for (const entry of targets) {
-        if ((await duplicateRecord(entry)) !== null) made += 1;
+  const runBulk = useCallback(
+    async (
+      action: 'set' | 'delete' | 'duplicate',
+      targets: Entry[],
+      run: () => Promise<BulkResult>,
+    ) => {
+      if (bulkBusy) return;
+      const generation = ++bulkGeneration.current;
+      const place = bulkPlace.current;
+      const samePlace = () =>
+        bulkMounted.current &&
+        bulkPlace.current.vault === place.vault &&
+        useVaultStore.getState().vaultPath === place.vault &&
+        bulkPlace.current.scope === place.scope;
+      setBulkBusy(true);
+      try {
+        const result = await run();
+        if (!samePlace() || bulkGeneration.current !== generation) return;
+        setCheckedPaths(new Set(result.failed.keys()));
+        setBulkReport(
+          result.failed.size === 0 ? null : { action, failed: result.failed, entries: targets },
+        );
+      } finally {
+        if (samePlace()) setBulkBusy(false);
       }
-      // The copies are new records; keeping the originals ticked would leave a
-      // selection that no longer describes what is on screen.
-      clearChecked();
-      if (made > 0) toast(`Duplicated ${made} ${made === 1 ? 'record' : 'records'}`);
-    })();
-  }, [checked, clearChecked, toast]);
+    },
+    [bulkBusy, setBulkBusy, setCheckedPaths, setBulkReport],
+  );
+
+  const duplicateChecked = () => void runBulk('duplicate', checked, () => bulkDuplicate(checked));
   const allChecked = distinctPaths > 0 && checkedPaths.size >= distinctPaths;
 
   const copyLinks = useCallback(() => {
-    const text = checked.map((e) => `[[${e.title}]]`).join('\n');
-    void (async () => {
-      try {
-        await navigator.clipboard.writeText(text);
-        toast(`${checked.length === 1 ? 'Link' : `${checked.length} links`} copied`);
-      } catch {
-        // Clipboard access is a permission, not a certainty — a silent
-        // failure here reads as "the button does nothing".
-        toast("Couldn't copy to the clipboard");
-      }
-    })();
-  }, [checked, toast]);
+    void copyPageLinks(checked);
+  }, [checked]);
 
-  /** Move a set of records to the vault's Trash (M60.8) as one batch of
-   * delete ops, for one row or many (M60.6): every record goes, or none
-   * does. Never throws: a refusal is the store's one toast, and the store
-   * rescans either way. Undoable (M60.7): the store toasts the label with
-   * Undo. */
-  const deleteRecords = useCallback(
-    (targets: Entry[]) => {
-      setConfirmBulkDelete(false);
-      void (async () => {
-        if (targets.length === 0) return;
-        const label =
-          targets.length === 1 ? movedToast(targets[0].title) : movedRecordsToast(targets.length);
-        const applied = await applyBatch(
-          targets.map((entry) => ({ op: 'delete' as const, path: entry.path })),
-          { undo: label },
-        );
-        if (applied === null) return;
-        setCheckedPaths(new Set());
-      })();
-    },
-    [applyBatch],
-  );
+  const deleteRecords = (targets: Entry[]) => {
+    setConfirmBulkDelete(false);
+    void runBulk('delete', targets, () => bulkDelete(targets));
+  };
 
   const [confirmRow, setConfirmRow] = useState<Entry | null>(null);
 
@@ -2313,7 +2367,7 @@ export function TableView({
           break;
         case 'copy-link':
         case 'copy-path': {
-          const text = action === 'copy-link' ? `[[${entry.title}]]` : entry.path;
+          const text = action === 'copy-link' ? formatWikilink(linkTargetOf(entry)) : entry.path;
           void (async () => {
             try {
               await navigator.clipboard.writeText(text);
@@ -2569,24 +2623,27 @@ export function TableView({
    * including the ones nesting pulled in from outside the query.
    */
   const calcResults = useMemo(() => {
-    const out: Record<string, string> = {};
-    const shown = flatRows.map((r) => r.entry);
+    const out: Record<string, { value: string; skipped: number }> = {};
+    // A record can appear in several value bands; each path contributes
+    // once to the footer, including records pulled in through nesting.
+    const shown = [...new Map(flatRows.map((r) => [r.entry.path, r.entry])).values()];
     if (presentation.titleCalc !== undefined) {
-      out.title = aggregate(
-        presentation.titleCalc,
-        shown.map((e) => ({ raw: e.title, display: e.title })),
-      );
+      const cells = shown.map((e) => ({ raw: e.title, display: e.title }));
+      out.title = {
+        value: aggregate(presentation.titleCalc, cells),
+        skipped: aggregateSkipped(presentation.titleCalc, cells),
+      };
     }
     for (const { spec, def } of resolved) {
       if (spec.calc === undefined) continue;
-      out[spec.field] = aggregate(
-        spec.calc,
-        shown.map((e) => {
-          const r = schema.resolveField(e, spec.field);
-          return { raw: r.raw, display: r.display };
-        }),
-        def,
-      );
+      const cells = shown.map((e) => {
+        const r = schema.resolveField(e, spec.field);
+        return { raw: r.raw, display: r.display };
+      });
+      out[spec.field] = {
+        value: aggregate(spec.calc, cells, def),
+        skipped: aggregateSkipped(spec.calc, cells),
+      };
     }
     return out;
   }, [flatRows, resolved, schema, presentation.titleCalc]);
@@ -2707,7 +2764,13 @@ export function TableView({
                     // `indeterminate` is a DOM property with no attribute.
                     if (el !== null) el.indeterminate = checked.length > 0 && !allChecked;
                   }}
-                  onChange={() => setCheckedPaths(allChecked ? new Set() : new Set(rowPaths))}
+                  onChange={() => {
+                    bulkGeneration.current += 1;
+                    setBulkReport(null);
+                    setSelection((state) =>
+                      listCursor.toggleAll(state, selectionKeys, selectionKey),
+                    );
+                  }}
                   className={`h-3.5 w-3.5 flex-none accent-cortex-500 ${
                     checked.length > 0 ? 'opacity-100' : 'opacity-0 group-hover/head:opacity-100'
                   }`}
@@ -2935,6 +2998,7 @@ export function TableView({
               <Fragment key={row.key}>
                 <TableRow
                   entry={row.entry}
+                  bulkFailure={bulkReport?.failed.get(row.entry.path)}
                   cells={cells}
                   titlePos={titlePos}
                   titleFrozen={titleFrozen}
@@ -2970,7 +3034,7 @@ export function TableView({
                   // patching too. That belongs with the nesting model; until it
                   // exists, offering nothing beats offering the wrong thing.
                   onInsert={
-                    onCreate === undefined || row.depth > 0
+                    onCreate === undefined || row.depth > 0 || rowBand?.seedable === false
                       ? undefined
                       : () =>
                           setInserting({
@@ -3030,7 +3094,8 @@ export function TableView({
                     key={key}
                     field={key}
                     calc={column === null ? presentation.titleCalc : column.spec.calc}
-                    result={calcResults[key] ?? ''}
+                    result={calcResults[key]?.value ?? ''}
+                    skipped={calcResults[key]?.skipped ?? 0}
                     className={[
                       d < frozenCount ? 'z-10 bg-n-25' : '',
                       'flex flex-none items-center border-r border-n-100 px-2 text-xs',
@@ -3071,21 +3136,46 @@ export function TableView({
         >
           <span className="px-1 text-sm font-medium text-n-700">{checked.length} selected</span>
           <span className="h-4 w-px bg-n-200" />
+          <BulkSetMenu
+            entries={checked}
+            schema={schema}
+            sourceType={sourceType}
+            disabled={bulkBusy}
+            onApply={(field, value) =>
+              runBulk('set', checked, () => bulkSetField(checked, field, value, schema))
+            }
+          />
           <Button size="sm" variant="ghost" icon="link" onClick={copyLinks}>
             Copy links
           </Button>
-          <Button size="sm" variant="ghost" icon="copy" onClick={duplicateChecked}>
+          <Button
+            size="sm"
+            variant="ghost"
+            icon="copy"
+            disabled={bulkBusy}
+            onClick={duplicateChecked}
+          >
             Duplicate
           </Button>
           <Button
             size="sm"
             variant="danger"
             icon="trash-2"
+            disabled={bulkBusy}
             onClick={() => setConfirmBulkDelete(true)}
           >
             Delete
           </Button>
           <IconButton icon="x" label="Clear selection" size="sm" onClick={clearChecked} />
+        </div>
+      )}
+      {bulkReport !== null && (
+        <div
+          role="status"
+          data-testid="bulk-report"
+          className="absolute bottom-24 left-4 right-4 z-30 rounded-md border border-n-200 bg-n-0 px-3 py-2 text-xs text-n-700 shadow-sm"
+        >
+          {bulkFailureText(bulkReport.action, bulkReport.failed, bulkReport.entries)}
         </div>
       )}
       <Dialog

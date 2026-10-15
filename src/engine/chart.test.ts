@@ -5,6 +5,38 @@ import { buildSchema } from '@/engine/schema';
 import { makeEntry } from '@/test/factories';
 import type { Entry, Presentation } from '@/engine/types';
 
+describe('chart totals over overlapping memberships (M61.1)', () => {
+  const shared = makeEntry({ path: 'shared.md', properties: { tags: ['a', 'b'], points: 4 } });
+  const single = makeEntry({ path: 'single.md', properties: { tags: ['b'], points: 2 } });
+  const entries = [shared, single];
+  const schema = buildSchema(entries);
+  const p: Presentation = { type: 'chart', group: [{ field: 'tags' }], sort: [], columns: [] };
+  it('counts distinct drawn records while arcs count memberships', () => {
+    const data = computeChart(entries, { ...p, chart: { kind: 'donut' } }, schema);
+    expect(data.slices.map((s) => [s.key, s.value])).toEqual([
+      ['a', 1],
+      ['b', 2],
+    ]);
+    expect(data.total).toBe(2);
+    expect(data.ringTotal).toBe(3);
+    expect(data.overlap).toBe(1);
+  });
+  it('hidden memberships leave the distinct total and overlap honest', () => {
+    const data = computeChart(entries, { ...p, chart: { hidden: ['a'] } }, schema);
+    expect(data.total).toBe(2);
+    expect(data.ringTotal).toBe(2);
+    expect(data.overlap).toBe(0);
+  });
+  it('measures each record once in sum and average totals', () => {
+    const sum = computeChart(entries, { ...p, chart: { agg: 'sum', value: 'points' } }, schema);
+    expect(sum.total).toBe(6);
+    expect(sum.ringTotal).toBe(10);
+    const avg = computeChart(entries, { ...p, chart: { agg: 'avg', value: 'points' } }, schema);
+    expect(avg.total).toBe(3);
+    expect(avg.ringTotal).toBe(7);
+  });
+});
+
 /**
  * The chart engine (M16.27; the axis decoupled in M44.3).
  *

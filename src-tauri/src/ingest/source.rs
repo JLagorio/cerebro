@@ -288,6 +288,22 @@ mod tests {
     }
 
     #[test]
+    fn each_import_system_registers_as_imported_content() {
+        for system in crate::import::table().value["systems"].as_array().unwrap() {
+            let key = "imports/page.md";
+            let snapshot = snapshot_with(key, serde_json::json!({"source_system": system["id"]}));
+            let provenance = provenance_of(key, &snapshot);
+            assert_eq!(provenance, Provenance::Imported);
+            let (_, _, staged) = resolve(&EpistemicState::default(), STORE, provenance, 0);
+            let registered = registration(&staged);
+            assert_eq!(registered.capability(), AuthorityCapability::ContentOnly);
+            assert!(
+                matches!(registered, SourceRegistration::Builtin { service_id, .. } if service_id == IMPORT_SERVICE)
+            );
+        }
+    }
+
+    #[test]
     fn the_owners_notes_and_the_owners_in_app_edits_are_one_source() {
         // Two identities for one person would make a single claim look like
         // two, which is manufactured corroboration.

@@ -36,6 +36,13 @@ export function useFocusRestore(): void {
       // deliberately and outranks a going-away surface's memory.
       const now = document.activeElement;
       if (now !== null && now !== document.body) return;
+      // Choosing a page already held by another pane hands navigation to that
+      // pane. Restoring into the old pane would immediately undo the handoff.
+      const pane = opener.closest('[data-testid="pane"]');
+      if (pane?.getAttribute('data-active') === 'false') {
+        document.querySelector<HTMLElement>('[data-testid="pane"][data-active="true"]')?.focus();
+        return;
+      }
       opener.focus();
     };
   }, [opener]);

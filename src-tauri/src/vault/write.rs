@@ -381,7 +381,8 @@ pub fn landing_path(vault: &Path, rel: &str) -> Option<String> {
 // dropped the other change, and a writer that picked a free name and then
 // wrote could overwrite one picked at the same moment. Writes to one file now
 // take turns, keyed by where the path LANDS (`lock_key`), so every spelling of
-// one file waits on the same key; writes to different files overlap.
+// one file waits on the same key. A folder move also excludes writes below
+// that folder; writes to sibling files still overlap.
 //
 // Lock order: while a path lock is held, code takes only leaf locks — the
 // watcher's own-write map, the runtime sink (`shadow_write`) and the Trash's
@@ -391,9 +392,7 @@ pub fn landing_path(vault: &Path, rel: &str) -> Option<String> {
 // (that refuses instead of hanging). knowledge/ projections belong to the
 // ledger writer alone and take no path lock.
 //
-// What it does not cover: a folder move holds only the folder's own keys, so
-// a write into that folder racing the move may land in either place or fail;
-// and outside writers (git, other editors) never take the lock.
+// Outside writers (git, other editors) never take the lock.
 
 /// Which thread holds each key, and the signal a release sends.
 type LockTable = (Mutex<HashMap<String, ThreadId>>, Condvar);
@@ -424,6 +423,14 @@ fn lock_key(vault: &Path, rel: &str) -> Result<String, String> {
         })
         .collect::<Vec<_>>()
         .join("/"))
+}
+
+/// A directory and any descendant exclude each other. The separator keeps
+/// neighboring names such as `items` and `items-next` independent.
+fn keys_overlap(a: &str, b: &str) -> bool {
+    a == b
+        || a.strip_prefix(b).is_some_and(|tail| tail.starts_with('/'))
+        || b.strip_prefix(a).is_some_and(|tail| tail.starts_with('/'))
 }
 
 /// The paths one write holds. Dropping it releases every key and wakes the
@@ -477,10 +484,16 @@ pub(crate) fn lock_paths(vault: &Path, rels: &[&str]) -> Result<PathLock, String
     let (table, released) = path_locks();
     let mut held = table.lock().unwrap_or_else(PoisonError::into_inner);
     loop {
-        if let Some((_, rel)) = keys.iter().find(|(key, _)| held.get(key) == Some(&me)) {
+        if let Some((_, rel)) = keys.iter().find(|(key, _)| {
+            held.iter()
+                .any(|(taken, owner)| *owner == me && keys_overlap(key, taken))
+        }) {
             return Err(format!("{rel} is already locked by this write"));
         }
-        if keys.iter().all(|(key, _)| !held.contains_key(key)) {
+        if keys
+            .iter()
+            .all(|(key, _)| held.keys().all(|taken| !keys_overlap(key, taken)))
+        {
             break;
         }
         held = released.wait(held).unwrap_or_else(PoisonError::into_inner);
@@ -494,7 +507,7 @@ pub(crate) fn lock_paths(vault: &Path, rels: &[&str]) -> Result<PathLock, String
     })
 }
 
-/// An agent write's expectation that did not hold (M55.3): it named the
+/// A checked write's expectation that did not hold (M55.3, M65.7): it named the
 /// hash of `expected` bytes, and the lock found `actual` ones. Nothing was
 /// written.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -504,7 +517,7 @@ pub struct StaleContent {
     pub actual: String,
 }
 
-/// Why a note write wrote nothing (M55.3): the agent's expectation was
+/// Why a note write wrote nothing (M55.3, M65.7): its expectation was
 /// stale, or the write was refused in words.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NoteWriteError {
@@ -536,7 +549,7 @@ impl From<NoteWriteError> for String {
 /// (M57.4c). A preview reads, compares `expect`, runs the writer's own
 /// bytes and checks and picks the first free name, under the same lock, and
 /// stops there: it writes nothing, records nothing and announces nothing.
-/// Human writers always commit.
+/// Human saves always commit; a create may preview the first free filename.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WriteMode {
     Commit,
@@ -561,9 +574,9 @@ pub struct Landing {
 /// the lock holds, `next` computes the new bytes from them, and `write_file`
 /// renames them into place, recorded by `shadow_write` as a `vault.write`
 /// under `by`'s stamp, a `.mmd` too (M58.1). A stale `expect` or an `Err`
-/// from `next` writes nothing: no temp file, no `vault_writes` row. A
-/// person's saves never pass an expectation, so a save never compares and
-/// the last write wins; only Restore does, as D2 (c)'s undo clause (M58.4).
+/// from `next` writes nothing: no temp file, no `vault_writes` row. The
+/// editor saves never pass an expectation, so their last write wins. Saves
+/// from a stale outside view and Restore compare (M65.7, D2 (c)).
 /// Returns the written bytes' SHA-256.
 pub(crate) fn rewrite_note<D: Door>(
     vault: &Path,
@@ -594,12 +607,12 @@ pub(crate) fn rewrite_note_in<D: Door>(
 
 /// `rewrite_note_in`, and whether the bytes changed. With `keep_identical`
 /// false, as every other writer asks, identical bytes are written and
-/// recorded like any others; `set_note_fields` (M60.4) passes true, so a
+/// recorded like any others; `set_note_fields` and `edit_sheet_page` pass true, so a
 /// plan that changes nothing writes nothing: no temp file, no rename, no
 /// `vault_writes` row.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the funnel's arguments, plus the one flag set_note_fields needs"
+    reason = "the funnel's arguments, plus the flag for no-op field and sheet writes"
 )]
 fn rewrite_note_outcome<D: Door>(
     vault: &Path,
@@ -613,7 +626,13 @@ fn rewrite_note_outcome<D: Door>(
 ) -> Result<(Landing, bool), NoteWriteError> {
     let target = note_join(vault, rel, extensions)?;
     let lock = lock_paths(vault, &[rel])?;
-    let current = std::fs::read_to_string(&target).map_err(|e| format!("{rel}: {e}"))?;
+    let current = if extensions == CANVAS {
+        read_canvas_source(vault, rel)
+            .map_err(|error| error.message)?
+            .content
+    } else {
+        std::fs::read_to_string(&target).map_err(|e| format!("{rel}: {e}"))?
+    };
     let before = crate::ledger::sha256_hex(current.as_bytes());
     if let Some(expected) = expect {
         if before != expected {
@@ -719,6 +738,7 @@ pub(super) const MARKDOWN: &[&str] = &["md"];
 /// `save_note`'s set: the diagram page and the whiteboard tab save a `.mmd`
 /// raw, through the body editor's own door (M29.20, M29.46).
 const MARKDOWN_OR_DIAGRAM: &[&str] = &["md", "mmd"];
+const CANVAS: &[&str] = &["canvas"];
 
 /// Why `path` is not a note a note writer may touch, or `None` when it is.
 ///
@@ -748,11 +768,11 @@ const MARKDOWN_OR_DIAGRAM: &[&str] = &["md", "mmd"];
 ///   disk folds `Views/` onto an existing `views/`, the LANDING is `views/`
 ///   (see `note_join`), and that refuses.
 ///
-/// One consequence, deliberate: a `.mmd` is exempt from the folder rule
+/// One consequence, deliberate: `.mmd` and `.canvas` are exempt from the folder rule
 /// because something writes one there today. `WhiteboardView` files a legacy
 /// `views/<id>.yml` List's canvases under `views/whiteboards/`, and refusing
 /// would strand every canvas such a List already has. Only the human doors
-/// take a `.mmd`.
+/// take a `.mmd`; board doors take `.canvas`.
 ///
 /// Mirrored by `noteRefusal` in src/lib/mockIpc.ts; both replay
 /// src-tauri/fixtures/note-targets.json.
@@ -824,9 +844,9 @@ fn slashed(path: &Path) -> String {
 ///
 /// Every note writer below resolves its target here before it reads a byte —
 /// the ones that go through `rewrite_note` (`save_note`, `update_frontmatter`,
-/// `set_note_title`, and the agent's `patch_note_checked`,
+/// `set_note_title`, `save_canvas`, and the agent's `patch_note_checked`,
 /// `append_note_checked`, `edit_note` and `set_note_fields`), `create_note`,
-/// `write_source` and
+/// `create_canvas`, `write_source` and
 /// `write_text_file` — so the agent's MCP doors and the human IPC commands share one boundary,
 /// and a refused file is never opened, let alone rewritten. It lives in the
 /// mechanism because the grant cannot hold it: panel turns, and every Agent
@@ -894,7 +914,7 @@ fn judge_note(vault: &Path, rel: &str, extensions: &[&str]) -> Result<Resolved, 
 
 /// Why a markdown note door refuses `rel` as no note it may touch, in
 /// `note_join`'s words, or `None` (M54.10): the check the agent's
-/// `update_frontmatter`, `set_fields`, `append_to_note` and `edit_note` make
+/// `update_frontmatter`, `set_fields`, `append_to_note`, `edit_note` and `edit_sheet` make
 /// before dispatch.
 ///
 /// `None` as well where those doors answer in other words: a `.mmd`, which
@@ -1177,7 +1197,7 @@ fn refuse_mmd_patch(rel: &str) -> Result<(), String> {
 /// `---` fence sitting in that body arrives at byte zero and becomes the
 /// frontmatter the scanner reads (PR #17 security review). The agent's check
 /// judges these bytes, under the write's lock (`patch_note_checked`).
-pub(super) fn patch_bytes(
+pub(crate) fn patch_bytes(
     rel: &str,
     current: &str,
     patch: &serde_json::Map<String, serde_json::Value>,
@@ -1351,6 +1371,82 @@ pub fn set_note_fields(
     Ok(FieldsWritten { landing, changed })
 }
 
+/// A sheet edit reports the recalculated copy and lands one whole page.
+#[derive(Debug)]
+pub struct EditedSheetPage {
+    pub landing: Landing,
+    pub wrote: bool,
+    pub ops: Vec<String>,
+    pub report: crate::sheet::ai::EditReport,
+}
+
+/// Plan against the bytes under the path lock, preserve the entire prefix,
+/// judge governed bytes, then evaluate on the bounded engine thread before
+/// writing once. Preview and identical bytes write and record nothing.
+pub fn edit_sheet_page(
+    vault: &Path,
+    rel: &str,
+    plan: impl FnOnce(&str) -> Result<crate::sheet::edit::EditPlan, String>,
+    expect: Option<&str>,
+    check: impl Fn(&str, &str) -> Result<(), String>,
+    mode: WriteMode,
+    by: &WriteReceipt<Agent>,
+) -> Result<EditedSheetPage, NoteWriteError> {
+    if !note_join(vault, rel, MARKDOWN)?.is_file() {
+        return Err(format!("no note at {rel}").into());
+    }
+    let mut answer = None;
+    let (landing, wrote) = rewrite_note_outcome(
+        vault,
+        rel,
+        MARKDOWN,
+        expect,
+        mode,
+        true,
+        |current| {
+            let (frontmatter, body) = parse::split_frontmatter(current);
+            let prefix = &current[..current.len() - body.len()];
+            let planned = match plan(body) {
+                Ok(planned) => planned,
+                Err(refusal) => {
+                    check(current, current)?;
+                    return Err(refusal);
+                }
+            };
+            let after = format!("{prefix}{}", planned.body);
+            if parse::split_frontmatter(&after).0 != frontmatter {
+                check(current, current)?;
+                return Err(
+                    "The edit would change the page's properties.\nNothing was written.".into(),
+                );
+            }
+            check(current, &after)?;
+            let report = crate::sheet::engine::run_on_engine_thread(move |thread| {
+                crate::sheet::ai::edit_report(
+                    thread,
+                    &planned.before,
+                    &planned.after,
+                    &planned.written,
+                )
+                .map(|report| (planned.ops, report))
+            })
+            .map_err(|reason| {
+                format!("The sheets couldn't be computed ({reason}).\nNothing was written.")
+            })?;
+            answer = Some(report);
+            Ok(after)
+        },
+        by,
+    )?;
+    let (ops, report) = answer.expect("the rewrite completed its plan");
+    Ok(EditedSheetPage {
+        landing,
+        wrote,
+        ops,
+        report,
+    })
+}
+
 /// The verify path (M23.4): the stamp is a field revision plus a
 /// `belief.attested` pinned to the reviewed revision event and its
 /// projection hash, and the file regenerates as the projection. Refuses
@@ -1366,7 +1462,47 @@ pub fn verify_frontmatter(
     crate::ledger::concepts::verify_concept(vault, rel, patch, viewed_body_hash, by)
 }
 
+/// Validate a caller's full-file SHA-256 before any read or write. Shared by
+/// human saves and MCP parsing; each boundary keeps its own refusal words.
+pub fn normalize_expect_hash(hash: &str) -> Result<String, String> {
+    if hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Ok(hash.to_ascii_lowercase())
+    } else {
+        Err("expectHash must be a 64-character hex hash".into())
+    }
+}
+
+/// A stale human save names the changed page, never its current hash.
+pub fn stale_save_words(path: &str) -> String {
+    format!("stale_content: {path} changed since it was read, so nothing was saved.")
+}
+
+/// Compare a projection under the ledger writer's lock (M65.7). The capture
+/// valve also calls this before opening a writer, so a stale edit is refused
+/// even when no ledger writer is active. It never acquires a note path lock.
+pub(crate) fn check_note_expectation(
+    vault: &Path,
+    rel: &str,
+    expect: Option<&str>,
+) -> Result<(), NoteWriteError> {
+    let Some(expected) = expect else {
+        return Ok(());
+    };
+    let source = read_note_source(vault, rel)?;
+    if source.hash == expected {
+        return Ok(());
+    }
+    Err(NoteWriteError::Stale(StaleContent {
+        path: rel.into(),
+        expected: expected.into(),
+        actual: source.hash,
+    }))
+}
+
 /// Replace the note body, preserving the frontmatter block byte-for-byte.
+/// `expect`, when supplied by a reader outside the editor, must match the
+/// bytes under the write lock. The editor sends None and its last save wins.
+/// Returns the SHA-256 of the complete file it wrote.
 ///
 /// `.mmd` files are RAW (M29.20): mermaid's own `---` config header is
 /// diagram syntax, so the body IS the whole file — no frontmatter compose.
@@ -1375,18 +1511,18 @@ pub fn save_note(
     vault: &Path,
     rel: &str,
     body: &str,
+    expect: Option<&str>,
     by: &WriteReceipt<Human>,
-) -> Result<(), String> {
+) -> Result<String, NoteWriteError> {
+    let expect = expect.map(normalize_expect_hash).transpose()?;
     rewrite_note(
         vault,
         rel,
         MARKDOWN_OR_DIAGRAM,
-        None,
+        expect.as_deref(),
         |current| Ok(compose_saved(rel, current, body)),
         by,
     )
-    .map(drop)
-    .map_err(String::from)
 }
 
 /// The bytes `save_note` turns `current` into for a new body: the existing
@@ -1431,6 +1567,195 @@ pub fn read_note_hashed(vault: &Path, rel: &str) -> Result<(String, String), Str
     }
     let (_, body) = parse::split_frontmatter(&content);
     Ok((body.to_string(), hash))
+}
+
+/// A byte-exact note source and the hash of those same bytes (M60.10).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct NoteSource {
+    pub content: String,
+    pub hash: String,
+}
+
+/// Board door failures carry displayable words; a scoped reader may also
+/// return its operational refusal before the opened descriptor yields bytes.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct CanvasRefusal {
+    pub code: String,
+    pub message: String,
+}
+impl CanvasRefusal {
+    pub fn new(code: &str) -> Self {
+        let message = match code {
+            "missing" => "This whiteboard could not be found or read.".into(),
+            "too_large" => format!(
+                "This whiteboard is over the {} byte limit.",
+                crate::canvas::format::table().limits.max_bytes
+            ),
+            "not_text" => "This whiteboard is not valid UTF-8 text.".into(),
+            "not_a_board_path" => "This is not a writable whiteboard path.".into(),
+            "unreadable_on_disk" => {
+                "This whiteboard cannot be read from disk, so it was left unchanged.".into()
+            }
+            "invalid_content" => {
+                "The changed whiteboard is invalid, so it was left unchanged.".into()
+            }
+            "read_only" => "Knowledge boards are read-only here.".into(),
+            _ => unreachable!("closed board refusal codes"),
+        };
+        Self {
+            code: code.into(),
+            message,
+        }
+    }
+}
+
+fn canvas_target(vault: &Path, rel: &str, writing: bool) -> Result<PathBuf, CanvasRefusal> {
+    if writing && crate::knowledge::is_knowledge_path(rel) {
+        return Err(CanvasRefusal::new("read_only"));
+    }
+    note_join(vault, rel, CANVAS).map_err(|_| CanvasRefusal::new("not_a_board_path"))
+}
+
+/// The MCP corpus check shares the board door's path judgement, before bytes.
+pub fn canvas_target_refusal(vault: &Path, rel: &str) -> Option<String> {
+    canvas_target(vault, rel, false)
+        .err()
+        .map(|error| error.message)
+}
+
+/// Raw UTF-8 source, including broken JSON for the page's unavailable preview.
+/// Size is checked before a bounded read of the same contained descriptor.
+pub fn read_canvas_source(vault: &Path, rel: &str) -> Result<NoteSource, CanvasRefusal> {
+    read_canvas_hashed(vault, rel, |_| Ok(())).map_err(|error| {
+        if error.code == "too_large" {
+            CanvasRefusal::new("too_large")
+        } else {
+            error
+        }
+    })
+}
+
+/// The scoped caller checks the pinned descriptor's actual landing before any
+/// bytes; a symlink changed after dispatch cannot widen its read scope.
+pub fn read_canvas_hashed(
+    vault: &Path,
+    rel: &str,
+    check: impl FnOnce(&crate::files::bytes::OpenedFile) -> Result<(), CanvasRefusal>,
+) -> Result<NoteSource, CanvasRefusal> {
+    use std::io::Read;
+    canvas_target(vault, rel, false)?;
+    let opened =
+        crate::files::bytes::open_in(vault, "0", rel).map_err(|_| CanvasRefusal::new("missing"))?;
+    check(&opened)?;
+    let max = crate::canvas::format::table().limits.max_bytes as u64;
+    let size = opened
+        .file
+        .metadata()
+        .map_err(|_| CanvasRefusal::new("missing"))?
+        .len();
+    let too_large = |size| CanvasRefusal {
+        code: "too_large".into(),
+        message: format!("{rel} holds {size} bytes; a whiteboard is read up to {max}."),
+    };
+    if size > max {
+        return Err(too_large(size));
+    }
+    let mut bytes = Vec::new();
+    opened
+        .file
+        .take(max + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| CanvasRefusal::new("missing"))?;
+    if bytes.len() as u64 > max {
+        return Err(too_large(bytes.len() as u64));
+    }
+    let content = String::from_utf8(bytes).map_err(|_| CanvasRefusal::new("not_text"))?;
+    let hash = crate::ledger::sha256_hex(content.as_bytes());
+    Ok(NoteSource { content, hash })
+}
+
+/// A person's serial autosave. Current bytes are judged under the path lock;
+/// a missing or unreadable board is never repaired by overwriting it.
+pub fn save_canvas(
+    vault: &Path,
+    rel: &str,
+    content: &str,
+    by: &WriteReceipt<Human>,
+) -> Result<String, CanvasRefusal> {
+    let target = canvas_target(vault, rel, true)?;
+    crate::canvas::read::read(content).map_err(|_| CanvasRefusal::new("invalid_content"))?;
+    if !target.is_file() {
+        return Err(CanvasRefusal::new("missing"));
+    }
+    rewrite_note(
+        vault,
+        rel,
+        CANVAS,
+        None,
+        |current| {
+            crate::canvas::read::read(current)
+                .map_err(|_| "Unreadable board on disk".to_string())?;
+            Ok(content.to_string())
+        },
+        by,
+    )
+    .map_err(|_| {
+        CanvasRefusal::new(if target.exists() {
+            "unreadable_on_disk"
+        } else {
+            "missing"
+        })
+    })
+}
+
+/// Make a board beside a taken name, with the same locked suffix choice as
+/// create_note. A preview chooses a path and writes no file or receipt row.
+pub fn create_canvas<D: CreatesNotes>(
+    vault: &Path,
+    rel: &str,
+    content: &str,
+    mode: WriteMode,
+    by: &WriteReceipt<D>,
+) -> Result<Landing, CanvasRefusal> {
+    canvas_target(vault, rel, true)?;
+    crate::canvas::read::read(content).map_err(|_| CanvasRefusal::new("invalid_content"))?;
+    let stem = rel
+        .strip_suffix(".canvas")
+        .ok_or_else(|| CanvasRefusal::new("not_a_board_path"))?;
+    let candidates = (1_u64..).map(|index| {
+        if index == 1 {
+            rel.to_string()
+        } else {
+            format!("{stem}-{index}.canvas")
+        }
+    });
+    let path = claim_free_name(
+        vault,
+        candidates,
+        |candidate| note_join(vault, candidate, CANVAS),
+        |lock, path, target| {
+            if mode == WriteMode::Commit {
+                write_file(lock, target, content)?;
+                shadow_write(vault, path, content, "vault.create", by);
+            }
+            Ok(())
+        },
+    )
+    .map_err(|_| CanvasRefusal::new("not_a_board_path"))?;
+    Ok(Landing {
+        path,
+        before: None,
+        after: crate::ledger::sha256_hex(content.as_bytes()),
+    })
+}
+
+/// Read the whole markdown file, including its frontmatter and BOM, once.
+/// The caller carries its hash into a checked write; this read takes no lock.
+pub fn read_note_source(vault: &Path, rel: &str) -> Result<NoteSource, String> {
+    let target = note_join(vault, rel, MARKDOWN)?;
+    let content = std::fs::read_to_string(target).map_err(|e| format!("{rel}: {e}"))?;
+    let hash = crate::ledger::sha256_hex(content.as_bytes());
+    Ok(NoteSource { content, hash })
 }
 
 /// The bytes an append turns `current` into: its body with `addition`
@@ -1665,73 +1990,50 @@ pub fn write_text_file(
 /// thing that puts files there on purpose (M16.13c).
 pub const ATTACHMENTS_DIR: &str = "attachments";
 
-/// `report.pdf` → `attachments/report.pdf`, then `-2`, `-3`, …
-///
-/// Not `note_candidates`: that one hardcodes `.md`, and `report.pdf-2` is a
-/// file the OS can no longer open. The dedupe goes on the STEM.
-fn attachment_candidates(name: &str) -> impl Iterator<Item = String> + '_ {
-    // A leading dot is the whole name (".gitignore"), not an extension.
-    let (stem, ext) = match name.rsplit_once('.') {
-        Some((s, e)) if !s.is_empty() => (s, format!(".{e}")),
-        _ => (name, String::new()),
-    };
-    (1..).map(move |n: u64| {
-        let suffix = if n == 1 {
-            String::new()
-        } else {
-            format!("-{n}")
-        };
-        format!("{ATTACHMENTS_DIR}/{stem}{suffix}{ext}")
-    })
-}
+pub use super::attachments::AttachmentImport;
 
-/// Copy a file from anywhere on disk into the vault's `attachments/` folder
-/// and return its VAULT-RELATIVE path (M16.13c).
-///
-/// The destination folder is fixed here rather than taken from the caller.
-/// A files field stores whatever string it is handed, so letting the frontend
-/// choose would let a field drop a `.md` into a records folder, where the very
-/// next scan would adopt it as a note — and `attachments/` is precisely the
-/// one directory the scanner and the watcher already agree to ignore.
-///
-/// Removing a chip in the UI does NOT delete the copy. Dropping a reference is
-/// not deleting a file, and in a files-first app the vault folder is the user's
-/// to prune.
-///
-/// Recorded as a `vault.create` with no hash (M58.1): the copy is any file,
-/// of any size, and reading it back to hash it would read its bytes twice.
+/// Copy an explicitly picked or dropped file into attachments/. Reusing an
+/// identical member of its name family neither writes nor records a row.
 pub fn import_attachment(
     vault: &Path,
     source: &str,
     by: &WriteReceipt<Human>,
-) -> Result<String, String> {
-    let src = Path::new(source);
-    if !src.is_absolute() {
-        return Err(format!("attachment source must be absolute: {source}"));
+) -> Result<AttachmentImport, String> {
+    let placed = super::attachments::import_file(vault, source)?;
+    if !placed.result.reused {
+        super::watcher::note_own_write(&vault.join(&placed.result.path));
+        record(
+            vault,
+            "vault.create",
+            &placed.result.path,
+            None,
+            Some(&placed.hash),
+            by,
+        );
     }
-    let meta = std::fs::metadata(src).map_err(|e| format!("{source}: {e}"))?;
-    if !meta.is_file() {
-        return Err(format!("not a file: {source}"));
+    Ok(placed.result)
+}
+
+/// The pasted/uploaded byte door shares placement, reuse and its human stamp.
+pub fn import_attachment_bytes(
+    vault: &Path,
+    name: &str,
+    bytes_base64: &str,
+    by: &WriteReceipt<Human>,
+) -> Result<AttachmentImport, String> {
+    let placed = super::attachments::import_bytes(vault, name, bytes_base64)?;
+    if !placed.result.reused {
+        super::watcher::note_own_write(&vault.join(&placed.result.path));
+        record(
+            vault,
+            "vault.create",
+            &placed.result.path,
+            None,
+            Some(&placed.hash),
+            by,
+        );
     }
-    let name = src
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| format!("unusable file name: {source}"))?;
-    safe_component("attachment name", name)?;
-    claim_free_name(
-        vault,
-        attachment_candidates(name),
-        |candidate| safe_join(vault, candidate),
-        |_lock, copied, dest| {
-            if let Some(parent) = dest.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-            std::fs::copy(src, dest).map_err(|e| format!("{source}: {e}"))?;
-            super::watcher::note_own_write(dest);
-            record(vault, "vault.create", copied, None, None, by);
-            Ok(())
-        },
-    )
+    Ok(placed.result)
 }
 
 /// The exact bytes `create_note` will write for a frontmatter map and a body.
@@ -2022,6 +2324,53 @@ pub fn write_source(
     let (content, existed) = concept_write(vault, rel, frontmatter, body)?;
     shadow_write(vault, rel, &content, write_kind(existed), by);
     Ok(())
+}
+
+/// The import writer's agent door (M69.5): exact planned bytes, with either
+/// an expected old hash or a required absent target. Identity planning holds
+/// import::lock before this path lock; another note writer cannot be overwritten
+/// between the scan and this comparison. Stamps are judged by the import
+/// planner, while the supplied check keeps governed types out on both sides.
+pub fn write_import(
+    vault: &Path,
+    rel: &str,
+    content: &str,
+    expect: Option<&str>,
+    check: impl FnOnce(&str, &str) -> Result<(), String>,
+    by: &WriteReceipt<Agent>,
+) -> Result<String, NoteWriteError> {
+    if let Some(refusal) = crate::import::path_refusal(rel) {
+        return Err(refusal.into());
+    }
+    if let Some(expected) = expect {
+        return rewrite_note(
+            vault,
+            rel,
+            MARKDOWN,
+            Some(expected),
+            |before| {
+                check(before, content)?;
+                Ok(content.to_owned())
+            },
+            by,
+        );
+    }
+    let target = note_join(vault, rel, MARKDOWN)?;
+    let lock = lock_paths(vault, &[rel])?;
+    match std::fs::symlink_metadata(&target) {
+        Ok(_) => {
+            return Err(format!(
+                "{rel} appeared after the import was planned; nothing was written."
+            )
+            .into())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("{rel}: {error}").into()),
+    }
+    check("", content)?;
+    write_file(&lock, &target, content)?;
+    shadow_write(vault, rel, content, "vault.create", by);
+    Ok(crate::ledger::sha256_hex(content.as_bytes()))
 }
 
 /// Does a concept already live at this path? Read BEFORE writing, so the log
@@ -2379,7 +2728,7 @@ pub fn rename_note(
     )
 }
 
-/// `rename_note` with the step that clears an orphan sidecar already at the
+/// `rename_note` through `rename_carrying`, with the step that clears an orphan sidecar at the
 /// target passed in, so tests never reach the OS Trash.
 ///
 /// In order, under the lock: the target must be free; an orphan sidecar at
@@ -2397,6 +2746,20 @@ pub(crate) fn rename_note_with(
     remove: impl Fn(&Path) -> Result<(), String>,
     by: &WriteReceipt<Human>,
 ) -> Result<(), String> {
+    rename_paths(vault, from, to)?;
+    let keys = rename_lock_keys(from, to);
+    let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+    let lock = lock_paths(vault, &refs)?;
+    rename_carrying(vault, from, to, &lock, remove, by)
+}
+
+/// Check the two names a move uses, without requiring the source to exist:
+/// an earlier step of a batch may be the one that brings it here.
+pub(super) fn rename_paths(
+    vault: &Path,
+    from: &str,
+    to: &str,
+) -> Result<(PathBuf, PathBuf), String> {
     let src = safe_join(vault, from)?;
     let dst = safe_join(vault, to)?;
     for end in [from, to] {
@@ -2410,14 +2773,39 @@ pub(crate) fn rename_note_with(
             ));
         }
     }
+    Ok((src, dst))
+}
+
+/// Both possible sidecar shapes are locked: a preceding folder move may
+/// make the source exist only after these locks have been taken.
+pub(super) fn rename_lock_keys(from: &str, to: &str) -> Vec<String> {
+    let mut keys = vec![from.to_string(), to.to_string()];
+    for end in [from, to] {
+        for is_dir in [false, true] {
+            if let Some(side) = super::comments::carried_rel(end, is_dir) {
+                keys.push(side);
+            }
+        }
+    }
+    keys
+}
+
+/// Move a page and its comments under locks already held by rename_note or
+/// a batch. Recovery uses the same carry, stamped with its System receipt.
+/// A successful move also carries every live thread-turn binding.
+pub(super) fn rename_carrying<D: Door>(
+    vault: &Path,
+    from: &str,
+    to: &str,
+    lock: &PathLock,
+    remove: impl Fn(&Path) -> Result<(), String>,
+    by: &WriteReceipt<D>,
+) -> Result<(), String> {
+    let (src, dst) = rename_paths(vault, from, to)?;
+    debug_assert!(lock.covers(&src) && lock.covers(&dst));
     let is_dir = src.is_dir();
     let carried =
         super::comments::carried_rel(from, is_dir).zip(super::comments::carried_rel(to, is_dir));
-    let mut keys = vec![from, to];
-    if let Some((side_from, side_to)) = &carried {
-        keys.extend([side_from.as_str(), side_to.as_str()]);
-    }
-    let _lock = lock_paths(vault, &keys)?;
     if dst.exists() {
         return Err(format!("target already exists: {to}"));
     }
@@ -2454,6 +2842,8 @@ pub(crate) fn rename_note_with(
             }
             std::fs::rename(&old_side, &new_side)
                 .map_err(|e| format!("{from}: its comments could not move ({e})"))?;
+            crate::crash::crash_point("rename-comments-carried");
+            crate::crash::stop_point("rename-comments-carried");
             moved = Some((old_side, new_side));
         }
     }
@@ -2480,6 +2870,79 @@ pub(crate) fn rename_note_with(
         super::watcher::note_own_write(old_side);
         super::watcher::note_own_write(new_side);
         record(vault, "vault.rename", side_from, Some(side_to), None, by);
+        for parent in [old_side.parent(), new_side.parent()].into_iter().flatten() {
+            sync_dir(parent)?;
+        }
+    }
+    prune_empty_comment_folders(vault);
+    for parent in [src.parent(), dst.parent()].into_iter().flatten() {
+        sync_dir(parent)?;
+    }
+    crate::agent::thread_turn::page_moved(vault, from, to);
+    Ok(())
+}
+
+/// Undo a journaled move even if a stop split its page and comment moves.
+/// Comments go back first; a second stop can safely resume with them already
+/// home. An occupied old name is never cleared to make room for recovery.
+pub(super) fn recover_rename<D: Door>(
+    vault: &Path,
+    from: &str,
+    to: &str,
+    lock: &PathLock,
+    by: &WriteReceipt<D>,
+) -> Result<(), String> {
+    let (old, new) = rename_paths(vault, from, to)?;
+    debug_assert!(lock.covers(&old) && lock.covers(&new));
+    let old_exists = std::fs::symlink_metadata(&old).is_ok();
+    let new_exists = std::fs::symlink_metadata(&new).is_ok();
+    if old_exists == new_exists {
+        return Err(format!("{from}: the move has no unique page to put back"));
+    }
+    let is_dir = if old_exists {
+        old.is_dir()
+    } else {
+        new.is_dir()
+    };
+    if let Some((old_rel, new_rel)) =
+        super::comments::carried_rel(from, is_dir).zip(super::comments::carried_rel(to, is_dir))
+    {
+        let old_side = super::comments::sidecar_join(vault, &old_rel)?;
+        let new_side = super::comments::sidecar_join(vault, &new_rel)?;
+        debug_assert!(lock.covers(&old_side) && lock.covers(&new_side));
+        if new_side.exists() {
+            if old_side.exists() {
+                return Err(format!(
+                    "{from}: both comment locations exist; neither was overwritten"
+                ));
+            }
+            if let Some(parent) = old_side.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            std::fs::rename(&new_side, &old_side)
+                .map_err(|e| format!("{from}: its comments could not be put back ({e})"))?;
+            super::watcher::note_own_write(&new_side);
+            super::watcher::note_own_write(&old_side);
+            record(vault, "vault.rename", &new_rel, Some(&old_rel), None, by);
+            for parent in [new_side.parent(), old_side.parent()].into_iter().flatten() {
+                sync_dir(parent)?;
+            }
+            crate::crash::crash_point("rename-comments-restored");
+            crate::crash::stop_point("rename-comments-restored");
+        }
+    }
+    if new_exists {
+        if let Some(parent) = old.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::rename(&new, &old).map_err(|e| format!("{from}: {e}"))?;
+        super::watcher::note_own_write(&new);
+        super::watcher::note_own_write(&old);
+        record(vault, "vault.rename", to, Some(from), None, by);
+        for parent in [new.parent(), old.parent()].into_iter().flatten() {
+            sync_dir(parent)?;
+        }
+        crate::agent::thread_turn::page_moved(vault, to, from);
     }
     prune_empty_comment_folders(vault);
     Ok(())
@@ -2526,6 +2989,252 @@ mod tests {
     /// A person's receipt, as an IPC command mints one.
     fn human() -> WriteReceipt<Human> {
         WriteReceipt::for_test(super::super::receipt::HUMAN_ACTOR, None)
+    }
+
+    const EMPTY_CANVAS: &str = r#"{"nodes":[],"edges":[]}"#;
+
+    #[test]
+    fn save_canvas_writes_and_returns_the_hash_it_wrote() {
+        let vault = testutil::temp_vault("canvas-save");
+        testutil::write(&vault, "boards/plan.canvas", EMPTY_CANVAS);
+        let next = "{\n\"nodes\":[],\"edges\":[],\"future\":9007199254740993\n}";
+        let hash = save_canvas(&vault, "boards/plan.canvas", next, &human()).unwrap();
+        assert_eq!(hash, crate::ledger::sha256_hex(next.as_bytes()));
+        let source = read_canvas_source(&vault, "boards/plan.canvas").unwrap();
+        assert_eq!(source.content, next);
+        assert_eq!(source.hash, hash);
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn save_canvas_refuses_to_write_over_an_unreadable_board() {
+        let vault = testutil::temp_vault("canvas-unreadable");
+        for original in [
+            "{broken",
+            r#"{"cerebro":{"version":2}}"#,
+            r#"{"nodes":[{"id":"a"}]}"#,
+        ] {
+            testutil::write(&vault, "a.canvas", original);
+            // Reading returns raw text so the page can show a preview.
+            assert_eq!(
+                read_canvas_source(&vault, "a.canvas").unwrap().content,
+                original
+            );
+            assert_eq!(
+                save_canvas(&vault, "a.canvas", EMPTY_CANVAS, &human())
+                    .unwrap_err()
+                    .code,
+                "unreadable_on_disk"
+            );
+            assert_eq!(
+                std::fs::read_to_string(vault.join("a.canvas")).unwrap(),
+                original
+            );
+        }
+        std::fs::write(vault.join("a.canvas"), [255]).unwrap();
+        assert_eq!(
+            read_canvas_source(&vault, "a.canvas").unwrap_err().code,
+            "not_text"
+        );
+        assert_eq!(
+            save_canvas(&vault, "a.canvas", EMPTY_CANVAS, &human())
+                .unwrap_err()
+                .code,
+            "unreadable_on_disk"
+        );
+        assert_eq!(std::fs::read(vault.join("a.canvas")).unwrap(), [255]);
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn save_canvas_refuses_content_it_cannot_read_back() {
+        let vault = testutil::temp_vault("canvas-invalid");
+        testutil::write(&vault, "a.canvas", EMPTY_CANVAS);
+        for invalid in ["bad", r#"{"cerebro":{"version":2}}"#] {
+            assert_eq!(
+                save_canvas(&vault, "a.canvas", invalid, &human())
+                    .unwrap_err()
+                    .code,
+                "invalid_content"
+            );
+            assert_eq!(
+                create_canvas(&vault, "new.canvas", invalid, WriteMode::Commit, &human())
+                    .unwrap_err()
+                    .code,
+                "invalid_content"
+            );
+        }
+        assert!(!vault.join("new.canvas").exists());
+        assert_eq!(
+            std::fs::read_to_string(vault.join("a.canvas")).unwrap(),
+            EMPTY_CANVAS
+        );
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn save_canvas_refuses_a_missing_board_and_never_creates_one() {
+        let vault = testutil::temp_vault("canvas-missing");
+        assert_eq!(
+            save_canvas(&vault, "a.canvas", EMPTY_CANVAS, &human())
+                .unwrap_err()
+                .code,
+            "missing"
+        );
+        assert!(!vault.join("a.canvas").exists());
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn create_canvas_takes_the_next_free_name() {
+        let vault = testutil::temp_vault("canvas-create");
+        testutil::write(&vault, "views/whiteboards/a.canvas", EMPTY_CANVAS);
+        let preview = create_canvas(
+            &vault,
+            "views/whiteboards/a.canvas",
+            EMPTY_CANVAS,
+            WriteMode::Preview,
+            &human(),
+        )
+        .unwrap();
+        assert_eq!(preview.path, "views/whiteboards/a-2.canvas");
+        assert!(!vault.join(&preview.path).exists());
+        assert_eq!(
+            create_canvas(
+                &vault,
+                "views/whiteboards/a.canvas",
+                EMPTY_CANVAS,
+                WriteMode::Commit,
+                &human()
+            )
+            .unwrap(),
+            preview
+        );
+        assert_eq!(
+            create_canvas(
+                &vault,
+                "views/whiteboards/a.canvas",
+                EMPTY_CANVAS,
+                WriteMode::Commit,
+                &human()
+            )
+            .unwrap()
+            .path,
+            "views/whiteboards/a-3.canvas"
+        );
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn read_canvas_source_refuses_past_the_size_cap_before_reading() {
+        let vault = testutil::temp_vault("canvas-cap");
+        let file = std::fs::File::create(vault.join("huge.canvas")).unwrap();
+        file.set_len(crate::canvas::format::table().limits.max_bytes as u64 + 1)
+            .unwrap();
+        assert_eq!(
+            read_canvas_source(&vault, "huge.canvas").unwrap_err().code,
+            "too_large"
+        );
+        assert_eq!(
+            save_canvas(&vault, "huge.canvas", EMPTY_CANVAS, &human())
+                .unwrap_err()
+                .code,
+            "unreadable_on_disk"
+        );
+        assert_eq!(
+            file.metadata().unwrap().len(),
+            crate::canvas::format::table().limits.max_bytes as u64 + 1
+        );
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn a_board_over_the_file_cap_is_refused_before_it_is_read() {
+        let vault = testutil::temp_vault("canvas-scoped-cap");
+        let file = std::fs::File::create(vault.join("a.canvas")).unwrap();
+        let size = crate::canvas::format::table().limits.max_bytes as u64 + 1;
+        file.set_len(size).unwrap();
+        assert_eq!(
+            read_canvas_hashed(&vault, "a.canvas", |_| Ok(()))
+                .unwrap_err()
+                .message,
+            format!(
+                "a.canvas holds {size} bytes; a whiteboard is read up to {}.",
+                size - 1
+            )
+        );
+        // The scoped check also precedes the size check and invalid NUL content.
+        assert_eq!(
+            read_canvas_hashed(&vault, "a.canvas", |_| Err(CanvasRefusal {
+                code: "scope".into(),
+                message: "scope before bytes".into()
+            }))
+            .unwrap_err()
+            .message,
+            "scope before bytes"
+        );
+        assert_eq!(file.metadata().unwrap().len(), size);
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+
+    #[test]
+    fn a_canvas_save_is_recorded_as_human_me() {
+        let _recording = Recording::new("canvas-receipts");
+        let vault = testutil::temp_vault("canvas-receipts-vault");
+        create_canvas(
+            &vault,
+            "a.canvas",
+            EMPTY_CANVAS,
+            WriteMode::Preview,
+            &human(),
+        )
+        .unwrap();
+        assert!(recorded(&vault).is_empty());
+        create_canvas(
+            &vault,
+            "a.canvas",
+            EMPTY_CANVAS,
+            WriteMode::Commit,
+            &human(),
+        )
+        .unwrap();
+        save_canvas(&vault, "a.canvas", EMPTY_CANVAS, &human()).unwrap();
+        let rows = recorded(&vault);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].0, "vault.create");
+        assert_eq!(rows[1].0, "vault.write");
+        for row in rows {
+            assert_eq!(row.1, "a.canvas");
+            assert_eq!(
+                row.2,
+                Some(crate::ledger::sha256_hex(EMPTY_CANVAS.as_bytes()))
+            );
+            assert_eq!(row.3.as_deref(), Some("human:me"));
+            assert!(row.4.is_none());
+        }
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn knowledge_canvas_reads_but_both_writers_refuse() {
+        let vault = testutil::temp_vault("canvas-knowledge");
+        testutil::write(&vault, "knowledge/a.canvas", EMPTY_CANVAS);
+        assert!(read_canvas_source(&vault, "knowledge/a.canvas").is_ok());
+        for path in ["knowledge/a.canvas", "Knowledge/a.canvas"] {
+            assert_eq!(
+                save_canvas(&vault, path, EMPTY_CANVAS, &human())
+                    .unwrap_err()
+                    .code,
+                "read_only"
+            );
+            assert_eq!(
+                create_canvas(&vault, path, EMPTY_CANVAS, WriteMode::Commit, &human())
+                    .unwrap_err()
+                    .code,
+                "read_only"
+            );
+        }
+        let _ = std::fs::remove_dir_all(vault);
     }
 
     /// A run's receipt, as an MCP door mints one.
@@ -2647,17 +3356,22 @@ mod tests {
             ),
             ("verify_frontmatter", "the ledger's projection"),
             ("save_note", "vault.write"),
+            ("save_canvas", "vault.write"),
+            ("create_canvas", "vault.create"),
             ("append_note_checked", "vault.write"),
             ("append_note_in", "vault.write"),
             ("edit_note", "vault.write"),
             ("edit_note_in", "vault.write"),
+            ("edit_sheet_page", "vault.write"),
             ("write_text_file", "vault.create"),
             ("import_attachment", "vault.create"),
+            ("import_attachment_bytes", "vault.create"),
             ("create_note", "vault.create"),
             ("create_note_in", "vault.create"),
             ("create_note_if", "vault.create"),
             ("write_concept", "the ledger's projections"),
             ("write_source", "vault.write or vault.create"),
+            ("write_import", "vault.write or vault.create"),
             ("append_knowledge_log", "the ledger's projection"),
             ("set_note_title", "vault.write"),
             ("save_collection", "vault.write or vault.create"),
@@ -2667,6 +3381,8 @@ mod tests {
             ("create_folder", "unrecorded"),
             ("rename_note", "vault.rename"),
             ("rename_note_with", "vault.rename"),
+            ("rename_carrying", "vault.rename"),
+            ("recover_rename", "vault.rename"),
             ("delete_note", "move_to_trash's"),
             ("trash_locked", "vault.delete"),
             ("carry_out", "vault.delete"),
@@ -2676,13 +3392,15 @@ mod tests {
             ("restore_from_trash", "vault.create"),
             ("purge_expired", "unrecorded"),
             ("purge_expired_to_os_trash", "purge_expired's"),
+            ("apply_batch", "apply_batch_at's"),
+            ("apply_batch_at", "apply_expanded's, after import planning"),
             (
-                "apply_batch",
+                "apply_expanded",
                 "vault.write, vault.create, and the Trash moves'",
             ),
             (
                 "write_all",
-                "the Trash moves' own; apply_batch records the rest",
+                "the Trash moves' own; apply_expanded records the rest",
             ),
             ("roll_back", "vault.write, and the Trash moves'"),
             ("recover", "roll_back's, stamped system:batch-recovery"),
@@ -2727,7 +3445,7 @@ mod tests {
         let _recording = Recording::new("wfm-diagram-recorded-config");
         let vault = testutil::temp_vault("wfm-diagram-recorded");
         testutil::write(&vault, "diagrams/flow.mmd", "flowchart TD\n");
-        save_note(&vault, "diagrams/flow.mmd", "graph LR\n", &human()).unwrap();
+        save_note(&vault, "diagrams/flow.mmd", "graph LR\n", None, &human()).unwrap();
         let me = Some(super::super::receipt::HUMAN_ACTOR.to_string());
         assert_eq!(
             recorded(&vault),
@@ -2780,20 +3498,22 @@ mod tests {
     }
 
     #[test]
-    fn an_import_records_no_hash() {
+    fn an_import_records_the_hash_of_what_it_copied() {
         let _recording = Recording::new("wfm-import-recorded-config");
         let vault = testutil::temp_vault("wfm-import-recorded");
         let source_dir = testutil::temp_vault("wfm-import-recorded-source");
         let source = source_dir.join("report.pdf");
         std::fs::write(&source, b"%PDF-1.4").unwrap();
-        let rel = import_attachment(&vault, source.to_str().unwrap(), &human()).unwrap();
+        let rel = import_attachment(&vault, source.to_str().unwrap(), &human())
+            .unwrap()
+            .path;
         let rows = recorded(&vault);
         assert_eq!(rows.len(), 1);
         assert_eq!(
             (rows[0].0.as_str(), rows[0].1.as_str()),
             ("vault.create", rel.as_str())
         );
-        assert_eq!(rows[0].2, None, "the copy's bytes are not read twice");
+        assert_eq!(rows[0].2, Some(crate::ledger::sha256_hex(b"%PDF-1.4")));
         for dir in [&vault, &source_dir] {
             let _ = std::fs::remove_dir_all(dir);
         }
@@ -3173,6 +3893,7 @@ mod tests {
             &vault,
             "items/atl-1.md",
             "\n# Ship the scanner\n\nEdited.\n",
+            None,
             &human(),
         )
         .unwrap();
@@ -3463,6 +4184,7 @@ mod tests {
             &vault,
             "items/atl-1.md",
             "\n# Ship the scanner\n\nMine.\n",
+            None,
             &human(),
         )
         .unwrap();
@@ -3556,6 +4278,7 @@ mod tests {
             &vault,
             "items/atl-1.md",
             "\n# Ship the scanner\n\nNew body.\n",
+            None,
             &human(),
         )
         .unwrap();
@@ -3564,6 +4287,35 @@ mod tests {
             "---\ntype: Work item\nkey: ATL-1\nstatus: todo\ncustom_field: kept\n---\n\n# Ship the scanner\n\nNew body.\n"
         );
         let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn read_note_source_returns_the_whole_file_and_its_hash() {
+        let vault = testutil::temp_vault("read-source");
+        let original = "\u{feff}---\r\ntype: Doc\r\n---\r\n\r\n# Exact\r\n";
+        testutil::write(&vault, "notes/a.md", original);
+        let source = read_note_source(&vault, "notes/a.md").unwrap();
+        assert_eq!(source.content, original);
+        assert_eq!(source.hash, crate::ledger::sha256_hex(original.as_bytes()));
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn read_note_source_refuses_what_note_join_refuses() {
+        let vault = testutil::temp_vault("read-source-refused");
+        for path in [
+            ".git/config",
+            "attachments/a.md",
+            "notes/a.txt",
+            "../outside.md",
+            "Knowledge/a.md",
+        ] {
+            assert_eq!(
+                read_note_source(&vault, path).unwrap_err(),
+                note_join(&vault, path, MARKDOWN).unwrap_err()
+            );
+        }
+        let _ = std::fs::remove_dir_all(vault);
     }
 
     #[test]
@@ -3587,14 +4339,21 @@ mod tests {
         testutil::write(&vault, "diagrams/pipeline.mmd", MMD);
         let read_back = read_note(&vault, "diagrams/pipeline.mmd").unwrap();
         assert_eq!(read_back, MMD);
-        save_note(&vault, "diagrams/pipeline.mmd", &read_back, &human()).unwrap();
+        save_note(&vault, "diagrams/pipeline.mmd", &read_back, None, &human()).unwrap();
         assert_eq!(read(&vault, "diagrams/pipeline.mmd"), MMD);
         // Saving edited source writes exactly those bytes, header included.
         let edited = format!("{MMD}  B --> C\n");
-        save_note(&vault, "diagrams/pipeline.mmd", &edited, &human()).unwrap();
+        save_note(&vault, "diagrams/pipeline.mmd", &edited, None, &human()).unwrap();
         assert_eq!(read(&vault, "diagrams/pipeline.mmd"), edited);
         // Same contract as .md: save only overwrites an existing file.
-        assert!(save_note(&vault, "diagrams/nope.mmd", "flowchart TD\n", &human()).is_err());
+        assert!(save_note(
+            &vault,
+            "diagrams/nope.mmd",
+            "flowchart TD\n",
+            None,
+            &human()
+        )
+        .is_err());
         let _ = std::fs::remove_dir_all(&vault);
     }
 
@@ -4196,7 +4955,7 @@ mod tests {
         let hacked = patch(&[("hacked", serde_json::json!(true))]);
 
         assert!(update_frontmatter(&vault, &victim_rel, &hacked, &human()).is_err());
-        assert!(save_note(&vault, &victim_rel, "hacked\n", &human()).is_err());
+        assert!(save_note(&vault, &victim_rel, "hacked\n", None, &human()).is_err());
         assert!(set_note_title(&vault, &victim_rel, "Hacked", &human()).is_err());
         assert!(read_note(&vault, &victim_rel).is_err());
         // Absolute paths must be rejected too: Path::join replaces the base.
@@ -4233,7 +4992,7 @@ mod tests {
 
         let hacked = patch(&[("hacked", serde_json::json!(true))]);
         assert!(update_frontmatter(&vault, link_rel, &hacked, &human()).is_err());
-        assert!(save_note(&vault, link_rel, "hacked\n", &human()).is_err());
+        assert!(save_note(&vault, link_rel, "hacked\n", None, &human()).is_err());
         assert!(set_note_title(&vault, link_rel, "Hacked", &human()).is_err());
         assert!(read_note(&vault, link_rel).is_err());
 
@@ -4243,7 +5002,7 @@ mod tests {
         let escape_dir_rel = "escape";
         std::os::unix::fs::symlink(vault.parent().unwrap(), vault.join(escape_dir_rel)).unwrap();
         let nested_rel = format!("{escape_dir_rel}/new-file.md");
-        assert!(save_note(&vault, &nested_rel, "hacked\n", &human()).is_err());
+        assert!(save_note(&vault, &nested_rel, "hacked\n", None, &human()).is_err());
         assert!(read_note(&vault, &nested_rel).is_err());
 
         assert_eq!(std::fs::read_to_string(&victim).unwrap(), VICTIM);
@@ -4320,19 +5079,40 @@ mod tests {
                     | "update_frontmatter"
                     | "set_note_title"
                     | "edit_note"
+                    | "edit_sheet"
                     | "set_fields"
                     | "restore_version"
                     | "batch_patch"
                     | "batch_body"
+                    | "batch_replace_file"
+                    | "batch_rename_from"
             );
             if edits && case["seed"] != serde_json::json!(false) {
                 testutil::write(&vault, path, seed);
             }
+            if door == "save_canvas" && case["lands"].is_string() {
+                testutil::write(&vault, path, "{}");
+            }
+            if door == "batch_rename_to" {
+                testutil::write(&vault, "records/source.md", seed);
+            }
             let before = snapshot(&vault);
             let outcome = match door {
-                "save_note" => {
-                    save_note(&vault, path, "\n# Landed\n", &human()).map(|()| path.to_string())
-                }
+                "save_canvas" => save_canvas(&vault, path, r#"{"nodes":[],"edges":[]}"#, &human())
+                    .map(|_| path.to_string())
+                    .map_err(|error| error.message),
+                "create_canvas" => create_canvas(
+                    &vault,
+                    path,
+                    r#"{"nodes":[],"edges":[]}"#,
+                    WriteMode::Commit,
+                    &human(),
+                )
+                .map(|landing| landing.path)
+                .map_err(|error| error.message),
+                "save_note" => save_note(&vault, path, "\n# Landed\n", None, &human())
+                    .map(|_| path.to_string())
+                    .map_err(String::from),
                 "update_frontmatter" => update_frontmatter(
                     &vault,
                     path,
@@ -4341,7 +5121,7 @@ mod tests {
                 )
                 .map(|_| path.to_string()),
                 "set_note_title" => {
-                    set_note_title(&vault, path, "Landed", &human()).map(|()| path.to_string())
+                    set_note_title(&vault, path, "Landed", &human()).map(|_| path.to_string())
                 }
                 "create_note" => create_note(
                     &vault,
@@ -4367,6 +5147,10 @@ mod tests {
                 )
                 .map(|_| path.to_string())
                 .map_err(String::from),
+                "edit_sheet" => edit_sheet_page(&vault,path,|body| {
+                    let request=crate::sheet::edit::parse_request(&serde_json::json!({"path":path,"ops":[{"op":"add_sheet","name":"Budget"}]}).as_object().unwrap().clone())?;
+                    crate::sheet::edit::plan(body,&request)
+                },None,|_,_|Ok(()),WriteMode::Commit,&agent()).map(|_|path.to_string()).map_err(String::from),
                 // M60.4: the agent's field write, planning one key.
                 "set_fields" => set_note_fields(
                     &vault,
@@ -4395,8 +5179,18 @@ mod tests {
                     .map(|_| path.to_string())
                 }
                 // M60.6: one op of a batch, through the batch writer.
-                "batch_patch" | "batch_body" | "batch_create" => {
+                "batch_patch" | "batch_body" | "batch_create" | "batch_replace_file"
+                | "batch_rename_from" | "batch_rename_to" => {
                     let op = match door {
+                        "batch_replace_file" => {
+                            serde_json::json!({ "op": "replace_file", "path": path, "content": "# Landed\n", "expectHash": crate::ledger::sha256_hex(seed.as_bytes()) })
+                        }
+                        "batch_rename_from" => {
+                            serde_json::json!({ "op": "rename", "from": path, "to": "records/moved.md" })
+                        }
+                        "batch_rename_to" => {
+                            serde_json::json!({ "op": "rename", "from": "records/source.md", "to": path })
+                        }
                         "batch_patch" => {
                             serde_json::json!({ "op": "patch", "path": path, "set": { "status": "done" } })
                         }
@@ -4773,7 +5567,7 @@ mod tests {
         let gone = vault.join("no-such-vault");
         assert_eq!(note_target_refusal(&gone, "records/a.md"), None);
         assert_eq!(new_note_refusal(&gone, "records", "a"), None);
-        assert!(save_note(&gone, "records/a.md", "x\n", &human()).is_err());
+        assert!(save_note(&gone, "records/a.md", "x\n", None, &human()).is_err());
 
         // The planned name is create_note's, before a `-2` makes it new.
         assert_eq!(planned_note_path("", "x").as_deref(), Some("x.md"));
@@ -4806,7 +5600,9 @@ mod tests {
 
         let before = snapshot(&vault);
         let hacked = patch(&[("hacked", serde_json::json!(true))]);
-        let err = save_note(&vault, "docs/notes.md", "hacked\n", &human()).unwrap_err();
+        let err = save_note(&vault, "docs/notes.md", "hacked\n", None, &human())
+            .map_err(String::from)
+            .unwrap_err();
         assert!(err.contains("resolves to .git/notes.md"), "{err}");
         assert!(update_frontmatter(&vault, "docs/notes.md", &hacked, &human()).is_err());
         assert!(set_note_title(&vault, "docs/notes.md", "Hacked", &human()).is_err());
@@ -4831,7 +5627,7 @@ mod tests {
         // A leaf link whose own name is a note.
         let err = update_frontmatter(&vault, "records/config.md", &hacked, &human()).unwrap_err();
         assert!(err.contains("resolves to .git/config"), "{err}");
-        assert!(save_note(&vault, "records/config.md", "hacked\n", &human()).is_err());
+        assert!(save_note(&vault, "records/config.md", "hacked\n", None, &human()).is_err());
         assert!(append_note_checked(
             &vault,
             "records/config.md",
@@ -4849,7 +5645,7 @@ mod tests {
             .file_type()
             .is_symlink());
         // And an ordinary note beside them still lands.
-        save_note(&vault, "records/real.md", "\n# Real\n", &human()).unwrap();
+        save_note(&vault, "records/real.md", "\n# Real\n", None, &human()).unwrap();
         let _ = std::fs::remove_dir_all(&vault);
     }
 
@@ -4887,7 +5683,7 @@ mod tests {
         let stamp = patch(&[("verified", serde_json::json!({ "by": "human:josef" }))]);
         let err = update_frontmatter(&vault, kelvin, &stamp, &human()).unwrap_err();
         assert!(err.contains("inside knowledge/"), "{err}");
-        assert!(save_note(&vault, kelvin, "\n# Rewritten\n", &human()).is_err());
+        assert!(save_note(&vault, kelvin, "\n# Rewritten\n", None, &human()).is_err());
         assert!(set_note_title(&vault, kelvin, "Rewritten", &human()).is_err());
         let smuggled = create_note(
             &vault,
@@ -4946,7 +5742,7 @@ mod tests {
             testutil::write(&vault, rel, NOTE);
             let visible = !listed(&vault).is_empty();
             let done = patch(&[("status", serde_json::json!("done"))]);
-            let saved = save_note(&vault, rel, "\n# Saved\n", &human()).is_ok();
+            let saved = save_note(&vault, rel, "\n# Saved\n", None, &human()).is_ok();
             assert_eq!(saved, visible, "{rel} beside {beside:?}: saved {saved}");
             assert_eq!(
                 update_frontmatter(&vault, rel, &done, &human()).is_ok(),
@@ -5085,7 +5881,7 @@ mod tests {
                 "{rel}: {err}"
             );
             assert!(
-                save_note(&vault, &rel, "\n# Rewritten\n", &human()).is_err(),
+                save_note(&vault, &rel, "\n# Rewritten\n", None, &human()).is_err(),
                 "{rel}"
             );
             assert!(
@@ -5124,7 +5920,14 @@ mod tests {
         let stamp = patch(&[("verified", serde_json::json!({ "by": "human:josef" }))]);
         let err = update_frontmatter(&vault, "kb/metrics/churn.md", &stamp, &human()).unwrap_err();
         assert!(err.contains("inside knowledge/ by another name"), "{err}");
-        assert!(save_note(&vault, "kb/metrics/churn.md", "\n# Rewritten\n", &human()).is_err());
+        assert!(save_note(
+            &vault,
+            "kb/metrics/churn.md",
+            "\n# Rewritten\n",
+            None,
+            &human()
+        )
+        .is_err());
         assert!(create_note(&vault, "kb", "smuggled", &patch(&[]), "# S\n", &human()).is_err());
         assert_eq!(snapshot(&vault), before);
         assert!(bundle_join(&vault, "knowledge/metrics/churn.md").is_ok());
@@ -5292,7 +6095,9 @@ mod tests {
     fn import_copies_into_attachments_and_returns_a_relative_path() {
         let vault = testutil::temp_vault("wfm-attach");
         let src = source_file("wfm-attach-src", "report.pdf", "%PDF-1.4");
-        let rel = import_attachment(&vault, src.to_str().unwrap(), &human()).unwrap();
+        let rel = import_attachment(&vault, src.to_str().unwrap(), &human())
+            .unwrap()
+            .path;
 
         assert_eq!(rel, "attachments/report.pdf");
         assert_eq!(read(&vault, &rel), "%PDF-1.4");
@@ -5311,11 +6116,15 @@ mod tests {
         let a = source_file("wfm-attach-dupe-a", "report.pdf", "first");
         let b = source_file("wfm-attach-dupe-b", "report.pdf", "second");
         assert_eq!(
-            import_attachment(&vault, a.to_str().unwrap(), &human()).unwrap(),
+            import_attachment(&vault, a.to_str().unwrap(), &human())
+                .unwrap()
+                .path,
             "attachments/report.pdf"
         );
         assert_eq!(
-            import_attachment(&vault, b.to_str().unwrap(), &human()).unwrap(),
+            import_attachment(&vault, b.to_str().unwrap(), &human())
+                .unwrap()
+                .path,
             "attachments/report-2.pdf"
         );
         // Neither clobbered the other.
@@ -5327,22 +6136,20 @@ mod tests {
     }
 
     #[test]
-    fn a_dotfile_name_keeps_its_leading_dot() {
-        let vault = testutil::temp_vault("wfm-attach-dot");
-        let a = source_file("wfm-attach-dot-a", ".gitignore", "node_modules");
-        let b = source_file("wfm-attach-dot-b", ".gitignore", "target");
+    fn a_hidden_name_is_refused_by_both_doors() {
+        let vault = testutil::temp_vault("attachment-hidden");
+        let source = source_file("attachment-hidden-source", ".env", "secret");
         assert_eq!(
-            import_attachment(&vault, a.to_str().unwrap(), &human()).unwrap(),
-            "attachments/.gitignore"
+            import_attachment(&vault, source.to_str().unwrap(), &human()).unwrap_err(),
+            ".env is hidden"
         );
-        // Not "attachments/-2.gitignore": a leading dot is the whole name.
         assert_eq!(
-            import_attachment(&vault, b.to_str().unwrap(), &human()).unwrap(),
-            "attachments/.gitignore-2"
+            import_attachment_bytes(&vault, ".env", "c2VjcmV0", &human()).unwrap_err(),
+            ".env is hidden"
         );
-        let _ = std::fs::remove_dir_all(&vault);
-        let _ = std::fs::remove_dir_all(a.parent().unwrap());
-        let _ = std::fs::remove_dir_all(b.parent().unwrap());
+        assert!(!vault.join(ATTACHMENTS_DIR).exists());
+        std::fs::remove_dir_all(vault).unwrap();
+        std::fs::remove_dir_all(source.parent().unwrap()).unwrap();
     }
 
     #[test]
@@ -5365,11 +6172,285 @@ mod tests {
     fn an_imported_markdown_file_lands_where_the_scanner_will_not_adopt_it() {
         let vault = testutil::temp_vault("wfm-attach-md");
         let src = source_file("wfm-attach-md-src", "notes.md", "# Not a record");
-        let rel = import_attachment(&vault, src.to_str().unwrap(), &human()).unwrap();
+        let rel = import_attachment(&vault, src.to_str().unwrap(), &human())
+            .unwrap()
+            .path;
         assert!(rel.starts_with("attachments/"));
         assert!(crate::vault::scan::scan_vault(&vault).unwrap().is_empty());
         let _ = std::fs::remove_dir_all(&vault);
         let _ = std::fs::remove_dir_all(src.parent().unwrap());
+    }
+
+    #[test]
+    fn replays_the_shared_attachment_names() {
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(include_str!("../../fixtures/attachment-names.json")).unwrap();
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            assert_eq!(
+                super::super::attachments::attachment_name(name),
+                case["safe"].as_str().unwrap(),
+                "{name:?}"
+            );
+            assert_eq!(
+                super::super::attachments::attachment_refusal(name, case["size"].as_u64().unwrap()),
+                case["refusal"].as_str().map(str::to_owned),
+                "{name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn importing_and_pasting_the_same_bytes_reuses_without_changing_the_file() {
+        let vault = testutil::temp_vault("attachment-reuse");
+        let source = source_file("attachment-reuse-source", "a.png", "same bytes");
+        let first = import_attachment(&vault, source.to_str().unwrap(), &human()).unwrap();
+        assert!(!first.reused);
+        let modified = std::fs::metadata(vault.join(&first.path))
+            .unwrap()
+            .modified()
+            .unwrap();
+        assert_eq!(
+            import_attachment(&vault, source.to_str().unwrap(), &human()).unwrap(),
+            AttachmentImport {
+                path: first.path.clone(),
+                reused: true
+            }
+        );
+        assert_eq!(
+            import_attachment_bytes(&vault, "a.png", "c2FtZSBieXRlcw==", &human()).unwrap(),
+            AttachmentImport {
+                path: first.path.clone(),
+                reused: true
+            }
+        );
+        assert_eq!(
+            std::fs::metadata(vault.join(&first.path))
+                .unwrap()
+                .modified()
+                .unwrap(),
+            modified
+        );
+        assert_eq!(
+            std::fs::read_dir(vault.join(ATTACHMENTS_DIR))
+                .unwrap()
+                .count(),
+            1
+        );
+        std::fs::remove_dir_all(vault).unwrap();
+        std::fs::remove_dir_all(source.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn the_name_family_ignores_case_and_normalization_but_not_another_name() {
+        let vault = testutil::temp_vault("attachment-family");
+        testutil::write(&vault, "attachments/caf\u{e9}-2.png", "same");
+        let reused =
+            import_attachment_bytes(&vault, "CAFE\u{301}.PNG", "c2FtZQ==", &human()).unwrap();
+        assert_eq!(
+            reused,
+            AttachmentImport {
+                path: "attachments/caf\u{e9}-2.png".into(),
+                reused: true
+            }
+        );
+        let different =
+            import_attachment_bytes(&vault, "caf\u{e9}-2.png", "bmV3IQ==", &human()).unwrap();
+        assert!(!different.reused);
+        assert_ne!(different.path, reused.path);
+        assert!(
+            !import_attachment_bytes(&vault, "other.png", "c2FtZQ==", &human())
+                .unwrap()
+                .reused
+        );
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+
+    #[test]
+    fn same_size_different_bytes_get_a_new_name_and_a_reuse_records_nothing() {
+        let _recording = Recording::new("attachment-receipts-config");
+        let vault = testutil::temp_vault("attachment-receipts");
+        assert_eq!(
+            import_attachment_bytes(&vault, "a.txt", "b25l", &human())
+                .unwrap()
+                .path,
+            "attachments/a.txt"
+        );
+        assert_eq!(
+            import_attachment_bytes(&vault, "a.txt", "dHdv", &human())
+                .unwrap()
+                .path,
+            "attachments/a-2.txt"
+        );
+        let before = recorded(&vault);
+        assert!(
+            import_attachment_bytes(&vault, "A.TXT", "b25l", &human())
+                .unwrap()
+                .reused
+        );
+        assert_eq!(recorded(&vault), before);
+        assert_eq!(before[0].2, Some(crate::ledger::sha256_hex(b"one")));
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+
+    #[test]
+    fn attachment_limits_and_bad_bytes_refuse_before_staging() {
+        let vault = testutil::temp_vault("attachment-limit");
+        let source = source_file("attachment-limit-source", "big.mov", "");
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&source)
+            .unwrap()
+            .set_len(crate::files::kinds::limits().attachment_bytes + 1)
+            .unwrap();
+        assert_eq!(
+            import_attachment(&vault, source.to_str().unwrap(), &human()).unwrap_err(),
+            "big.mov is over 50 MB"
+        );
+        assert_eq!(
+            import_attachment(&vault, source.parent().unwrap().to_str().unwrap(), &human())
+                .unwrap_err(),
+            format!(
+                "{} is a folder",
+                source
+                    .parent()
+                    .unwrap()
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+            )
+        );
+        for encoded in ["%", "YQ", "YR==", "YQ==\n"] {
+            assert!(import_attachment_bytes(&vault, "bad.png", encoded, &human()).is_err());
+        }
+        let oversized = "A"
+            .repeat((crate::files::kinds::limits().attachment_bytes.div_ceil(3) * 4 + 1) as usize);
+        assert_eq!(
+            import_attachment_bytes(&vault, "big.mov", &oversized, &human()).unwrap_err(),
+            "big.mov is over 50 MB"
+        );
+        assert!(!vault.join(ATTACHMENTS_DIR).exists());
+        std::fs::remove_dir_all(vault).unwrap();
+        std::fs::remove_dir_all(source.parent().unwrap()).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_attachment_copy_preserves_quarantine() {
+        use std::os::fd::AsRawFd;
+        let vault = testutil::temp_vault("attachment-quarantine");
+        let source = source_file("attachment-quarantine-source", "download.png", "same");
+        let input = std::fs::File::open(&source).unwrap();
+        let name = c"com.apple.quarantine";
+        let value = b"0081;00000000;Cerebro test;";
+        // SAFETY: the live descriptor and both borrowed buffers cover this call.
+        assert_eq!(
+            unsafe {
+                libc::fsetxattr(
+                    input.as_raw_fd(),
+                    name.as_ptr(),
+                    value.as_ptr().cast(),
+                    value.len(),
+                    0,
+                    0,
+                )
+            },
+            0
+        );
+        let copied = import_attachment(&vault, source.to_str().unwrap(), &human()).unwrap();
+        let output = std::fs::File::open(vault.join(copied.path)).unwrap();
+        let mut received = [0_u8; 256];
+        // SAFETY: the descriptor is live and the writable buffer has the given length.
+        let count = unsafe {
+            libc::fgetxattr(
+                output.as_raw_fd(),
+                name.as_ptr(),
+                received.as_mut_ptr().cast(),
+                received.len(),
+                0,
+                0,
+            )
+        };
+        assert!(count > 0);
+        // copyfile lets macOS refresh the timestamp/agent fields and add the
+        // copied-file flag. The quarantine protections must remain set.
+        let quarantine = std::str::from_utf8(&received[..count as usize]).unwrap();
+        let flags = u16::from_str_radix(quarantine.split(';').next().unwrap(), 16).unwrap();
+        assert_eq!(flags & 0x0081, 0x0081);
+        std::fs::remove_dir_all(vault).unwrap();
+        std::fs::remove_dir_all(source.parent().unwrap()).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn attachment_candidates_and_the_folder_never_follow_symlinks() {
+        let vault = testutil::temp_vault("attachment-links");
+        let outside = testutil::temp_vault("attachment-links-out");
+        testutil::write(&outside, "a.png", "same");
+        std::fs::create_dir(vault.join(ATTACHMENTS_DIR)).unwrap();
+        std::os::unix::fs::symlink(outside.join("a.png"), vault.join("attachments/a.png")).unwrap();
+        assert_eq!(
+            import_attachment_bytes(&vault, "a.png", "c2FtZQ==", &human())
+                .unwrap()
+                .path,
+            "attachments/a-2.png"
+        );
+        std::fs::remove_dir_all(vault.join(ATTACHMENTS_DIR)).unwrap();
+        std::os::unix::fs::symlink(&outside, vault.join(ATTACHMENTS_DIR)).unwrap();
+        assert_eq!(
+            import_attachment_bytes(&vault, "a.png", "c2FtZQ==", &human()).unwrap_err(),
+            "attachments/ is not the folder the scanner skips"
+        );
+        std::fs::remove_file(vault.join(ATTACHMENTS_DIR)).unwrap();
+        std::fs::create_dir(vault.join("Attachments")).unwrap();
+        assert_eq!(
+            import_attachment_bytes(&vault, "a.png", "c2FtZQ==", &human()).unwrap_err(),
+            "attachments/ is not the folder the scanner skips"
+        );
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 1);
+        std::fs::remove_dir_all(vault).unwrap();
+        std::fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_attachment_copy_drops_execute_bits() {
+        use std::os::unix::fs::PermissionsExt;
+        let vault = testutil::temp_vault("attachment-mode");
+        let source = source_file("attachment-mode-source", "run.sh", "echo hi");
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let copied = import_attachment(&vault, source.to_str().unwrap(), &human()).unwrap();
+        assert_eq!(
+            std::fs::metadata(vault.join(copied.path))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o111,
+            0
+        );
+        std::fs::remove_dir_all(vault).unwrap();
+        std::fs::remove_dir_all(source.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn a_failed_attachment_import_leaves_no_temp() {
+        let vault = testutil::temp_vault("attachment-cleanup");
+        // An overlong extension cannot be installed, after its bounded staging
+        // succeeds. Every failure path drops the staging entry.
+        assert!(import_attachment_bytes(
+            &vault,
+            &format!("a.{}", "x".repeat(300)),
+            "YQ==",
+            &human()
+        )
+        .is_err());
+        assert_eq!(
+            std::fs::read_dir(vault.join(ATTACHMENTS_DIR))
+                .unwrap()
+                .count(),
+            0
+        );
+        std::fs::remove_dir_all(vault).unwrap();
     }
 
     // --- Path locks (M55.1) -------------------------------------------------
@@ -5467,6 +6548,65 @@ mod tests {
                 .replace("Body stays.", "A was here.")
         );
         let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn folder_and_descendant_locks_overlap_in_both_directions() {
+        let vault = vault_with_note("wfm-lock-ancestors");
+        for (held, requested) in [("items", "items/atl-1.md"), ("items/atl-1.md", "items")] {
+            let lock = lock_paths(&vault, &[held]).unwrap();
+            assert!(
+                lock_paths(&vault, &[requested]).is_err(),
+                "{held} excludes {requested}"
+            );
+            // Sharing only part of a name does not mean sharing a directory.
+            let neighbor = lock_paths(&vault, &["items-next/atl-1.md"]).unwrap();
+            drop(neighbor);
+            drop(lock);
+        }
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn a_folder_move_waits_for_the_note_write_and_carries_its_new_bytes() {
+        let vault = vault_with_note("wfm-lock-folder-move");
+        let (entered, inside) = mpsc::channel();
+        let (release, released) = mpsc::channel::<()>();
+        let dir = vault.clone();
+        let writing = in_thread(move || {
+            rewrite_note(
+                &dir,
+                "items/atl-1.md",
+                MARKDOWN,
+                None,
+                |current| {
+                    entered.send(()).unwrap();
+                    released.recv_timeout(LANDS).unwrap();
+                    Ok(current.replace("Body stays.", "Saved before the move."))
+                },
+                &human(),
+            )
+        });
+        inside.recv_timeout(LANDS).unwrap();
+        let dir = vault.clone();
+        let moving =
+            in_thread(move || rename_note_with(&dir, "items", "moved", |_| Ok(()), &human()));
+        assert!(
+            moving.recv_timeout(WAITS).is_err(),
+            "the folder must wait for its note"
+        );
+        release.send(()).unwrap();
+        writing.recv_timeout(LANDS).unwrap().unwrap();
+        moving.recv_timeout(LANDS).unwrap().unwrap();
+        assert!(
+            !vault.join("items").exists(),
+            "the write must not recreate the old folder"
+        );
+        assert_eq!(
+            read(&vault, "moved/atl-1.md"),
+            NOTE.replace("Body stays.", "Saved before the move.")
+        );
+        let _ = std::fs::remove_dir_all(vault);
     }
 
     #[test]
@@ -5572,7 +6712,7 @@ mod tests {
         write_file(&held, &vault.join("attachments/report.pdf"), "first").unwrap();
         drop(held);
         assert_eq!(
-            import.recv_timeout(LANDS).unwrap().unwrap(),
+            import.recv_timeout(LANDS).unwrap().unwrap().path,
             "attachments/report-2.pdf"
         );
         assert_eq!(read(&vault, "attachments/report.pdf"), "first");
@@ -5994,7 +7134,13 @@ mod tests {
                 MARKDOWN,
                 None,
                 |current| {
-                    inner = Some(save_note(&dir, "./items/atl-1.md", "\n# Inner\n", &human()));
+                    inner = Some(save_note(
+                        &dir,
+                        "./items/atl-1.md",
+                        "\n# Inner\n",
+                        None,
+                        &human(),
+                    ));
                     Ok(current.to_string())
                 },
                 &human(),
@@ -6005,7 +7151,7 @@ mod tests {
             .recv_timeout(LANDS)
             .expect("no write hangs on itself");
         assert_eq!(
-            inner.unwrap().unwrap_err(),
+            inner.unwrap().map_err(String::from).unwrap_err(),
             "./items/atl-1.md is already locked by this write"
         );
         outer.unwrap();
@@ -6063,6 +7209,7 @@ mod tests {
             &vault,
             "items/atl-1.md",
             "\n# Ship the scanner\n\nNew body.\n",
+            None,
             &human(),
         )
         .unwrap();
@@ -6089,6 +7236,7 @@ mod tests {
             &vault,
             "items/atl-1.md",
             "\n# Ship the scanner\n\nPrivate.\n",
+            None,
             &human(),
         )
         .unwrap();
@@ -6198,6 +7346,7 @@ mod tests {
             &vault,
             "items/atl-1.md",
             "\n# Ship the scanner\n\nMine.\n",
+            None,
             &human(),
         )
         .unwrap();
@@ -6224,5 +7373,237 @@ mod tests {
         );
         assert!(temp_files(&vault).is_empty());
         let _ = std::fs::remove_dir_all(&vault);
+    }
+    #[test]
+    fn a_stale_save_from_outside_the_editor_writes_nothing() {
+        let _recording = Recording::new("stale-save-recording");
+        let vault = vault_with_note("stale-save");
+        let expected = crate::ledger::sha256_hex(NOTE.as_bytes());
+        testutil::write(
+            &vault,
+            "items/atl-1.md",
+            &NOTE.replace("Body stays.", "External edit."),
+        );
+        let before = snapshot(&vault);
+        let mtime = std::fs::metadata(vault.join("items/atl-1.md"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        let rows = recorded(&vault);
+        let error = save_note(
+            &vault,
+            "items/atl-1.md",
+            "# Stale draft\n",
+            Some(&expected),
+            &human(),
+        )
+        .unwrap_err();
+        assert!(matches!(error, NoteWriteError::Stale(_)));
+        assert_eq!(snapshot(&vault), before);
+        assert_eq!(
+            std::fs::metadata(vault.join("items/atl-1.md"))
+                .unwrap()
+                .modified()
+                .unwrap(),
+            mtime
+        );
+        assert_eq!(recorded(&vault), rows);
+        assert!(temp_files(&vault).is_empty());
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn a_save_with_the_current_hash_lands_and_answers_the_new_hash() {
+        let _recording = Recording::new("matched-save-recording");
+        let vault = vault_with_note("matched-save");
+        let expected = crate::ledger::sha256_hex(NOTE.as_bytes()).to_ascii_uppercase();
+        let hash = save_note(
+            &vault,
+            "items/atl-1.md",
+            "# New body\n",
+            Some(&expected),
+            &human(),
+        )
+        .unwrap();
+        let bytes = read(&vault, "items/atl-1.md");
+        assert_eq!(hash, crate::ledger::sha256_hex(bytes.as_bytes()));
+        assert!(bytes.contains("# New body"));
+        assert_eq!(
+            parse::split_frontmatter(&bytes).0,
+            parse::split_frontmatter(NOTE).0
+        );
+        assert_eq!(recorded(&vault).len(), 1);
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn an_editor_save_never_compares() {
+        let vault = vault_with_note("editor-save-no-compare");
+        testutil::write(
+            &vault,
+            "items/atl-1.md",
+            &NOTE.replace("Body stays.", "Changed outside."),
+        );
+        let hash = save_note(&vault, "items/atl-1.md", "# Editor wins\n", None, &human()).unwrap();
+        let bytes = read(&vault, "items/atl-1.md");
+        assert!(bytes.contains("# Editor wins"));
+        assert_eq!(hash, crate::ledger::sha256_hex(bytes.as_bytes()));
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn a_malformed_save_hash_writes_nothing() {
+        let _recording = Recording::new("malformed-save-recording");
+        let vault = vault_with_note("malformed-save");
+        let before = snapshot(&vault);
+        for hash in [
+            "".to_string(),
+            "abc".into(),
+            "g".repeat(64),
+            "a".repeat(63),
+            format!(" {}", "a".repeat(64)),
+        ] {
+            assert_eq!(
+                save_note(&vault, "items/atl-1.md", "# Bad\n", Some(&hash), &human()),
+                Err(NoteWriteError::Refused(
+                    "expectHash must be a 64-character hex hash".into()
+                ))
+            );
+        }
+        assert_eq!(snapshot(&vault), before);
+        assert!(recorded(&vault).is_empty());
+        assert!(temp_files(&vault).is_empty());
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    fn sheet_plan(
+        body: &str,
+        cells: serde_json::Value,
+    ) -> Result<crate::sheet::edit::EditPlan, String> {
+        let args = serde_json::json!({"path":"notes/budget.md","ops":[{"op":"set_cells","sheet":"Sheet1","cells":cells}]});
+        crate::sheet::edit::plan(
+            body,
+            &crate::sheet::edit::parse_request(args.as_object().unwrap())?,
+        )
+    }
+    #[test]
+    fn edit_sheet_page_writes_once_and_keeps_the_prefix() {
+        let _recording = Recording::new("sheet-prefix-recording");
+        let vault = testutil::temp_vault("sheet-prefix");
+        let before="\u{feff}---\r\ntitle: Budget\r\n--- \r\n# Budget\r\n\r\n```cerebro-sheet\r\n1,2\r\n```\r\n";
+        testutil::write(&vault, "notes/budget.md", before);
+        let answer = edit_sheet_page(
+            &vault,
+            "notes/budget.md",
+            |body| {
+                sheet_plan(
+                    body,
+                    serde_json::json!([{"address":"C1","value":"=SUM(A1:B1)"}]),
+                )
+            },
+            None,
+            |_, _| Ok(()),
+            WriteMode::Commit,
+            &agent(),
+        )
+        .unwrap();
+        let after = read(&vault, "notes/budget.md");
+        assert_eq!(after, before.replace("1,2\r\n", "1,2,=SUM(A1:B1)\r\n"));
+        assert!(answer.wrote);
+        assert_eq!(answer.report.changed[0]["value"].as_f64(), Some(3.0));
+        assert_eq!(
+            answer.landing.after,
+            crate::ledger::sha256_hex(after.as_bytes())
+        );
+        let rows = recorded(&vault);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].3.as_deref(), Some("process:scout"));
+        assert_eq!(rows[0].4.as_deref(), Some("run-test"));
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn edit_sheet_preview_stale_and_refused_plans_write_nothing() {
+        let _recording = Recording::new("sheet-nonwrites-recording");
+        let vault = testutil::temp_vault("sheet-nonwrites");
+        let before = "```cerebro-sheet\n1\n```\n";
+        testutil::write(&vault, "notes/budget.md", before);
+        let preview = edit_sheet_page(
+            &vault,
+            "notes/budget.md",
+            |body| sheet_plan(body, serde_json::json!([{"address":"A1","value":"2"}])),
+            None,
+            |_, _| Ok(()),
+            WriteMode::Preview,
+            &agent(),
+        )
+        .unwrap();
+        assert!(preview.wrote);
+        assert!(matches!(
+            edit_sheet_page(
+                &vault,
+                "notes/budget.md",
+                |_| panic!("stale must precede plan"),
+                Some(&"0".repeat(64)),
+                |_, _| Ok(()),
+                WriteMode::Commit,
+                &agent()
+            ),
+            Err(NoteWriteError::Stale(_))
+        ));
+        assert!(edit_sheet_page(
+            &vault,
+            "notes/budget.md",
+            |_| Err("refused".into()),
+            None,
+            |_, _| Ok(()),
+            WriteMode::Commit,
+            &agent()
+        )
+        .is_err());
+        assert_eq!(read(&vault, "notes/budget.md"), before);
+        assert!(recorded(&vault).is_empty());
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn an_unchanged_sheet_plan_writes_and_records_nothing() {
+        let _recording = Recording::new("sheet-noop-recording");
+        let vault = testutil::temp_vault("sheet-noop");
+        let before = "```cerebro-sheet\n1\n```\n";
+        testutil::write(&vault, "notes/budget.md", before);
+        let answer = edit_sheet_page(
+            &vault,
+            "notes/budget.md",
+            |body| sheet_plan(body, serde_json::json!([{"address":"A1","value":"1"}])),
+            None,
+            |_, _| Ok(()),
+            WriteMode::Commit,
+            &agent(),
+        )
+        .unwrap();
+        assert!(!answer.wrote);
+        assert_eq!(answer.report.changed_total, 0);
+        assert!(recorded(&vault).is_empty());
+        assert_eq!(read(&vault, "notes/budget.md"), before);
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn add_sheet_never_closes_an_unclosed_byte_zero_frontmatter() {
+        let vault = testutil::temp_vault("sheet-header");
+        let before = "---\ntitle: Original\n";
+        testutil::write(&vault, "notes/budget.md", before);
+        let args = serde_json::json!({"path":"notes/budget.md","ops":[{"op":"add_sheet","name":"Budget"}]});
+        let request = crate::sheet::edit::parse_request(args.as_object().unwrap()).unwrap();
+        let error = edit_sheet_page(
+            &vault,
+            "notes/budget.md",
+            |body| crate::sheet::edit::plan(body, &request),
+            None,
+            |_, _| Ok(()),
+            WriteMode::Commit,
+            &agent(),
+        )
+        .unwrap_err();
+        assert_eq!(
+            String::from(error),
+            "The edit would change the page's properties.\nNothing was written."
+        );
+        assert_eq!(read(&vault, "notes/budget.md"), before);
+        let _ = std::fs::remove_dir_all(vault);
     }
 }

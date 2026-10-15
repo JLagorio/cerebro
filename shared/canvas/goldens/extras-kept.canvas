@@ -1,0 +1,19 @@
+{
+	"vendor": {"large":9007199254740993,"escaped":"\ud800","scientific":1.2300e+44},
+	"nodes": [
+		{"id":"text","type":"text","text":"Preserve me","x":0,"y":0,"width":240,"height":120,"vendor":{"nested":[null,true,1e999]}}
+	],
+	"edges": [
+		{"id":"edge","fromNode":"text","toNode":"text","vendor":-0}
+	],
+	"cerebro": {
+		"version": 1,
+		"cards": {
+			"text": {"shape":"ellipse","vendor":{"kept":true}}
+		},
+		"ink": [
+			{"id":"ink","x":0,"y":160,"width":40,"height":30,"size":4,"simulated":false,"points":[0,0,500],"vendor":"\u0061"}
+		],
+		"vendor": ["kept"]
+	}
+}

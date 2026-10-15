@@ -84,6 +84,14 @@ test('agent wakes: a change wakes its agent once, the next waits under the coold
     .poll(() => wakes(page), { timeout: 30_000 })
     .toEqual([`${RISK} finished succeeded`, `${RISK} pending`]);
 
+  // Attribution comes from the panel write receipt, not from a guessed author.
+  await page.getByTestId('nav-agent').filter({ hasText: 'Risk watch' }).click();
+  await page.getByRole('tab', { name: 'Runs', exact: true }).click();
+  await page.getByTestId('agent-wake-author').scrollIntoViewIfNeeded();
+  await expect(page.getByTestId('agent-wake-author')).toBeVisible();
+  await expect(page.getByTestId('agent-wake-author')).toHaveText('by Assistant');
+  await page.screenshot({ path: test.info().outputPath('wake-author.png') });
+
   // Pause on the agent's page cancels the waiting wake, saying why.
   await page.getByTestId('nav-agent').filter({ hasText: 'Risk watch' }).click();
   await expect(page.getByTestId('agent-dossier')).toBeVisible({ timeout: 10_000 });

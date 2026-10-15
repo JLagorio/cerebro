@@ -1,6 +1,7 @@
 ---
 type: Work item
 key: OPS-12
+project: "[[phoenix-warehouse-rollout]]"
 status: backlog
 priority: medium
 assignee: "[[rosa-alvine]]"

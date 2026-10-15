@@ -1,8 +1,8 @@
 //! The app's one window (M53.12).
 //!
 //! Tauri builds every `create: true` window itself, before `setup` runs, and
-//! that path attaches no navigation hook and no new-window hook (tauri-2.11.5
-//! app.rs:2524-2525). With no new-window hook WebKit gets no window back, so
+//! that path attaches no navigation hook and no new-window hook (tauri-2.12.4
+//! app.rs:2691-2692). With no new-window hook WebKit gets no window back, so
 //! every `target="_blank"` anchor, `window.open`, BlockNote's link toolbar and
 //! tiptap's click handler was a dead click in the packaged app, and a plain
 //! link was worse: nothing stopped it from taking the whole app off its page.
@@ -21,20 +21,30 @@
 //! That entry also turns WebKit's background throttling off (M53.13). Two of
 //! the app's clocks matter most while nobody is looking: `useJobRunner`'s 60 s
 //! tick, the only way a due schedule gets noticed, and `useReminders`' 30 s
-//! check, which exists to post a desktop notification. Tauri documents a
+//! check, which claims due reminders and sends their notices. Tauri documents a
 //! hidden view's timers being suspended after about five minutes. The key
-//! reaches wry through `from_config`, and wry applies it on macOS 14 and
-//! later only; `minimumSystemVersion` is still 10.15, so an older Mac keeps
-//! WebKit's default. `the_main_window_keeps_running_hidden` says how to
+//! reaches wry through `from_config`; wry 0.57.0 applies it on macOS 14 and
+//! later (wkwebview/mod.rs:473-488), so the 14.0 floor covers every supported
+//! Mac. `the_main_window_keeps_running_hidden` says how to
 //! measure it.
 //!
 //! `open` is the one other way out (M55.9): Open with reveals or opens a
 //! vault note and hands a page to an agent app, each through `/usr/bin/open`
 //! as one argument, and writes the clipboard through `/usr/bin/pbcopy`.
+//! `file_actions` adds contained root files, with the kinds table's Open
+//! verdict and native confirmation, plus Reveal, Quick Look and Save a copy.
+//!
+//! `notify` is the one door to Notification Center: permission and posts
+//! are guarded by the installed app bundle; an unbundled process is unknown.
 //!
 //! `quit` owns ⌘Q, the app menu and the close guard's prepare (M55.10).
 
+//! `deep_link` buffers incoming app links until the window can navigate.
+
+pub mod deep_link;
+pub mod file_actions;
 pub mod links;
+pub mod notify;
 pub mod open;
 pub mod quit;
 
@@ -48,8 +58,8 @@ pub const MAIN_WINDOW: &str = "main";
 /// the webview a title permission.
 ///
 /// The devUrl is the app's own origin only under `tauri dev`: tauri's own
-/// app URL reads the same switch (`get_app_url`, tauri-2.11.5
-/// manager/mod.rs:348-367), so in a packaged build it is just another web
+/// app URL reads the same switch (`get_app_url`, tauri-2.12.4
+/// manager/mod.rs:345-358), so in a packaged build it is just another web
 /// address, and a link to it leaves for the browser like any other.
 pub fn build_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let config = app
@@ -73,7 +83,9 @@ pub fn build_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Err
         .on_new_window(move |url, _features| {
             links::route_new_window(&url, win_root.as_ref(), &links::open_in_browser)
         })
-        // M59.1: the title is vault text, so a failure is logged without it.
+        // M59.1: tauri 2.12.4 forwards this hook (webview_window.rs:326-337);
+        // wry 0.57.0 observes WKWebView's title (wkwebview/mod.rs:560-569).
+        // The title is vault text, so a failure is logged without it.
         .on_document_title_changed(|window, title| {
             if let Err(err) = window.set_title(&title) {
                 log::warn!("the window title did not follow the page: {err}");
@@ -97,12 +109,49 @@ mod tests {
     use super::links::{classify, LinkVerdict};
     use super::*;
 
+    #[test]
+    fn the_csp_names_each_source_it_allows() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
+        assert_eq!(config["app"]["security"]["csp"].as_str(), Some("default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data: cerebro-file:; media-src 'self' cerebro-file:; font-src 'self'"));
+    }
+
     /// The shipped `tauri.conf.json`, parsed by tauri's own `Config`. Its
     /// window entries deny unknown keys, so a misspelt key or value fails
     /// here.
     fn shipped_config() -> tauri::Config {
         serde_json::from_str(include_str!("../../tauri.conf.json"))
             .expect("tauri.conf.json parses as tauri's own Config")
+    }
+
+    #[test]
+    fn info_plist_declares_the_cerebro_scheme() {
+        let plist = include_str!("../../Info.plist");
+        assert!(plist.contains("<key>CFBundleURLTypes</key>"));
+        assert!(plist.contains("<string>com.cerebro.app</string>"));
+        assert!(plist.contains("<key>CFBundleURLSchemes</key>"));
+        assert!(plist.contains("<array><string>cerebro</string></array>"));
+    }
+
+    #[test]
+    fn opened_urls_reach_the_inbox() {
+        let source = include_str!("../lib.rs");
+        assert!(source.contains(".manage(shell::deep_link::DeepLinkInbox::default())"));
+        assert!(source.contains(
+            "tauri::RunEvent::Opened { urls } => shell::deep_link::received(app, &urls)"
+        ));
+    }
+
+    #[test]
+    fn the_macos_floor_is_14() {
+        assert_eq!(
+            shipped_config()
+                .bundle
+                .macos
+                .minimum_system_version
+                .as_deref(),
+            Some("14.0")
+        );
     }
 
     #[test]

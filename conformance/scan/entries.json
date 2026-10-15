@@ -816,12 +816,15 @@
       "relationships": {
         "assignee": [
           "priya-nair"
+        ],
+        "project": [
+          "field-app-launch-campaign"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "5bf55f0e90d13529d3b35ddccfa3ab822aa3b0f5bb95bcf80ec26e71280e5ec4"
+      "hash": "6619431de6794e55cbd74be22ba22de4b105a914166f43dc7d4508aef8b5b7a3"
     },
     {
       "path": "projects/field-app-launch-campaign/items/lnc-10.md",
@@ -845,12 +848,15 @@
         ],
         "epic": [
           "epic-launch-narrative"
+        ],
+        "project": [
+          "field-app-launch-campaign"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "48f1a9b7395c7d0496e5d202abd3ea16922c7553ceaf46329202da02328144be"
+      "hash": "38cf1d2354b5f1d582f722489071a5efc9d9a79f78d8490085763f8389c6fb4d"
     },
     {
       "path": "projects/field-app-launch-campaign/items/lnc-11.md",
@@ -873,6 +879,9 @@
       "relationships": {
         "assignee": [
           "dana-fox"
+        ],
+        "project": [
+          "field-app-launch-campaign"
         ]
       },
       "outgoingLinks": [
@@ -880,7 +889,7 @@
       ],
       "snippet": "Runs bet-office-hours-beat-webinars. Keep the webinar landing page alive so the comparison is like for like.",
       "parseError": null,
-      "hash": "1aab5b01915ed3855772b71e29757446f91716053d8fc7cc7e9c73128825f0f4"
+      "hash": "c684ebc228ec46f0528707f84e0c2b9792d4af9945f94e7e8b5ba1d9a162c61a"
     },
     {
       "path": "projects/field-app-launch-campaign/items/lnc-2.md",
@@ -903,12 +912,15 @@
       "relationships": {
         "assignee": [
           "priya-nair"
+        ],
+        "project": [
+          "field-app-launch-campaign"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "08d3029f34fe76c7e1557c295571d7473546141b72b43788f74203fbd3fbaa4f"
+      "hash": "b354e09af21bf49ea0ecf4b51169032576cc08e392c877c969164cf0c2bb1005"
     },
     {
       "path": "projects/field-app-launch-campaign/items/lnc-3.md",
@@ -931,12 +943,15 @@
       "relationships": {
         "assignee": [
           "josef-lang"
+        ],
+        "project": [
+          "field-app-launch-campaign"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "a17a310e621b3c32675bd3da0baf384389620c9227de43ab494a23406268c66d"
+      "hash": "a7b8f238169063e65b356c022b94c16afe4fd26e86b7d13c969addac820738c8"
     },
     {
       "path": "projects/field-app-launch-campaign/items/lnc-4.md",
@@ -959,12 +974,15 @@
       "relationships": {
         "assignee": [
           "josef-lang"
+        ],
+        "project": [
+          "field-app-launch-campaign"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "86c67d141b60233d4342f2e78133b1b979e1207d99e18c9e383be99274e0080b"
+      "hash": "64e2da89d45bf35bd283b9d92edf90148866c79fedf085ab82ebd6f74c92b47c"
     },
     {
       "path": "projects/field-app-launch-campaign/items/lnc-5.md",
@@ -987,12 +1005,15 @@
       "relationships": {
         "assignee": [
           "maya-chen"
+        ],
+        "project": [
+          "field-app-launch-campaign"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "e867ee4d5459bce8bd32736dc4295c852ebf99b4fe0431a1574134c38fa15569"
+      "hash": "0344e9a7b4c625dc31102d0b4b9f261034803462bdc0dd67301a76acda91fa51"
     },
     {
       "path": "projects/field-app-launch-campaign/items/lnc-6.md",
@@ -1015,12 +1036,15 @@
       "relationships": {
         "assignee": [
           "maya-chen"
+        ],
+        "project": [
+          "field-app-launch-campaign"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "7874fe56d801f154f2ff4fac40df17fc58895a91c3645478900a8962e48ea8d3"
+      "hash": "9cd56e876b458547455789fb2e05cbe650c3e59cd140fd5642db8464148449d0"
     },
     {
       "path": "projects/field-app-launch-campaign/items/lnc-7.md",
@@ -1043,12 +1067,15 @@
       "relationships": {
         "assignee": [
           "priya-nair"
+        ],
+        "project": [
+          "field-app-launch-campaign"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "7f4f9fe1ffd2c164298a7cfca2063687b1c51f42bdef00239536d957baba519b"
+      "hash": "769a7b716ed6aabbfb1a69f5c8b620fa57f796a070670b965cfb6e06d6647ca7"
     },
     {
       "path": "projects/field-app-launch-campaign/items/lnc-8.md",
@@ -1074,6 +1101,9 @@
         ],
         "epic": [
           "epic-launch-narrative"
+        ],
+        "project": [
+          "field-app-launch-campaign"
         ]
       },
       "outgoingLinks": [
@@ -1081,7 +1111,7 @@
       ],
       "snippet": "Every asset currently describes one app for both audiences, which dec-supervisor-web-console made untrue.",
       "parseError": null,
-      "hash": "f8f8c1ef432a234e9411e83a3b25ae5c2ccc0d60c17e7ef6f866b3bfa2375756"
+      "hash": "d079921ace816505fdb2994c75452d7a0423af18cf4c29035998db6374ef8792"
     },
     {
       "path": "projects/field-app-launch-campaign/items/lnc-9.md",
@@ -1107,6 +1137,9 @@
         ],
         "epic": [
           "epic-launch-narrative"
+        ],
+        "project": [
+          "field-app-launch-campaign"
         ]
       },
       "outgoingLinks": [
@@ -1114,7 +1147,7 @@
       ],
       "snippet": "The settling condition for bet-named-customer-unlocks-pipeline.",
       "parseError": null,
-      "hash": "cbdade93fb5f0a31383c41838a0684e21fd25067b5b686a4b0c83c7883d203d0"
+      "hash": "bb4fb64a67b9748936ba8279463fd91224f301d1817660fe778cebc254b3c660"
     },
     {
       "path": "projects/field-app-launch-campaign/meetings/kickoff.md",
@@ -1153,12 +1186,15 @@
       "relationships": {
         "assignee": [
           "ana-rios"
+        ],
+        "project": [
+          "guided-onboarding-ga"
         ]
       },
       "outgoingLinks": [],
       "snippet": "Umbrella for everything the GA gate needs: flow, coaching, telemetry, and the fallback path.",
       "parseError": null,
-      "hash": "bca2eda5342bfe4dd37b7368251c34d32eefb5342d91a08d8b5fa89803d5c0df"
+      "hash": "089f4ae59078ee7137b2eac6a2ed6855228dfa90880d2cd9234acebf2c1624a3"
     },
     {
       "path": "projects/guided-onboarding-ga/items/fld-10.md",
@@ -1184,12 +1220,15 @@
         ],
         "epic": [
           "epic-first-week-activation"
+        ],
+        "project": [
+          "guided-onboarding-ga"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "87c17468e53178414391ece02df65d53147bcd89aca02dae49a1fd91c3832064"
+      "hash": "84ed77c87ed2b9e63af93f098b0d3782e476606a7194039063cd718966fecf52"
     },
     {
       "path": "projects/guided-onboarding-ga/items/fld-11.md",
@@ -1215,12 +1254,15 @@
         ],
         "epic": [
           "epic-first-week-activation"
+        ],
+        "project": [
+          "guided-onboarding-ga"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "6491be437fe31e151c9baba657b6628ad65ee9b3535805dbd2339e8fba522bec"
+      "hash": "6ffd960eb9c14a69f07d90a8444881fa407f4ed5b131b0c68b70d0c298987c4e"
     },
     {
       "path": "projects/guided-onboarding-ga/items/fld-12.md",
@@ -1243,12 +1285,15 @@
       "relationships": {
         "assignee": [
           "dana-fox"
+        ],
+        "project": [
+          "guided-onboarding-ga"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "eca0e72f744f9e26d4ab1685275e0a9bdbe919c6d2947ce3a4677750a5b32a06"
+      "hash": "2b77946b73fb8804ccb09dc01a99bbbee1179bb0e71519cb3b61b32a9757be72"
     },
     {
       "path": "projects/guided-onboarding-ga/items/fld-2.md",
@@ -1271,12 +1316,15 @@
       "relationships": {
         "assignee": [
           "elena-vasquez"
+        ],
+        "project": [
+          "guided-onboarding-ga"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "30805f8dc923fb06a40fd3db13490b8c9964a96169c033513ea62e17cbd5e1b8"
+      "hash": "a5fbd99131f6e85a0ae5ea23e038484b2f113689160f74834387e6361167902e"
     },
     {
       "path": "projects/guided-onboarding-ga/items/fld-3.md",
@@ -1299,12 +1347,15 @@
       "relationships": {
         "assignee": [
           "elena-vasquez"
+        ],
+        "project": [
+          "guided-onboarding-ga"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "a15fb566bb77395fdb32497258eeacfbff694a7262da2fcc9f5637d910bc6e94"
+      "hash": "79dc97b4678152b1d6e5652788c11c0bf03a4432262b2591ab846001ca640a73"
     },
     {
       "path": "projects/guided-onboarding-ga/items/fld-4.md",
@@ -1327,12 +1378,15 @@
       "relationships": {
         "assignee": [
           "priya-nair"
+        ],
+        "project": [
+          "guided-onboarding-ga"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "65aadf530e6e61d14cca5aedfaee75e0b87e6103ffb4d0540551336a09c878ae"
+      "hash": "c5c0f31c0beb0374d85c285385324e00b2c40665a62b01bd812ef15753cd8b1d"
     },
     {
       "path": "projects/guided-onboarding-ga/items/fld-5.md",
@@ -1355,12 +1409,15 @@
       "relationships": {
         "assignee": [
           "maya-chen"
+        ],
+        "project": [
+          "guided-onboarding-ga"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "12246850b58523abfd4f94e6c4e18c9bfce1570cccc456a74d6dd295bb5ac14e"
+      "hash": "62ca294d0da8b13a0138d4aae0a1dadabbb9b2cabf891df914004c59091dcaa4"
     },
     {
       "path": "projects/guided-onboarding-ga/items/fld-6.md",
@@ -1383,12 +1440,15 @@
       "relationships": {
         "assignee": [
           "sam-ito"
+        ],
+        "project": [
+          "guided-onboarding-ga"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "8fb4dde5e992d8c283a68bd411ca7fb07cb6c1e101896e7aff019fb70dd8038a"
+      "hash": "57b3d592df6e47b7684138d8c4171a220a2c9b94fc221d0d56ccde49b85b4fda"
     },
     {
       "path": "projects/guided-onboarding-ga/items/fld-7.md",
@@ -1411,12 +1471,15 @@
       "relationships": {
         "assignee": [
           "sam-ito"
+        ],
+        "project": [
+          "guided-onboarding-ga"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "88868b0104f9e1906c1f23ffc3965cb561c20a1bb47fab856135073cf65cbadd"
+      "hash": "d0d3aad1658f090497a7c2c2107437f7047af66eb9d3ad5ffc214ddcf108c7f4"
     },
     {
       "path": "projects/guided-onboarding-ga/items/fld-8.md",
@@ -1442,12 +1505,15 @@
         ],
         "epic": [
           "epic-first-week-activation"
+        ],
+        "project": [
+          "guided-onboarding-ga"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "9555f78d49df860fd2dd4a92ddddef8c64b883d08e05f7c6a21f899d78dfb4bf"
+      "hash": "a6e25ab3bb1fef37fea8efd1b8605945a12986e2eb325677f1b634545569843d"
     },
     {
       "path": "projects/guided-onboarding-ga/items/fld-9.md",
@@ -1476,12 +1542,15 @@
         ],
         "epic": [
           "epic-first-week-activation"
+        ],
+        "project": [
+          "guided-onboarding-ga"
         ]
       },
       "outgoingLinks": [],
       "snippet": "Depends on the resolution screen: there is no graceful recovery to show until there is somewhere to send them.",
       "parseError": null,
-      "hash": "00556f5ddb68c77653ca691061ec8999fb170e806d0cea9ff04cf417e8404d96"
+      "hash": "29811ef2cf7c1a5793eded2590a70f10e743ce621a680a1d111d4888e0ea03f5"
     },
     {
       "path": "projects/guided-onboarding-ga/meetings/kickoff.md",
@@ -1520,12 +1589,15 @@
       "relationships": {
         "assignee": [
           "sam-ito"
+        ],
+        "project": [
+          "offline-sync-hardening"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "6061dda789ac6c0189fea9dcf7b66fc27f85ae0b399499919f5ebb887fa82cf8"
+      "hash": "9c8af4a27ae50819c55f67538bb025aa1e802e087d7ebfa93f1da6d6ef08b5d5"
     },
     {
       "path": "projects/offline-sync-hardening/items/syn-10.md",
@@ -1549,6 +1621,9 @@
         ],
         "epic": [
           "epic-offline-conflict-model"
+        ],
+        "project": [
+          "offline-sync-hardening"
         ]
       },
       "outgoingLinks": [
@@ -1556,7 +1631,7 @@
       ],
       "snippet": "Without this the KR reads as a regression the day the epic ships. See the consequences section of dec-conflict-resolution-is-manual.",
       "parseError": null,
-      "hash": "8b514cf29188c11d7a25025db890b69c77262c32705320b91ccc9e98edc030f7"
+      "hash": "8bbec0fece8e59cae13a73c6e66413f921c50126058b71b9578f7f2a14ba35e3"
     },
     {
       "path": "projects/offline-sync-hardening/items/syn-2.md",
@@ -1579,12 +1654,15 @@
       "relationships": {
         "assignee": [
           "sam-ito"
+        ],
+        "project": [
+          "offline-sync-hardening"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "6d8f9959568e6e48797265b55db3f206e349ebb037535e2728cdd76fae19589b"
+      "hash": "f131a4bd88895b03668afe570da8e130624f22578541af046789f67595695770"
     },
     {
       "path": "projects/offline-sync-hardening/items/syn-3.md",
@@ -1607,12 +1685,15 @@
       "relationships": {
         "assignee": [
           "dana-fox"
+        ],
+        "project": [
+          "offline-sync-hardening"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "42d8ac47c875a6edba2b621f43f0624e910e7913e8d3bc8c3abc03ddb9d77163"
+      "hash": "f20b200752468b658deb80cacd19fec73c442c205edb1c15f8af3b2b76c14b21"
     },
     {
       "path": "projects/offline-sync-hardening/items/syn-4.md",
@@ -1635,12 +1716,15 @@
       "relationships": {
         "assignee": [
           "dana-fox"
+        ],
+        "project": [
+          "offline-sync-hardening"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "60a22e84984a7acffb1cc321ef73f9570deab2e4bde63b615ba2a9eb8a8a00ce"
+      "hash": "e296bf2324504fa0c3ad16e39b10aa1e22448cf44414b4d151b1590128fdd6ab"
     },
     {
       "path": "projects/offline-sync-hardening/items/syn-5.md",
@@ -1663,12 +1747,15 @@
       "relationships": {
         "assignee": [
           "sam-ito"
+        ],
+        "project": [
+          "offline-sync-hardening"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "2f77f97c429139bcb67f1dc8f9eafa435993c4f5ccdc6edbf21caf320390e3e7"
+      "hash": "0a0094f6930bef8da9b85116d3e6507eaa557c494bc42824f09cc503c7b88f7b"
     },
     {
       "path": "projects/offline-sync-hardening/items/syn-6.md",
@@ -1694,12 +1781,15 @@
         ],
         "epic": [
           "epic-offline-conflict-model"
+        ],
+        "project": [
+          "offline-sync-hardening"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "29c0fb92f6a424fd4d6e4e02f9f1dce0cfa929d4670c2a6ff10a71d5368a7170"
+      "hash": "566e6ab9be5f848c1ba89ceca5921670c8dbd93761b71cf8d64d71734d2bcf95"
     },
     {
       "path": "projects/offline-sync-hardening/items/syn-7.md",
@@ -1728,6 +1818,9 @@
         ],
         "epic": [
           "epic-offline-conflict-model"
+        ],
+        "project": [
+          "offline-sync-hardening"
         ]
       },
       "outgoingLinks": [
@@ -1735,7 +1828,7 @@
       ],
       "snippet": "Storage side of dec-conflict-resolution-is-manual. Both versions live until someone picks; neither is authoritative in the meantime. The migration is the awkwar",
       "parseError": null,
-      "hash": "6b4d40052d093d3de075d7a0bf2328969ec52ea1a6f2d91893cce9d862ced543"
+      "hash": "64fd4bfacdce6af4e4b4a366cc59835d59654158ff29deafa574b57a4cb3d2ee"
     },
     {
       "path": "projects/offline-sync-hardening/items/syn-8.md",
@@ -1764,12 +1857,15 @@
         ],
         "epic": [
           "epic-offline-conflict-model"
+        ],
+        "project": [
+          "offline-sync-hardening"
         ]
       },
       "outgoingLinks": [],
       "snippet": "The half of the epic that makes the other half worth shipping. Detection without this just tells crews something went wrong and offers them nothing.",
       "parseError": null,
-      "hash": "c1798575a9cc2fe04c56d8882a2c32e433964339c00388a0e48e3a0667c4e866"
+      "hash": "15f8df32986e70184a5de048b4dfbb2a337dcfb1420b679aa1857528effdc688"
     },
     {
       "path": "projects/offline-sync-hardening/items/syn-9.md",
@@ -1795,6 +1891,9 @@
         ],
         "epic": [
           "epic-offline-conflict-model"
+        ],
+        "project": [
+          "offline-sync-hardening"
         ]
       },
       "outgoingLinks": [
@@ -1802,7 +1901,7 @@
       ],
       "snippet": "Implements the boundary from dec-offline-window-72h. The warning has to be honest without being alarming — crews work long weekends routinely.",
       "parseError": null,
-      "hash": "3e37d416f05ea6b93c02113b03556e3238ca173552bd0b47e231baa1b0f27a00"
+      "hash": "58374cb5ff06eebd7e0282060e35fae43a7edfc1ff22eae2643446786b063135"
     },
     {
       "path": "projects/offline-sync-hardening/meetings/kickoff.md",
@@ -1865,12 +1964,15 @@
       "relationships": {
         "assignee": [
           "marcus-webb"
+        ],
+        "project": [
+          "phoenix-warehouse-rollout"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "f7bfa9dbaed1f5f663eb09852cf8bd64a000661d7d2e52d5e1be0240800c7660"
+      "hash": "0d7df7b05fc470cd5cbb3f5e19b4136f70347f9c487e653194bbfb8abd8acf04"
     },
     {
       "path": "projects/phoenix-warehouse-rollout/items/ops-10.md",
@@ -1896,6 +1998,9 @@
         ],
         "epic": [
           "epic-warehouse-cutover"
+        ],
+        "project": [
+          "phoenix-warehouse-rollout"
         ]
       },
       "outgoingLinks": [
@@ -1903,7 +2008,7 @@
       ],
       "snippet": "Takes hardware off the critical path per dec-no-custom-scanner-hardware.",
       "parseError": null,
-      "hash": "5f5749b72fd571d81500524256664b6f2def81aab5625a65cca13815ec7132e0"
+      "hash": "471fe5201bcb39cbf9b3261509b7a8613fd4269954a6b2c233fbe6906edafcf7"
     },
     {
       "path": "projects/phoenix-warehouse-rollout/items/ops-11.md",
@@ -1933,12 +2038,15 @@
         ],
         "epic": [
           "epic-warehouse-cutover"
+        ],
+        "project": [
+          "phoenix-warehouse-rollout"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "4ff66ddaaac3125d570356fe8d05e5bfa7d39b2da824122375c7ae541114c855"
+      "hash": "8a6502602b31023f4c9377cc11200994853cd1ea95f7fcf513af796be6ca913a"
     },
     {
       "path": "projects/phoenix-warehouse-rollout/items/ops-12.md",
@@ -1967,12 +2075,15 @@
         ],
         "epic": [
           "epic-warehouse-cutover"
+        ],
+        "project": [
+          "phoenix-warehouse-rollout"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "3bf2fddf34d06ecf0f9269acc4e0c6a9e021b5950c81dfb7ca51e3d9606e97d1"
+      "hash": "1ab0da904911f04837d8e1a9549c90763bccb0ffec0b7e6fcb2329f36ee4e9ba"
     },
     {
       "path": "projects/phoenix-warehouse-rollout/items/ops-2.md",
@@ -1995,12 +2106,15 @@
       "relationships": {
         "assignee": [
           "marcus-webb"
+        ],
+        "project": [
+          "phoenix-warehouse-rollout"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "2cbbce45d9f2ceadc3368bf069f32b85d11b1d6ac20a08540617742808d7bb4e"
+      "hash": "f716e1d798d026e40737f7b8c35d745ccaa10015770c0bb251b7d788c8de27ac"
     },
     {
       "path": "projects/phoenix-warehouse-rollout/items/ops-3.md",
@@ -2023,12 +2137,15 @@
       "relationships": {
         "assignee": [
           "mo-byrd"
+        ],
+        "project": [
+          "phoenix-warehouse-rollout"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "649a5dc266c424203dff86855aaba089c615bdad7b3e87ed40645e6bc973f16e"
+      "hash": "6dc5ef1dc60873d03b1fda9120e0e8008831bc37475553be2e7b63b282c375bb"
     },
     {
       "path": "projects/phoenix-warehouse-rollout/items/ops-4.md",
@@ -2051,12 +2168,15 @@
       "relationships": {
         "assignee": [
           "mo-byrd"
+        ],
+        "project": [
+          "phoenix-warehouse-rollout"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "8fd530bee05a3549bb55c1180197096b265c525c8ad1256a7b533ca73aa9144d"
+      "hash": "d5b3888586bfe39c19330bccef58516dc34d6d873112494b0bb9d9a22617c11d"
     },
     {
       "path": "projects/phoenix-warehouse-rollout/items/ops-5.md",
@@ -2079,12 +2199,15 @@
       "relationships": {
         "assignee": [
           "dana-fox"
+        ],
+        "project": [
+          "phoenix-warehouse-rollout"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "a5a17940dfd50ce7aebf53270c888acdb073d08441c5d426f947156891abf900"
+      "hash": "03e1d3f07c0900850575bb1a39cf0a7862d81dafce13f08deac798a6c3cd6f23"
     },
     {
       "path": "projects/phoenix-warehouse-rollout/items/ops-6.md",
@@ -2107,12 +2230,15 @@
       "relationships": {
         "assignee": [
           "dana-fox"
+        ],
+        "project": [
+          "phoenix-warehouse-rollout"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "0c092452accc002364dc1b97c43fe2b5633b4c6f883383723ba7728448d58a9d"
+      "hash": "6680a1fe198f87d490518aa3eea46376caa4506b699e0308b1b60b255e02c8f7"
     },
     {
       "path": "projects/phoenix-warehouse-rollout/items/ops-7.md",
@@ -2135,12 +2261,15 @@
       "relationships": {
         "assignee": [
           "marcus-webb"
+        ],
+        "project": [
+          "phoenix-warehouse-rollout"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "7ac987f8bf5ebc98b175df7197b6b10422626a7e2aa8576fb88da6740c5445fe"
+      "hash": "f9d122366108ee38eaa29dbf321d43e238f4dfd400d6b29b288de934ea2f06cc"
     },
     {
       "path": "projects/phoenix-warehouse-rollout/items/ops-8.md",
@@ -2163,12 +2292,15 @@
       "relationships": {
         "assignee": [
           "marcus-webb"
+        ],
+        "project": [
+          "phoenix-warehouse-rollout"
         ]
       },
       "outgoingLinks": [],
       "snippet": "",
       "parseError": null,
-      "hash": "926a71669e2026b86170e0afb11d8d0c75dfb99a3b2af30726a8a0018650ee9f"
+      "hash": "d53f9c11cedbd968fd4e25790bee9220821bb5f7cc14ce2404163608fb2c26d4"
     },
     {
       "path": "projects/phoenix-warehouse-rollout/items/ops-9.md",
@@ -2194,6 +2326,9 @@
         ],
         "epic": [
           "epic-warehouse-cutover"
+        ],
+        "project": [
+          "phoenix-warehouse-rollout"
         ]
       },
       "outgoingLinks": [
@@ -2201,7 +2336,7 @@
       ],
       "snippet": "Mitigation for risk-rollback-unrehearsed. Full sequence, including the pick-queue drain, with the clock running.",
       "parseError": null,
-      "hash": "6f0ed8dcb0e4cf81b4441d766259717a3fae123a41a1f0bda27c0b94b452df67"
+      "hash": "8377165759780e401b0a23c49df701ce93ae8e36fc574ff1f773d957422b74f8"
     },
     {
       "path": "projects/phoenix-warehouse-rollout/meetings/kickoff.md",
@@ -3792,6 +3927,17 @@
           "key": {
             "kind": "text"
           },
+          "progress": {
+            "kind": "rollup",
+            "from": {
+              "type": "Work item",
+              "field": "project"
+            },
+            "property": "status",
+            "calculate": "percent_done",
+            "format": "progress",
+            "precision": 0
+          },
           "state": {
             "kind": "select",
             "options": [
@@ -3817,14 +3963,57 @@
                 "color": "#1F9D61"
               }
             ]
+          },
+          "agents": {
+            "kind": "relation",
+            "target": "Agent"
           }
-        }
+        },
+        "tabs": [
+          {
+            "id": "overview",
+            "name": "Overview",
+            "content": "overview"
+          },
+          {
+            "id": "tasks",
+            "name": "Tasks",
+            "icon": "square-check",
+            "content": "view",
+            "source": {
+              "type": "Work item"
+            },
+            "scope": "related"
+          },
+          {
+            "id": "docs",
+            "name": "Docs",
+            "icon": "file-text",
+            "content": "view",
+            "source": {
+              "type": "Spec"
+            },
+            "scope": "related"
+          },
+          {
+            "id": "agents",
+            "name": "Agents",
+            "icon": "bot",
+            "content": "agents"
+          },
+          {
+            "id": "runs",
+            "name": "Runs",
+            "icon": "history",
+            "content": "runs"
+          }
+        ]
       },
       "relationships": {},
       "outgoingLinks": [],
-      "snippet": "A project is an ordinary record: it carries the key and state, and work items point at it with a project: relation.",
+      "snippet": "A project is a page. Its Tasks and Docs tabs list the work items and specs that name it through their project: relation. New work created from Tasks is filed un",
       "parseError": null,
-      "hash": "d0d3719b17d048ace25c3c3c83cd2d21c3c948190d39dae6aeafa62c58e19cf8"
+      "hash": "b7e234862c7bb7bbd8ded3f97975316c7134b60b9a78defa59ec38daadb30b48"
     },
     {
       "path": "types/risk.md",
@@ -3975,6 +4164,7 @@
       "properties": {
         "icon": "square-check",
         "color": "#3D8BE8",
+        "deadline": "due",
         "statuses": [
           {
             "id": "backlog",
@@ -4073,6 +4263,15 @@
           "blocked_by": {
             "kind": "relation",
             "target": "Work item"
+          },
+          "project": {
+            "kind": "relation",
+            "target": "Project",
+            "limit": 1
+          },
+          "agent": {
+            "kind": "relation",
+            "target": "Agent"
           }
         },
         "layout": {
@@ -4268,10 +4467,49 @@
       "outgoingLinks": [],
       "snippet": "Work items are the unit of delivery: tasks, bugs, and milestones tracked on project boards. blockedby is how blocking is modelled — a relation between two items",
       "parseError": null,
-      "hash": "004afb55b4b265d06e21e1a5e5ab5c4d16bb4d7d0f13179172a60502f0b18f14"
+      "hash": "d81ef26ee53c6042eb7820ce8855b6e42939c98098d600d36422477e536f0887"
     }
   ],
   "fixtures": [
+    {
+      "path": "boards/plan.canvas",
+      "content": "{\n\t\"nodes\": [\n\t\t{\"id\":\"text\",\"type\":\"text\",\"text\":\"Roadmap [[Vision]]\",\"x\":0,\"y\":0,\"width\":240,\"height\":120,\"color\":\"1\"},\n\t\t{\"id\":\"file\",\"type\":\"file\",\"file\":\"projects/Launch/project.md\",\"subpath\":\"#Next\",\"x\":280,\"y\":0,\"width\":240,\"height\":120},\n\t\t{\"id\":\"link\",\"type\":\"link\",\"url\":\"https://example.com\",\"x\":280,\"y\":160,\"width\":240,\"height\":120},\n\t\t{\"id\":\"group\",\"type\":\"group\",\"x\":-20,\"y\":-20,\"width\":560,\"height\":320,\"label\":\"Release\",\"background\":\"attachments/texture.png\",\"backgroundStyle\":\"ratio\"}\n\t],\n\t\"edges\": [\n\t\t{\"id\":\"edge\",\"fromNode\":\"text\",\"fromSide\":\"right\",\"fromEnd\":\"none\",\"toNode\":\"file\",\"toSide\":\"left\",\"toEnd\":\"arrow\",\"color\":\"2\",\"label\":\"Next\"}\n\t]\n}",
+      "entry": {
+        "path": "boards/plan.canvas",
+        "filename": "plan.canvas",
+        "folder": "boards",
+        "project": null,
+        "title": "Plan",
+        "type": null,
+        "properties": {},
+        "relationships": {},
+        "outgoingLinks": [
+          "Vision",
+          "Launch#Next"
+        ],
+        "snippet": "Roadmap Vision Release",
+        "parseError": null,
+        "hash": "addb955741d865b27f1beb7cd7a980a80d1854d6ee5c02b0004b7bf2b4249b49"
+      }
+    },
+    {
+      "path": "boards/broken.canvas",
+      "content": "{\"nodes\":[",
+      "entry": {
+        "path": "boards/broken.canvas",
+        "filename": "broken.canvas",
+        "folder": "boards",
+        "project": null,
+        "title": "Broken",
+        "type": null,
+        "properties": {},
+        "relationships": {},
+        "outgoingLinks": [],
+        "snippet": "",
+        "parseError": "This whiteboard isn't valid JSON.",
+        "hash": "eaf63937f587eac003e9b5f6eb807dd22fb09e7f2a3f1402895e8c1cded81ce4"
+      }
+    },
     {
       "path": "items/fld-7.md",
       "content": "---\ntype: Work item\nkey: FLD-7\nstatus: progress\npriority: urgent\nproject: \"[[guided-onboarding-ga]]\"\n---\n\n# Checklist stalls on step 3 offline\n\nSteps to reproduce the stall, see [[offline-sync-hardening]].\n",

@@ -32,6 +32,7 @@ const TEXT = new Set([
   '.yaml',
   '.json',
   '.jsonl',
+  '.canvas',
   '.html',
   '.css',
   '.sh',

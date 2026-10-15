@@ -26,6 +26,20 @@ export const DATES_FORMAT = 1;
 const FORMS = ['date', 'date_time', 'instant'] as const;
 const ZONES = ['Z', '+HH:MM', '-HH:MM'] as const;
 
+export interface RelativeGrammar {
+  days: { token: string; offset: number; words: string }[];
+  offsets: {
+    prefix: string;
+    signs: Record<string, number>;
+    min: number;
+    max: number;
+    leading_zero: boolean;
+  };
+  periods: { token: string; unit: 'week' | 'month'; offset: number; words: string }[];
+  week_starts: number[];
+  words: Record<'past_one' | 'past_many' | 'future_one' | 'future_many', string>;
+}
+
 export interface DateGrammar {
   format: number;
   artifact_version: number;
@@ -39,6 +53,8 @@ export interface DateGrammar {
   read: string;
   write: string;
   backwards: string;
+  relative: RelativeGrammar;
+  relative_cases: unknown[];
   cases: unknown[];
 }
 
@@ -68,9 +84,76 @@ function word(key: string, got: unknown, known: readonly string[]): void {
   }
 }
 
+function checkRelative(value: unknown): void {
+  const shape = () => {
+    throw new Error('dates: relative has an invalid shape');
+  };
+  if (!isRecord(value)) return shape();
+  const rows = (list: unknown, period: boolean) =>
+    Array.isArray(list) &&
+    list.every(
+      (row) =>
+        isRecord(row) &&
+        typeof row.token === 'string' &&
+        typeof row.words === 'string' &&
+        Number.isInteger(row.offset) &&
+        (!period || typeof row.unit === 'string'),
+    );
+  const offsets = value.offsets;
+  if (
+    !rows(value.days, false) ||
+    !rows(value.periods, true) ||
+    !isRecord(offsets) ||
+    typeof offsets.prefix !== 'string' ||
+    !isRecord(offsets.signs) ||
+    !Object.values(offsets.signs).every(Number.isInteger) ||
+    !Number.isInteger(offsets.min) ||
+    !Number.isInteger(offsets.max) ||
+    typeof offsets.leading_zero !== 'boolean' ||
+    !Array.isArray(value.week_starts) ||
+    !value.week_starts.every(Number.isInteger) ||
+    !isRecord(value.words) ||
+    !Object.values(value.words).every((word) => typeof word === 'string')
+  )
+    return shape();
+  const rule = value as unknown as RelativeGrammar;
+  const tokens = [...rule.days, ...rule.periods];
+  if (
+    rule.days.length === 0 ||
+    rule.periods.length === 0 ||
+    tokens.some((row) => row.token === '' || row.words === '') ||
+    new Set(tokens.map((row) => row.token)).size !== tokens.length
+  ) {
+    throw new Error('dates: relative tokens must be non-empty and unique');
+  }
+  if (
+    rule.offsets.prefix === '' ||
+    rule.offsets.min !== 1 ||
+    rule.offsets.max !== 999 ||
+    Object.keys(rule.offsets.signs).length !== 2 ||
+    rule.offsets.signs['+'] !== 1 ||
+    rule.offsets.signs['-'] !== -1 ||
+    rule.offsets.leading_zero
+  ) {
+    throw new Error('dates: relative offsets are invalid');
+  }
+  for (const period of rule.periods) {
+    word('relative period unit', period.unit, ['week', 'month']);
+    if (period.offset < -1 || period.offset > 1)
+      throw new Error('dates: relative offsets are invalid');
+  }
+  if (rule.week_starts.length !== 2 || rule.week_starts[0] !== 0 || rule.week_starts[1] !== 1) {
+    throw new Error('dates: relative week_starts must be 0, 1 in order');
+  }
+  for (const key of ['past_one', 'past_many', 'future_one', 'future_many'] as const) {
+    if (!rule.words[key]?.includes('{n}')) throw new Error('dates: relative words must name {n}');
+  }
+}
+
 /** Parse and check a grammar, refusing in the words `dates.rs` uses. */
 export function parseDateGrammar(value: unknown): DateGrammar {
   if (!isRecord(value)) throw new Error('dates: the grammar is not an object');
+  checkRelative(value.relative);
   const g = value as unknown as DateGrammar;
   if (g.format !== DATES_FORMAT) {
     throw new Error(`dates: format must be ${DATES_FORMAT}, not ${String(g.format)}`);
@@ -105,6 +188,8 @@ export function parseDateGrammar(value: unknown): DateGrammar {
   word('write', g.write, ['strict']);
   word('backwards', g.backwards, ['same_form']);
   if (!Array.isArray(g.cases) || g.cases.length === 0) throw new Error('dates: no cases');
+  if (!Array.isArray(g.relative_cases) || g.relative_cases.length === 0)
+    throw new Error('dates: no relative cases');
   return g;
 }
 
@@ -220,6 +305,20 @@ function toEndpoint(parsed: Parsed): DateEndpoint {
 export function parseDateText(text: string): DateEndpoint | null {
   const parsed = parseExact(text.trim());
   return parsed === null ? null : toEndpoint(parsed);
+}
+
+/** A validated timestamp as a moment, with floating dates read in local time.
+ * Rendering relative sections needs seconds as well as the endpoint's minute. */
+export function dateEpoch(text: string): number | null {
+  const parsed = parseExact(text.trim());
+  if (parsed === null) return null;
+  if (parsed.form === 'instant') return parsed.epochMs + parsed.nanos / 1_000_000;
+  const date = new Date(0);
+  const [year, month, day] = parsed.date.split('-').map(Number);
+  const [hour, minute] = (parsed.time ?? '00:00').split(':').map(Number);
+  date.setFullYear(year, month - 1, day);
+  date.setHours(hour, minute, 0, 0);
+  return date.getTime();
 }
 
 /** Strict: a string that is exactly date text, as a write must store it. */

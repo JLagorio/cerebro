@@ -102,3 +102,28 @@ test('a turn commits exactly the two notes it wrote, and View diff opens its com
   await expect(diff).toContainText('First line.');
   await expect(diff).not.toContainText('No uncommitted changes to this note.');
 });
+
+test('a mail-only turn keeps its page out of the commit and names the count', async ({
+  page,
+}, info) => {
+  await boot(page);
+  await page.evaluate(() =>
+    window.__cerebroMockFs.set('sources/mail/synthetic.md', '# Synthetic header\n'),
+  );
+  const before = (await mockGit(page)).commits.length;
+  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  const panel = page.getByTestId('ai-panel');
+  await panel
+    .getByLabel('Message the assistant')
+    .fill('append "Reviewed." to sources/mail/synthetic.md');
+  await panel.getByRole('button', { name: 'Send' }).click();
+  await expect(panel.getByTestId('turn-changeset-kept-out')).toHaveText(
+    'Kept 1 mail file out of git.',
+    { timeout: 10_000 },
+  );
+  expect((await mockGit(page)).commits.length).toBe(before);
+  expect(
+    await page.evaluate(() => window.__cerebroMockFs.get('sources/mail/synthetic.md')),
+  ).toContain('Reviewed.');
+  await page.screenshot({ path: info.outputPath('mail-kept-out.png'), animations: 'disabled' });
+});

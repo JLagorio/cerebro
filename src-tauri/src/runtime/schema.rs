@@ -1182,8 +1182,7 @@ pub const SCHEMA_V14: &str = "
 
 /// M34.3 — a run can be started by another run, and the chain must be
 /// walkable from the table alone. `parent_run_id` names the run whose tool
-/// call started this one; NULL is every run a person or a schedule started —
-/// the roots. A chain's total cost is the sum over the tree, derived at read
+/// call or recorded write started this one; NULL names a root. A chain's total cost is the sum over the tree, derived at read
 /// time, never stored: a stored total would go stale the moment a late child
 /// finalized. The index is bare because the one query is "children of this
 /// run", and it already arrives holding the parent's id.
@@ -1283,7 +1282,8 @@ pub const SCHEMA_V19: &str = "
 /// M56.7 — why a run started, and the Claude Code session it ran as.
 ///
 /// `runs.cause` is a JSON object whose `kind` is one of the ten in
-/// `runtime::cause::WORDS`, in that order, at most 2048 characters. The kind
+/// `runtime::cause::WORDS` at that time (v28 adds client), in that order,
+/// at most 2048 characters. The kind
 /// test sits in `coalesce(…, 0)` because SQLite passes a CHECK that reads
 /// NULL, and an object with no `kind` would read exactly that. Written
 /// with the run row, by the runtime only: the claim, the attended open and
@@ -1571,4 +1571,101 @@ pub const SCHEMA_V26: &str = "
         started_at TEXT NOT NULL CHECK (started_at LIKE '____-__-__T%Z')
     );
     CREATE INDEX batch_journal_by_vault ON batch_journal (vault_id, started_at);
+";
+
+/// M64.3 — durable, vault-scoped reminder claims and revision-aware Done marks.
+pub const SCHEMA_V27: &str = "
+    CREATE TABLE reminder_fires (
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        path TEXT NOT NULL CHECK (length(path) BETWEEN 1 AND 1024),
+        chip TEXT NOT NULL CHECK (length(chip) = 16 AND NOT chip GLOB '*[^0-9a-f]*'),
+        ordinal INTEGER NOT NULL CHECK (typeof(ordinal) = 'integer' AND ordinal >= 0),
+        fire_at TEXT NOT NULL CHECK (length(fire_at) = 16
+            AND fire_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]'
+            AND substr(fire_at, 1, 4) BETWEEN '0001' AND '9999'
+            AND datetime(fire_at, '+0 days') IS NOT NULL
+            AND strftime('%Y-%m-%dT%H:%M', fire_at, '+0 days') = fire_at),
+        outcome TEXT NOT NULL CHECK (outcome IN ('fired', 'missed', 'moved', 'imported')),
+        claimed_at TEXT NOT NULL CHECK (claimed_at LIKE '____-__-__T%Z'),
+        PRIMARY KEY (vault_id, path, chip, ordinal, fire_at)
+    );
+    CREATE TABLE done_marks (
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        lane TEXT NOT NULL CHECK (lane IN ('insight', 'run', 'reminder', 'change')),
+        subject TEXT NOT NULL CHECK (length(subject) BETWEEN 1 AND 1024),
+        until TEXT NOT NULL CHECK (until IN ('revision', 'forever')),
+        revision TEXT CHECK (revision IS NULL OR length(revision) BETWEEN 1 AND 256),
+        marked_at TEXT NOT NULL CHECK (marked_at LIKE '____-__-__T%Z'),
+        CHECK ((until = 'revision') = (revision IS NOT NULL)),
+        PRIMARY KEY (vault_id, lane, subject)
+    );
+";
+
+/// M62.5 — personal token fingerprints and one new runtime-only cause.
+/// The cause column is copied inside the migration's BEGIN IMMEDIATE; every
+/// row, run foreign key and existing cause survives, or the whole step rolls
+/// back. No plaintext token is a column in this database.
+pub const SCHEMA_V28: &str = "
+    CREATE TABLE client_tokens (
+        token_id TEXT PRIMARY KEY NOT NULL CHECK (length(token_id) = 32
+            AND NOT token_id GLOB '*[^0-9a-f]*'),
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 100),
+        slug TEXT NOT NULL CHECK (length(slug) BETWEEN 1 AND 32
+            AND NOT slug GLOB '*[^a-z0-9-]*'),
+        secret_sha256 TEXT NOT NULL UNIQUE CHECK (length(secret_sha256) = 64
+            AND NOT secret_sha256 GLOB '*[^0-9a-f]*'),
+        toolsets TEXT NOT NULL CHECK (json_valid(toolsets) AND json_type(toolsets) = 'array'),
+        write_scope TEXT NOT NULL CHECK (json_valid(write_scope) AND json_type(write_scope) = 'array'),
+        read_scope TEXT CHECK (read_scope IS NULL OR
+            (json_valid(read_scope) AND json_type(read_scope) = 'array')),
+        created_at TEXT NOT NULL CHECK (created_at LIKE '____-__-__T%Z'),
+        last_used_at TEXT CHECK (last_used_at IS NULL OR last_used_at LIKE '____-__-__T%Z'),
+        UNIQUE (vault_id, slug)
+    );
+    CREATE INDEX client_tokens_by_vault ON client_tokens (vault_id, created_at);
+    ALTER TABLE runs ADD COLUMN cause_next TEXT CHECK (cause_next IS NULL OR (
+        json_valid(cause_next) AND json_type(cause_next) = 'object'
+        AND coalesce(json_extract(cause_next, '$.kind') IN ('schedule', 'event', 'assigned', 'handoff', 'manual', 'followup', 'attended', 'ingest', 'maintenance', 'assembly', 'client'), 0)
+        AND length(cause_next) <= 2048));
+    UPDATE runs SET cause_next = cause;
+    ALTER TABLE runs DROP COLUMN cause;
+    ALTER TABLE runs RENAME COLUMN cause_next TO cause;
+";
+
+/// M63.2 — who caused a wake, and the recorded run whose chain it extends.
+/// Existing rows remain NULL: attribution cannot be reconstructed honestly.
+pub const SCHEMA_V29: &str = "
+    ALTER TABLE agent_wakes ADD COLUMN author TEXT
+        CHECK (author IS NULL OR author IN ('person', 'run', 'not_recorded'));
+    ALTER TABLE agent_wakes ADD COLUMN author_actor TEXT
+        CHECK (author_actor IS NULL OR (length(author_actor) BETWEEN 1 AND 128
+            AND author IS NOT NULL AND author IN ('person', 'run')));
+    ALTER TABLE agent_wakes ADD COLUMN parent_run_id TEXT REFERENCES runs (run_id)
+        CHECK (parent_run_id IS NULL OR author IS 'run');
+";
+
+/// M63.8 — self-only later runs, with a bounded durable claim lifecycle.
+pub const SCHEMA_V30: &str = "
+    CREATE TABLE agent_followups (
+        followup_id TEXT PRIMARY KEY NOT NULL CHECK (length(followup_id) = 32
+            AND NOT followup_id GLOB '*[^0-9a-f]*'),
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        actor TEXT NOT NULL CHECK (actor LIKE 'process:_%' AND length(actor) <= 128),
+        note TEXT NOT NULL CHECK (length(note) BETWEEN 1 AND 500),
+        due_at TEXT NOT NULL CHECK (due_at LIKE '____-__-__T%Z'),
+        requested_at TEXT NOT NULL CHECK (requested_at LIKE '____-__-__T%Z'),
+        requested_by_run TEXT NOT NULL CHECK (length(requested_by_run) > 0),
+        state TEXT NOT NULL CHECK (state IN ('pending', 'claimed', 'fired', 'cancelled')),
+        claimed_at TEXT CHECK (claimed_at IS NULL OR claimed_at LIKE '____-__-__T%Z'),
+        run_id TEXT CHECK (run_id IS NULL OR length(run_id) > 0),
+        ended_at TEXT CHECK (ended_at IS NULL OR ended_at LIKE '____-__-__T%Z'),
+        cancel_reason TEXT CHECK (cancel_reason IS NULL OR cancel_reason IN ('person', 'agent_gone', 'paused')),
+        CHECK (state != 'claimed' OR claimed_at IS NOT NULL),
+        CHECK (state != 'pending' OR claimed_at IS NULL),
+        CHECK ((state = 'fired') = (run_id IS NOT NULL)),
+        CHECK ((state = 'cancelled') = (cancel_reason IS NOT NULL)),
+        CHECK ((state IN ('fired', 'cancelled')) = (ended_at IS NOT NULL))
+    );
+    CREATE INDEX agent_followups_by_due ON agent_followups (vault_id, state, due_at);
 ";

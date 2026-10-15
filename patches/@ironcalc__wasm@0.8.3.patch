@@ -1,0 +1,62 @@
+diff --git a/package.json b/package.json
+index fe34291350254e33cf75157e47f1031a111e4eb3..d678d1a77969519b76dda101b81976959e91dac3 100644
+--- a/package.json
++++ b/package.json
+@@ -14,7 +14,8 @@
+   "files": [
+     "wasm_bg.wasm",
+     "wasm.js",
+-    "wasm.d.ts"
++    "wasm.d.ts",
++    "snippets"
+   ],
+   "main": "wasm.js",
+   "types": "wasm.d.ts",
+diff --git a/snippets/ironcalc_base-aa721fe913c88060/inline0.js b/snippets/ironcalc_base-aa721fe913c88060/inline0.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..ff90702e0d6c05afca0998e6a172a258b2b1eb43
+--- /dev/null
++++ b/snippets/ironcalc_base-aa721fe913c88060/inline0.js
+@@ -0,0 +1,42 @@
++
++        const _fmtCache = new Map();
++        function getFormatter(tz) {
++            let f = _fmtCache.get(tz);
++            if (!f) {
++                f = new Intl.DateTimeFormat('en-US', {
++                    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
++                    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
++                });
++                _fmtCache.set(tz, f);
++            }
++            return f;
++        }
++        export function ic_tz_validate(name) {
++            try { getFormatter(name); return true; }
++            catch(_) { return false; }
++        }
++        export function ic_tz_all() {
++            try {
++                const list = Intl.supportedValuesOf('timeZone');
++
++                const zones = new Set(list);
++
++                const extras = [ 'UTC', 'GMT' ];
++
++                for (const tz of extras) {
++                    zones.add(tz);
++                }
++
++                return Array.from(zones);
++            } catch(e) {
++                // no support
++                console.log(e);
++                return [ ];
++            }
++        }
++        export function ic_tz_parts(ms, tz) {
++            const p = {};
++            for (const x of getFormatter(tz).formatToParts(new Date(ms))) p[x.type] = x.value | 0;
++            return [p.year, p.month, p.day, p.hour, p.minute, p.second];
++        }
++    

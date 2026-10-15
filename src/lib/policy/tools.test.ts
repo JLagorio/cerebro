@@ -14,6 +14,7 @@ import { POLICY } from './table';
 import TOOL_CASES from '../../../src-tauri/fixtures/tool-cases.json';
 import {
   bareToolName,
+  clientToolsets,
   isConfirmable,
   parseToolsManifest,
   TOOLS,
@@ -22,6 +23,7 @@ import {
   TOOLS_PATH,
   toolFacts,
   toolSchema,
+  toolsetWrites,
   type CliTool,
   type ToolRow,
   type ToolsManifest,
@@ -50,15 +52,25 @@ describe('the shared manifest is one artifact', () => {
     expect(TOOLS.cli_tools.length).toBeGreaterThan(0);
   });
 
-  it('folds exactly the read rows, list_notes included (M56.8, M59.5)', () => {
+  it('folds exactly the step-rendered read rows, page sheets included (M56.8, M67.2)', () => {
     const folded = TOOLS.tools.filter((row) => row.fold !== null).map((row) => row.name);
-    const reads = TOOLS.tools.filter((row) => row.kind === 'read_only').map((row) => row.name);
+    const reads = TOOLS.tools
+      .filter((row) => row.kind === 'read_only' && row.renderer === 'step')
+      .map((row) => row.name);
     expect(folded).toEqual(reads);
     expect(folded).toEqual([
       'get_vault_context',
       'search_notes',
       'list_notes',
+      'read_activity',
+      'describe_database',
+      'query_records',
+      'list_agenda',
       'get_note',
+      'read_document',
+      'read_sheet',
+      'calculate_sheet',
+      'read_canvas',
       'knowledge_about',
       'list_inbox',
     ]);
@@ -558,6 +570,11 @@ describe('the load refuses what tools.rs refuses, in the same words', () => {
         ['tool create_note', '`renderer`', 'concept needs door concept, not note'],
       ],
       [
+        'view off the none door',
+        (v) => (tool(v, 'open_note').renderer = 'view'),
+        ['tool open_note', '`renderer`', 'view needs door none, not ui'],
+      ],
+      [
         'handoff off the run door',
         (v) => (tool(v, 'open_note').renderer = 'handoff'),
         ['tool open_note', '`renderer`', 'handoff needs door run, not ui'],
@@ -689,8 +706,10 @@ describe('toolFacts', () => {
     });
   });
 
-  it('folds exactly the reads, and draws each tool by its renderer (M56.8)', () => {
-    const reads = TOOLS.tools.filter((row) => row.kind === 'read_only').map((row) => row.name);
+  it('folds exactly the step reads, and draws each tool by its renderer (M56.8)', () => {
+    const reads = TOOLS.tools
+      .filter((row) => row.kind === 'read_only' && row.renderer === 'step')
+      .map((row) => row.name);
     expect(TOOLS.tools.filter((row) => row.fold !== null).map((row) => row.name)).toEqual(reads);
     expect(TOOLS.cli_tools.filter((row) => row.fold !== null).map((row) => row.name)).toEqual([
       'Read',
@@ -703,19 +722,22 @@ describe('toolFacts', () => {
     });
     expect(toolFacts('propose_create_belief')?.fold).toBeNull();
     expect(toolFacts('create_note')?.fold).toBeNull();
+    expect(toolFacts('suggest_view')?.renderer).toBe('view');
+    expect(toolFacts('suggest_view')?.fold).toBeNull();
     expect(toolFacts('hand_to')?.renderer).toBe('handoff');
     expect(toolFacts('commit_proposals')?.renderer).toBe('commit');
     expect(toolFacts('write_concept')?.renderer).toBe('concept');
     expect(toolFacts('recheck_concept')?.renderer).toBe('concept');
   });
 
-  it('names exactly the five note writers confirmable, with their titles (M57.4)', () => {
+  it('names exactly the note writers confirmable, with their titles (M57.4)', () => {
     expect(TOOLS.tools.filter((row) => row.confirmable).map((row) => row.name)).toEqual([
       'create_note',
       'update_frontmatter',
       'set_fields',
       'append_to_note',
       'edit_note',
+      'edit_sheet',
     ]);
     expect(TOOLS.generated.confirmable).toBe(false);
     expect(toolFacts('mcp__cerebro__create_note')).toMatchObject({
@@ -766,5 +788,83 @@ describe('toolFacts', () => {
       target: { arg: 'path', kind: 'note' },
     });
     expect(toolFacts('commit_proposals')).toMatchObject({ writes: true, target: null });
+  });
+});
+
+describe('personal token grants are manifest facts', () => {
+  it('takes a read-only default and only folder-bounded grantable toolsets', () => {
+    const clients = clientToolsets();
+    expect(clients.default.id).toBe(TOOLS.clients.default);
+    expect(clients.grantable.map((set) => set.id)).toEqual(TOOLS.clients.grantable);
+    expect(clients.why).toBe(TOOLS.clients.why);
+    expect(toolsetWrites(clients.default.id)).toBe(false);
+    expect(toolsetWrites('write')).toBe(true);
+    expect(toolsetWrites('comment')).toBe(false);
+    expect(toolsetWrites('missing')).toBe(false);
+    for (const row of TOOLS.tools.filter((row) => row.toolset === clients.default.id)) {
+      expect(row.kind).toBe('read_only');
+      expect(TOOLS.doors.find((door) => door.id === row.door)?.writes).toBe(false);
+    }
+    for (const set of clients.grantable) {
+      expect(set.id).not.toBe(TOOLS.generated.toolset);
+      expect(
+        TOOLS.tools.filter((row) => row.toolset === set.id).every((row) => row.axis !== 'none'),
+      ).toBe(true);
+    }
+  });
+
+  it('refuses client block defects in the Rust loader’s words', () => {
+    const cases: [keyof ToolsManifest['clients'], unknown, string][] = [
+      ['why', ' ', 'is empty'],
+      ['default', 'missing', 'names no declared toolset: "missing"'],
+      ['default', 'write', 'must name a toolset of read_only rows on non-writing doors'],
+      ['default', 'comment', 'must name a toolset of read_only rows on non-writing doors'],
+      ['grantable', ['missing'], 'names no declared toolset: "missing"'],
+      ['grantable', ['write', 'write'], 'repeats toolset "write"'],
+      ['grantable', ['read'], 'includes the default toolset "read"'],
+      ['grantable', ['proposals'], 'includes the generated toolset "proposals"'],
+      ['grantable', ['knowledge'], 'toolset "knowledge" contains a row no folder scope bounds'],
+    ];
+    for (const [field, value, problem] of cases) {
+      const input = JSON.parse(RAW) as { clients: Record<string, unknown> };
+      input.clients[field] = value;
+      expect(() => parseToolsManifest(input)).toThrow(
+        `${TOOLS_PATH}: clients: \`${field}\` ${problem}`,
+      );
+    }
+  });
+});
+
+describe('file targets (M66.8)', () => {
+  it('a file target sits only on reads', () => {
+    expect(tool(TOOLS, 'read_document').target?.kind).toBe('file');
+    for (const [field, value] of [
+      ['axis', 'write'],
+      ['door', 'comment'],
+    ] as const) {
+      expect(refused((raw) => put(tool(raw, 'read_document'), field, value))).toContain(
+        'file targets require the read axis and door none',
+      );
+    }
+    expect(refused((raw) => put(tool(raw, 'read_document').target!, 'arg', null))).toContain(
+      'file needs an argument',
+    );
+  });
+});
+
+describe('canvas targets (M68.7)', () => {
+  it('a canvas target sits only on reads', () => {
+    expect(tool(TOOLS, 'read_canvas').target?.kind).toBe('canvas');
+    for (const [field, value] of [
+      ['axis', 'write'],
+      ['door', 'comment'],
+    ] as const) {
+      expect(refused((raw) => put(tool(raw, 'read_canvas'), field, value))).toContain(
+        'canvas targets require the read axis and door none',
+      );
+    }
+    expect(refused((raw) => put(tool(raw, 'read_canvas').target!, 'arg', null))).toContain(
+      'canvas needs an argument',
+    );
   });
 });

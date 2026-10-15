@@ -1,0 +1,38 @@
+[
+  {
+    "path": "docs/report.docx",
+    "ok": true
+  },
+  {
+    "path": "./docs/report.docx",
+    "error": "path escapes the vault: ./docs/report.docx"
+  },
+  {
+    "path": "../outside.docx",
+    "error": "path escapes the vault: ../outside.docx"
+  },
+  {
+    "path": "/docs/report.docx",
+    "error": "path escapes the vault: /docs/report.docx"
+  },
+  {
+    "path": ".hidden.docx",
+    "error": "dot-folders and dotfiles are not readable here"
+  },
+  {
+    "path": "docs/.hidden/report.docx",
+    "error": "dot-folders and dotfiles are not readable here"
+  },
+  {
+    "path": "missing.docx",
+    "error": "no file at missing.docx"
+  },
+  {
+    "path": "docs",
+    "error": "docs is a folder, not a file"
+  },
+  {
+    "path": "docs\\report.docx",
+    "error": "path escapes the vault: docs\\report.docx"
+  }
+]

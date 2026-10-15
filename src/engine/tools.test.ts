@@ -141,14 +141,22 @@ describe('the picker reads the tool manifest (M54.2)', () => {
 });
 
 describe('the read toolset (M59.5)', () => {
-  it('is the six readers, list_notes after search_notes, none writing', () => {
+  it('is the fourteen readers, including page sheets and whiteboards, none writing', () => {
     const read = TOOLSETS.find((s) => s.id === 'read');
     expect(read?.label).toBe('Read the vault');
     expect(read?.tools.map((t) => t.name)).toEqual([
       'get_vault_context',
       'search_notes',
       'list_notes',
+      'read_activity',
+      'describe_database',
+      'query_records',
+      'list_agenda',
       'get_note',
+      'read_document',
+      'read_sheet',
+      'calculate_sheet',
+      'read_canvas',
       'knowledge_about',
       'list_inbox',
     ]);
@@ -157,7 +165,7 @@ describe('the read toolset (M59.5)', () => {
 });
 
 describe('the write toolset', () => {
-  it('is create_note, update_frontmatter, set_fields, append_to_note and edit_note, in that order, all writing', () => {
+  it('is create_note, update_frontmatter, set_fields, append_to_note, edit_note and edit_sheet, in that order, all writing', () => {
     const write = TOOLSETS.find((s) => s.id === 'write');
     expect(write?.tools.map((t) => t.name)).toEqual([
       'create_note',
@@ -165,6 +173,7 @@ describe('the write toolset', () => {
       'set_fields',
       'append_to_note',
       'edit_note',
+      'edit_sheet',
     ]);
     expect(write?.tools.every((t) => t.writes)).toBe(true);
   });
@@ -255,6 +264,12 @@ describe('toolRenderer and toolFold (M56.8)', () => {
 });
 
 describe('toolsets', () => {
+  it('offers filing then checked view suggestions in the propose set', () => {
+    expect(TOOLSETS.find((set) => set.id === 'propose')?.tools.map((tool) => tool.name)).toEqual([
+      'propose_organize',
+      'suggest_view',
+    ]);
+  });
   it('puts every writing tool in a set whose hint says so', () => {
     // The grouping axis is "what can this change", so a tool that writes must
     // never be reachable by ticking a group that reads as harmless.

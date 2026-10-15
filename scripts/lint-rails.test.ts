@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { join } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
 import { ESLint } from 'eslint';
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -55,6 +56,11 @@ describe('the roadmap acceptance cases', () => {
 });
 
 describe('engine/ imports only its allowlist', () => {
+  it('admits the shared pure structural equality leaf', async () => {
+    expect(
+      await railMessages('src/engine/probe.ts', "export { deepEqual } from '@/lib/deepEqual';"),
+    ).toEqual([]);
+  });
   const ENGINE = 'src/engine/probe.ts';
 
   it.each([
@@ -66,10 +72,12 @@ describe('engine/ imports only its allowlist', () => {
     ['a parent-folder import', "import '../lib/mockIpc';"],
     ['a lib module off the list', "import '@/lib/slugger';"],
     ['a policy module off the list', "import '@/lib/policy/verdict';"],
+    ['an rrule subpath', "import 'rrule/dist/esm/index';"],
     ['a yaml subpath', "import 'yaml/util';"],
     ['shared/policy code rather than a table', "import '../../shared/policy/table.ts';"],
     ['shared/schema code rather than a table', "import '../../shared/schema/kinds.ts';"],
     ['a shared/calendar file that is not JSON', "import '../../shared/calendar/README.md';"],
+    ['a shared/import file that is not JSON', "import '../../shared/import/README.md';"],
     ['a shared/files file that is not JSON', "import '../../shared/files/README.md';"],
     [
       'shared JSON outside the four table folders',
@@ -84,6 +92,7 @@ describe('engine/ imports only its allowlist', () => {
       "import './types';",
       "import type { Entry } from '@/engine/types';",
       "import 'yaml';",
+      "import 'rrule';",
       "import '@/lib/slug';",
       "import '@/lib/templates';",
       "import '@/lib/sha256';",
@@ -95,6 +104,7 @@ describe('engine/ imports only its allowlist', () => {
       "import '../../shared/schema/field-kinds.v1.json';",
       "import '../../shared/calendar/dates.v1.json';",
       "import '../../shared/files/kinds.v1.json';",
+      "import '../../shared/import/sources.v1.json';",
       "export const t = () => import('./types');",
       "export type V = typeof import('@/views/viewKinds');",
       'export type E = Entry;',
@@ -210,15 +220,22 @@ describe('only mockIpc reads mockParse', () => {
  * in engine/ a Tauri import breaks the allowlist too, and draws both.
  */
 describe('each file class keeps every rail but its own exemption', () => {
-  type Rail = 'tauri' | 'mermaid' | 'mockParse' | 'comments' | 'engine';
+  type Rail = 'pdfjs' | 'tauri' | 'mermaid' | 'ironcalc' | 'mockParse' | 'comments' | 'engine';
   const MARK: Record<Rail, string> = {
+    pdfjs: 'load pdfjs-dist',
     tauri: 'Tauri loads only in the IPC adapters',
     mermaid: 'load mermaid',
+    ironcalc: 'load @ironcalc/wasm',
     mockParse: 'reads mockParse',
     comments: "loads '@blocknote/core/comments'",
     engine: 'engine/ is the pure core',
   };
   const PROBES: Record<Rail, string[]> = {
+    pdfjs: [
+      "import 'pdfjs-dist';",
+      "export const p = () => import('pdfjs-dist/legacy/build/pdf.mjs');",
+      "export type P = typeof import('pdfjs-dist');",
+    ],
     tauri: [
       "import { invoke } from '@tauri-apps/api/core';\nexport const i = invoke;",
       "export const l = () => import('@tauri-apps/api/event');",
@@ -226,6 +243,12 @@ describe('each file class keeps every rail but its own exemption', () => {
     mermaid: [
       "import mermaid from 'mermaid';\nexport const m = mermaid;",
       "export const e = () => import('@mermaid-js/layout-elk');",
+    ],
+    ironcalc: [
+      "import { Model } from '@ironcalc/wasm'; export const m = Model;",
+      "export const m = () => import('@ironcalc/wasm');",
+      "import type { Model } from '@ironcalc/wasm'; export type M = Model;",
+      "export type M = typeof import('@ironcalc/wasm');",
     ],
     mockParse: [
       "import { parseNote } from '@/lib/mockParse';\nexport const p = parseNote;",
@@ -238,6 +261,8 @@ describe('each file class keeps every rail but its own exemption', () => {
     engine: ["import { useUiStore } from '@/stores/uiStore';\nexport const u = useUiStore;"],
   };
   const CLASSES: [path: string, allowed: Rail[]][] = [
+    ['src/workspace/viewers/pdf/pdfjs.ts', ['pdfjs', 'engine']],
+    ['src/workspace/viewers/pdf/probe.pdf.test.ts', ['pdfjs', 'engine']],
     ['src/pages/Probe.tsx', ['engine']],
     ['src/lib/ipc.ts', ['tauri', 'engine']],
     ['src/lib/gitIpc.ts', ['tauri', 'engine']],
@@ -246,6 +271,8 @@ describe('each file class keeps every rail but its own exemption', () => {
     ['src/mermaid/render.ts', ['mermaid', 'engine']],
     ['src/mermaid/flowchart/probe.mermaid.test.ts', ['mermaid', 'engine']],
     ['src/lib/mockIpc.ts', ['mockParse', 'engine']],
+    ['src/lib/mockSheet.ts', ['ironcalc', 'engine']],
+    ['src/lib/mockSheet.ironcalc.test.ts', ['ironcalc', 'engine']],
     ['src/lib/mockParse.test.ts', ['mockParse', 'engine']],
     ['src/lib/scanGolden.test.ts', ['mockParse', 'engine']],
     ['src/engine/probe.ts', []],
@@ -262,5 +289,61 @@ describe('each file class keeps every rail but its own exemption', () => {
   it.each(cases)('%s, %s rail: allowed %s', async (path, rail, allowed, code) => {
     const messages = await railMessages(path, code);
     expect(messages.some((m) => m.includes(MARK[rail]))).toBe(!allowed);
+  });
+});
+
+it('only the reminder hook posts native notifications and no web notification remains', () => {
+  const walk = (dir: string): string[] =>
+    readdirSync(join(REPO, dir), { withFileTypes: true }).flatMap((entry): string[] => {
+      const path = `${dir}/${entry.name}`;
+      return entry.isDirectory()
+        ? walk(path)
+        : /\.tsx?$/.test(path) && !/\.test\./.test(path)
+          ? [path]
+          : [];
+    });
+  const callers: string[] = [];
+  for (const path of walk('src')) {
+    const text = readFileSync(join(REPO, path), 'utf8');
+    expect(text, path).not.toMatch(/new\s+Notification\s*\(|Notification\.requestPermission/);
+    if (
+      !['src/lib/ipc.ts', 'src/lib/mockIpc.ts'].includes(path) &&
+      /\bpostNotification\s*\(/.test(text)
+    )
+      callers.push(path);
+  }
+  expect(callers).toEqual(['src/hooks/useReminders.ts']);
+});
+
+it('only mockSheet.ts and *.ironcalc.test.ts load the sheet wasm', async () => {
+  expect(await railMessages('src/lib/mockSheet.ts', "import '@ironcalc/wasm';")).toEqual([]);
+  expect(await railMessages('src/lib/probe.ironcalc.test.ts', "import '@ironcalc/wasm';")).toEqual(
+    [],
+  );
+  expect(
+    await railMessages('src/lib/mockSheet.ts', "import './sheetValues/values.wasm?url';"),
+  ).toEqual([]);
+  for (const code of [
+    "import '@ironcalc/wasm';",
+    "export const m = () => import('@ironcalc/wasm');",
+    "import type { Model } from '@ironcalc/wasm'; export type M = Model;",
+    "import '@/lib/sheetValues/values.wasm?url';",
+    "export const m = () => import('../lib/sheetValues/values.wasm?url');",
+  ]) {
+    expect(
+      (await railMessages('src/sheet/Probe.tsx', code)).some((message) =>
+        message.includes('load @ironcalc/wasm'),
+      ),
+    ).toBe(true);
+  }
+});
+
+describe('only the pdf loader and *.pdf.test.ts load pdfjs-dist', () => {
+  it('refuses a component import and explains the loader boundary', async () => {
+    expect(
+      (
+        await railMessages('src/pages/Probe.tsx', "import 'pdfjs-dist/legacy/web/pdf_viewer.mjs';")
+      )[0],
+    ).toContain('PDF loader');
   });
 });

@@ -14,7 +14,11 @@
 // scanGolden.test.ts replays it through this parser, and a divergence moves
 // this side.
 import YAML from 'yaml';
-import { humanize, splitFrontmatter } from '@/engine/frontmatter';
+import { isWhiteboardPath } from '@/engine/fileKinds';
+import { fileLinkTarget, fileRefsOf, readCanvas, searchTextOf } from '@/engine/scene/jsonCanvas';
+import { CANVAS_FORMAT } from '@/engine/scene/format';
+import { utf8Length } from '@/engine/scene/json';
+import { firstH1LineIndex, humanize, splitFrontmatter } from '@/engine/frontmatter';
 import { isKnowledgePath } from '@/engine/okf';
 import type { Entry, Scalar } from '@/engine/types';
 import { firstMeaningfulLine } from '@/mermaid/detect';
@@ -90,30 +94,6 @@ function parseFrontmatterBlock(block: string): {
   } catch (err) {
     return { mapping: {}, error: err instanceof Error ? err.message : String(err) };
   }
-}
-
-/**
- * Index (into `body.split('\n')`) of the line the parser reads the title
- * from: the first H1 (`# ...`) line with non-empty text, skipping lines
- * inside ``` fenced code blocks and indented code lines (>= 4 leading
- * spaces; up to 3 are allowed). -1 when the body has no real H1. Parity
- * with `first_h1_line_start` in parse.rs; shared with mockIpc.setNoteTitle
- * so reading and rewriting the title always agree on which line is the H1.
- */
-export function firstH1LineIndex(body: string): number {
-  let inFence = false;
-  const lines = body.split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].endsWith('\r') ? lines[i].slice(0, -1) : lines[i];
-    const trimmed = line.trim();
-    if (trimmed.startsWith('```')) {
-      inFence = !inFence;
-      continue;
-    }
-    if (inFence || line.startsWith('    ')) continue;
-    if (trimmed.startsWith('# ') && trimmed.slice(2).trim() !== '') return i;
-  }
-  return -1;
 }
 
 /**
@@ -212,6 +192,35 @@ function makeSnippet(body: string): string {
 
 export function parseNote(path: string, raw: string, createdAt: string, modifiedAt: string): Entry {
   const filename = path.split('/').pop() ?? path;
+  if (isWhiteboardPath(path)) {
+    const tooLarge = utf8Length(raw) > CANVAS_FORMAT.limits.max_bytes;
+    const read = readCanvas(raw);
+    const text = read.ok ? searchTextOf(read.board) : '';
+    return {
+      path,
+      filename,
+      folder: path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '',
+      project: null,
+      title: humanize(filename.slice(0, filename.lastIndexOf('.'))),
+      type: null,
+      properties: {},
+      relationships: {},
+      outgoingLinks: read.ok
+        ? [
+            ...new Set([
+              ...extractOutgoingLinks(text),
+              ...fileRefsOf(read.board).map(({ file, subpath }) => fileLinkTarget(file, subpath)),
+            ]),
+          ]
+        : [],
+      snippet: makeSnippet(text),
+      createdAt,
+      modifiedAt,
+      parseError: read.ok ? null : `${tooLarge ? 'unreadable: ' : ''}${read.message}`,
+      hash: tooLarge ? null : sha256Hex(raw),
+    };
+  }
+
   // M29.20: a .mmd file is RAW mermaid source — its `---` header is diagram
   // syntax, never note frontmatter (parity with the .mmd branch in entry.rs).
   // Title from the filename stem, snippet from the first meaningful line.

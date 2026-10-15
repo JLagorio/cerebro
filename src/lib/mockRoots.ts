@@ -16,17 +16,22 @@ import type {
 } from '@/engine/git';
 import type { DirEntry, FileText, MountRefusal, Root, RootGitRefusal } from '@/engine/roots';
 import { DIVERGED_MESSAGE } from '@/engine/roots';
+import { VAULT_ROOT } from '@/engine/fileBytes';
+import { mockVaultFiles } from './mockIpc';
+import { byteEntries, readText } from './mockBytes';
+import { probeFile } from './mockBytes';
+import { isFileRefusal } from '@/engine/fileBytes';
+import { DESKTOP_ONLY, type FileActionResult } from '@/engine/fileActions';
+import type { Thumbnail } from '@/engine/thumbs';
+import { resolveBytes } from './mockBytes';
+
+/** A browser can prove containment/refusals, but never pretends to open the desktop. */
+export async function fileAction(rootId: string, path: string): Promise<FileActionResult> {
+  const probe = await probeFile(rootId, path);
+  return isFileRefusal(probe) ? probe : { ...DESKTOP_ONLY };
+}
 
 export const MAX_BYTES = 2 * 1024 * 1024;
-
-/**
- * The NUL that marks a file binary, matching `read.rs`'s sniff.
- *
- * Written as an escape, never as a raw byte — `.gitattributes` is pinned to
- * text precisely because embedded control characters have turned source files
- * binary here before.
- */
-const NUL = '\u0000';
 
 interface MockRootSeed {
   path: string;
@@ -165,7 +170,8 @@ export async function unmountRoot(rootId: string): Promise<void> {
   roots = roots.filter((r) => r.id !== rootId);
 }
 
-function rootPathFor(rootId: string): string | null {
+export function rootPathFor(rootId: string): string | null {
+  if (rootId === VAULT_ROOT) return VAULT_ROOT;
   return roots.find((r) => r.id === rootId)?.path ?? null;
 }
 
@@ -175,7 +181,8 @@ function escapes(rel: string): boolean {
 }
 
 /** Every seeded file belonging to a root, as [relativePath, content]. */
-function filesIn(rootPath: string): [string, string][] {
+export function filesIn(rootPath: string): readonly (readonly [string, string])[] {
+  if (rootPath === VAULT_ROOT) return mockVaultFiles();
   return [...(files.get(rootPath) ?? new Map<string, string>())];
 }
 
@@ -187,12 +194,16 @@ export async function listDir(rootId: string, path: string): Promise<DirEntry[]>
   const dirs = new Set<string>();
   const out: DirEntry[] = [];
 
-  for (const [rel, content] of filesIn(rootPath)) {
+  const entries = new Map(
+    filesIn(rootPath).map(([rel, content]) => [rel, new TextEncoder().encode(content).length]),
+  );
+  for (const [rel, size] of byteEntries(rootId)) entries.set(rel, size);
+  for (const [rel, size] of entries) {
     if (!rel.startsWith(prefix)) continue;
     const remainder = rel.slice(prefix.length);
     const cut = remainder.indexOf('/');
     if (cut === -1) {
-      out.push({ name: remainder, path: rel, isDir: false, size: content.length, ignored: false });
+      out.push({ name: remainder, path: rel, isDir: false, size, ignored: false });
     } else {
       dirs.add(remainder.slice(0, cut));
     }
@@ -210,15 +221,7 @@ export async function listDir(rootId: string, path: string): Promise<DirEntry[]>
 }
 
 export async function readFileText(rootId: string, path: string): Promise<FileText> {
-  const rootPath = rootPathFor(rootId);
-  if (rootPath === null || escapes(path)) return { kind: 'notFound' };
-  const content = files.get(rootPath)?.get(path);
-  if (content === undefined) return { kind: 'notFound' };
-  if (content.length > MAX_BYTES) {
-    return { kind: 'tooLarge', size: content.length, limit: MAX_BYTES };
-  }
-  if (content.includes(NUL)) return { kind: 'binary' };
-  return { kind: 'text', content };
+  return readText(rootId, path);
 }
 
 // ---------------------------------------------------------------------------
@@ -480,5 +483,36 @@ if (typeof window !== 'undefined') {
     seedRootGitFailure,
     seedRootGitRemoteFailure,
     seedRootNested,
+  };
+}
+/** Browser previews keep real byte fixtures but do not invent decoded dimensions. */
+export async function fileThumbnail(root: string, path: string, _size: number): Promise<Thumbnail> {
+  const found = resolveBytes(root, path);
+  if (isFileRefusal(found)) return { state: 'none', reason: 'notFound' };
+  if (found.size > 64 * 1024 * 1024) return { state: 'none', reason: 'tooLarge' };
+  const b = found.bytes;
+  const starts = (magic: readonly number[]) => magic.every((v, i) => b[i] === v);
+  const ascii = (from: number, to: number) => String.fromCharCode(...b.subarray(from, to));
+  const mime = starts([137, 80, 78, 71, 13, 10, 26, 10])
+    ? 'image/png'
+    : starts([255, 216, 255])
+      ? 'image/jpeg'
+      : ['GIF87a', 'GIF89a'].includes(ascii(0, 6))
+        ? 'image/gif'
+        : ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP'
+          ? 'image/webp'
+          : ascii(0, 2) === 'BM'
+            ? 'image/bmp'
+            : null;
+  if (mime === null) return { state: 'none', reason: 'unsupported' };
+  let binary = '';
+  for (let i = 0; i < b.length; i += 8192)
+    binary += String.fromCharCode(...b.subarray(i, i + 8192));
+  return {
+    state: 'ready',
+    dataUrl: `data:${mime};base64,${btoa(binary)}`,
+    width: null,
+    height: null,
+    source: 'image',
   };
 }

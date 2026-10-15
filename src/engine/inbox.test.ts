@@ -98,6 +98,16 @@ describe('inboxEntries', () => {
 });
 
 describe('hasRealTitle', () => {
+  it('honors an explicit title even when a one-word filename matches it', () => {
+    expect(
+      hasRealTitle(
+        makeEntry({ filename: 'plan.md', title: 'Plan', properties: { title: 'Plan' } }),
+      ),
+    ).toBe(true);
+    expect(
+      hasRealTitle(makeEntry({ filename: 'plan.md', title: 'Plan', properties: { title: ' ' } })),
+    ).toBe(false);
+  });
   it('recognises the humanized-filename fallback as untitled', () => {
     expect(humanizeStem('capture-2026-07-28.md')).toBe('Capture 2026 07 28');
     expect(hasRealTitle(makeEntry({ filename: 'fld-7.md', title: 'Fld 7' }))).toBe(false);

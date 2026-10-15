@@ -25,10 +25,15 @@
  *   and deleting the field waits while a board or chart does.
  */
 
+import { parse } from 'yaml';
 import type { BatchOp } from './batch';
+import { recordsFolder } from './createRecord';
+import { renameDatabasePointers } from './databaseBlock';
+import { replaceH1, splitFrontmatter } from './frontmatter';
+import { formulaReads, renameFormulaRefs } from './formula';
 import { chainTypes } from './hierarchyOptions';
 import { isKnowledgePath } from './okf';
-import { buildSchema, serializeLayoutConfig } from './schema';
+import { humanize, buildSchema, serializeLayoutConfig } from './schema';
 import { parseTriggers } from './triggers';
 import { nestLevels } from './types';
 import type {
@@ -60,12 +65,12 @@ import type {
   ViewTabSource,
   ViewType,
 } from './types';
-import { parseViewList, serializeViewList } from './views';
+import { parseTabList, parseViewList, serializeTabList, serializeViewList } from './views';
 
 // --- the classification ---------------------------------------------------
 
 /** What one stored key holds. */
-export type Holds = 'nothing' | 'field' | 'fields' | 'type' | 'nested';
+export type Holds = 'nothing' | 'field' | 'fields' | 'type' | 'nested' | 'formula';
 
 type WidgetArm<K extends DashboardWidget['kind']> = Exclude<
   keyof Extract<DashboardWidget, { kind: K }>,
@@ -111,6 +116,7 @@ export const PRESENTATION_KEYS = {
 /** A nest level's `field` mirrors its `descend.field`, so the walk reports
  * the descent's name once, as the nest; a band level's is the band. */
 export const GROUP_KEYS = {
+  dateBucket: 'nothing',
   field: 'field',
   descend: 'nested',
   dir: 'nothing',
@@ -270,6 +276,7 @@ export const LIST_TAB_SOURCE_KEYS = {
 
 /** `name` is the `fields:` key itself. */
 export const FIELD_DEF_KEYS = {
+  formula: 'formula',
   name: 'field',
   kind: 'nothing',
   options: 'nothing',
@@ -283,6 +290,7 @@ export const FIELD_DEF_KEYS = {
   precision: 'nothing',
   dateFormat: 'nothing',
   timeFormat: 'nothing',
+  remind: 'nothing',
   visibility: 'nothing',
 } as const satisfies Record<keyof FieldDef, Holds>;
 
@@ -293,6 +301,7 @@ export const FIELD_FROM_KEYS = {
 
 /** `name` is the type's own name, its identity rather than a reference. */
 export const TYPE_DEF_KEYS = {
+  deadline: 'field',
   name: 'nothing',
   icon: /* a glyph name, not an Icon call site */ 'nothing',
   color: 'nothing',
@@ -579,6 +588,8 @@ export function ruleAt(view: ViewDefinition, ref: ViewRef): FilterRule | null {
 
 /** Where outside a view's presentation a name is stored. */
 export type SchemaPosition =
+  | 'deadline'
+  | 'formulaRef'
   | 'fieldName'
   | 'fieldTarget'
   | 'rollupRelation'
@@ -606,9 +617,15 @@ const inView = (view: ViewDefinition): StoredRef[] =>
 /** Every name a parsed Type doc stores, in walk order. */
 export function typeDefRefs(def: TypeDef): StoredRef[] {
   const out: StoredRef[] = [];
+  if (def.deadline != null) out.push({ name: def.deadline, holds: 'field', position: 'deadline' });
   for (const f of def.fields) {
     const at = { field: f.name };
     out.push({ name: f.name, holds: 'field', position: 'fieldName', ...at });
+    if (f.kind === 'formula' && f.formula !== undefined) {
+      for (const name of formulaReads(f.formula, def.fields) ?? []) {
+        out.push({ name, holds: 'field', position: 'formulaRef', ...at });
+      }
+    }
     if (f.target !== undefined) {
       out.push({ name: f.target, holds: 'type', position: 'fieldTarget', ...at });
     }
@@ -719,7 +736,7 @@ const maybeOwnedBy = (owner: RefOwner, type: string): boolean =>
 
 /** Why a reference was left as it was. */
 export type RenameFlagKind =
-  'list' | 'trigger' | 'untargetedRollup' | 'ambiguous' | 'knowledge' | 'yamlError';
+  'list' | 'trigger' | 'untargetedRollup' | 'ambiguous' | 'knowledge' | 'yamlError' | 'formula';
 
 /** One reference a rename left as it was, and the file holding it. */
 export interface RenameFlag {
@@ -738,8 +755,10 @@ export interface RenameCounts {
   records: number;
 }
 
+type PatchOp = Extract<BatchOp, { op: 'patch' }>;
+
 export type RenamePlan =
-  | { ok: true; ops: BatchOp[]; flagged: RenameFlag[]; counts: RenameCounts }
+  | { ok: true; ops: PatchOp[]; flagged: RenameFlag[]; counts: RenameCounts }
   | { ok: false; refusal: { code: 'collision'; holders: number } };
 
 export interface RenameRequest {
@@ -805,6 +824,11 @@ function renamedFields(
       continue;
     }
     const next: Record<string, unknown> = { ...obj };
+    if (own && f.kind === 'formula' && f.formula !== undefined) {
+      const renamed = renameFormulaRefs(f.formula, def?.fields ?? [], from, to);
+      if (renamed === null) flag('formula', name);
+      else if (formulaReads(f.formula, def?.fields ?? [])?.includes(from)) next.formula = renamed;
+    }
     if (f.kind === 'rollup' && f.relation === from && own) next.relation = to;
     if (f.kind === 'rollup' && f.from === undefined && f.relation !== undefined) {
       const rel = declared(f.relation);
@@ -847,7 +871,7 @@ function storedValue(record: Entry, key: string): unknown {
   return links.length === 1 ? links[0] : links;
 }
 
-const patchOp = (entry: Entry, set: Record<string, unknown>): BatchOp =>
+const patchOp = (entry: Entry, set: Record<string, unknown>): PatchOp =>
   entry.hash === null
     ? { op: 'patch', path: entry.path, set }
     : { op: 'patch', path: entry.path, set, expectHash: entry.hash };
@@ -887,7 +911,7 @@ export function planFieldRename(req: RenameRequest, vault: RenameVault): RenameP
   const holders = records.filter((e) => holdsKey(e, to)).length;
   if (holders > 0) return { ok: false, refusal: { code: 'collision', holders } };
 
-  const docOps: BatchOp[] = [];
+  const docOps: PatchOp[] = [];
   let views = 0;
   const typeDocs = entries.filter((e) => e.type === 'Type').sort(byPath);
   for (const doc of typeDocs) {
@@ -903,6 +927,7 @@ export function planFieldRename(req: RenameRequest, vault: RenameVault): RenameP
       docFlags.push({ kind, path: doc.path, detail }),
     );
     if (fields !== null) set.fields = fields;
+    if (isOwn && def?.deadline === from) set.deadline = to;
 
     const stored = def?.views ?? [];
     let viewsChanged = 0;
@@ -941,7 +966,7 @@ export function planFieldRename(req: RenameRequest, vault: RenameVault): RenameP
     docOps.push(patchOp(doc, set));
   }
 
-  const recordOps: BatchOp[] = [];
+  const recordOps: PatchOp[] = [];
   for (const record of [...records].sort(byPath)) {
     if (!holdsKey(record, from)) continue;
     if (isKnowledgePath(record.path)) {
@@ -989,6 +1014,188 @@ function dedupeFlags(flags: RenameFlag[]): RenameFlag[] {
   });
 }
 
+/** A source read and its precondition are inseparable: a plan never hashes
+ * a scan's old values with a later read's hash (M60.11). */
+export interface DatabaseRenameRead {
+  content: string;
+  hash: string;
+}
+
+export interface DatabaseRenameFlag {
+  kind: 'list' | 'knowledge' | 'yamlError' | 'readFailed';
+  path: string;
+  detail?: string;
+}
+
+export interface DatabaseRenameCounts {
+  typeDocs: number;
+  /** Individual field, view and tab references rewritten. */
+  schemaReferences: number;
+  views: number;
+  records: number;
+  /** Individual matching fences, not the number of pages holding them. */
+  pointers: number;
+}
+
+export type DatabaseRenamePlan =
+  | {
+      ok: true;
+      ops: Extract<BatchOp, { op: 'patch' | 'body' | 'replace_file' }>[];
+      flagged: DatabaseRenameFlag[];
+      counts: DatabaseRenameCounts;
+    }
+  | {
+      ok: false;
+      refusal: { code: 'sourceUnavailable' | 'sourceInvalid'; path: string | null };
+    };
+
+/** Rename the database identity wherever a stored shape declares it. Prose
+ * is untouched; Lists and knowledge pages are reported for the person to
+ * handle. Every op compares the source bytes used to build it. */
+export function planDatabaseRename(
+  { from, to }: { from: string; to: string },
+  vault: RenameVault & { reads: ReadonlyMap<string, DatabaseRenameRead> },
+): DatabaseRenamePlan {
+  const { entries, lists, reads } = vault;
+  const own = typeDocOf(entries, from);
+  if (own === null) return { ok: false, refusal: { code: 'sourceUnavailable', path: null } };
+  const ops: Extract<BatchOp, { op: 'patch' | 'body' | 'replace_file' }>[] = [];
+  const flagged: DatabaseRenameFlag[] = [];
+  const counts: DatabaseRenameCounts = {
+    typeDocs: 0,
+    schemaReferences: 0,
+    views: 0,
+    records: 0,
+    pointers: 0,
+  };
+  if (from === to) return { ok: true, ops, flagged, counts };
+  const pages = [...entries].sort(
+    (a, b) => Number(b.type === 'Type') - Number(a.type === 'Type') || byPath(a, b),
+  );
+  for (const page of pages) {
+    const source = reads.get(page.path);
+    if (source === undefined || (page.hash !== null && page.hash !== source.hash)) {
+      if (page === own) {
+        return { ok: false, refusal: { code: 'sourceUnavailable', path: page.path } };
+      }
+      flagged.push({
+        kind: 'readFailed',
+        path: page.path,
+        ...(source === undefined ? {} : { detail: 'Changed since the scan' }),
+      });
+      continue;
+    }
+    const split = splitFrontmatter(source.content);
+    let raw: Record<string, unknown>;
+    try {
+      const parsed: unknown = split.yaml === null ? {} : parse(split.yaml);
+      const mapping = asObject(parsed);
+      if (mapping === null && parsed !== null) throw new Error('Frontmatter is not a mapping');
+      raw = mapping ?? {};
+    } catch {
+      if (page === own) {
+        return { ok: false, refusal: { code: 'sourceInvalid', path: page.path } };
+      }
+      flagged.push({ kind: 'yamlError', path: page.path });
+      continue;
+    }
+    if (page === own && (raw.type !== 'Type' || isKnowledgePath(page.path))) {
+      return { ok: false, refusal: { code: 'sourceInvalid', path: page.path } };
+    }
+    const set: Record<string, unknown> = {};
+    let references = 0;
+    let changedViews = 0;
+    if (raw.type === 'Type') {
+      const fields = asObject(raw.fields);
+      if (fields !== null) {
+        const next: Record<string, unknown> = {};
+        let changed = false;
+        for (const [key, spec] of Object.entries(fields)) {
+          const field = asObject(spec);
+          if (field === null) {
+            next[key] = spec;
+            continue;
+          }
+          const mapped = { ...field };
+          if (field.target === from) {
+            mapped.target = to;
+            changed = true;
+            references += 1;
+          }
+          const reverse = asObject(field.from);
+          if (reverse?.type === from) {
+            mapped.from = { ...reverse, type: to };
+            changed = true;
+            references += 1;
+          }
+          next[key] = mapped;
+        }
+        if (changed) set.fields = next;
+      }
+      const views = parseViewList(raw.views).map((view) => {
+        let changed = false;
+        const mapped = mapViewRefs(view, (ref) => {
+          if (ref.holds !== 'type' || ref.name !== from) return ref.name;
+          changed = true;
+          references += 1;
+          return to;
+        });
+        if (changed) changedViews += 1;
+        return mapped;
+      });
+      if (changedViews > 0) set.views = serializeViewList(views);
+      let changedTabs = false;
+      const tabs = parseTabList(raw.tabs).map((tab) => {
+        if (tab.source == null || !('type' in tab.source) || tab.source.type !== from) return tab;
+        changedTabs = true;
+        references += 1;
+        return { ...tab, source: { type: to } };
+      });
+      if (changedTabs) set.tabs = serializeTabList(tabs);
+      const home = recordsFolder(from);
+      if (
+        page === own &&
+        !(typeof raw.folder === 'string' && raw.folder.trim() !== '') &&
+        entries.some((record) => record.type === from && record.path.startsWith(`${home}/`))
+      ) {
+        set.folder = home;
+      }
+    }
+    const retag = raw.type === from;
+    if (retag) set.type = to;
+    const pointers = renameDatabasePointers(split.body, from, to);
+    const body = page === own ? replaceH1(pointers.body, to) : pointers.body;
+    const patch = Object.keys(set).length > 0;
+    if (!patch && body === split.body) continue;
+    if (isKnowledgePath(page.path)) {
+      flagged.push({ kind: 'knowledge', path: page.path });
+      continue;
+    }
+    const base = { path: page.path, expectHash: source.hash };
+    if (patch) ops.push({ op: 'patch', ...base, set });
+    if (body !== split.body) {
+      if (patch || page === own) ops.push({ op: 'body', ...base, body });
+      else {
+        // splitFrontmatter strips a leading BOM; deriving the prefix from
+        // the original bytes carries it and every frontmatter byte through.
+        const prefix = source.content.slice(0, source.content.length - split.body.length);
+        ops.push({ op: 'replace_file', ...base, content: prefix + body });
+      }
+    }
+    if (raw.type === 'Type') counts.typeDocs += 1;
+    counts.schemaReferences += references;
+    counts.views += changedViews;
+    if (retag) counts.records += 1;
+    counts.pointers += pointers.count;
+  }
+  for (const list of [...lists].sort(byPath)) {
+    if (listRefs(list.definition).some((ref) => ref.holds === 'type' && ref.name === from)) {
+      flagged.push({ kind: 'list', path: list.path });
+    }
+  }
+  return { ok: true, ops, flagged, counts };
+}
+
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /** What a refused rename says. */
@@ -1029,6 +1236,9 @@ export function renameFlagWords(flags: RenameFlag[], from: string): string | nul
     lines.push(
       `${count(knowledge, 'knowledge page still holds', 'knowledge pages still hold')} “${from}”.`,
     );
+  }
+  for (const flag of flags.filter((item) => item.kind === 'formula')) {
+    lines.push(`the formula “${humanize(flag.detail ?? '')}” couldn't be read.`);
   }
   const yaml = n('yamlError');
   if (yaml > 0) {
@@ -1170,4 +1380,24 @@ export function deleteBlockedWords(field: string, blockers: GroupingUse[]): stri
   return more === 0
     ? `Can't delete “${field}”: the ${noun} “${first.view}” groups by it. Regroup that view first.`
     : `Can't delete “${field}”: the ${noun} “${first.view}” and ${more} more group by it. Regroup those views first.`;
+}
+
+/** Formula fields in this database that directly read the named input. */
+export function formulaUses(
+  entries: Entry[],
+  type: string,
+  field: string,
+): { path: string; field: string }[] {
+  const schema = buildSchema(entries);
+  const def = schema.types.get(type);
+  if (def === undefined) return [];
+  const path = entries.find((entry) => entry.type === 'Type' && entry.title === type)?.path ?? '';
+  return def.fields
+    .filter(
+      (candidate) =>
+        candidate.kind === 'formula' &&
+        candidate.formula !== undefined &&
+        formulaReads(candidate.formula, def.fields)?.includes(field),
+    )
+    .map((candidate) => ({ path, field: candidate.name }));
 }

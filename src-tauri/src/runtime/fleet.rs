@@ -4,7 +4,8 @@
 //! `operational_log` rows recorded against a run (M56.9), what the run
 //! wrote (`write_log::run_writes`, M58.1b), which run made which commit
 //! (`run_commits`, M58.4), and what is waiting to wake an agent
-//! (`agent_wakes`, M63.1b), and it reads them through
+//! (`agent_wakes`, M63.1b). `subject_runs` places recorded causes and their
+//! bounded hop descendants on pages (M63.4b). It reads them through
 //! [`ReadOnly`]: a handle SQLite refuses writes on, so this module
 //! cannot change a row even by mistake. It computes nothing the rows do not
 //! already say: every aggregate it serves is recomputable from the rows it
@@ -306,6 +307,73 @@ pub fn runs(ro: &ReadOnly, filter: &Filter) -> Result<Vec<FleetRun>, String> {
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
+}
+
+/// Runs whose recorded cause names one of these pages, plus two hop levels.
+/// The subject set is one bound JSON value; every recursive level stays in
+/// this vault. Empty means no read, and old runs without causes stay unplaced.
+pub fn subject_runs(
+    ro: &ReadOnly,
+    vault_id: &str,
+    subjects: &[String],
+    limit: Option<u32>,
+) -> Result<Vec<FleetRun>, String> {
+    if subjects.is_empty() {
+        return Ok(Vec::new());
+    }
+    if subjects.len() > 1000 {
+        return Err("A page's runs can search at most 1000 page paths.".into());
+    }
+    if subjects.iter().any(|path| path.len() > 1024) {
+        return Err("A page path for the runs search is longer than 1024 bytes.".into());
+    }
+    let subjects = serde_json::to_string(subjects).map_err(|e| e.to_string())?;
+    let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT);
+    let sql = format!(
+        "WITH RECURSIVE placed(run_id, depth) AS ( \
+         SELECT run_id, 0 FROM runs WHERE vault_id = ?1 \
+         AND json_extract(cause, '$.subject') IN (SELECT value FROM json_each(?2)) \
+         UNION SELECT child.run_id, placed.depth + 1 FROM runs child \
+         JOIN placed ON child.parent_run_id = placed.run_id \
+         WHERE child.vault_id = ?1 AND placed.depth < 2) \
+         SELECT {RUN_COLUMNS} FROM runs WHERE vault_id = ?1 \
+         AND run_id IN (SELECT run_id FROM placed) \
+         ORDER BY started_at DESC, run_id DESC LIMIT ?3"
+    );
+    let mut statement = ro.prepare(&sql).map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map(rusqlite::params![vault_id, subjects, limit], map_run)
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+/// Home's finished unattended work, scoped before the bounded read.
+#[derive(Debug, Serialize)]
+pub struct EndedRuns {
+    pub runs: Vec<FleetRun>,
+    pub truncated: bool,
+}
+pub fn ended_runs(ro: &ReadOnly, vault_id: &str, limit: Option<u32>) -> Result<EndedRuns, String> {
+    let limit = limit.unwrap_or(200).clamp(1, 200) as usize;
+    let actors = &crate::agent::meter::CONSTRUCT_ACTORS;
+    let marks = (0..actors.len()).map(|_| "?").collect::<Vec<_>>().join(",");
+    let sql=format!("SELECT {RUN_COLUMNS} FROM runs WHERE vault_id=? AND mode='ambient' \
+        AND ended_at IS NOT NULL AND outcome!='running' AND (actor IS NULL OR actor NOT IN ({marks})) \
+        ORDER BY ended_at DESC,run_id DESC LIMIT {}",limit+1);
+    let mut bound: Vec<&dyn rusqlite::ToSql> = vec![&vault_id];
+    for actor in actors {
+        bound.push(actor);
+    }
+    let mut statement = ro.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut runs = statement
+        .query_map(bound.as_slice(), map_run)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    let truncated = runs.len() > limit;
+    runs.truncate(limit);
+    Ok(EndedRuns { runs, truncated })
 }
 
 fn unknown_run(run_id: &str) -> impl Fn(rusqlite::Error) -> String + '_ {
@@ -712,10 +780,15 @@ pub struct FleetWake {
     pub deferred: Option<String>,
     pub finished_at: Option<String>,
     pub run_id: Option<String>,
+    pub author: Option<String>,
+    pub author_actor: Option<String>,
+    pub parent_run_id: Option<String>,
+    /// The pre-run check's question, answer or unavailability, when recorded.
+    pub note: Option<serde_json::Value>,
 }
 
 const WAKE_COLUMNS: &str = "wake_id, agent, outcome, reason, detail, cause, admitted_at, \
-     not_before, deferred, finished_at, run_id";
+     not_before, deferred, finished_at, run_id, author, author_actor, parent_run_id, note";
 
 fn map_wake(row: &rusqlite::Row<'_>) -> rusqlite::Result<FleetWake> {
     let outcome: Option<String> = row.get(2)?;
@@ -741,6 +814,12 @@ fn map_wake(row: &rusqlite::Row<'_>) -> rusqlite::Result<FleetWake> {
         deferred: row.get(8)?,
         finished_at: row.get(9)?,
         run_id: row.get(10)?,
+        author: row.get(11)?,
+        author_actor: row.get(12)?,
+        parent_run_id: row.get(13)?,
+        note: row
+            .get::<_, Option<String>>(14)?
+            .and_then(|raw| serde_json::from_str(&raw).ok()),
     })
 }
 
@@ -865,6 +944,230 @@ mod tests {
             )
             .unwrap();
         }
+    }
+
+    fn subject_run(
+        conn: &Connection,
+        vault: &str,
+        id: &str,
+        subject: Option<&str>,
+        parent: Option<&str>,
+    ) {
+        seed_runs(
+            conn,
+            vault,
+            &[Seed::new(id, Some("process:scout"), "2026-07-28T12:00:00Z")],
+        );
+        let cause = subject.map(|path| {
+            serde_json::json!({"kind":"assigned","subject":path,"detail":"via agent"}).to_string()
+        });
+        conn.execute(
+            "UPDATE runs SET cause=?2, parent_run_id=?3 WHERE run_id=?1",
+            rusqlite::params![id, cause, parent],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn subject_runs_lists_runs_about_the_given_pages_newest_first() {
+        let (dir, conn, vault) = fixture("page-runs-order");
+        subject_run(&conn, &vault, "a", Some("work/a.md"), None);
+        subject_run(&conn, &vault, "b", Some("work/a.md"), None);
+        subject_run(&conn, &vault, "z", Some("elsewhere.md"), None);
+        let rows = subject_runs(&read(&dir), &vault, &["work/a.md".into()], None).unwrap();
+        assert_eq!(
+            rows.iter().map(|r| r.run_id.as_str()).collect::<Vec<_>>(),
+            ["b", "a"]
+        );
+        assert_eq!(
+            rows[0].cause.as_ref().unwrap().detail.as_deref(),
+            Some("via agent")
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn subject_runs_include_the_hops_a_listed_run_started() {
+        let (dir, conn, vault) = fixture("page-runs-hops");
+        subject_run(&conn, &vault, "root", Some("project.md"), None);
+        subject_run(&conn, &vault, "child", None, Some("root"));
+        subject_run(&conn, &vault, "grandchild", None, Some("child"));
+        subject_run(&conn, &vault, "too-deep", None, Some("grandchild"));
+        let rows = subject_runs(&read(&dir), &vault, &["project.md".into()], None).unwrap();
+        let ids = rows.iter().map(|r| r.run_id.as_str()).collect::<Vec<_>>();
+        assert_eq!(ids.len(), 3);
+        assert!(ids.contains(&"child") && ids.contains(&"grandchild"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn subject_runs_never_reach_another_vault() {
+        let (dir, conn, vault) = fixture("page-runs-vault");
+        subject_run(&conn, &vault, "root", Some("project.md"), None);
+        let other = crate::runtime::scope::register(&conn, &dir.join("another-vault")).unwrap();
+        subject_run(&conn, &other, "foreign", Some("project.md"), Some("root"));
+        subject_run(&conn, &vault, "returning", None, Some("foreign"));
+        let rows = subject_runs(&read(&dir), &vault, &["project.md".into()], None).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].run_id, "root");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_run_without_a_cause_is_never_placed_on_a_page() {
+        let (dir, conn, vault) = fixture("page-runs-unknown");
+        subject_run(&conn, &vault, "old", None, None);
+        assert!(
+            subject_runs(&read(&dir), &vault, &["project.md".into()], None)
+                .unwrap()
+                .is_empty()
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn subject_runs_with_no_pages_read_nothing() {
+        let (dir, conn, vault) = fixture("page-runs-empty");
+        conn.execute("DROP TABLE runs", []).unwrap();
+        assert!(subject_runs(&read(&dir), &vault, &[], None)
+            .unwrap()
+            .is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn subject_runs_clamp_the_limit() {
+        let (dir, conn, vault) = fixture("page-runs-limit");
+        for index in 0..205 {
+            subject_run(
+                &conn,
+                &vault,
+                &format!("r{index:03}"),
+                Some("project.md"),
+                None,
+            );
+        }
+        let ro = read(&dir);
+        assert_eq!(
+            subject_runs(&ro, &vault, &["project.md".into()], Some(u32::MAX))
+                .unwrap()
+                .len(),
+            200
+        );
+        assert_eq!(
+            subject_runs(&ro, &vault, &["project.md".into()], Some(2))
+                .unwrap()
+                .len(),
+            2
+        );
+        assert!(subject_runs(&ro, &vault, &["project.md".into()], Some(0))
+            .unwrap()
+            .is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn subject_runs_refuse_too_many_pages() {
+        let (dir, _conn, vault) = fixture("page-runs-bounds");
+        let ro = read(&dir);
+        assert!(subject_runs(&ro, &vault, &vec!["p".into(); 1001], None)
+            .unwrap_err()
+            .contains("1000"));
+        assert!(subject_runs(&ro, &vault, &["é".repeat(513)], None)
+            .unwrap_err()
+            .contains("1024 bytes"));
+        assert!(subject_runs(&ro, &vault, &["é".repeat(512)], None).is_ok());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn ended_runs_are_this_vaults_finished_unattended_agent_runs() {
+        let (dir, conn, vault) = fixture("home-ended");
+        let mut panel = Seed::new("panel", Some("process:scout"), "2026-07-28T13:00:00Z");
+        panel.mode = "attended";
+        let mut live = Seed::new("live", Some("process:scout"), "2026-07-28T13:00:00Z");
+        live.outcome = "running";
+        let mut failed = Seed::new("failed", Some("process:scout"), "2026-07-28T12:00:00Z");
+        failed.outcome = "failed";
+        seed_runs(
+            &conn,
+            &vault,
+            &[
+                panel,
+                live,
+                failed,
+                Seed::new("unknown", None, "2026-07-28T11:00:00Z"),
+            ],
+        );
+        let other = dir.join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        let other = crate::runtime::scope::register(&conn, &other).unwrap();
+        seed_runs(
+            &conn,
+            &other,
+            &[Seed::new("other", None, "2026-07-28T14:00:00Z")],
+        );
+        let ended = ended_runs(&read(&dir), &vault, None).unwrap();
+        assert_eq!(
+            ended
+                .runs
+                .iter()
+                .map(|r| r.run_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["failed", "unknown"]
+        );
+        assert!(!ended.truncated);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    #[test]
+    fn ended_runs_never_lists_a_construct() {
+        let (dir, conn, vault) = fixture("home-constructs");
+        for (i, actor) in crate::agent::meter::CONSTRUCT_ACTORS.iter().enumerate() {
+            seed_runs(
+                &conn,
+                &vault,
+                &[Seed::new(
+                    &format!("construct-{i}"),
+                    Some(actor),
+                    "2026-07-28T12:00:00Z",
+                )],
+            );
+        }
+        assert!(ended_runs(&read(&dir), &vault, None)
+            .unwrap()
+            .runs
+            .is_empty());
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    #[test]
+    fn ended_runs_says_when_it_truncated() {
+        let (dir, conn, vault) = fixture("home-limit");
+        for i in 0..200 {
+            seed_runs(
+                &conn,
+                &vault,
+                &[Seed::new(&format!("r{i:03}"), None, "2026-07-28T12:00:00Z")],
+            );
+        }
+        let first = ended_runs(&read(&dir), &vault, None).unwrap();
+        assert_eq!(first.runs.len(), 200);
+        assert!(!first.truncated);
+        seed_runs(
+            &conn,
+            &vault,
+            &[Seed::new("r200", None, "2026-07-28T12:00:00Z")],
+        );
+        let more = ended_runs(&read(&dir), &vault, Some(999)).unwrap();
+        assert_eq!(more.runs.len(), 200);
+        assert!(more.truncated);
+        assert_eq!(
+            ended_runs(&read(&dir), &vault, Some(0)).unwrap().runs.len(),
+            1
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -2098,7 +2401,7 @@ mod tests {
         );
         assert_eq!(
             listed[2].words,
-            "skipped (or cancelled) for a reason this version does not name (cycle)"
+            "skipped — the change came from its own chain of runs, so it would wake itself"
         );
         assert_eq!(listed[3].words, "expired — waited more than 7 days");
         assert_eq!(

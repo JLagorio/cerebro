@@ -115,10 +115,7 @@ describe('checkView: fields', () => {
       },
       { all: [{ field: 'type', op: 'equals', value: 'Work item' }] },
     );
-    expect(check(view)).toEqual([
-      { code: 'unknown_field', name: 'createdAt', position: 'column' },
-      { code: 'unknown_field', name: 'modifiedAt', position: 'dateField' },
-    ]);
+    expect(check(view)).toEqual([{ code: 'unknown_field', name: 'createdAt', position: 'column' }]);
   });
 
   it('judges a typeless view against every database and every record', () => {

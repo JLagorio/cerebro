@@ -7,14 +7,54 @@
 //!
 //! The session id IS the process identity — pid, build, and the instant the
 //! process started — so no schema change is needed to name it, and an older
-//! build reading the same database reads an ordinary id.
+//! build reading the same database reads an ordinary id. Reminder catch-up reads
+//! the closure retained by `window_for`; a webview reload keeps that window.
 
+use std::collections::HashMap;
 use std::sync::{Mutex, Once, OnceLock};
 
 use chrono::Utc;
 
 use super::catchup::{close_session, heartbeat, open_session, HEARTBEAT_SECONDS};
 use super::VaultScope;
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionWindow {
+    pub closed_at: String,
+    pub precision: String,
+    pub reopened_at: String,
+    pub cause: String,
+}
+fn process_start() -> &'static chrono::DateTime<Utc> {
+    static START: OnceLock<chrono::DateTime<Utc>> = OnceLock::new();
+    START.get_or_init(Utc::now)
+}
+fn windows() -> &'static Mutex<HashMap<String, SessionWindow>> {
+    static WINDOWS: OnceLock<Mutex<HashMap<String, SessionWindow>>> = OnceLock::new();
+    WINDOWS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+pub fn window_for(vault_id: &str) -> Option<SessionWindow> {
+    windows().lock().ok()?.get(vault_id).cloned()
+}
+fn session_window(
+    closed: super::catchup::ClosedInterval,
+    now: chrono::DateTime<Utc>,
+    start: chrono::DateTime<Utc>,
+) -> SessionWindow {
+    let cause =
+        if chrono::DateTime::parse_from_rfc3339(&closed.app_closed_at).is_ok_and(|at| at > start) {
+            "vault"
+        } else {
+            "app"
+        };
+    SessionWindow {
+        closed_at: closed.app_closed_at,
+        precision: closed.precision.into(),
+        reopened_at: now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        cause: cause.into(),
+    }
+}
 
 /// This process's session id: `pid <n> · <build> · <started>`.
 pub fn session_id() -> &'static str {
@@ -24,7 +64,7 @@ pub fn session_id() -> &'static str {
             "pid {} · {} · {}",
             std::process::id(),
             crate::app_config::build_label(),
-            Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+            process_start().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
         )
     })
 }
@@ -47,6 +87,7 @@ pub fn track(scope: &VaultScope) {
     let Ok(mut open) = current().lock() else {
         return;
     };
+    let start = *process_start();
     let now = Utc::now();
     if open.as_ref() == Some(&next) {
         super::sink::with_sink(|conn| heartbeat(conn, session_id(), &next.0, &next.1, now));
@@ -59,7 +100,14 @@ pub fn track(scope: &VaultScope) {
     }
     let opened =
         super::sink::with_sink(|conn| open_session(conn, session_id(), &next.0, &next.1, now));
-    if matches!(opened, Some(Ok(_))) {
+    if let Some(Ok(closed)) = opened {
+        if let Ok(mut windows) = windows().lock() {
+            if let Some(closed) = closed {
+                windows.insert(next.0.clone(), session_window(closed, now, start));
+            } else {
+                windows.remove(&next.0);
+            }
+        }
         *open = Some(next);
         start_heartbeat();
     }
@@ -98,6 +146,26 @@ fn start_heartbeat() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn closure_cause_distinguishes_process_start_and_a_later_vault_switch() {
+        let start = "2026-07-28T12:00:00Z"
+            .parse::<chrono::DateTime<Utc>>()
+            .unwrap();
+        for (at, cause) in [
+            ("2026-07-28T11:00:00Z", "app"),
+            ("2026-07-28T12:01:00Z", "vault"),
+        ] {
+            let closed = super::super::catchup::ClosedInterval {
+                app_closed_at: at.into(),
+                precision: "clean_exact",
+            };
+            assert_eq!(
+                session_window(closed, start + chrono::Duration::hours(1), start).cause,
+                cause
+            );
+        }
+    }
 
     #[test]
     fn opening_a_vault_records_this_process_and_a_switch_closes_it_cleanly() {
@@ -139,6 +207,7 @@ mod tests {
         };
         let a = register("va");
         track(&a);
+        assert_eq!(window_for(&a.vault_id), None);
         track(&a); // a webview reload: no second row
         let first = rows();
         assert_eq!(first.len(), 1, "{first:?}");
@@ -167,6 +236,21 @@ mod tests {
             "the switched-from session closed"
         );
         assert_eq!(precision(&b), "open");
+        track(&a);
+        let window = window_for(&a.vault_id).unwrap();
+        assert_eq!(window.precision, "clean_exact");
+        assert_eq!(window.cause, "vault");
+        track(&a);
+        assert_eq!(window_for(&a.vault_id), Some(window));
+        let reopened = rows();
+        assert_eq!(
+            reopened
+                .iter()
+                .find(|(_, id, _)| id == &a.vault_id)
+                .unwrap()
+                .2,
+            "open"
+        );
         close_current();
         assert!(rows()
             .iter()

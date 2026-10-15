@@ -1,3 +1,5 @@
+import { holdEditor } from '@/editor/openPages';
+import { usePaneId } from '@/stores/navStore';
 import { useEffect, useRef, useState } from 'react';
 import type { SaveState } from '@/editor/NoteBodyEditor';
 import { readNote, saveNote } from '@/lib/ipc';
@@ -74,6 +76,8 @@ export interface DiagramFile {
  * edit wins or loses on last-write like any plain editor.
  */
 export function useDiagramFile(path: string): DiagramFile {
+  const pane = usePaneId();
+  useEffect(() => holdEditor(path, pane), [path, pane]);
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const toast = useUiStore((s) => s.toast);
 

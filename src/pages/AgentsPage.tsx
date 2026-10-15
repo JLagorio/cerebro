@@ -8,6 +8,7 @@ import type { Selection } from '@/engine/types';
 import { AgentRoster } from '@/status/AgentRoster';
 import { AgentRunHistory } from '@/status/AgentRunHistory';
 import { FleetSection } from '@/status/FleetSection';
+import { FollowupList } from '@/status/FollowupList';
 import { WakesSection } from '@/status/WakesSection';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -156,6 +157,9 @@ export function AgentsPage({ selection }: { selection: AgentsSelection }) {
               it, so the roster and the feed stay one section to address. */}
           <section data-section="wakes" className="my-2">
             <WakesSection vaultPath={vaultPath} />
+          </section>
+          <section data-section="followups" className="my-2">
+            <FollowupList />
           </section>
           <FleetSection />
         </section>

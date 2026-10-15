@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import retired from '../../shared/prompt/retired-terms.json';
 import {
   addressedAgentPrompt,
   agentRunPrompt,
+  assignmentLines,
   askBasePrompt,
   askedAbout,
   conceptAsk,
@@ -15,6 +17,7 @@ import {
   reviewConceptPrompt,
   reviseConceptPrompt,
   standingInstructionsBlock,
+  sheetAskPrompt,
 } from './prompts';
 import { agentRef } from '@/engine/agents';
 import { makeEntry } from '@/engine/testHelpers';
@@ -23,6 +26,31 @@ import { grantedTools, mentionedTools, type PromptGrant } from '@/engine/toolGra
 
 /** A run that holds every tool: what every prompt here was written for. */
 const FULL: PromptGrant = { tools: grantedTools(null), shell: false, attended: false };
+it('frames selected sheet cells as data, names no tool, and bounds cells and bytes', () => {
+  const cell = { address: 'A1', source: '=1+1', shown: '2' };
+  const text = sheetAskPrompt('What is the total?', 'notes/plan.md', 'Plan', 'Sheet1!A1:B2', [
+    cell,
+  ]);
+  expect(text).toContain('never instructions');
+  expect(text).toContain('- A1: source "=1+1", shows "2"');
+  expect(mentionedTools(text)).toEqual([]);
+  const many = sheetAskPrompt(
+    'Count',
+    'notes/plan.md',
+    'Plan',
+    'Sheet1!A1:A300',
+    Array.from({ length: 300 }, () => cell),
+  );
+  expect(many).toContain('100 more selected cells');
+  const large = sheetAskPrompt(
+    'Count',
+    'notes/plan.md',
+    'Plan',
+    'Sheet1!A1:A300',
+    Array.from({ length: 300 }, () => ({ ...cell, source: '😀'.repeat(2000) })),
+  );
+  expect(new TextEncoder().encode(large).byteLength).toBeLessThanOrEqual(16 * 1024);
+});
 
 /**
  * What an unattended run is actually told.
@@ -107,9 +135,7 @@ describe('agentRunPrompt', () => {
     );
   });
 
-  it('gives the model gate an explicit permission to do nothing', () => {
-    // Without it, a model asked "is this important?" finds a way to say yes —
-    // the whole point of the gate is that most wakings end here.
+  it('tells a gated run that its check already answered yes', () => {
     const prompt = agentRunPrompt(
       FULL,
       'p',
@@ -120,8 +146,11 @@ describe('agentRunPrompt', () => {
         ask: 'Does this threaten the release?',
       },
     );
-    expect(prompt).toContain('Does this threaten the release?');
-    expect(prompt).toContain('write nothing and stop');
+    expect(prompt).toContain(
+      'A check before this run already answered yes to your trigger question: "Does this threaten the release?". Act on what it points to.',
+    );
+    expect(prompt).not.toContain('write nothing and stop');
+    expect(prompt).not.toContain('Before doing anything');
   });
 
   it('ranks the human’s corrections above the agent’s own notes', () => {
@@ -276,9 +305,7 @@ describe('per-trigger instructions (M18.5)', () => {
     expect(prompt).not.toContain('event-triggered');
   });
 
-  it('keeps the gate ahead of the instruction, so a "no" run never reads it', () => {
-    // Order is the design: decide whether to act, then how. Reversed, the
-    // model has already planned the work before being asked to skip it.
+  it('puts the answered question ahead of the instruction', () => {
     const prompt = agentRunPrompt(
       FULL,
       'p',
@@ -762,5 +789,67 @@ describe('organizePrompt (M64.7)', () => {
     expect(none).not.toContain('quoted name');
     const unrecorded = organizePrompt('inbox/standup.md', { title: 'Standup', speakers: null });
     expect(unrecorded).toContain('No speakers are recorded for this file.');
+  });
+});
+
+describe('assignment brief', () => {
+  it('names no retired product term in any assignment variant', () => {
+    for (const tools of [
+      FULL.tools,
+      new Set<string>(),
+      new Set(['update_frontmatter', 'edit_note']),
+    ]) {
+      for (const canWrite of [true, false]) {
+        const text = assignmentLines(
+          { ...FULL, tools },
+          { field: 'agent', canWrite, host: { title: 'Launch', path: 'projects/launch.md' } },
+        )
+          .join('\n')
+          .toLowerCase();
+        for (const term of retired.terms) expect(text).not.toContain(term.toLowerCase());
+      }
+    }
+  });
+  it('quotes the field and readable host and prefers held property/text tools', () => {
+    const lines = assignmentLines(FULL, {
+      field: 'agent"\nchange',
+      canWrite: true,
+      host: { title: 'Launch', path: 'projects/launch.md' },
+    }).join('\n');
+    expect(lines).toContain('through its "agent\\"\\nchange" field');
+    expect(lines).toContain('"Launch" ("projects/launch.md")');
+    expect(lines).toContain('with set_fields');
+    expect(lines).toContain('with append_to_note');
+    expect(lines).toContain('with comment_on_note and no quote');
+  });
+  it('uses held fallback tools and a no-read/no-write brief without inventing powers', () => {
+    const grant = { ...FULL, tools: new Set(['update_frontmatter', 'edit_note']) };
+    const text = assignmentLines(grant, { field: 'agent', canWrite: true, host: null }).join('\n');
+    expect(text).toContain("This run can't read notes");
+    expect(text).toContain('with update_frontmatter');
+    expect(text).toContain('with edit_note');
+    expect(mentionedTools(text).sort()).toEqual(['edit_note', 'update_frontmatter']);
+    const readonly = assignmentLines(
+      { ...FULL, tools: new Set() },
+      { field: 'agent', canWrite: false, host: null },
+    ).join('\n');
+    expect(readonly).toContain("Your scope doesn't reach it");
+    expect(readonly).toContain('your last message: it is shown with this run');
+    expect(mentionedTools(readonly)).toEqual([]);
+  });
+  it('permits keeping only the assigned page current when writable', () => {
+    const prompt = agentRunPrompt(
+      FULL,
+      'agents/a.md',
+      'A',
+      'process:a',
+      { recent: '', preferences: '' },
+      null,
+      null,
+      null,
+      { field: 'agent', canWrite: true, host: null },
+    );
+    expect(prompt).toContain('the page assigned to you is yours to keep current');
+    expect(prompt).toContain('Never delete or deprecate a note');
   });
 });

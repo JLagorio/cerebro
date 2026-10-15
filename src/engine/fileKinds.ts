@@ -36,10 +36,11 @@ const KIND_WORDS = [
   'text',
   'unknown',
   'video',
+  'whiteboard',
 ] as const;
 const VIEWERS = ['code', 'doc', 'image', 'media', 'none', 'pdf', 'table'] as const;
 const EXTRACTORS = ['docx', 'pdf', 'pptx', 'xlsx'] as const;
-const INGESTS = ['capture', 'extract', 'none'] as const;
+const INGESTS = ['capture', 'extract', 'import', 'none'] as const;
 const DOORS = ['scheme', 'ipc', 'none'] as const;
 const OPENS = ['allow', 'confirm', 'deny'] as const;
 const COLORS = [
@@ -88,14 +89,14 @@ export interface NameRow {
 export interface KindTable {
   format: number;
   artifact_version: number;
-  limits: { capture_max_bytes: number };
+  limits: { capture_max_bytes: number; attachment_bytes: number; import_max_bytes: number };
   unknown: Omit<KindRow, 'ext'>;
   kinds: KindRow[];
   names: NameRow[];
 }
 
 const TOP_KEYS = ['format', 'artifact_version', 'limits', 'unknown', 'kinds', 'names'];
-const LIMIT_KEYS = ['capture_max_bytes'];
+const LIMIT_KEYS = ['capture_max_bytes', 'attachment_bytes', 'import_max_bytes'];
 const ROW_KEYS = [
   'ext',
   'kind',
@@ -246,6 +247,7 @@ export function parseKinds(raw: unknown): KindTable {
     if (row.ingest === 'capture' && kind !== 'markdown' && kind !== 'text') {
       fail(`${ext} is captured but is not markdown or text`);
     }
+    if (row.ingest === 'import' && kind !== 'data') fail(`${ext} is imported but is not data`);
     if (row.ingest === 'extract' && row.extractor === null) {
       fail(`${ext} is extracted but names no extractor`);
     }
@@ -344,3 +346,11 @@ export function isCapturable(name: string): boolean {
 
 /** The largest file the Inbox captures. */
 export const CAPTURE_MAX_BYTES: number = KINDS.limits.capture_max_bytes;
+
+/** JSON Canvas boards are named by the shared kind row, never a second extension list. */
+export function isWhiteboardPath(path: string): boolean {
+  return kindFor(path).kind === 'whiteboard';
+}
+
+/** Largest local calendar/import file, shared with the native dropped-file door. */
+export const IMPORT_MAX_BYTES: number = KINDS.limits.import_max_bytes;

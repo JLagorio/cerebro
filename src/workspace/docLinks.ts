@@ -32,3 +32,34 @@ export function resolveRelative(fromPath: string, href: string): string {
   }
   return out.join('/');
 }
+
+/** Decode a markdown image reference before resolving it, refusing an escape. */
+export function resolveImagePath(fromPath: string, href: string): string | null {
+  if (href.startsWith('<') && href.endsWith('>')) href = href.slice(1, -1);
+  if (classifyHref(href) !== 'internal' || href.startsWith('//')) return null;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(href.split('#')[0].split('?')[0]);
+  } catch {
+    return null;
+  }
+  if (
+    decoded.includes('\\') ||
+    decoded.startsWith('//') ||
+    /^[a-z][a-z0-9+.-]*:/i.test(decoded) ||
+    [...decoded].some(
+      (char) =>
+        char.charCodeAt(0) < 0x20 || (char.charCodeAt(0) >= 0x7f && char.charCodeAt(0) <= 0x9f),
+    )
+  )
+    return null;
+  const base = decoded.startsWith('/') ? [] : fromPath.split('/').slice(0, -1);
+  for (const part of decoded.split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') {
+      if (base.length === 0) return null;
+      base.pop();
+    } else base.push(part);
+  }
+  return base.length === 0 ? null : base.join('/');
+}

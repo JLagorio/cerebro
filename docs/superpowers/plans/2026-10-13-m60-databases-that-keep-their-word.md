@@ -9,7 +9,8 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M60. House style and rails: the 
 ## Status
 
 - **Precondition:** M53–M57, M70, M58 and M59 are closed, in that order: gates green, roadmap statuses updated. Today they are being built, unstaged, in this checkout (fc510e6 plus drafts), so this plan names their finished functions, never today's lines.
-- **Built:** nothing. All 11 roadmap parts were scouted against the eight plans and today's tree; all build. Three split by their own sentences: .2 → .2 + .2b (checkView), .8 → .8 + .8b (the CLI's readers), .10 → .10 + .10b (the other doors, Undo, stem links). 14 parts.
+- **Implementation, 2026-10-15:** all 14 split parts have code in this checkout. The remaining view-check, link-keeping rename/Undo and database-rename routes are implemented, with scoped unit and browser checks. Batch recovery also restores comment sidecars independently, preserves conflicts, and removes folders created by a rolled-back batch. New work stays unstaged and uncommitted at the owner's request.
+- **Verification still open:** the complete integrated gate, Linux crash checks for the new work, the packaged checks below, and isolated live CLI checks. Implementation is not milestone closure.
 - **Effort:** 6 M + 8 L ≈ 11 L; the roadmap said ≈5.8 L. Re-measured: .1, .9 and .11 S → M; .2, .3, .4, .5, .7 and .8 M → L; .2b, .8b and .10b are new M.
 - **Crash risk:** .6 (batch writer, recovery, schema step), .7 (the batch's apply path), .8 (Trash moves in the write funnel), .8b (every spawn's argv), .10 (renames enter the journal).
 - **Packaged checks:** .6, .7, .8, .10, .10b, .11. **Live checks** (CLI 2.1.250, the owner's isolated login): .4, .8b.

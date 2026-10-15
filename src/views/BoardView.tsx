@@ -17,21 +17,12 @@ import { QuickAddInline } from '@/views/QuickAdd';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { FieldChip } from '@/views/FieldChip';
 import { Icon } from '@/components/ui/Icon';
-import { bandValueFor, bandWritable, groupTree } from '@/engine/grouping';
+import { groupTree, movedBandValue } from '@/engine/grouping';
 import { visibleColumns } from '@/engine/views';
 import { bandLevels } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
-import type {
-  CardSize,
-  Entry,
-  FieldDef,
-  FieldKind,
-  GroupNode,
-  GroupSpec,
-  Presentation,
-  Schema,
-} from '@/engine/types';
+import type { CardSize, Entry, GroupNode, GroupSpec, Presentation, Schema } from '@/engine/types';
 
 export interface BoardViewProps {
   entries: Entry[];
@@ -96,6 +87,7 @@ const CARD_METRICS: Record<
  * for exactly this reason — is unique per node.
  */
 export interface BoardColumnNode {
+  seedable?: false;
   /** Unique node identity, and therefore the droppable id. */
   path: string;
   /** The value a card lands on when dropped here. */
@@ -116,6 +108,7 @@ function toColumns(nodes: GroupNode[], lane: BoardColumnNode['lane']): BoardColu
     label: n.label,
     color: n.color,
     ghost: n.ghost,
+    seedable: n.seedable,
     entries: n.entries,
     lane,
   }));
@@ -213,7 +206,7 @@ export const boardCollision: CollisionDetection = ({
   return hit === null ? [] : [{ id: hit }];
 };
 
-export function handleDragEnd(
+export async function handleDragEnd(
   event: DragEndEvent,
   args: {
     groupBy: string;
@@ -223,58 +216,55 @@ export function handleDragEnd(
     patchFrontmatter: (path: string, patch: Record<string, unknown>) => Promise<unknown>;
     toast: (message: string) => void;
   },
-): void {
+): Promise<void> {
   const { active, over } = event;
   if (!over) return;
-  const path = String(active.id);
+  const drag = active.data.current;
+  if (typeof drag?.path !== 'string' || typeof drag.column !== 'string') return;
+  const path = drag.path;
   const target = args.columns.find((c) => c.path === String(over.id));
   if (target === undefined) return;
-  const source = args.columns.find((c) => c.entries.some((e) => e.path === path));
-  if (source !== undefined && source.path === target.path) return;
-
+  const source = args.columns.find((c) => c.path === drag.column);
   const dragged = source?.entries.find((e) => e.path === path);
-  const defOf = (field: string): FieldDef | null =>
-    dragged === undefined ? null : args.schema.resolveField(dragged, field).def;
-  const kindOf = (field: string): FieldKind | undefined => defOf(field)?.kind;
-
-  // A computed or derived band (M60.1) is not the card's to change: a rollup
-  // or a timestamp stores nothing, and a relation with `from` lives on the
-  // linking records. Refused whole, before any patch is built.
-  const columnMoves = source === undefined || source.key !== target.key;
+  if (source === undefined || dragged === undefined || source.path === target.path) return;
+  const columnMoves = source.key !== target.key;
   const lane = target.lane;
   const laneMoves = lane !== null && source?.lane?.key !== lane.key;
-  if (
-    (columnMoves && !bandWritable(defOf(args.groupBy))) ||
-    (laneMoves && !bandWritable(defOf(lane.field)))
-  ) {
-    args.toast("Can't move cards grouped by a computed property");
-    return;
-  }
-
   const patch: Record<string, unknown> = {};
   if (columnMoves) {
-    const value = bandValueFor(target.key, kindOf(args.groupBy));
-    if (value === undefined) {
-      args.toast("Can't move cards grouped by a multi-select field");
+    const result = movedBandValue(dragged, args.groupBy, source.key, target.key, args.schema);
+    if ('refused' in result) {
+      args.toast(result.refused);
       return;
     }
-    patch[args.groupBy] = value;
+    patch[args.groupBy] = result.value;
   }
   // Sub-grouping: a lane is the SECOND band level, so a card dropped in
   // another lane has changed two values, not one. Writing only the column's
   // left the card visibly snapping back into the lane it came from.
   if (laneMoves) {
-    const value = bandValueFor(lane.key, kindOf(lane.field));
-    if (value === undefined) {
-      args.toast("Can't move cards grouped by a multi-select field");
+    const result = movedBandValue(
+      dragged,
+      lane.field,
+      source.lane?.key ?? '__none__',
+      lane.key,
+      args.schema,
+    );
+    if ('refused' in result) {
+      args.toast(result.refused);
       return;
     }
-    patch[lane.field] = value;
+    patch[lane.field] = result.value;
   }
   if (Object.keys(patch).length === 0) return;
 
-  void args.patchFrontmatter(path, patch);
-  args.toast(`Moved to ${laneMoves ? `${lane.label} · ${target.label}` : target.label}`);
+  if (!(await args.patchFrontmatter(path, patch))) return;
+  const oldLabel = laneMoves
+    ? `${source.lane?.label ?? 'No value'} · ${source.label}`
+    : source.label;
+  args.toast(
+    `Moved from ${oldLabel} to ${laneMoves ? `${lane.label} · ${target.label}` : target.label}`,
+  );
 }
 
 function BoardCard({
@@ -293,8 +283,10 @@ function BoardCard({
 }) {
   // M9.3: one open rule across all four layouts (see useOpenPath).
   const openPath = useOpenPath('in-place');
+  const dragId = JSON.stringify([column.path, entry.path]);
   const { attributes, listeners, setNodeRef } = useDraggable({
-    id: entry.path,
+    id: dragId,
+    data: { path: entry.path, column: column.path },
   });
   const dragKeyDown = listeners?.onKeyDown as ((e: React.KeyboardEvent) => void) | undefined;
   const key = typeof entry.properties.key === 'string' ? entry.properties.key : '';
@@ -329,7 +321,7 @@ function BoardCard({
        * is a block move, so it takes C-II: the card stays exactly where it is
        * at full strength, and a 40% copy of it follows the cursor.
        */
-      data-drag-id={entry.path}
+      data-drag-id={dragId}
       {...listeners}
       {...attributes}
       onClick={() => openPath(entry.path)}
@@ -485,7 +477,7 @@ function BoardColumn({
         ))}
         {/* M9.6: creating here presets the column's own value, so a card
             lands in the column you pressed rather than in triage. */}
-        {onCreate !== undefined && (
+        {onCreate !== undefined && column.seedable !== false && (
           <QuickAddInline
             compact
             label="New"
@@ -613,9 +605,9 @@ export function BoardView({
    * listener that swallowed the key would beat dnd-kit to it and cancel
    * nothing.
    */
-  const gesture = useDndGesture<DragEndEvent>((event) =>
-    handleDragEnd(event, { groupBy, columns, schema, patchFrontmatter, toast }),
-  );
+  const gesture = useDndGesture<DragEndEvent>((event) => {
+    void handleDragEnd(event, { groupBy, columns, schema, patchFrontmatter, toast });
+  });
 
   return (
     // Deviation from the plan's verbatim root (reported): the shared contract

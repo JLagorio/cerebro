@@ -1,0 +1,26 @@
+{
+  "description": "Rust-delivered app-link shapes, consumed by the webview without a second URL parser.",
+  "payloads": [
+    { "kind": "open", "path": "notes/a.md", "vault": null },
+    { "kind": "go", "to": "history", "database": null, "view": null, "vault": null },
+    { "kind": "refused", "reason": "it names no page" },
+    {
+      "kind": "open",
+      "path": "notes/a.md",
+      "vault": {
+        "id": "00000000000000000000000000000000",
+        "lookup": { "kind": "found", "path": "/example-vault" }
+      }
+    },
+    {
+      "kind": "open",
+      "path": "notes/a.md",
+      "vault": { "id": "00000000000000000000000000000000", "lookup": { "kind": "unknown" } }
+    },
+    {
+      "kind": "open",
+      "path": "notes/a.md",
+      "vault": { "id": "00000000000000000000000000000000", "lookup": { "kind": "unreadable" } }
+    }
+  ]
+}

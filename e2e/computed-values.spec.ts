@@ -27,6 +27,7 @@ async function choose(page: Page, name: string, label: string) {
 /** Set the open rule's date bound to a day of the pinned month, July 2026. */
 async function pickDay(page: Page, day: string) {
   await page.getByTestId('filter-rule').getByRole('button', { name: 'Filter value' }).click();
+  await page.getByTestId('filter-exact-date').click();
   await page.getByTestId('calendar').getByRole('button', { name: day }).click();
   // Escape closes the top layer only: the date surface, not the rule editor.
   await page.keyboard.press('Escape');

@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import cases from '../../src-tauri/fixtures/media-lines.json';
+import { resolveImagePath } from '../workspace/docLinks';
 import { formatMediaLine, mediaKindOf, parseMediaLine, readMediaAt } from './pageMedia';
 
 describe('parseMediaLine / formatMediaLine', () => {
@@ -134,8 +136,22 @@ describe('mediaKindOf', () => {
     ['no-extension', 'image'],
     ['.hidden', 'image'],
     ['a.mp4/b', 'image'],
-    ['a.unknownext', 'image'],
+    ['a.unknownext', 'file'],
+    ['https://example.com/image.unknown', 'image'],
+    ['/attachments/a.PNG', 'image'],
+    ['/attachments/a.zip', 'file'],
   ])('reads %s as %s', (url, kind) => {
     expect(mediaKindOf(url)).toBe(kind);
+  });
+});
+
+// D3: the native scoped-picture reader uses these exact grammar/destination cases.
+describe('media-lines.json shared native grammar', () => {
+  it.each(cases.lines)('replays the shared media line $line', ({ line, media, kind }) => {
+    expect(parseMediaLine(line)).toEqual(media);
+    if (media !== null) expect(mediaKindOf(media.url)).toBe(kind);
+  });
+  it.each(cases.destinations)('resolves $note → $dest', ({ note, dest, path }) => {
+    expect(resolveImagePath(note, dest)).toBe(path);
   });
 });

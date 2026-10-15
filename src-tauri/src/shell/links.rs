@@ -9,7 +9,7 @@
 //! is refused: `mailto:`, `file:`, `blob:`, `about:`, and any OTHER path or
 //! query on the app's own origin. That last one is the reason the entry is a
 //! closed list: tauri's asset fallback serves `index.html` for every path it
-//! cannot find (tauri-2.11.5 manager/mod.rs:405-425), so following a
+//! cannot find (tauri-2.12.4 manager/mod.rs:402-415), so following a
 //! vault-relative link reloads the whole app and drops whatever the open page
 //! had not saved yet.
 //!

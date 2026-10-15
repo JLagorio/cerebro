@@ -121,8 +121,3 @@ export function mentionNamesPage(query: string): boolean {
   if (/[,.;:!?]/.test(query)) return false;
   return query.trim().split(/\s+/).length <= MENTION_CREATE_WORDS;
 }
-
-/** The stem a link names a note by: `notes/launch-notes.md` is `launch-notes`. */
-export function stemOfPath(path: string): string {
-  return path.slice(path.lastIndexOf('/') + 1).replace(/\.md$/i, '');
-}

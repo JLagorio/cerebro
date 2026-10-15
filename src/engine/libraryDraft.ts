@@ -7,7 +7,14 @@ import {
   parseScope,
   type AgentMemory,
 } from './agents';
-import { parseAllowedTools, parseArguments, type SkillArgument } from './skills';
+import {
+  parseAllowedTools,
+  parseArguments,
+  parseScheduleSet,
+  nextSetFire,
+  scheduleItems,
+  type SkillArgument,
+} from './skills';
 import { parseTriggers, type Trigger } from './triggers';
 import type { Entry } from './types';
 
@@ -44,8 +51,8 @@ export interface SkillDraft {
   arguments: SkillArgument[];
   /** Null when the skill does not narrow the turn; [] narrows it to nothing. */
   allowedTools: string[] | null;
-  /** `schedule:` verbatim, '' for none. Validated by parseSchedule on save. */
-  schedule: string;
+  /** Authored items stay verbatim until their own control changes them. */
+  schedule: string[];
   /** The body — the actual instructions. */
   instructions: string;
 }
@@ -56,7 +63,7 @@ export function skillDraft(entry: Entry, body: string): SkillDraft {
     description: text(entry.properties.description),
     arguments: parseArguments(entry.properties.arguments),
     allowedTools: parseAllowedTools(entry.properties['allowed-tools']),
-    schedule: text(entry.properties.schedule),
+    schedule: scheduleItems(entry.properties.schedule),
     instructions: body,
   };
 }
@@ -77,7 +84,7 @@ export function skillPatch(draft: SkillDraft): Record<string, unknown> {
             ...(a.required ? { required: true } : {}),
           })),
     'allowed-tools': draft.allowedTools,
-    schedule: blank(draft.schedule),
+    schedule: scheduleValue(draft.schedule),
   };
 }
 
@@ -116,7 +123,7 @@ export interface AgentDraft {
    * default, and writes no key. */
   model: string;
   effort: string;
-  schedule: string;
+  schedule: string[];
   triggers: Trigger[];
   /** What the human corrected. The agent may read it and never write it. */
   preferences: string;
@@ -139,7 +146,7 @@ export function agentDraft(entry: Entry, body: string): AgentDraft {
     askFirst: askFirstOf(entry).warning === null ? askFirstOf(entry).on : null,
     model: text(entry.properties.model),
     effort: text(entry.properties.effort),
-    schedule: text(entry.properties.schedule),
+    schedule: scheduleItems(entry.properties.schedule),
     triggers: parseTriggers(entry.properties.when),
     preferences: memory.preferences,
     recent: memory.recent,
@@ -236,7 +243,7 @@ export function agentPatch(draft: AgentDraft, keys: readonly AgentKey[]): Record
         out.effort = blank(draft.effort);
         break;
       case 'schedule':
-        out.schedule = blank(draft.schedule);
+        out.schedule = scheduleValue(draft.schedule);
         break;
       case 'triggers':
         out.when = draft.triggers.length === 0 ? null : draft.triggers.map(triggerToYaml);
@@ -273,16 +280,17 @@ function triggerToYaml(trigger: Trigger): Record<string, unknown> {
   return out;
 }
 
-/**
- * Is this agent on duty?
- *
- * DERIVED, never stored. An agent is active exactly when something can fire
- * it, so there is no `enabled:` flag to fall out of step with a `schedule:`
- * somebody deleted — and the agent page turns activation on by writing a
- * real schedule or trigger rather than by flipping a bit that means nothing.
- */
-export function agentActive(draft: Pick<AgentDraft, 'schedule' | 'triggers'>): boolean {
-  return draft.schedule.trim() !== '' || draft.triggers.length > 0;
+/** On duty is derived from a future clock time or a trigger. A passed once
+ * alone is off duty; the queue may still owe its one catch-up. */
+export function agentActive(
+  draft: Pick<AgentDraft, 'schedule' | 'triggers'>,
+  now = new Date(),
+): boolean {
+  const schedules = parseScheduleSet(draft.schedule);
+  return draft.triggers.length > 0 || (schedules !== null && nextSetFire(schedules, now) !== null);
+}
+function scheduleValue(items: string[]): string | string[] | null {
+  return items.length === 0 ? null : items.length === 1 ? items[0] : items;
 }
 
 // --- Templates --------------------------------------------------------------

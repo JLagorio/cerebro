@@ -1,3 +1,4 @@
+import { navSeed } from '@/test/navSeed';
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -26,7 +27,7 @@ describe('SubPageList (M55.13)', () => {
     fs().set('plan/rollout/checklist.md', '# Checklist\n');
     fs().set('lonely.md', '# Lonely\n');
     await useVaultStore.getState().openVault('/demo-vault');
-    useNavStore.setState({ selection: { kind: 'home' }, history: [{ kind: 'home' }] });
+    useNavStore.setState({ selection: { kind: 'home' }, history: [navSeed({ kind: 'home' })] });
   });
   afterEach(cleanup);
 

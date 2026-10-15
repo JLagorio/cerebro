@@ -2,6 +2,19 @@
   "about": "What kinds.v1.json answers for a path (M66.1), replayed by src-tauri/src/files/kinds.rs and src/engine/fileKinds.test.ts. kinds: the row's facts, then the presentation TS adds (names override icon, color and shiki; Rust ignores names). open: Rust's open_policy over a regular file with this name, octal mode and hex head; TS never reads it. refusals: one edit to the shipped table (at: keys, a kinds or names row picked by its ext or name; set a value or delete) and the words both loaders refuse it in.",
   "kinds": [
     {
+      "name": "boards/plan.canvas",
+      "ext": "canvas",
+      "kind": "whiteboard",
+      "mime": "application/json",
+      "viewer": "code",
+      "bytes": "none",
+      "open": "confirm",
+      "shiki": "json",
+      "icon": "presentation",
+      "color": null,
+      "capture": false
+    },
+    {
       "name": "docs/README.md",
       "ext": "md",
       "kind": "markdown",
@@ -351,6 +364,19 @@
       "icon": "file",
       "color": null,
       "capture": false
+    },
+    {
+      "name": "calendar/team.ics",
+      "ext": "ics",
+      "kind": "data",
+      "mime": "text/calendar",
+      "viewer": "code",
+      "bytes": "none",
+      "open": "confirm",
+      "shiki": null,
+      "icon": "calendar",
+      "color": "blue",
+      "capture": false
     }
   ],
   "open": [
@@ -489,7 +515,12 @@
     }
   ],
   "refusals": [
-    { "rule": "format", "at": ["format"], "set": 2, "error": "kinds: format must be 1, not 2" },
+    {
+      "rule": "format",
+      "at": ["format"],
+      "set": 2,
+      "error": "kinds: format must be 1, not 2"
+    },
     {
       "rule": "format",
       "at": ["format"],
@@ -601,7 +632,9 @@
     {
       "rule": "name",
       "at": ["names", ".editorconfig"],
-      "set": { "name": ".editorconfig" },
+      "set": {
+        "name": ".editorconfig"
+      },
       "error": "kinds: name .editorconfig overrides nothing"
     },
     {
@@ -711,6 +744,12 @@
       "at": ["names", ".eslintrc", "shiki"],
       "set": "",
       "error": "kinds: .eslintrc has an empty shiki"
+    },
+    {
+      "rule": "ingest",
+      "at": ["kinds", "png", "ingest"],
+      "set": "import",
+      "error": "kinds: png is imported but is not data"
     }
   ]
 }

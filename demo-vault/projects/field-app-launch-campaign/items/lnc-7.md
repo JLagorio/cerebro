@@ -1,6 +1,7 @@
 ---
 type: Work item
 key: LNC-7
+project: "[[field-app-launch-campaign]]"
 status: cancelled
 priority: none
 assignee: "[[priya-nair]]"

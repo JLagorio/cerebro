@@ -1,6 +1,7 @@
 ---
 type: Work item
 key: FLD-2
+project: "[[guided-onboarding-ga]]"
 status: review
 priority: high
 assignee: "[[elena-vasquez]]"

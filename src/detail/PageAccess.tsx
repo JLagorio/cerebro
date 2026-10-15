@@ -1,4 +1,8 @@
-import { useMemo, useState } from 'react';
+import { clientReach } from '@/engine/clientAccess';
+import { CLIENT_ACTOR_PREFIX } from '@/engine/authors';
+import { GOVERNED_TYPES } from '@/engine/agentAccess';
+import { useClientAccessStore } from '@/stores/clientAccessStore';
+import { useEffect, useMemo, useState } from 'react';
 import { useOpenPath } from '@/app/useOpenPath';
 import {
   accessLines,
@@ -71,9 +75,7 @@ function AccessRowView({ row }: { row: AccessRow }) {
  * engine/agentAccess from the tool manifest, the tool-approval table and the
  * record's own axes. Rows that can't change the page fold away.
  *
- * Nothing here is read over IPC: the scan, the Settings shell ceiling and
- * the panel's binding are already in the stores, so there is no read that
- * can fail and no unavailable state.
+ * Token reach is read from runtime metadata and has its own unavailable state.
  */
 export function PageAccess({ entry }: { entry: Entry }) {
   const entries = useVaultStore((s) => s.entries);
@@ -83,6 +85,20 @@ export function PageAccess({ entry }: { entry: Entry }) {
     vaultPath === null ? null : (s.panelAgents[vaultPath] ?? null),
   );
   const [showOthers, setShowOthers] = useState(false);
+  const clients = useClientAccessStore();
+  useEffect(() => {
+    if (vaultPath) void useClientAccessStore.getState().refresh(vaultPath);
+  }, [vaultPath]);
+  const clientRows =
+    clients.vault === vaultPath && clients.tokensStatus === 'ready'
+      ? clientReach(
+          clients.tokens,
+          entry.path,
+          GOVERNED_TYPES.some((type) => type === entry.type),
+        )
+      : [];
+  const writers = clientRows.filter((row) => row.write);
+
   const access = useMemo(
     () => pageAccess({ entries, path: entry.path, type: entry.type, shell, panelAgent }),
     [entries, entry.path, entry.type, shell, panelAgent],
@@ -128,6 +144,42 @@ export function PageAccess({ entry }: { entry: Entry }) {
           )}
         </div>
       )}
+      <div data-testid="page-client-access" className="mt-2">
+        {clients.vault !== vaultPath ||
+        clients.tokensStatus === 'loading' ||
+        clients.tokensStatus === 'idle' ? (
+          <p className="text-xs text-n-500">Reading other apps…</p>
+        ) : clients.tokensStatus === 'error' ? (
+          <p data-testid="section-unavailable" className="text-xs text-n-500">
+            Couldn't read which other apps have tokens.
+          </p>
+        ) : (
+          <>
+            <p className="text-xs text-n-600">
+              {writers.length
+                ? `Other apps that can change this page: ${writers.map((row) => row.token.name).join(', ')}.`
+                : 'No other app can change this page.'}
+            </p>
+            <ul className="m-0 list-none p-0">
+              {clientRows.map((row) => (
+                <li
+                  key={row.token.tokenId}
+                  data-testid="page-access-row"
+                  data-actor={`${CLIENT_ACTOR_PREFIX}${row.token.slug}`}
+                  data-write={row.write ? 'yes' : 'no'}
+                  data-read={row.read ? 'yes' : 'no'}
+                  className="px-1.5 py-1.5"
+                >
+                  <span className="text-sm font-medium text-n-800">{row.token.name}</span>
+                  <p data-testid="page-access-reason" className="m-0 text-2xs text-n-500">
+                    {row.reason}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
       <p className="m-0 mt-2 text-2xs text-n-400">
         Connector tools act outside the vault&rsquo;s checks, so they are not counted here.
       </p>

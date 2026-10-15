@@ -1,5 +1,6 @@
-//! Walk a vault folder and produce an Entry per markdown file.
+//! Walk a vault and list markdown pages, Mermaid diagrams and JSON Canvas boards.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use walkdir::WalkDir;
@@ -80,7 +81,7 @@ pub(crate) struct NoteFile {
     pub meta: Option<std::fs::Metadata>,
 }
 
-/// The scan's walk (M59.4): every `.md` and `.mmd` file the scan lists, in
+/// The scan's walk (M59.4): every page, diagram and whiteboard, in
 /// walk order. Dotfiles and dot-folders are hidden, Obsidian-style
 /// ([`is_hidden`]), and `views/` and `attachments/` are skipped. The scan
 /// and search's corpus (`vault/corpus.rs`) both walk with it, so the two
@@ -103,7 +104,8 @@ pub(crate) fn note_files(vault: &Path) -> Result<Vec<NoteFile>, String> {
         if !matches!(
             item.path().extension().and_then(|e| e.to_str()),
             Some("md") | Some("mmd")
-        ) {
+        ) && !crate::files::kinds::is_whiteboard(&item.path().to_string_lossy())
+        {
             continue;
         }
         files.push(NoteFile {
@@ -113,6 +115,33 @@ pub(crate) fn note_files(vault: &Path) -> Result<Vec<NoteFile>, String> {
         });
     }
     Ok(files)
+}
+
+/// A board's size is checked on the opened file before allocating its body;
+/// the bounded read also closes a growth race after metadata. Scan and search
+/// share this one read, including unavailable UTF-8 and over-limit boards.
+pub(crate) fn read_content(file: &NoteFile) -> std::io::Result<String> {
+    if !crate::files::kinds::is_whiteboard(&file.rel) {
+        return std::fs::read_to_string(&file.path);
+    }
+    let limit = crate::canvas::format::table().limits.max_bytes;
+    let source = std::fs::File::open(&file.path)?;
+    let too_large =
+        || std::io::Error::other(format!("This whiteboard is over the {limit} byte limit."));
+    if source.metadata()?.len() > limit as u64 {
+        return Err(too_large());
+    }
+    let mut bytes = Vec::new();
+    source.take(limit as u64 + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > limit {
+        return Err(too_large());
+    }
+    String::from_utf8(bytes).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "This whiteboard is not valid UTF-8 text.",
+        )
+    })
 }
 
 /// One note's Entry from what reading it gave (M59.4): the scan and search's
@@ -138,19 +167,22 @@ pub(crate) fn entry_from_read(
     }
 }
 
-/// Scan every `.md` and `.mmd` file in the vault into Entries with
+/// Scan every page, Mermaid diagram and JSON Canvas board into Entries with
 /// vault-relative forward-slash paths, sorted by path: [`note_files`]'s
 /// walk, one read per file, [`entry_from_read`], then project containment.
 pub fn scan_vault(vault: &Path) -> Result<Vec<Entry>, String> {
+    scan_vault_filtered(vault, |_| true)
+}
+
+/// Filter paths before their bytes are opened (ambient ingest excludes mail).
+pub(crate) fn scan_vault_filtered(
+    vault: &Path,
+    include: impl Fn(&str) -> bool,
+) -> Result<Vec<Entry>, String> {
     let mut entries: Vec<Entry> = note_files(vault)?
         .iter()
-        .map(|file| {
-            entry_from_read(
-                &file.rel,
-                &std::fs::read_to_string(&file.path),
-                file.meta.as_ref(),
-            )
-        })
+        .filter(|file| include(&file.rel))
+        .map(|file| entry_from_read(&file.rel, &read_content(file), file.meta.as_ref()))
         .collect();
     entries.sort_by(|a, b| a.path.cmp(&b.path));
     assign_projects(&mut entries);
@@ -249,17 +281,23 @@ mod tests {
         );
         testutil::write(&vault, "\u{200c}.notes/x.md", "# Hidden too\n");
         testutil::write(&vault, "notes.txt", "not markdown\n");
+        testutil::write(
+            &vault,
+            "boards/plan.canvas",
+            include_str!("../../../shared/canvas/goldens/obsidian-layout.canvas"),
+        );
         vault
     }
 
     #[test]
-    fn scans_only_markdown_files_sorted_by_relative_path() {
+    fn scans_notes_diagrams_and_boards_sorted_by_relative_path() {
         let vault = fixture_vault("scan-paths");
         let entries = scan_vault(&vault).unwrap();
         let paths: Vec<&str> = entries.iter().map(|e| e.path.as_str()).collect();
         assert_eq!(
             paths,
             vec![
+                "boards/plan.canvas",
                 "diagrams/pipeline.mmd",
                 "items/atl-1.md",
                 "items/atl-2.md",
@@ -271,6 +309,48 @@ mod tests {
         );
         assert!(entries.iter().all(|e| !e.path.contains('\\')));
         let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn whiteboards_have_card_facts_and_unreadable_ones_keep_their_entry() {
+        let vault = fixture_vault("scan-whiteboards");
+        testutil::write(&vault, "boards/broken.canvas", "{\"nodes\":[");
+        let entries = scan_vault(&vault).unwrap();
+        let board = entries
+            .iter()
+            .find(|e| e.path == "boards/plan.canvas")
+            .unwrap();
+        assert_eq!(board.title, "Plan");
+        assert_eq!(board.snippet, "Roadmap Vision Release");
+        assert_eq!(board.outgoing_links, ["Vision", "Launch#Next"]);
+        assert!(board.entry_type.is_none() && board.properties.is_empty());
+        assert!(board.hash.is_some() && board.parse_error.is_none());
+        let broken = entries
+            .iter()
+            .find(|e| e.path == "boards/broken.canvas")
+            .unwrap();
+        assert_eq!(
+            broken.parse_error.as_deref(),
+            Some("This whiteboard isn't valid JSON.")
+        );
+        assert!(broken.hash.is_some());
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+
+    #[test]
+    fn an_oversized_board_is_unavailable_without_reading_its_body() {
+        let vault = testutil::temp_vault("scan-board-cap");
+        let path = vault.join("large.canvas");
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(crate::canvas::format::table().limits.max_bytes as u64 + 1)
+            .unwrap();
+        let entry = scan_vault(&vault).unwrap().pop().unwrap();
+        assert_eq!(entry.hash, None);
+        assert!(entry
+            .parse_error
+            .unwrap()
+            .contains("over the 8388608 byte limit"));
+        std::fs::remove_dir_all(vault).unwrap();
     }
 
     // M29.20: a .mmd is RAW diagram source. Mermaid's own `---` config header
@@ -304,7 +384,9 @@ mod tests {
             !e.path.starts_with("views/")
                 && !e.path.starts_with("attachments/")
                 && !e.path.split('/').any(is_hidden)
-                && (e.path.ends_with(".md") || e.path.ends_with(".mmd"))
+                && (e.path.ends_with(".md")
+                    || e.path.ends_with(".mmd")
+                    || crate::files::kinds::is_whiteboard(&e.path))
         }));
         for hidden in [
             ".obsidian/workspace.md",
@@ -487,7 +569,9 @@ mod tests {
     /// vault, as `(vault-relative path, content)`. A new parser edge case
     /// goes HERE, where the golden carries it to the TS replay — never as
     /// twin assertions written once in Rust and again in TS.
-    const GOLDEN_FIXTURES: [(&str, &str); 3] = [
+    const GOLDEN_FIXTURES: [(&str, &str); 5] = [
+        ("boards/plan.canvas", include_str!("../../../shared/canvas/goldens/obsidian-layout.canvas")),
+        ("boards/broken.canvas", "{\"nodes\":["),
         (
             "items/fld-7.md",
             "---\ntype: Work item\nkey: FLD-7\nstatus: progress\npriority: urgent\nproject: \"[[guided-onboarding-ga]]\"\n---\n\n# Checklist stalls on step 3 offline\n\nSteps to reproduce the stall, see [[offline-sync-hardening]].\n",

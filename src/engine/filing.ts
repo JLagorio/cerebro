@@ -14,9 +14,11 @@
  */
 
 import { isKnowledgePath } from './okf';
+import { agentFieldsOf } from './assignment';
+import { relationFieldTargeting, resolveViewTab } from './viewTab';
 import { personCandidates } from './properties';
 import { matchSpeakers, transcriptFacts } from './transcripts';
-import type { Entry, FieldDef, Schema } from './types';
+import type { Entry, FieldDef, ListFile, Schema, TabDef } from './types';
 import {
   formatWikilink,
   linkTargetOf,
@@ -220,4 +222,92 @@ export function filingPlan(
 
   if (type !== null) patch.type = type;
   return { type, title, patch, links, unfiled, transcript };
+}
+
+/** A stored relation files records only when the host's related tab lists them. */
+export function filingFields(
+  recordType: string,
+  schema: Schema,
+): { hostType: string; field: string }[] {
+  const result: { hostType: string; field: string }[] = [];
+  for (const [hostType, definition] of schema.types) {
+    if (
+      !definition.tabs.some(
+        (tab) =>
+          tab.content === 'view' &&
+          tab.scope === 'related' &&
+          tab.source != null &&
+          'type' in tab.source &&
+          tab.source.type === recordType,
+      )
+    )
+      continue;
+    const field = relationFieldTargeting(recordType, hostType, schema);
+    if (field !== null) result.push({ hostType, field: field.name });
+  }
+  return result;
+}
+
+/** Resolved filing hosts, in path order; a dependency link is never a host. */
+export function hostsOf(entry: Entry, entries: readonly Entry[], schema: Schema): Entry[] {
+  if (entry.type === null || entry.parseError !== null) return [];
+  const hosts = new Map<string, Entry>();
+  for (const { hostType, field } of filingFields(entry.type, schema)) {
+    for (const target of entry.relationships[field] ?? []) {
+      const host = resolveTarget(target, entries);
+      if (host !== null && host.type === hostType && host.parseError === null)
+        hosts.set(host.path, host);
+    }
+  }
+  return [...hosts.values()].sort((a, b) => a.path.localeCompare(b.path));
+}
+
+export interface FiledType {
+  tab: TabDef;
+  recordType: string;
+  field: string;
+  receiving: string | null;
+}
+
+/** Related tabs declare which stored fields file records under this host. */
+export function filedTypesOf(hostType: string | null, schema: Schema): FiledType[] {
+  if (hostType === null) return [];
+  return (schema.types.get(hostType)?.tabs ?? []).flatMap((tab) => {
+    if (
+      tab.content !== 'view' ||
+      tab.scope !== 'related' ||
+      tab.source == null ||
+      !('type' in tab.source)
+    )
+      return [];
+    const recordType = tab.source.type;
+    const field = relationFieldTargeting(recordType, hostType, schema);
+    if (field === null) return [];
+    const receiving = agentFieldsOf(recordType, schema);
+    return [
+      {
+        tab,
+        recordType,
+        field: field.name,
+        receiving: receiving.length === 1 ? receiving[0].name : null,
+      },
+    ];
+  });
+}
+
+/** The page and the records its related tabs actually list, once in path order. */
+export function pagesFiledUnder(
+  host: Entry,
+  entries: Entry[],
+  schema: Schema,
+  views: ListFile[] = [],
+): string[] {
+  const paths = new Set([host.path]);
+  for (const tab of host.type === null ? [] : (schema.types.get(host.type)?.tabs ?? [])) {
+    if (tab.content !== 'view' || tab.scope !== 'related') continue;
+    const resolution = resolveViewTab(tab, host, entries, schema, views);
+    if (resolution.kind === 'ok')
+      for (const entry of resolution.surface.entries) paths.add(entry.path);
+  }
+  return [...paths].sort();
 }

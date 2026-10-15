@@ -1,8 +1,22 @@
 import { kindMeta } from './properties';
+import {
+  bandContext,
+  bandEndpoint,
+  bandDayOf,
+  dateBandFor,
+  dateScale,
+  dropDateValue,
+  isDateKind,
+  type BandContext,
+} from './dateBuckets';
+import { workState } from './myWork';
+import { makeDateValue, serializeDateProperty } from './dates';
+import { kindFacts } from './fieldKindTable';
 import { humanize } from './schema';
 import { bandLevels } from './types';
 import { formatWikilink } from './wikilink';
 import type {
+  DateBucketing,
   Entry,
   FieldDef,
   FieldKind,
@@ -17,10 +31,17 @@ import type {
 /** The trailing "No <field>" bucket's key. */
 export const NO_VALUE_KEY = '__none__';
 
-function firstValue(raw: unknown): string | null {
-  if (raw === undefined || raw === null || raw === '') return null;
-  if (Array.isArray(raw)) return raw.length > 0 ? String(raw[0]) : null;
-  return String(raw);
+/** Multi kinds come from the shared schema artifact; an undeclared list
+ * keeps the memberships the file holds too (M61.1). */
+export function bandsEveryValue(def: FieldDef | null, raw: unknown): boolean {
+  return def === null ? Array.isArray(raw) : kindFacts(def.kind).multi && def.limit !== 1;
+}
+
+export function bandKeysOf(raw: unknown, def: FieldDef | null): string[] {
+  if (raw === undefined || raw === null || raw === '') return [];
+  if (!Array.isArray(raw)) return [String(raw)];
+  const values = bandsEveryValue(def, raw) ? raw : raw.slice(0, 1);
+  return [...new Set(values.filter((value) => value != null && value !== '').map(String))];
 }
 
 /**
@@ -30,8 +51,29 @@ function firstValue(raw: unknown): string | null {
  * - Entries with no value go to a trailing "No <field>" group.
  * - Entry order within groups preserves the caller's input order (caller sorts first).
  */
-export function groupEntries(entries: Entry[], field: string, schema: Schema): Group[] {
-  const def = bandDef(entries, field, schema);
+export function groupEntries(
+  entries: Entry[],
+  field: string,
+  schema: Schema,
+  options: {
+    dateBucket?: DateBucketing;
+    ctx?: BandContext;
+    def?: FieldDef | null;
+    deadline?: boolean;
+  } = {},
+): Group[] {
+  const def = options.def ?? bandDef(entries, field, schema);
+  if (def !== null && isDateKind(def.kind)) {
+    return dateGroups(
+      entries,
+      field,
+      schema,
+      def,
+      options.dateBucket,
+      options.ctx ?? bandContext(),
+      options.deadline,
+    );
+  }
   const kind: FieldKind = def?.kind ?? 'text';
 
   let known: FieldOption[] = [];
@@ -44,17 +86,22 @@ export function groupEntries(entries: Entry[], field: string, schema: Schema): G
   // Map preserves insertion order → ghost groups keep first-seen order.
   const buckets = new Map<string, Entry[]>();
   const ungrouped: Entry[] = [];
+  const seenPaths = new Set<string>();
   for (const e of entries) {
+    if (seenPaths.has(e.path)) continue;
+    seenPaths.add(e.path);
     // The value a filter reads too (M60.1), so a derived relation bands by
     // its linking records and a rollup by its result, not by an empty key.
-    const key = firstValue(schema.fieldValue(e, field));
-    if (key === null) {
+    const keys = bandKeysOf(schema.fieldValue(e, field), schema.resolveField(e, field).def);
+    if (keys.length === 0) {
       ungrouped.push(e);
       continue;
     }
-    const bucket = buckets.get(key);
-    if (bucket === undefined) buckets.set(key, [e]);
-    else bucket.push(e);
+    for (const key of keys) {
+      const bucket = buckets.get(key);
+      if (bucket === undefined) buckets.set(key, [e]);
+      else bucket.push(e);
+    }
   }
 
   const groups: Group[] = [];
@@ -77,9 +124,12 @@ export function groupEntries(entries: Entry[], field: string, schema: Schema): G
     const labelled = [...buckets.entries()].map(([key, bucket]) => ({
       key,
       bucket,
-      // resolveField display for the bucket's first entry starts with this key's
-      // resolved title (key = first target by construction)
-      label: schema.resolveField(bucket[0], field).display.split(', ')[0] || key,
+      // Resolve this target alone through the schema's ordinary link display.
+      // A type-less projection avoids recomputing a derived field's entire
+      // list, and titles containing commas remain whole.
+      label:
+        schema.resolveField({ ...bucket[0], type: null, relationships: { [field]: [key] } }, field)
+          .display || key,
     }));
     labelled.sort((a, b) => a.label.localeCompare(b.label));
     for (const g of labelled) {
@@ -116,6 +166,94 @@ export function groupEntries(entries: Entry[], field: string, schema: Schema): G
   }
 
   return groups;
+}
+
+/** Date values belong to bounded calendar intervals, never raw-value bands. */
+function dateGroups(
+  entries: Entry[],
+  field: string,
+  schema: Schema,
+  def: FieldDef,
+  unit: DateBucketing | undefined,
+  ctx: BandContext,
+  deadline?: boolean,
+): Group[] {
+  const buckets = new Map<string, Group>();
+  const ghosts = new Map<string, Group>();
+  const absent: Entry[] = [];
+  const seen = new Set<string>();
+  const hasDeadline =
+    deadline ?? entries.some((entry) => bandEndpoint(entry, field, schema) === 'end');
+  if (unit === undefined) {
+    for (const b of dateScale(def.kind, ctx, hasDeadline)) {
+      if (!b.filledOnly)
+        buckets.set(b.key, {
+          key: b.key,
+          label: b.label,
+          color: b.color ?? null,
+          ghost: false,
+          entries: [],
+          ...(b.seedable === false ? { seedable: false as const } : {}),
+        });
+    }
+  }
+  for (const entry of entries) {
+    if (seen.has(entry.path)) continue;
+    seen.add(entry.path);
+    const raw = schema.fieldValue(entry, field);
+    if (raw == null || raw === '') {
+      absent.push(entry);
+      continue;
+    }
+    const endpoint = bandEndpoint(entry, field, schema);
+    const day = bandDayOf(raw, endpoint);
+    if (day === null) {
+      const label = typeof raw === 'object' ? JSON.stringify(raw) : String(raw);
+      const key = `invalid:${label}`;
+      const group = ghosts.get(key) ?? {
+        key,
+        label,
+        color: null,
+        ghost: true,
+        seedable: false as const,
+        entries: [],
+      };
+      group.entries.push(entry);
+      ghosts.set(key, group);
+      continue;
+    }
+    const b = dateBandFor(day, def.kind, unit, ctx, {
+      deadline: endpoint === 'end',
+      finished: workState(entry, schema) === 'finished',
+    });
+    const group = buckets.get(b.key) ?? {
+      key: b.key,
+      label: b.label,
+      color: b.color ?? null,
+      ghost: false,
+      entries: [],
+      ...(b.seedable === false ? { seedable: false as const } : {}),
+    };
+    group.entries.push(entry);
+    buckets.set(b.key, group);
+  }
+  const order =
+    unit === undefined
+      ? dateScale(def.kind, ctx, hasDeadline).map((b) => b.key)
+      : [...buckets.keys()].sort();
+  const groups = order.flatMap((key) => (buckets.has(key) ? [buckets.get(key)!] : []));
+  groups.push(...ghosts.values());
+  if (absent.length > 0)
+    groups.push({
+      key: NO_VALUE_KEY,
+      label: `No ${humanize(field).toLowerCase()}`,
+      color: null,
+      ghost: false,
+      entries: absent,
+    });
+  return bandWritable(def)
+    ? groups
+    : groups.map((group) => ({ ...group, seedable: false as const }));
 }
 
 /**
@@ -170,15 +308,11 @@ export function bandWritable(def: FieldDef | null): boolean {
  * A checkbox band wrote the STRING `"true"`.
  *
  * `null` means "no value" — the "No <field>" band, which deletes the key on a
- * move and seeds nothing on a create. `undefined` means the band cannot be
- * expressed as a single write at all.
+ * move and seeds nothing on a create. Multi-value seeds and moves are handled
+ * by bandSeedFor and movedBandValue, which keep the field's list shape.
  */
 export function bandValueFor(key: string, kind: FieldKind | undefined): Scalar | undefined {
   if (key === NO_VALUE_KEY) return null;
-  // A multi-select record sits in several bands at once; writing one scalar
-  // would silently delete every other value it holds. Refuse until a real
-  // add/remove treatment exists.
-  if (kind === 'multiselect') return undefined;
   // Person/relation bands key by the wikilink STEM, so a bare-stem write
   // destroys the link on disk (the field leaves `relationships` after a
   // rescan). Wrap those back up.
@@ -187,6 +321,67 @@ export function bandValueFor(key: string, kind: FieldKind | undefined): Scalar |
   // field holds.
   if (kind === 'checkbox') return key === 'true';
   return key;
+}
+
+/** The value a newly created record inherits from a writable band. */
+export function bandSeedFor(key: string, def: FieldDef | null): unknown {
+  if (key === NO_VALUE_KEY) return null;
+  if (!bandWritable(def)) return undefined;
+  if (isDateKind(def?.kind)) {
+    return bandDayOf(key) === key
+      ? serializeDateProperty(makeDateValue(key), def?.kind === 'daterange' ? 'daterange' : 'date')
+      : undefined;
+  }
+  return def?.kind === 'multiselect' ? [key] : bandValueFor(key, def?.kind);
+}
+
+/** Move only the membership the person grabbed, retaining all other values
+ * in order. The computed/derived write refusal is shared by both board axes. */
+export function movedBandValue(
+  entry: Entry,
+  field: string,
+  from: string,
+  to: string,
+  schema: Schema,
+): { value: unknown } | { refused: string } {
+  const def = schema.resolveField(entry, field).def;
+  if (!bandWritable(def)) return { refused: "Can't move cards grouped by a computed property" };
+  const raw = schema.fieldValue(entry, field);
+  if (isDateKind(def?.kind)) {
+    if (to === NO_VALUE_KEY) return { value: null };
+    if (bandDayOf(to) !== to)
+      return { refused: "Choose a day to move this record; this band doesn't name one date" };
+    return {
+      value: dropDateValue(
+        raw,
+        to,
+        def?.kind === 'daterange' ? 'daterange' : 'date',
+        bandEndpoint(entry, field, schema),
+      ),
+    };
+  }
+  if (!bandsEveryValue(def, raw)) return { value: bandValueFor(to, def?.kind) ?? null };
+  const values = (Array.isArray(raw) ? raw : raw == null || raw === '' ? [] : [raw]) as Scalar[];
+  const next = values.flatMap((value): Scalar[] => {
+    if (value == null || value === '') return [];
+    if (String(value) !== from) return [value];
+    return to === NO_VALUE_KEY ? [] : [to];
+  });
+  if (from === NO_VALUE_KEY && to !== NO_VALUE_KEY) next.push(to);
+  const seen = new Set<string>();
+  const unique = next.filter((value) => {
+    const key = String(value);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (unique.length === 0) return { value: null };
+  return {
+    value:
+      def?.kind === 'person' || def?.kind === 'relation' || entry.relationships[field] !== undefined
+        ? unique.map((value) => formatWikilink(String(value)))
+        : unique,
+  };
 }
 
 /**
@@ -209,6 +404,12 @@ export function groupTree(
   schema: Schema,
   depth = 0,
   parentPath = '',
+  ctx = bandContext(),
+  defs = bandLevels(group).map((spec) => bandDef(entries, spec.field, schema)),
+  seedable = true,
+  deadlines = bandLevels(group).map((spec) =>
+    entries.some((entry) => bandEndpoint(entry, spec.field, schema) === 'end'),
+  ),
 ): GroupNode[] {
   // M9.7: only the property levels band. Relation levels nest, which is a
   // different rendering — they are handed to the row walker instead.
@@ -216,7 +417,12 @@ export function groupTree(
   const spec = specs[depth];
   if (spec === undefined) return [];
 
-  const flat = groupEntries(entries, spec.field, schema);
+  const flat = groupEntries(entries, spec.field, schema, {
+    dateBucket: spec.dateBucket,
+    ctx,
+    def: defs[depth],
+    deadline: deadlines[depth],
+  });
   const ordered = spec.dir === 'desc' ? [...flat].reverse() : flat;
   const isLeaf = depth === specs.length - 1;
 
@@ -227,9 +433,22 @@ export function groupTree(
     // every assignee, and a collapse map keyed on `key` alone would toggle
     // all of them together.
     const path = parentPath === '' ? g.key : `${parentPath}/${g.key}`;
-    const children = isLeaf ? [] : groupTree(g.entries, specs, schema, depth + 1, path);
+    const children = isLeaf
+      ? []
+      : groupTree(
+          g.entries,
+          specs,
+          schema,
+          depth + 1,
+          path,
+          ctx,
+          defs,
+          seedable && g.seedable !== false,
+          deadlines,
+        );
     nodes.push({
       ...g,
+      ...(!seedable ? { seedable: false as const } : {}),
       depth,
       field: spec.field,
       path,

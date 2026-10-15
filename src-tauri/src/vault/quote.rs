@@ -1,6 +1,8 @@
 //! Quote-anchored body edits (M55.5): the resolver under `edit_note`.
 //!
-//! An edit names the passage it replaces by quoting it, exactly as get_note
+//! An edit names the passage it replaces by quoting its raw saved body. A
+//! large sheet summary in get_note is not in that body; quotes of it refuse.
+//! Other passages are quoted exactly as get_note
 //! prints the note's body: raw markdown, no trimming, no case or Unicode
 //! normalizing. A quote that matches nowhere, or more than once without an
 //! `occurrence`, is refused with every appearance listed, rather than guessed

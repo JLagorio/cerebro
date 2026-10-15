@@ -23,7 +23,9 @@ export type DateDisplayFormat = (typeof DATE_DISPLAY_FORMATS)[number];
 export const TIME_DISPLAY_FORMATS = ['12', '24', 'hidden'] as const;
 export type TimeDisplayFormat = (typeof TIME_DISPLAY_FORMATS)[number];
 /** Days before the start date that the reminder fires. */
-export type RemindOffset = '0d' | '1d' | '2d' | '1w';
+export const REMIND_OFFSETS = ['0d', '1d', '2d', '1w'] as const;
+export type RemindOffset = (typeof REMIND_OFFSETS)[number];
+export const DATE_ONLY_REMIND_TIME = '09:00';
 
 export interface DateValue {
   start: string; // YYYY-MM-DD
@@ -92,7 +94,6 @@ const TIME_FLAGS: Record<string, TimeDisplayFormat> = {
   '24h': '24',
   notime: 'hidden',
 };
-const REMIND_OFFSETS: RemindOffset[] = ['0d', '1d', '2d', '1w'];
 
 /** Parse a serialized date token (with or without the leading 📅 spacing
  * variations). Returns null when the text isn't a date token. */
@@ -109,7 +110,8 @@ export function parseDateToken(text: string): DateValue | null {
     else if (flag in TIME_FLAGS) value.timeFormat = TIME_FLAGS[flag];
     else if (flag.startsWith('remind:')) {
       const offset = flag.slice('remind:'.length);
-      if ((REMIND_OFFSETS as string[]).includes(offset)) value.remind = offset as RemindOffset;
+      if ((REMIND_OFFSETS as readonly string[]).includes(offset))
+        value.remind = offset as RemindOffset;
     }
   }
   return value;
@@ -209,23 +211,34 @@ export function formatDateValue(v: DateValue, today: string): string {
 
 export const REMIND_OPTIONS: { id: RemindOffset | 'none'; label: string }[] = [
   { id: 'none', label: 'None' },
-  { id: '0d', label: 'On day of event (9:00 AM)' },
-  { id: '1d', label: '1 day before (9:00 AM)' },
-  { id: '2d', label: '2 days before (9:00 AM)' },
-  { id: '1w', label: '1 week before (9:00 AM)' },
+  { id: '0d', label: 'On day of event' },
+  { id: '1d', label: '1 day before' },
+  { id: '2d', label: '2 days before' },
+  { id: '1w', label: '1 week before' },
 ];
 
 const OFFSET_DAYS: Record<RemindOffset, number> = { '0d': 0, '1d': 1, '2d': 2, '1w': 7 };
 
+/** The firing time belongs to the value; hiding its display time never hides
+ * when the reminder will fire. */
+export function remindLabel(id: RemindOffset | 'none', value: DateValue): string {
+  const label = REMIND_OPTIONS.find((option) => option.id === id)!.label;
+  if (id === 'none') return label;
+  const time = formatTime(
+    value.startTime ?? DATE_ONLY_REMIND_TIME,
+    value.timeFormat === '24' ? '24' : '12',
+  );
+  return `${label}, ${time}`;
+}
+
 /**
  * When the reminder fires, as a local 'YYYY-MM-DDTHH:MM'. Timed events
- * remind at the event's own time on the offset day; date-only events at
- * 9:00 AM (mirrors the picker's preset labels).
+ * remind at the event's own time on the offset day; date-only events at 9:00 AM.
  */
 export function remindAt(v: DateValue): string | null {
   if (v.remind === null) return null;
   const day = addDays(v.start, -OFFSET_DAYS[v.remind]);
-  return `${day}T${v.startTime ?? '09:00'}`;
+  return `${day}T${v.startTime ?? DATE_ONLY_REMIND_TIME}`;
 }
 
 // --- Date PROPERTIES (M16.14) ----------------------------------------------
@@ -332,7 +345,7 @@ export function chipPropsToDateValue(p: Partial<DateChipProps>): DateValue {
   if (p.timeFormat === '12' || p.timeFormat === '24' || p.timeFormat === 'hidden') {
     value.timeFormat = p.timeFormat;
   }
-  if (p.remind !== undefined && (REMIND_OFFSETS as string[]).includes(p.remind)) {
+  if (p.remind !== undefined && (REMIND_OFFSETS as readonly string[]).includes(p.remind)) {
     value.remind = p.remind as RemindOffset;
   }
   return value;

@@ -386,7 +386,8 @@ mod tests {
         super::super::sink::arm(&config).unwrap();
         testutil::write(&vault, "items/a.md", "# A\n");
         let by = crate::vault::receipt::WriteReceipt::for_test("human:me", None);
-        crate::vault::write::save_note(&vault, "items/a.md", "\n# A\n\nEdited.\n", &by).unwrap();
+        crate::vault::write::save_note(&vault, "items/a.md", "\n# A\n\nEdited.\n", None, &by)
+            .unwrap();
         crate::vault::write::rename_note(&vault, "items/a.md", "items/b.md", &by).unwrap();
         // The sink is process-global: other tests' writes may land in it
         // while it is armed, so only this vault's rows are asked for.

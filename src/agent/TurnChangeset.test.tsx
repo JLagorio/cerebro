@@ -193,3 +193,17 @@ describe('TurnChangeset (M58.3)', () => {
     expect(screen.queryByTestId('turn-changeset')).toBeNull();
   });
 });
+
+it('names withheld mail even when the run committed nothing', () => {
+  render(
+    <TurnChangeset
+      changesets={[
+        { state: 'nothing', run_id: 'mail', shell_unrecorded: false, kept_out_of_git: 2 },
+      ]}
+    />,
+  );
+  expect(screen.getByTestId('turn-changeset-kept-out').textContent).toBe(
+    'Kept 2 mail files out of git.',
+  );
+  expect(screen.queryByTestId('turn-changeset-view-diff')).toBeNull();
+});

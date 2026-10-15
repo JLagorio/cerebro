@@ -50,7 +50,7 @@ describe('skillDraft / skillPatch', () => {
       description: '   ',
       arguments: [],
       allowedTools: null,
-      schedule: '',
+      schedule: [],
       instructions: '',
     });
     expect(patch.slug).toBe(null);
@@ -75,7 +75,7 @@ describe('skillDraft / skillPatch', () => {
     description: '',
     arguments: [],
     allowedTools: null,
-    schedule: '',
+    schedule: [],
     instructions: '',
   };
   function draft(patch: Partial<SkillDraft>): SkillDraft {
@@ -212,7 +212,7 @@ describe('agentPatch by key (M55.12)', () => {
     expect(agentPatch(d, ['shell'])).toEqual({ tools: 'safe' });
     expect(agentPatch(d, ['web'])).toEqual({ tools: 'safe' });
     expect(agentPatch({ ...d, triggers: [] }, ['triggers'])).toEqual({ when: null });
-    expect(agentPatch({ ...d, schedule: '' }, ['schedule'])).toEqual({ schedule: null });
+    expect(agentPatch({ ...d, schedule: [] }, ['schedule'])).toEqual({ schedule: null });
     expect(agentPatch({ ...d, preferences: '  ' }, ['preferences'])).toEqual({ preferences: null });
     expect(agentPatch(d, [])).toEqual({});
   });
@@ -261,9 +261,9 @@ describe('agentPatch by key (M55.12)', () => {
 
 describe('agentActive', () => {
   it('is derived, so there is no flag to fall out of step with the record', () => {
-    expect(agentActive({ schedule: '', triggers: [] })).toBe(false);
-    expect(agentActive({ schedule: 'daily 09:00', triggers: [] })).toBe(true);
-    expect(agentActive({ schedule: '', triggers: [{ event: 'created' }] })).toBe(true);
+    expect(agentActive({ schedule: [], triggers: [] })).toBe(false);
+    expect(agentActive({ schedule: ['daily 09:00'], triggers: [] })).toBe(true);
+    expect(agentActive({ schedule: [], triggers: [{ event: 'created' }] })).toBe(true);
   });
 });
 
@@ -296,4 +296,32 @@ describe('parseList', () => {
     expect(parseList('a, b\nc,,  \n d ')).toEqual(['a', 'b', 'c', 'd']);
     expect(parseList('   ')).toEqual([]);
   });
+});
+
+it('round-trips an assigned trigger through the agent draft without a to clause', () => {
+  const record = makeEntry({
+    path: 'records/agents/a.md',
+    type: 'Agent',
+    properties: { when: [{ event: 'assigned', field: 'agent', to: 'ignored' }] } as never,
+  });
+  expect(agentPatch(agentDraft(record, ''), ['triggers']).when).toEqual([
+    { event: 'assigned', field: 'agent' },
+  ]);
+});
+
+it('keeps an authored single schedule scalar and preserves list items verbatim', () => {
+  for (const raw of ['  Weekly Friday 9:00  ', ['monthly last 18:00', '  Weekdays 8:30  ']]) {
+    const e = entry({ schedule: raw });
+    expect(skillPatch(skillDraft(e, '')).schedule).toEqual(raw);
+    expect(agentPatch(agentDraft(e, ''), ['schedule']).schedule).toEqual(raw);
+  }
+});
+it('a passed once alone is off duty but a future once or trigger can still fire', () => {
+  const now = new Date(2026, 6, 28, 12);
+  expect(agentActive({ schedule: ['once 2026-07-28 09:00'], triggers: [] }, now)).toBe(false);
+  expect(agentActive({ schedule: ['once 2026-07-29 09:00'], triggers: [] }, now)).toBe(true);
+  expect(
+    agentActive({ schedule: ['once 2026-07-28 09:00'], triggers: [{ event: 'created' }] }, now),
+  ).toBe(true);
+  expect(agentActive({ schedule: ['daily 09:00', 'bad'], triggers: [] }, now)).toBe(false);
 });

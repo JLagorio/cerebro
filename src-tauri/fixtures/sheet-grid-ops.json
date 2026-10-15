@@ -1,0 +1,1067 @@
+{
+  "format": 1,
+  "about": "M67.3 upstream structural reference rewriting. Inputs are one based; formula output cells and operation at are zero based. Calculations stay paused. Unchanged before/after formulas retain the source spelling in the UI. M67.3b adds paused autofill and partial-parser completion. Fill areas and targets are zero based; source/target are engine text matrices; completion cursor counts raw Unicode characters, replace_from counts formula-body characters after =.",
+  "restructure": [
+    {
+      "name": "row zero rewrites a sum range",
+      "sheets": [
+        {
+          "name": "Budget",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "1"
+            },
+            {
+              "row": 2,
+              "col": 1,
+              "source": "2"
+            },
+            {
+              "row": 3,
+              "col": 1,
+              "source": "3"
+            },
+            {
+              "row": 4,
+              "col": 1,
+              "source": "=sum(a1:a3)"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "change": "insert_rows",
+      "at": 0,
+      "count": 1,
+      "expect": {
+        "before": [
+          {
+            "sheet": 0,
+            "row": 3,
+            "column": 0,
+            "source": "=SUM(A1:A3)"
+          }
+        ],
+        "after": [
+          {
+            "sheet": 0,
+            "row": 4,
+            "column": 0,
+            "source": "=SUM(A2:A4)"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a row after the formula leaves its text alone",
+      "sheets": [
+        {
+          "name": "Budget",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "1"
+            },
+            {
+              "row": 2,
+              "col": 1,
+              "source": "2"
+            },
+            {
+              "row": 3,
+              "col": 1,
+              "source": "3"
+            },
+            {
+              "row": 4,
+              "col": 1,
+              "source": "=sum(a1:a3)"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "change": "insert_rows",
+      "at": 5,
+      "count": 1,
+      "expect": {
+        "before": [
+          {
+            "sheet": 0,
+            "row": 3,
+            "column": 0,
+            "source": "=SUM(A1:A3)"
+          }
+        ],
+        "after": [
+          {
+            "sheet": 0,
+            "row": 3,
+            "column": 0,
+            "source": "=SUM(A1:A3)"
+          }
+        ]
+      }
+    },
+    {
+      "name": "deleting a referenced row makes ref",
+      "sheets": [
+        {
+          "name": "Budget",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "7"
+            },
+            {
+              "row": 2,
+              "col": 2,
+              "source": "=A1"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "change": "delete_rows",
+      "at": 0,
+      "count": 1,
+      "expect": {
+        "before": [
+          {
+            "sheet": 0,
+            "row": 1,
+            "column": 1,
+            "source": "=A1"
+          }
+        ],
+        "after": [
+          {
+            "sheet": 0,
+            "row": 0,
+            "column": 1,
+            "source": "=#REF!"
+          }
+        ]
+      }
+    },
+    {
+      "name": "column zero changes the other sheet",
+      "sheets": [
+        {
+          "name": "Budget",
+          "cells": [
+            {
+              "row": 2,
+              "col": 2,
+              "source": "7"
+            }
+          ]
+        },
+        {
+          "name": "Summary",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "=Budget!B2"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "change": "insert_columns",
+      "at": 0,
+      "count": 1,
+      "expect": {
+        "before": [
+          {
+            "sheet": 1,
+            "row": 0,
+            "column": 0,
+            "source": "=Budget!B2"
+          }
+        ],
+        "after": [
+          {
+            "sheet": 1,
+            "row": 0,
+            "column": 0,
+            "source": "=Budget!C2"
+          }
+        ]
+      }
+    },
+    {
+      "name": "deleting a referenced column makes ref in the other sheet",
+      "sheets": [
+        {
+          "name": "Budget",
+          "cells": [
+            {
+              "row": 2,
+              "col": 2,
+              "source": "7"
+            }
+          ]
+        },
+        {
+          "name": "Summary",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "=Budget!B2"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "change": "delete_columns",
+      "at": 1,
+      "count": 1,
+      "expect": {
+        "before": [
+          {
+            "sheet": 1,
+            "row": 0,
+            "column": 0,
+            "source": "=Budget!B2"
+          }
+        ],
+        "after": [
+          {
+            "sheet": 1,
+            "row": 0,
+            "column": 0,
+            "source": "=#REF!"
+          }
+        ]
+      }
+    },
+    {
+      "name": "only a spill anchor and no quoted text",
+      "sheets": [
+        {
+          "name": "S",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "=SEQUENCE(3)"
+            },
+            {
+              "row": 1,
+              "col": 2,
+              "source": "'=text"
+            },
+            {
+              "row": 1,
+              "col": 3,
+              "source": "=\"=A1\""
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "change": "insert_rows",
+      "at": 0,
+      "count": 1,
+      "expect": {
+        "before": [
+          {
+            "sheet": 0,
+            "row": 0,
+            "column": 0,
+            "source": "=SEQUENCE(3)"
+          },
+          {
+            "sheet": 0,
+            "row": 0,
+            "column": 2,
+            "source": "=\"=A1\""
+          }
+        ],
+        "after": [
+          {
+            "sheet": 0,
+            "row": 1,
+            "column": 0,
+            "source": "=SEQUENCE(3)"
+          },
+          {
+            "sheet": 0,
+            "row": 1,
+            "column": 2,
+            "source": "=\"=A1\""
+          }
+        ]
+      }
+    },
+    {
+      "name": "insert columns is one based upstream",
+      "sheets": [
+        {
+          "name": "S",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "1"
+            },
+            {
+              "row": 1,
+              "col": 2,
+              "source": "=A1"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "change": "insert_columns",
+      "at": 1,
+      "count": 1,
+      "expect": {
+        "before": [
+          {
+            "sheet": 0,
+            "row": 0,
+            "column": 1,
+            "source": "=A1"
+          }
+        ],
+        "after": [
+          {
+            "sheet": 0,
+            "row": 0,
+            "column": 2,
+            "source": "=A1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "bad sheet index",
+      "sheets": [
+        {
+          "name": "Budget",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "1"
+            },
+            {
+              "row": 2,
+              "col": 1,
+              "source": "2"
+            },
+            {
+              "row": 3,
+              "col": 1,
+              "source": "3"
+            },
+            {
+              "row": 4,
+              "col": 1,
+              "source": "=sum(a1:a3)"
+            }
+          ]
+        }
+      ],
+      "sheet": 3,
+      "change": "insert_rows",
+      "at": 0,
+      "count": 1,
+      "expect": {
+        "error": "That sheet isn't on this page."
+      }
+    },
+    {
+      "name": "no zero sized op",
+      "sheets": [
+        {
+          "name": "Budget",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "1"
+            },
+            {
+              "row": 2,
+              "col": 1,
+              "source": "2"
+            },
+            {
+              "row": 3,
+              "col": 1,
+              "source": "3"
+            },
+            {
+              "row": 4,
+              "col": 1,
+              "source": "=sum(a1:a3)"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "change": "insert_rows",
+      "at": 0,
+      "count": 0,
+      "expect": {
+        "error": "Choose at least one row or column."
+      }
+    },
+    {
+      "name": "outside negative row",
+      "sheets": [
+        {
+          "name": "Budget",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "1"
+            },
+            {
+              "row": 2,
+              "col": 1,
+              "source": "2"
+            },
+            {
+              "row": 3,
+              "col": 1,
+              "source": "3"
+            },
+            {
+              "row": 4,
+              "col": 1,
+              "source": "=sum(a1:a3)"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "change": "delete_rows",
+      "at": -1,
+      "count": 1,
+      "expect": {
+        "error": "Row 0 is outside this sheet."
+      }
+    },
+    {
+      "name": "outside column",
+      "sheets": [
+        {
+          "name": "Budget",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "1"
+            },
+            {
+              "row": 2,
+              "col": 1,
+              "source": "2"
+            },
+            {
+              "row": 3,
+              "col": 1,
+              "source": "3"
+            },
+            {
+              "row": 4,
+              "col": 1,
+              "source": "=sum(a1:a3)"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "change": "delete_columns",
+      "at": 26,
+      "count": 1,
+      "expect": {
+        "error": "Column AA is outside this sheet."
+      }
+    },
+    {
+      "name": "row cap before engine",
+      "sheets": [
+        {
+          "name": "S",
+          "cells": [
+            {
+              "row": 500,
+              "col": 1,
+              "source": "x"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "change": "insert_rows",
+      "at": 0,
+      "count": 1,
+      "expect": {
+        "error": "This sheet reaches row 501. A sheet holds at most 500 rows."
+      }
+    },
+    {
+      "name": "column cap before engine",
+      "sheets": [
+        {
+          "name": "S",
+          "cells": [
+            {
+              "row": 1,
+              "col": 26,
+              "source": "x"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "change": "insert_columns",
+      "at": 0,
+      "count": 1,
+      "expect": {
+        "error": "This sheet reaches column 27. A sheet holds at most 26 columns."
+      }
+    },
+    {
+      "name": "selection crossing row cap",
+      "sheets": [
+        {
+          "name": "Budget",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "1"
+            },
+            {
+              "row": 2,
+              "col": 1,
+              "source": "2"
+            },
+            {
+              "row": 3,
+              "col": 1,
+              "source": "3"
+            },
+            {
+              "row": 4,
+              "col": 1,
+              "source": "=sum(a1:a3)"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "change": "delete_rows",
+      "at": 499,
+      "count": 2,
+      "expect": {
+        "error": "This sheet reaches row 501. A sheet holds at most 500 rows."
+      }
+    }
+  ],
+  "fill": [
+    {
+      "name": "a two-number series continues down",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "1"
+            },
+            {
+              "row": 2,
+              "col": 1,
+              "source": "2"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "area": {
+        "row": 0,
+        "column": 0,
+        "width": 1,
+        "height": 2
+      },
+      "axis": "rows",
+      "to": 4,
+      "expect": {
+        "source": [["1"], ["2"]],
+        "target": [["3"], ["4"], ["5"]]
+      }
+    },
+    {
+      "name": "one number copies",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "10"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "area": {
+        "row": 0,
+        "column": 0,
+        "width": 1,
+        "height": 1
+      },
+      "axis": "rows",
+      "to": 2,
+      "expect": {
+        "source": [["10"]],
+        "target": [["10"], ["10"]]
+      }
+    },
+    {
+      "name": "relative references translate down",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "1"
+            },
+            {
+              "row": 1,
+              "col": 2,
+              "source": "=a1*2"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "area": {
+        "row": 0,
+        "column": 1,
+        "width": 1,
+        "height": 1
+      },
+      "axis": "rows",
+      "to": 2,
+      "expect": {
+        "source": [["=A1*2"]],
+        "target": [["=A2*2"], ["=A3*2"]]
+      }
+    },
+    {
+      "name": "references translate right",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "=a2"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "area": {
+        "row": 0,
+        "column": 0,
+        "width": 1,
+        "height": 1
+      },
+      "axis": "columns",
+      "to": 2,
+      "expect": {
+        "source": [["=A2"]],
+        "target": [["=B2", "=C2"]]
+      }
+    },
+    {
+      "name": "numbers continue upwards",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "cells": [
+            {
+              "row": 3,
+              "col": 1,
+              "source": "3"
+            },
+            {
+              "row": 4,
+              "col": 1,
+              "source": "4"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "area": {
+        "row": 2,
+        "column": 0,
+        "width": 1,
+        "height": 2
+      },
+      "axis": "rows",
+      "to": 0,
+      "expect": {
+        "source": [["3"], ["4"]],
+        "target": [["1"], ["2"]]
+      }
+    },
+    {
+      "name": "upward text repeats from the final source row",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "cells": [
+            {
+              "row": 4,
+              "col": 1,
+              "source": "first"
+            },
+            {
+              "row": 5,
+              "col": 1,
+              "source": "second"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "area": {
+        "row": 3,
+        "column": 0,
+        "width": 1,
+        "height": 2
+      },
+      "axis": "rows",
+      "to": 0,
+      "expect": {
+        "source": [["first"], ["second"]],
+        "target": [["second"], ["first"], ["second"]]
+      }
+    },
+    {
+      "name": "percent copies use engine numeric text",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "10%"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "area": {
+        "row": 0,
+        "column": 0,
+        "width": 1,
+        "height": 1
+      },
+      "axis": "rows",
+      "to": 2,
+      "expect": {
+        "source": [["0.1"]],
+        "target": [["0.1"], ["0.1"]]
+      }
+    },
+    {
+      "name": "empty area refuses",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "1"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "area": {
+        "row": 0,
+        "column": 0,
+        "width": 1,
+        "height": -1
+      },
+      "axis": "rows",
+      "to": 4,
+      "expect": {
+        "error": "Choose at least one cell to fill from."
+      }
+    },
+    {
+      "name": "target inside refuses",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "1"
+            },
+            {
+              "row": 2,
+              "col": 1,
+              "source": "2"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "area": {
+        "row": 0,
+        "column": 0,
+        "width": 1,
+        "height": 2
+      },
+      "axis": "rows",
+      "to": 1,
+      "expect": {
+        "error": "Fill to a cell outside the selected cells."
+      }
+    },
+    {
+      "name": "row past cap refuses",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "1"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "area": {
+        "row": 0,
+        "column": 0,
+        "width": 1,
+        "height": 1
+      },
+      "axis": "rows",
+      "to": 500,
+      "expect": {
+        "error": "This sheet reaches row 501. A sheet holds at most 500 rows."
+      }
+    },
+    {
+      "name": "column past cap refuses",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "1"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "area": {
+        "row": 0,
+        "column": 0,
+        "width": 1,
+        "height": 1
+      },
+      "axis": "columns",
+      "to": 26,
+      "expect": {
+        "error": "This sheet reaches column 27. A sheet holds at most 26 columns."
+      }
+    },
+    {
+      "name": "negative target refuses",
+      "sheets": [
+        {
+          "name": "Sheet1",
+          "cells": [
+            {
+              "row": 1,
+              "col": 1,
+              "source": "1"
+            }
+          ]
+        }
+      ],
+      "sheet": 0,
+      "area": {
+        "row": 0,
+        "column": 0,
+        "width": 1,
+        "height": 1
+      },
+      "axis": "rows",
+      "to": -1,
+      "expect": {
+        "error": "Choose cells inside the sheet."
+      }
+    }
+  ],
+  "complete": [
+    {
+      "name": "partial function",
+      "names": ["Data", "Other sheet"],
+      "sheet": 0,
+      "row": 0,
+      "column": 0,
+      "text": "=SU",
+      "cursor": 3,
+      "expect": {
+        "expecting": [
+          {
+            "FunctionName": "SU"
+          }
+        ],
+        "replace_from": 0
+      }
+    },
+    {
+      "name": "first argument",
+      "names": ["Data", "Other sheet"],
+      "sheet": 0,
+      "row": 0,
+      "column": 0,
+      "text": "=SUM(",
+      "cursor": 5,
+      "expect": {
+        "expecting": [
+          {
+            "Argument": ["SUM", 1]
+          },
+          "Range"
+        ],
+        "replace_from": 4
+      }
+    },
+    {
+      "name": "second argument",
+      "names": ["Data", "Other sheet"],
+      "sheet": 0,
+      "row": 0,
+      "column": 0,
+      "text": "=SUM(A1,",
+      "cursor": 8,
+      "expect": {
+        "expecting": [
+          {
+            "Argument": ["SUM", 2]
+          },
+          "Range"
+        ],
+        "replace_from": 7
+      }
+    },
+    {
+      "name": "emoji counts characters not bytes",
+      "names": ["Data", "Other sheet"],
+      "sheet": 0,
+      "row": 0,
+      "column": 0,
+      "text": "=\"\ud83d\ude00\"&SU",
+      "cursor": 7,
+      "expect": {
+        "expecting": [
+          {
+            "FunctionName": "SU"
+          }
+        ],
+        "replace_from": 4
+      }
+    },
+    {
+      "name": "page sheet names are known",
+      "names": ["Data", "Other sheet"],
+      "sheet": 0,
+      "row": 0,
+      "column": 0,
+      "text": "='Other sheet'!A1+SU",
+      "cursor": 20,
+      "expect": {
+        "expecting": [
+          {
+            "FunctionName": "SU"
+          }
+        ],
+        "replace_from": 17
+      }
+    },
+    {
+      "name": "finished reference",
+      "names": ["Data", "Other sheet"],
+      "sheet": 0,
+      "row": 0,
+      "column": 0,
+      "text": "=A1",
+      "cursor": 3,
+      "expect": {
+        "expecting": ["Other"],
+        "replace_from": 2
+      }
+    },
+    {
+      "name": "empty formula expects reference",
+      "names": ["Data", "Other sheet"],
+      "sheet": 0,
+      "row": 0,
+      "column": 0,
+      "text": "=",
+      "cursor": 1,
+      "expect": {
+        "expecting": ["Range", "Other"],
+        "replace_from": 0
+      }
+    },
+    {
+      "name": "second conditional argument",
+      "names": ["Data", "Other sheet"],
+      "sheet": 0,
+      "row": 0,
+      "column": 0,
+      "text": "=IF(A1>0,",
+      "cursor": 9,
+      "expect": {
+        "expecting": [
+          {
+            "Argument": ["IF", 2]
+          },
+          "Range"
+        ],
+        "replace_from": 8
+      }
+    }
+  ]
+}

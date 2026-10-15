@@ -9,7 +9,8 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M61. House style and rails: the 
 ## Status
 
 - **Precondition:** M53–M57, M70, M58, M59 and M60 are closed, in that order, with green gates and updated roadmap statuses. They are being built unstaged in this checkout today, so this plan names their finished functions, never today's lines.
-- **Built:** nothing. All 11 roadmap parts were scouted against those plans and today's tree, and all build. Seven split by their own sentences, giving 19 parts.
+- **Implementation, 2026-10-15:** all 19 split parts have code in this checkout, including project pages, atomic bulk and related-record edits, date bands/deadlines/relative filters, formulas with skipped-value counts, CSV import/export, the composer, checklist promotion, calendar editing and recurring-event splits with exact Undo. The existing `create_note` refuse/similar-note path and read-only calendar hours remain in place. New work stays unstaged and uncommitted at the owner's request.
+- **Verification:** focused suites and browser flows pass for the new surfaces. The broad TS audit passed 11,077 tests and cleared every coverage threshold (90.72% statements/lines, 88.51% branches, 86.96% functions); its one concurrent reminder-twin registration failure passed when rerun after both readers landed. A final integrated gate and the packaged/live checks below remain outstanding, so this milestone is not closed.
 - **Effort:** 1 S + 8 M + 10 L ≈ 14.3 L; the roadmap said ≈7 L. Re-measured: .1, .2, .4, .6 and .11 M → L. New: .2b, .5b, .6b, .10b and .11b M; .3b and .3c L; .4b S.
 - **Crash risk:** none. No schema step or spawn-path change. The one write-path change, .5's possible parent folders in `apply_batch`, adds no crash point, and CI Linux re-runs the batch's `crash_` tests.
 - **Packaged checks:** .5, .5b, .9. **Live check:** .6b (CLI 2.1.250).

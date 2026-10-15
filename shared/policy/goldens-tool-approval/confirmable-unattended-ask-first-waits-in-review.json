@@ -21,6 +21,8 @@
       "WebSearch",
       "AskUserQuestion",
       "ExitPlanMode",
+      "Read(./sources/mail/**)",
+      "Edit(./sources/mail/**)",
       "Read(./.trash/**)",
       "Edit(./.trash/**)"
     ],
@@ -44,7 +46,8 @@
       "mcp__cerebro__update_frontmatter": "queue",
       "mcp__cerebro__set_fields": "queue",
       "mcp__cerebro__append_to_note": "queue",
-      "mcp__cerebro__edit_note": "queue"
+      "mcp__cerebro__edit_note": "queue",
+      "mcp__cerebro__edit_sheet": "queue"
     }
   }
 }

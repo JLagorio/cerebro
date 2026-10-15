@@ -13,7 +13,8 @@ import { getSchema, useVaultStore } from '@/stores/vaultStore';
  * nothing.
  *
  * This is the half of "interact with the app" that is not about files: the
- * agent can move the user to what it is talking about, and it can put a
+ * agent can show the page it is talking about, reusing its pane silently
+ * without moving keyboard focus, and it can put a
  * proposal in front of them. Note what it CANNOT do here — a proposal is
  * stored for review, never applied, so the agent's opinion about how to file
  * a capture never becomes a silent write.

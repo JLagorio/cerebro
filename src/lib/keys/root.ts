@@ -1,6 +1,7 @@
 import type { CommandDef } from '@/app/commands';
-import { hasModalLayers } from '@/components/ui/layers';
+import { hasModalLayers, subscribeLayers } from '@/components/ui/layers';
 import { claimsKey, claimsOf, isEditableTarget } from './claims';
+import { armChord, cancelChord, finishChord } from './chords';
 import { isLetter, matchesSpec, type KeyLike } from './combo';
 import { findBinding, inDesktop, type Chain } from './registry';
 
@@ -30,6 +31,7 @@ const BARE_MODIFIERS = new Set(['Meta', 'Control', 'Alt', 'Shift', 'CapsLock', '
 
 let installs = 0;
 let recorded: Element | null = null;
+let stopLayers: (() => void) | null = null;
 
 function nearestScope(target: EventTarget | null): Element | null {
   if (typeof Element === 'undefined' || !(target instanceof Element)) return null;
@@ -52,7 +54,10 @@ export function activeChain(): Chain {
   const focusCounts = active !== null && active !== document.body && !isNeutral(active);
   let start = focusCounts ? nearestScope(active) : recorded;
   if (start !== null && !start.isConnected) start = null;
-  const page = document.querySelector('[data-key-scope-page]');
+  const page =
+    document.querySelector('[data-testid="pane"][data-active="true"][data-key-scope-page]') ??
+    document.querySelector('[data-key-scope-page]');
+  if (start?.closest('[data-testid="pane"][data-parked="true"]')) start = null;
   start ??= page;
   const chain: string[] = [];
   for (let node: Element | null = start; node !== null;) {
@@ -91,12 +96,32 @@ export function keyAdmits(
 function onKeyDown(e: KeyboardEvent): void {
   if (e.isComposing || e.keyCode === 229) return;
   if (BARE_MODIFIERS.has(e.key)) return;
-  if (e.key === 'Escape') return;
+  if (e.key === 'Escape') {
+    cancelChord();
+    return;
+  }
   const target = e.target;
-  if (claimsKey(claimsOf(target), e)) return;
+  if (claimsKey(claimsOf(target), e)) {
+    cancelChord();
+    return;
+  }
   const editable = isEditableTarget(target);
   const modal = hasModalLayers();
-  const hit = findBinding(activeChain(), (def) => keyAdmits(def, e, { editable, modal }));
+  if (editable || modal) cancelChord();
+  const finished = finishChord(e);
+  if (finished?.swallow) {
+    e.preventDefault();
+    e.stopPropagation();
+    finished.hit?.run(e);
+    return;
+  }
+  const chain = activeChain();
+  if (!editable && !modal && armChord(e, chain)) {
+    e.preventDefault();
+    e.stopPropagation();
+    return;
+  }
+  const hit = findBinding(chain, (def) => keyAdmits(def, e, { editable, modal }));
   if (hit === null) return;
   e.preventDefault();
   e.stopPropagation();
@@ -113,6 +138,11 @@ export function installKeyRoot(): () => void {
     window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('focusin', record, true);
     window.addEventListener('pointerdown', record, true);
+    window.addEventListener('pointerdown', cancelChord, true);
+    window.addEventListener('blur', cancelChord);
+    stopLayers = subscribeLayers(() => {
+      if (hasModalLayers()) cancelChord();
+    });
   }
   installs += 1;
   let released = false;
@@ -124,6 +154,11 @@ export function installKeyRoot(): () => void {
       window.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('focusin', record, true);
       window.removeEventListener('pointerdown', record, true);
+      window.removeEventListener('pointerdown', cancelChord, true);
+      window.removeEventListener('blur', cancelChord);
+      stopLayers?.();
+      stopLayers = null;
+      cancelChord();
     }
   };
 }
@@ -131,4 +166,5 @@ export function installKeyRoot(): () => void {
 /** Test seam: forget the recorded scope. */
 export function resetKeyRoot(): void {
   recorded = null;
+  cancelChord();
 }

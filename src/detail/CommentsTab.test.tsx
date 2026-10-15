@@ -1,3 +1,4 @@
+import { navSeed } from '@/test/navSeed';
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createStore } from '@blocknote/core';
@@ -94,7 +95,7 @@ beforeEach(async () => {
   useUiStore.setState({ toasts: [], detailPath: null });
   useNavStore.setState({
     selection: { kind: 'home' },
-    history: [{ kind: 'home' }],
+    history: [navSeed({ kind: 'home' })],
     historyIndex: 0,
   });
   fake = fakeHighlights();

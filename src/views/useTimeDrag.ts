@@ -1,5 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { useDragGesture } from '@/hooks/useDragGesture';
+import { snapDelta, type TimeSlot } from '@/engine/timeGrid';
 
 /**
  * Dragging a record along a date axis (M16.23, M16.24).
@@ -19,9 +20,8 @@ import { useDragGesture } from '@/hooks/useDragGesture';
  * piece of it: the claim on Escape and the teardown an unmount runs are
  * `useDragGesture` now, shared with every other pointer loop in the app.
  *
- * Everything is measured in WHOLE DAYS. A drag moves a record by days and
- * never by hours: a stored time of day (M16.14) rides along unchanged through
- * `rescheduleValue`, so a 9:00 standup dragged to Thursday is still at 9:00.
+ * Whole-day axes keep their times unchanged. An hours grid opts into a
+ * minute axis, with snapped moves and empty-space selections (M61.9).
  */
 
 /** What a gesture moves: the whole span, or one of its two endpoints. */
@@ -32,6 +32,7 @@ export interface TimeDragState {
   edge: DragEdge;
   /** Days the gesture currently represents; negative moves earlier. */
   days: number;
+  minutes: number;
 }
 
 export interface TimeDragHandle {
@@ -43,6 +44,8 @@ export interface TimeDragHandle {
 export interface TimeDrag {
   /** Spread onto the grabbable element — the bar, the chip, or an edge grip. */
   handleProps: (id: string, edge?: DragEdge) => TimeDragHandle;
+  slotProps: (day: string) => { onPointerDown: (e: React.PointerEvent) => void };
+  selection: (TimeSlot & { day: string }) | null;
   /**
    * The day under the pointer, as a delta from the day the gesture began, for
    * views whose geometry wraps. Ignored when no gesture is live.
@@ -70,8 +73,13 @@ export interface TimeDragOptions {
   pxPerDay?: number;
   /** Days one grid ROW is worth: 7 on a calendar, 0 on a linear axis. */
   rowDays?: number;
-  /** Apply the move. Never called with `days === 0`. */
-  onCommit: (id: string, edge: DragEdge, days: number) => void;
+  /** Vertical pixels per minute; omitted on whole-day axes. */
+  pxPerMinute?: number;
+  snapMinutes?: number;
+  dayLocked?: boolean;
+  onSelect?: (day: string, slot: TimeSlot) => void;
+  /** Apply only a nonzero day or minute change. */
+  onCommit: (id: string, edge: DragEdge, days: number, minutes: number) => void;
   /** No date field, or a read-only surface. */
   disabled?: boolean;
 }
@@ -79,10 +87,15 @@ export interface TimeDragOptions {
 export function useTimeDrag({
   pxPerDay,
   rowDays = 0,
+  pxPerMinute,
+  snapMinutes = 30,
+  dayLocked = false,
+  onSelect,
   onCommit,
   disabled = false,
 }: TimeDragOptions): TimeDrag {
   const [drag, setDrag] = useState<TimeDragState | null>(null);
+  const [selection, setSelection] = useState<(TimeSlot & { day: string }) | null>(null);
   const elements = useRef(new Map<string, HTMLElement>());
   const live = useRef<TimeDragState | null>(null);
   const moved = useRef(false);
@@ -91,8 +104,8 @@ export function useTimeDrag({
 
   // Latest-ref: the window listeners below are attached once per gesture and
   // must not commit through a stale callback if a render lands mid-drag.
-  const latest = useRef({ onCommit, pxPerDay });
-  latest.current = { onCommit, pxPerDay };
+  const latest = useRef({ onCommit, pxPerDay, pxPerMinute, snapMinutes, dayLocked, onSelect });
+  latest.current = { onCommit, pxPerDay, pxPerMinute, snapMinutes, dayLocked, onSelect };
 
   /** Move focus with the element, which React remounts under its new day. */
   const refocus = useCallback((key: string) => {
@@ -101,11 +114,11 @@ export function useTimeDrag({
 
   const commit = useCallback(
     (state: TimeDragState, key: string, viaPointer: boolean) => {
-      if (state.days === 0) return;
+      if (state.days === 0 && state.minutes === 0) return;
       // Only a POINTER gesture is followed by a click to swallow. Setting this
       // on the keyboard path too would eat the next real click on the bar.
       if (viaPointer) moved.current = true;
-      latest.current.onCommit(state.id, state.edge, state.days);
+      latest.current.onCommit(state.id, state.edge, state.days, state.minutes);
       refocus(key);
     },
     [refocus],
@@ -120,15 +133,21 @@ export function useTimeDrag({
       // Focus is then restored by hand — preventDefault on a <button> also
       // cancels the focus that makes the keyboard path reachable.
       e.preventDefault();
+      e.stopPropagation();
       (e.currentTarget as HTMLElement).focus();
       const originX = e.clientX;
-      const begin: TimeDragState = { id, edge, days: 0 };
+      const originY = e.clientY;
+      const begin: TimeDragState = { id, edge, days: 0, minutes: 0 };
       live.current = begin;
       setDrag(begin);
 
-      const update = (days: number) => {
-        if (live.current === null || live.current.days === days) return;
-        live.current = { ...live.current, days };
+      const update = (days: number, minutes: number) => {
+        if (
+          live.current === null ||
+          (live.current.days === days && live.current.minutes === minutes)
+        )
+          return;
+        live.current = { ...live.current, days, minutes };
         setDrag(live.current);
       };
       const stop = () => {
@@ -139,9 +158,22 @@ export function useTimeDrag({
         setDrag(null);
       };
       const move = (ev: PointerEvent) => {
-        const px = latest.current.pxPerDay;
-        if (px === undefined || px <= 0) return;
-        update(Math.round((ev.clientX - originX) / px));
+        const {
+          pxPerDay: px,
+          pxPerMinute: minutePx,
+          snapMinutes: snap,
+          dayLocked: locked,
+        } = latest.current;
+        const days = locked
+          ? 0
+          : px !== undefined && px > 0
+            ? Math.round((ev.clientX - originX) / px)
+            : (live.current?.days ?? 0);
+        const minutes =
+          minutePx !== undefined && minutePx > 0
+            ? snapDelta((ev.clientY - originY) / minutePx, snap)
+            : 0;
+        update(days, minutes);
       };
       const up = () => {
         const state = live.current;
@@ -178,16 +210,19 @@ export function useTimeDrag({
       if (disabled) return;
       const horizontal = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0;
       const vertical = e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0;
-      const days = horizontal !== 0 ? horizontal : vertical * rowDays;
-      if (days === 0) return;
+      const hours = pxPerMinute !== undefined;
+      const days = dayLocked ? 0 : horizontal !== 0 ? horizontal : hours ? 0 : vertical * rowDays;
+      const minutes = hours ? vertical * snapMinutes : 0;
+      if (days === 0 && minutes === 0) return;
       e.preventDefault();
+      e.stopPropagation();
       // Shift on a whole bar drags its END instead — the keyboard equivalent
       // of grabbing the right-hand grip, which has no keyboard of its own
       // while it is a 6px strip you have to see to aim at.
       const which: DragEdge = edge === 'move' && e.shiftKey ? 'end' : edge;
-      commit({ id, edge: which, days }, key, false);
+      commit({ id, edge: which, days, minutes }, key, false);
     },
-    [disabled, rowDays, commit],
+    [disabled, rowDays, pxPerMinute, snapMinutes, dayLocked, commit],
   );
 
   const handleProps = useCallback(
@@ -207,7 +242,7 @@ export function useTimeDrag({
   );
 
   const hover = useCallback((days: number) => {
-    if (live.current === null || live.current.days === days) return;
+    if (latest.current.dayLocked || live.current === null || live.current.days === days) return;
     live.current = { ...live.current, days };
     setDrag(live.current);
   }, []);
@@ -218,5 +253,60 @@ export function useTimeDrag({
     return was;
   }, []);
 
-  return { handleProps, hover, drag, consumeClick };
+  const slotProps = useCallback(
+    (day: string) => ({
+      onPointerDown: (e: React.PointerEvent) => {
+        const { pxPerMinute: px, snapMinutes: snap, onSelect: select } = latest.current;
+        if (
+          disabled ||
+          select === undefined ||
+          px === undefined ||
+          px <= 0 ||
+          (e.button ?? 0) !== 0
+        )
+          return;
+        if (
+          e.target instanceof Element &&
+          e.target.closest('button, input, textarea, [data-calendar-handle]')
+        )
+          return;
+        e.preventDefault();
+        const top = e.currentTarget.getBoundingClientRect().top;
+        const minute = (y: number) =>
+          Math.max(0, Math.min(1440 - snap, Math.floor((y - top) / px / snap) * snap));
+        const origin = minute(e.clientY);
+        let current = { day, start: origin, end: origin + snap };
+        setSelection(current);
+        const move = (event: PointerEvent) => {
+          const at = minute(event.clientY);
+          current = {
+            day,
+            start: Math.min(origin, at),
+            end: Math.min(1440, Math.max(origin, at) + snap),
+          };
+          setSelection(current);
+        };
+        const stop = () => {
+          window.removeEventListener('pointermove', move);
+          window.removeEventListener('pointerup', up);
+          window.removeEventListener('pointercancel', cancel);
+          setSelection(null);
+        };
+        const up = () => {
+          const slot = current;
+          gesture.end();
+          moved.current = true;
+          latest.current.onSelect?.(day, { start: slot.start, end: slot.end });
+        };
+        const cancel = () => gesture.end();
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up);
+        window.addEventListener('pointercancel', cancel);
+        gesture.begin(stop);
+      },
+    }),
+    [disabled, gesture],
+  );
+
+  return { handleProps, slotProps, selection, hover, drag, consumeClick };
 }

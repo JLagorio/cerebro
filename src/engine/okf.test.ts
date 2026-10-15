@@ -1425,3 +1425,16 @@ describe('staleness — the shared rule (M49.8, K24)', () => {
     }
   });
 });
+
+it('a board or diagram under knowledge is never a concept or a review row', () => {
+  const entries = ['knowledge/board.canvas', 'knowledge/diagram.mmd'].map((path) =>
+    makeEntry({
+      path,
+      filename: path.split('/').at(-1),
+      properties: { generated: { by: 'process:scout', at: '2026-07-28T12:00:00Z' } },
+    }),
+  );
+  for (const entry of entries) expect(isConcept(entry)).toBe(false);
+  expect(listConcepts(entries, '2026-07-28')).toEqual([]);
+  expect(reviewQueue(listConcepts(entries, '2026-07-28'))).toEqual([]);
+});

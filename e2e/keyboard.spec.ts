@@ -149,3 +149,84 @@ test('Inbox ⌘E files the open capture, and never while typing in its body', as
   await page.keyboard.press('ControlOrMeta+e');
   await expect.poll(() => readMockFile(page, PATH)).toContain('_organized: true');
 });
+
+test('g chords navigate, wait before hinting, swallow a hinted miss, and pass Escape', async ({
+  page,
+}, testInfo) => {
+  await boot(page);
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'My work' }).click();
+  await blurToBody(page);
+  await page.keyboard.press('g');
+  await page.keyboard.press('h');
+  await expect(page).toHaveTitle('Home — Cerebro');
+  await page.evaluate(() => {
+    document.body.dataset.lastChordMiss = '';
+    document.body.addEventListener('keydown', (event) => {
+      document.body.dataset.lastChordMiss = event.key;
+    });
+  });
+  await page.keyboard.press('g');
+  await page.waitForTimeout(300);
+  await expect(page.getByTestId('chord-hint')).toBeVisible();
+  await expect(page.getByTestId('chord-hint').getByText('Home', { exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('go-chord-hint.png'), animations: 'disabled' });
+  await page.keyboard.press('x');
+  await expect(page.getByTestId('chord-hint')).toHaveCount(0);
+  expect(await page.locator('body').getAttribute('data-last-chord-miss')).toBe('');
+  await page.keyboard.press('g');
+  await expect(page.getByTestId('chord-hint')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('chord-hint')).toHaveCount(0);
+  expect(await page.locator('body').getAttribute('data-last-chord-miss')).toBe('Escape');
+});
+
+test('g h typed into a page stays text, and Save and Find use the keymap', async ({ page }) => {
+  await boot(page);
+  await openByName(page, 'How we schedule');
+  const paragraph = page.locator('.bn-editor [data-content-type="paragraph"]').first();
+  await paragraph.click();
+  await page.keyboard.type('gh');
+  await expect(page.getByTestId('doc-title')).toHaveText('How we schedule');
+  await expect(page.getByTestId('chord-hint')).toHaveCount(0);
+  await page.keyboard.press('ControlOrMeta+s');
+  await expect.poll(() => readMockFile(page, 'delivery/how-we-schedule.md')).toContain('gh');
+  await page.keyboard.press('ControlOrMeta+f');
+  await expect(page.getByTestId('find-input')).toBeFocused();
+  await page.getByTestId('find-input').fill('gh');
+  await expect(page.getByTestId('find-count')).toHaveText('1 of 1');
+  await page.keyboard.press('ControlOrMeta+g');
+  await expect(page.getByTestId('find-count')).toHaveText('1 of 1');
+});
+
+test('c p creates an ordinary page, and g comma opens the complete shortcut catalog', async ({
+  page,
+}, testInfo) => {
+  await boot(page);
+  await blurToBody(page);
+  await page.keyboard.press('c');
+  await page.keyboard.press('p');
+  await page
+    .getByRole('dialog', { name: 'New page' })
+    .getByPlaceholder('Page title')
+    .fill('Launch notes');
+  await page.getByRole('button', { name: 'Create page', exact: true }).click();
+  await expect(page).toHaveTitle('Launch notes — Cerebro');
+  await expect(page.getByTestId('doc-title')).toHaveText('Launch notes');
+  expect(await readMockFile(page, 'launch-notes.md')).toContain('# Launch notes');
+  await blurToBody(page);
+  await page.keyboard.press('g');
+  await page.keyboard.press(',');
+  await expect(page.getByTestId('settings-page')).toBeVisible();
+  const shortcuts = page.getByTestId('settings-shortcuts');
+  await shortcuts.evaluate((element) => element.scrollIntoView({ block: 'start' }));
+  await expect(shortcuts.locator('[data-command="go.home"]')).toHaveAttribute('data-keys', 'g h');
+  await expect(shortcuts.locator('[data-command="palette.open"]')).toHaveAttribute(
+    'data-keys',
+    'mod+k',
+  );
+  await expect(shortcuts.getByText('Keyboard shortcuts', { exact: true })).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath('keyboard-settings.png'),
+    animations: 'disabled',
+  });
+});

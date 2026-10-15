@@ -1586,6 +1586,36 @@ describe('tab list on a Type doc (M44.5)', () => {
     expect(parsed[2]).toEqual({ id: 'tab-3', name: 'Tab 3', icon: null, content: 'sections' });
   });
 
+  it('a Runs tab round-trips without view source keys', () => {
+    const tabs = parseTabList([
+      {
+        id: 'runs',
+        name: 'Runs',
+        icon: 'history',
+        content: 'runs',
+        source: { type: 'Task' },
+        scope: 'related',
+      },
+    ]);
+    expect(tabs).toEqual([{ id: 'runs', name: 'Runs', icon: 'history', content: 'runs' }]);
+    expect(parseTabList(serializeTabList(tabs))).toEqual(tabs);
+  });
+
+  it('an Agents tab round-trips without view source keys', () => {
+    const tabs = parseTabList([
+      {
+        id: 'agents',
+        name: 'Agents',
+        icon: 'bot',
+        content: 'agents',
+        source: { type: 'Task' },
+        scope: 'related',
+      },
+    ]);
+    expect(tabs).toEqual([{ id: 'agents', name: 'Agents', icon: 'bot', content: 'agents' }]);
+    expect(parseTabList(serializeTabList(tabs))).toEqual(tabs);
+  });
+
   it('absent or malformed means no saved tabs', () => {
     expect(parseTabList(undefined)).toEqual([]);
     expect(parseTabList('sideways')).toEqual([]);
@@ -1737,4 +1767,20 @@ describe('view tabs on a Type doc (M45.4)', () => {
       scope: 'related',
     });
   });
+});
+
+it('round-trips only the four calendar date bucketing modes (M61.3)', () => {
+  for (const mode of ['day', 'week', 'month', 'year', 'relative', 'junk']) {
+    const list = parseListYaml(
+      'dates',
+      `name: Dates\npresentation:\n  group: [{ field: due, dateBucket: ${mode} }]\n`,
+    )!;
+    const expected = ['relative', 'junk'].includes(mode)
+      ? [{ field: 'due' }]
+      : [{ field: 'due', dateBucket: mode }];
+    expect(presentationOf(list).group).toEqual(expected);
+    expect(presentationOf(parseListYaml('dates', serializeList(list.definition))!).group).toEqual(
+      expected,
+    );
+  }
 });

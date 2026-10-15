@@ -26,6 +26,8 @@ export type Author =
   | { kind: 'other'; label: string };
 
 export const ASSISTANT_ACTOR = 'claude-code';
+/** Held to client_access.rs: other-app sessions are not agent records. */
+export const CLIENT_ACTOR_PREFIX = 'client:';
 
 export function isAssistantActor(raw: string): boolean {
   return raw === ASSISTANT_ACTOR || raw.startsWith(`${ASSISTANT_ACTOR}/`);
@@ -104,6 +106,8 @@ export interface ActorLabel {
 
 export function actorLabel(raw: string | null, entries: Entry[]): ActorLabel {
   if (raw === null) return { text: 'unattributed', raw: null };
+  if (raw.startsWith(CLIENT_ACTOR_PREFIX))
+    return { text: `${raw.slice(CLIENT_ACTOR_PREFIX.length)} (other app)`, raw };
   const construct = CONSTRUCT_ACTORS.find((c) => c.actor === raw);
   // "Background maintenance", not "Maintenance · internal" (M52.5): the
   // middle dot and "internal" read as a code on a proposal card.

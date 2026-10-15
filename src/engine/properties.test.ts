@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  aggregateNumbers,
   coerceValueToKind,
   computeRollup,
   formatTimestamp,
   findOptionByLabel,
   inferKindFromValue,
+  inferTarget,
   isSystemProperty,
   moveOption,
   optionId,
@@ -20,9 +22,9 @@ import {
   validateValue,
   visibleProperties,
 } from './properties';
-import { buildSchema } from './schema';
+import { buildSchema, DEFAULT_STATUSES } from './schema';
 import { makeEntry } from './testHelpers';
-import type { FieldDef } from './types';
+import type { Entry, FieldDef } from './types';
 
 const def = (kind: FieldDef['kind'], extra: Partial<FieldDef> = {}): FieldDef => ({
   name: 'field',
@@ -188,6 +190,86 @@ describe('computeRollup', () => {
         entries,
       ),
     ).toBe('');
+  });
+});
+
+describe('Percent done (M61.11b)', () => {
+  const progress = def('rollup', {
+    relation: 'work',
+    property: 'state',
+    calculate: 'percent_done',
+  });
+  const compute = (values: unknown[], kind: FieldDef['kind'] | null = 'status') => {
+    const targets = values.map((value, i) =>
+      makeEntry({ path: `work/${i}.md`, filename: `${i}.md`, properties: { state: value } }),
+    );
+    const host = makeEntry({ relationships: { work: targets.map((_, i) => String(i)) } });
+    return computeRollup(host, progress, [host, ...targets], undefined, {
+      fieldDef: () => (kind === null ? null : def(kind)),
+      statuses: () => DEFAULT_STATUSES,
+    });
+  };
+
+  it('counts done over active, ghost and empty statuses, leaving closed out', () => {
+    expect(compute(['done', 'todo', 'cancelled', 'unrecognised', undefined])).toBe('25');
+    expect(compute(['todo', 'cancelled'])).toBe('0');
+  });
+
+  it('counts only true checkboxes as done, including empty and malformed targets in the total', () => {
+    expect(compute([true, false, undefined, 'true'], 'checkbox')).toBe('25');
+  });
+
+  it('leaves select and undeclared properties unmeasured', () => {
+    expect(compute(['done'], 'select')).toBe('');
+    expect(compute(['done'], null)).toBe('');
+  });
+
+  it('nothing measured and every target closed stay blank', () => {
+    expect(compute([])).toBe('');
+    expect(compute(['cancelled', 'cancelled'])).toBe('');
+  });
+
+  it('rounds one done out of twelve to two decimal places', () => {
+    expect(compute(['done', ...Array<string>(11).fill('todo')])).toBe('8.33');
+  });
+
+  it('uses each target’s own declaration and status set', () => {
+    const targets = [
+      makeEntry({
+        path: 'work/a.md',
+        filename: 'a.md',
+        type: 'One',
+        properties: { state: 'shipped' },
+      }),
+      makeEntry({
+        path: 'work/b.md',
+        filename: 'b.md',
+        type: 'Two',
+        properties: { state: 'shipped' },
+      }),
+      makeEntry({
+        path: 'work/c.md',
+        filename: 'c.md',
+        type: null,
+        properties: { state: 'shipped' },
+      }),
+    ];
+    const host = makeEntry({ relationships: { work: ['a', 'b', 'c'] } });
+    const fieldDef = (entry: Entry) => (entry.type === null ? null : def('status'));
+    expect(
+      computeRollup(host, progress, [host, ...targets], undefined, {
+        fieldDef,
+        statuses: (entry) => [
+          {
+            id: 'shipped',
+            label: 'Shipped',
+            color: null,
+            group: entry.type === 'One' ? 'done' : 'closed',
+          },
+        ],
+      }),
+    ).toBe('100');
+    expect(computeRollup(host, progress, [host, ...targets])).toBe('');
   });
 });
 
@@ -734,4 +816,64 @@ describe('isSystemProperty (M4, M55.11)', () => {
       'covers',
     ]);
   });
+});
+
+it('does not turn blank, boolean, list or mapping inputs into measured rollup numbers', () => {
+  const absent = [null, undefined, '', '  ', false, true, [], [3], {}, Infinity, NaN];
+  for (const calc of ['sum', 'avg', 'min', 'max'] as const) {
+    expect(aggregateNumbers(absent, calc)).toBeNull();
+    expect(aggregateNumbers([...absent, 4, '4'], calc)).toBe(calc === 'sum' ? 8 : 4);
+  }
+});
+
+describe('library relation targets (M63.3)', () => {
+  const agent = makeEntry({ path: 'agents/scout.md', title: 'Scout', type: 'Agent' });
+  const skill = makeEntry({ path: 'skills/review.md', title: 'Review', type: 'Skill' });
+  const person = makeEntry({ path: 'people/ana.md', title: 'Ana', type: 'Person' });
+
+  it('never infers a library type, even when agents outnumber people', () => {
+    const entries = [agent, skill, person];
+    expect(inferTarget(['scout', 'review'], entries)).toBeNull();
+    expect(inferTarget(['scout', 'scout', 'review', 'ana'], entries)).toBe('Person');
+    expect(relationTargetFor(def('relation', { target: 'Agent' }), entries)).toBe('Agent');
+  });
+
+  it('peopleTypes never holds Agent or Skill, even for a person field that declares it', () => {
+    const entries = [
+      agent,
+      skill,
+      makeEntry({
+        path: 'types/task.md',
+        title: 'Task',
+        type: 'Type',
+        properties: {
+          fields: {
+            agent: { kind: 'person', target: 'Agent' },
+            skill: { kind: 'person', target: 'Skill' },
+          },
+        },
+      }),
+    ];
+    const schema = buildSchema(entries);
+    expect([...peopleTypes(schema, entries)]).toEqual([]);
+    expect(personCandidates(def('person', { target: 'Agent' }), schema, entries)).toEqual([]);
+    expect(personCandidates(def('person', { target: 'Skill' }), schema, entries)).toEqual([]);
+  });
+});
+
+it('keeps writer-owned import fields out of property rows while source_url stays a link', () => {
+  for (const name of [
+    'source_system',
+    'source_record_id',
+    'imported_at',
+    'imported_by',
+    'import_method',
+    'import_hash',
+  ])
+    expect(isSystemProperty(name), name).toBe(true);
+  expect(isSystemProperty('source_url')).toBe(false);
+  expect(visibleProperties(['title', 'source_url', 'source_system', 'import_hash'])).toEqual([
+    'title',
+    'source_url',
+  ]);
 });

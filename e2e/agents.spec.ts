@@ -164,7 +164,7 @@ test('agents: the lobby names what is waiting to wake an agent, and its Runs tab
   await expect(rows.nth(0)).toContainText('waiting since 2026-07-28 11:50');
   await expect(rows.nth(1)).toHaveAttribute('data-state', 'skipped');
   await expect(rows.nth(1)).toContainText(
-    'skipped (or cancelled) for a reason this version does not name (cycle)',
+    'skipped — the change came from its own chain of runs, so it would wake itself',
   );
   await expect(rows.nth(2)).toHaveAttribute('data-state', 'expired');
   await expect(rows.nth(2)).toContainText('Knowledge agent');

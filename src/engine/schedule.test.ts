@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  canReschedule,
   axisSpan,
   axisTicks,
   axisWidth,
@@ -27,6 +28,7 @@ import {
   quarterStart,
   PX_PER_DAY,
   rescheduleValue,
+  retimeValue,
   resizeSpan,
   resolveDateField,
   scrollToCentre,
@@ -768,4 +770,61 @@ describe('dayLabel', () => {
     expect(dayLabel('2026-07-28')).toBe('Tuesday, July 28, 2026');
     expect(dayLabel('2026-08-12')).toBe('Wednesday, August 12, 2026');
   });
+});
+
+describe('hours-grid writes (M61.9)', () => {
+  it('writes floating time, a midnight on the following day, and an open point end', () => {
+    expect(retimeValue(undefined, 'date', '2026-07-28', { start: 840, end: 900 })).toBe(
+      '2026-07-28 14:00',
+    );
+    expect(retimeValue(undefined, 'daterange', '2026-07-28', { start: 1320, end: 1440 })).toEqual({
+      start: '2026-07-28 22:00',
+      end: '2026-07-29 00:00',
+    });
+    expect(
+      retimeValue({ start: '2026-07-28 10:00', end: null }, 'daterange', '2026-07-29', { at: 630 }),
+    ).toEqual({ start: '2026-07-29 10:30', end: null });
+  });
+  it('seeds the selected hours in the shape the new record declares', () => {
+    const schema = buildSchema([
+      makeEntry({
+        type: 'Type',
+        title: 'Meeting',
+        properties: { fields: { window: { kind: 'daterange' }, due: { kind: 'date' } } },
+      }),
+    ]);
+    const slot = { start: 840, end: 900 };
+    expect(createOnDayValue('Meeting', 'window', '2026-07-29', schema, slot)).toEqual({
+      start: '2026-07-29 14:00',
+      end: '2026-07-29 15:00',
+    });
+    expect(createOnDayValue('Meeting', 'due', '2026-07-29', schema, slot)).toBe('2026-07-29 14:00');
+    expect(createOnDayValue('Meeting', 'unknown', '2026-07-29', schema, slot)).toBe(
+      '2026-07-29 14:00',
+    );
+  });
+});
+
+it('date axes resolve virtual and declared file times through the schema without treating them as editable dates', () => {
+  const doc = makeEntry({
+    path: 'types/event.md',
+    title: 'Event',
+    type: 'Type',
+    properties: { fields: { logged: { kind: 'created_time' } } },
+  });
+  const record = makeEntry({
+    path: 'events/one.md',
+    type: 'Event',
+    createdAt: '2026-10-15',
+    modifiedAt: '2026-10-16',
+    properties: { createdAt: '1999-01-01', logged: '1999-01-01' },
+  });
+  const schema = buildSchema([doc, record]);
+  expect(spanOf(record, 'createdAt', schema)).toEqual({ start: '2026-10-15', end: '2026-10-15' });
+  expect(spanOf(record, 'modifiedAt')).toEqual({ start: '2026-10-16', end: '2026-10-16' });
+  expect(spanOf(record, 'logged', schema)).toEqual({ start: '2026-10-15', end: '2026-10-15' });
+  expect(unscheduled([record], 'logged', schema)).toEqual([]);
+  expect(onDay([record], 'logged', '2026-10-15', schema)).toEqual([record]);
+  expect(canReschedule(record, 'logged', schema)).toBe(false);
+  expect(canReschedule(record, 'createdAt', schema)).toBe(false);
 });

@@ -1,3 +1,4 @@
+import { navSeed } from '@/test/navSeed';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Selection } from '@/engine/types';
 import { useNavStore } from './navStore';
@@ -6,9 +7,11 @@ import { useUiStore } from './uiStore';
 import { useVaultStore } from './vaultStore';
 
 function reset() {
+  useNavStore.getState().setLiveCheck(null);
+  useNavStore.getState().reset();
   useNavStore.setState({
     selection: { kind: 'home' },
-    history: [{ kind: 'home' }],
+    history: [navSeed({ kind: 'home' })],
     historyIndex: 0,
   });
   useUiStore.setState({ detailPath: null, diffView: null });
@@ -20,7 +23,7 @@ describe('navStore', () => {
   it('starts at home with a one-entry history', () => {
     const s = useNavStore.getState();
     expect(s.selection).toEqual({ kind: 'home' });
-    expect(s.history).toEqual([{ kind: 'home' }]);
+    expect(s.history.map((slot) => slot.selection)).toEqual([{ kind: 'home' }]);
     expect(s.historyIndex).toBe(0);
   });
 
@@ -41,7 +44,7 @@ describe('navStore', () => {
     back();
     navigate({ kind: 'settings' });
     const s = useNavStore.getState();
-    expect(s.history).toEqual([
+    expect(s.history.map((slot) => slot.selection)).toEqual([
       { kind: 'home' },
       { kind: 'list', id: 'all-items' },
       { kind: 'settings' },
@@ -150,7 +153,7 @@ describe('navStore', () => {
       navigate({ kind: 'knowledge', path: 'knowledge/work/delivery/c-1.md' });
       replacePath('work/delivery', 'work/shipping');
       const s = useNavStore.getState();
-      expect(s.history[1]).toEqual({ kind: 'collection', folder: 'work/shipping' });
+      expect(s.history[1].selection).toEqual({ kind: 'collection', folder: 'work/shipping' });
       // The knowledge path is not under the moved folder — untouched.
       expect(s.selection).toEqual({ kind: 'knowledge', path: 'knowledge/work/delivery/c-1.md' });
     });
@@ -237,13 +240,13 @@ describe('navStore', () => {
     const a: Selection = { kind: 'agents' };
     const b: Selection = { kind: 'agents', actor: 'process:release-scout' };
     const c: Selection = { kind: 'doc', path: 'records/agents/release-scout.md' };
-    useNavStore.setState({ selection: a, history: [a], historyIndex: 0 });
+    useNavStore.setState({ selection: a, history: [navSeed(a)], historyIndex: 0 });
     useUiStore.setState({ detailPath: 'records/risks/x.md' });
     const { navigate, back } = useNavStore.getState();
     navigate(b);
     navigate(c, { replace: true });
     let s = useNavStore.getState();
-    expect(s.history).toEqual([a, c]);
+    expect(s.history.map((slot) => slot.selection)).toEqual([a, c]);
     expect(s.historyIndex).toBe(1);
     expect(s.selection).toEqual(c);
     // It is still a surface change: what belonged to the last surface goes.
@@ -330,15 +333,209 @@ describe('navStore and the open log', () => {
     expect(useOpenLogStore.getState().logs).toEqual({});
   });
 
-  it('replacePath remaps exact and descendant paths in the current vault only', () => {
+  it('replacePath only changes navigation; the shared hook owns recent pointers', () => {
     const log = useOpenLogStore.getState();
     log.record('/v', 'docs/old.md');
     log.record('/v', 'docs/old/page.md');
     log.record('/w', 'docs/old/page.md');
     useNavStore.getState().replacePath('docs/old', 'docs/new');
-    expect(logged().map(([p]) => p)).toEqual(['docs/new/page.md', 'docs/old.md']);
+    expect(logged().map(([p]) => p)).toEqual(['docs/old/page.md', 'docs/old.md']);
     expect(logged('/w').map(([p]) => p)).toEqual(['docs/old/page.md']);
     useNavStore.getState().replacePath('docs/old.md', 'docs/renamed.md');
-    expect(logged().map(([p]) => p)).toEqual(['docs/new/page.md', 'docs/renamed.md']);
+    expect(logged().map(([p]) => p)).toEqual(['docs/old/page.md', 'docs/old.md']);
   });
+});
+
+it('captures the visit being left and keeps entry-state changes off the navigation sequence', () => {
+  reset();
+  const nav = useNavStore.getState();
+  const seq = nav.navSeq;
+  nav.setEntryState('view.search', 'old');
+  expect(useNavStore.getState().navSeq).toBe(seq);
+  const release = nav.registerEntryCaptor('canvas.scroll', () => ({ top: 300, left: 10 }));
+  nav.navigate({ kind: 'settings' });
+  expect(useNavStore.getState().history[0].state).toEqual({
+    'view.search': 'old',
+    'canvas.scroll': { top: 300, left: 10 },
+  });
+  expect(useNavStore.getState().navSeq).toBe(seq + 1);
+  release();
+  nav.back();
+  expect(nav.readEntryState('view.search')).toBe('old');
+  nav.navigate({ kind: 'pulse' }, { replace: true });
+  expect(nav.readEntryState('view.search')).toBeUndefined();
+  expect(useNavStore.getState().navSeq).toBe(seq + 3);
+});
+it('only the last captor wins, undefined deletes its key, and rename preserves state', () => {
+  reset();
+  const nav = useNavStore.getState();
+  nav.navigate({ kind: 'doc', path: 'a.md' });
+  nav.setEntryState('view.search', 'keep');
+  const older = nav.registerEntryCaptor('view.controls', () => true);
+  const newer = nav.registerEntryCaptor('view.controls', () => undefined);
+  older();
+  nav.replacePath('a.md', 'b.md');
+  expect(nav.readEntryState('view.search')).toBe('keep');
+  nav.navigate({ kind: 'settings' });
+  expect(useNavStore.getState().history[1].state).toEqual({ 'view.search': 'keep' });
+  newer();
+});
+it('Back and Forward drop dead slots and reset keeps one Home visit', () => {
+  reset();
+  const nav = useNavStore.getState();
+  for (const path of ['x.md', 'dead.md', 'y.md']) nav.navigate({ kind: 'doc', path });
+  nav.setLiveCheck((selection) => selection.kind !== 'doc' || selection.path !== 'dead.md');
+  nav.back();
+  expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'x.md' });
+  expect(useNavStore.getState().history).toHaveLength(3);
+  nav.forward();
+  expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'y.md' });
+  nav.reset();
+  expect(useNavStore.getState().history).toEqual([navSeed({ kind: 'home' })]);
+  nav.setLiveCheck(null);
+});
+it('restoring a last place is not recorded as a person opening the page', () => {
+  reset();
+  useVaultStore.setState({ vaultPath: '/history-restore' });
+  useOpenLogStore.getState().clear('/history-restore');
+  useNavStore.getState().navigate({ kind: 'doc', path: 'a.md' }, { replace: true, restore: true });
+  expect(useOpenLogStore.getState().logs['/history-restore'] ?? []).toEqual([]);
+});
+
+describe('page panes (M65.8)', () => {
+  beforeEach(() => {
+    reset();
+    useNavStore.getState().setPaneCapacity(4);
+  });
+  it('opening a held file activates its pane', () => {
+    const first = useNavStore.getState().active;
+    useNavStore.getState().navigate({ kind: 'doc', path: 'a.md' });
+    const second = useNavStore.getState().openPane({ kind: 'doc', path: 'b.md' }).pane;
+    useUiStore.setState({ toasts: [] });
+    const reuse = useNavStore.getState().navigateIn(first, { kind: 'doc', path: 'b.md' });
+    expect(reuse).toEqual({ kind: 'reused', pane: second });
+    expect(useNavStore.getState().paneIds).toHaveLength(2);
+    expect(useNavStore.getState().active).toBe(second);
+    expect(useNavStore.getPaneState(first).selection).toEqual({ kind: 'doc', path: 'a.md' });
+    expect(useUiStore.getState().toasts.at(-1)?.message).toBe('Already open in another pane.');
+    useUiStore.setState({ toasts: [] });
+    useNavStore.getState().navigateIn(first, { kind: 'doc', path: 'b.md' }, { byAgent: true });
+    expect(useUiStore.getState().toasts).toEqual([]);
+  });
+  it('Work and Inbox reuse and Back skips held visits until they are released', () => {
+    const first = useNavStore.getState().active;
+    useNavStore.getState().navigate({ kind: 'inbox' });
+    useNavStore.getState().navigate({ kind: 'workspace', root: 'first' });
+    const second = useNavStore.getState().openPane({ kind: 'inbox' }).pane;
+    useNavStore.getState().back(first);
+    expect(useNavStore.getPaneState(first).selection).toEqual({ kind: 'home' });
+    expect(useNavStore.getPaneState(first).history.map((slot) => slot.selection.kind)).toEqual([
+      'home',
+      'inbox',
+      'workspace',
+    ]);
+    useNavStore.getState().navigateIn(first, { kind: 'workspace', root: 'second' });
+    expect(useNavStore.getState().openPane({ kind: 'workspace', root: 'third' }).pane).toBe(first);
+    useNavStore.getState().closePane(second);
+    useNavStore.getState().back();
+    expect(useNavStore.getState().selection).toEqual({ kind: 'workspace', root: 'second' });
+  });
+  it('a peek belongs to its pane, a diff survives another holder, and stepping skips held files', () => {
+    const first = useNavStore.getState().active;
+    useNavStore.getState().navigate({ kind: 'doc', path: 'a.md' });
+    const second = useNavStore.getState().openPane({ kind: 'settings' }).pane;
+    useUiStore.getState().setDetailSiblings(['one.md', 'a.md', 'two.md'], second);
+    useNavStore.getState().openPeek('one.md', { from: second });
+    useUiStore.getState().openDiff('a.md');
+    useNavStore.getState().navigateIn(first, { kind: 'doc', path: 'a.md', tab: 'details' });
+    expect(useUiStore.getState().detailPath).toBe('one.md');
+    useNavStore.getState().stepPeek(1);
+    expect(useUiStore.getState().detailPath).toBe('two.md');
+    useUiStore.getState().openDiff('a.md');
+    useNavStore.getState().navigateIn(second, { kind: 'home' });
+    expect(useUiStore.getState().detailPath).toBeNull();
+    expect(useUiStore.getState().diffView?.path).toBe('a.md');
+    useNavStore.getState().openPeek('a.md', { from: second });
+    expect(useUiStore.getState().detailPath).toBeNull();
+    expect(useNavStore.getState().active).toBe(first);
+  });
+  it('captors and rename state stay with each pane; a reuse records exactly one person open', () => {
+    const first = useNavStore.getState().active;
+    useVaultStore.setState({ vaultPath: '/v' });
+    useOpenLogStore.setState({ logs: {}, saved: true });
+    useNavStore.getState().navigate({ kind: 'doc', path: 'old/a.md' });
+    useNavStore
+      .getState()
+      .registerEntryCaptor('canvas.scroll', () => ({ top: 30, left: 0 }), first);
+    const second = useNavStore.getState().openPane({ kind: 'doc', path: 'old/b.md' }).pane;
+    useNavStore.getState().setEntryState('view.search', 'b', second);
+    useNavStore.getState().navigateIn(second, { kind: 'doc', path: 'old/a.md' });
+    expect(
+      useOpenLogStore.getState().logs['/v'].find((row) => row.path === 'old/a.md')?.count,
+    ).toBe(2);
+    useNavStore.getState().replacePath('old', 'new');
+    expect(useNavStore.getPaneState(first).selection).toEqual({ kind: 'doc', path: 'new/a.md' });
+    expect(useNavStore.getPaneState(second).selection).toEqual({ kind: 'doc', path: 'new/b.md' });
+    expect(useNavStore.getPaneState(second).readEntryState('view.search')).toBe('b');
+    expect(useNavStore.getPaneState(first).readEntryState('canvas.scroll')).toEqual({
+      top: 30,
+      left: 0,
+    });
+  });
+  it('the peek never shows a file a pane shows', () => {
+    let seed = 43;
+    const next = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed;
+    };
+    for (let at = 0; at < 2000; at++) {
+      const state = useNavStore.getState();
+      const path = `${next() % 5}.md`;
+      const pane = state.paneIds[next() % state.paneIds.length];
+      switch (next() % 5) {
+        case 0:
+          state.openPeek(path, { from: pane, byAgent: true });
+          break;
+        case 1:
+          state.navigateIn(pane, { kind: 'doc', path }, { byAgent: true });
+          break;
+        case 2:
+          state.openPane({ kind: 'doc', path }, { from: pane, byAgent: true });
+          break;
+        case 3:
+          state.closePane(pane);
+          break;
+        case 4:
+          state.back(pane);
+          break;
+      }
+      const shown = useUiStore.getState().detailPath;
+      if (shown !== null)
+        for (const id of useNavStore.getState().paneIds) {
+          const selection = useNavStore.getPaneState(id).selection;
+          expect('path' in selection ? selection.path : null).not.toBe(shown);
+        }
+    }
+  });
+});
+
+it('restoreLayout mints fresh ids, restores each cursor, and closes overlays', () => {
+  useNavStore.getState().reset();
+  const before = useNavStore.getState().seq;
+  useUiStore.getState().openDetail('peek.md');
+  useNavStore.getState().restoreLayout({
+    v: 1,
+    active: 1,
+    panes: [
+      { index: 0, entries: [{ kind: 'doc', path: 'a.md' }, { kind: 'settings' }] },
+      { index: 0, entries: [{ kind: 'doc', path: 'b.md' }] },
+    ],
+  });
+  const nav = useNavStore.getState();
+  expect(nav.paneIds).toEqual([`p${before + 1}`, `p${before + 2}`]);
+  expect(nav.active).toBe(nav.paneIds[1]);
+  expect(useNavStore.getPaneState(nav.paneIds[0]).historyIndex).toBe(0);
+  expect(useNavStore.getPaneState(nav.paneIds[0]).history).toHaveLength(2);
+  expect(useUiStore.getState().detailPath).toBeNull();
+  expect(useUiStore.getState().diffView).toBeNull();
 });

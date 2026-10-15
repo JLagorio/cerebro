@@ -1,3 +1,4 @@
+import { Keycaps } from '@/components/ui/Keycaps';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useEscapeLayer } from '@/components/ui/Popover';
@@ -78,7 +79,8 @@ export function CommentComposer({
         }}
         className="w-full resize-y rounded-md border border-n-200 bg-n-0 px-2 py-1.5 text-sm text-n-800 outline-none placeholder:text-n-400 focus:border-cortex-500 disabled:opacity-60"
       />
-      <div className="flex justify-end gap-1.5">
+      <div className="flex items-center justify-end gap-1.5">
+        <Keycaps keys="mod+enter" />
         {onCancel !== undefined && (
           <Button size="sm" variant="ghost" onClick={cancel} disabled={busy}>
             Cancel

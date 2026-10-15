@@ -326,3 +326,25 @@ describe('the measured row anatomy (M46.2 Task 7)', () => {
     }
   });
 });
+
+describe('formula properties (M61.4)', () => {
+  afterEach(cleanup);
+  it('shows a lock and an em dash for an absent formula result', () => {
+    const entries = fixtureVault();
+    const doc = entries.find((entry) => entry.path === 'types/work-item.md')!;
+    const fields = doc.properties.fields as unknown as Record<string, unknown>;
+    fields.current = { kind: 'number' };
+    fields.gap = { kind: 'formula', formula: '100 - current' };
+    const entry = entries.find((item) => item.path.endsWith('fld-1.md'))!;
+    entry.properties.gap = 999;
+    useVaultStore.setState({ entries, vaultPath: '/vault' });
+    render(<RecordProperties entry={entry} schema={buildSchema(entries)} />);
+    const row = screen
+      .getAllByTestId('property-row')
+      .find((item) => within(item).queryByText('Gap'))!;
+    const computed = within(row).getByTitle('Computed from the vault — read only');
+    expect(computed.textContent).toBe('—');
+    expect(computed.querySelector('svg')).not.toBeNull();
+    expect(within(row).queryByRole('textbox')).toBeNull();
+  });
+});

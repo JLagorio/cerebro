@@ -1,6 +1,7 @@
 ---
 type: Work item
 key: OPS-5
+project: "[[phoenix-warehouse-rollout]]"
 status: progress
 priority: high
 assignee: "[[dana-fox]]"

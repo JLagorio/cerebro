@@ -4,10 +4,12 @@
 //! `Command::new` (M53.21), and the one call in [`command`] carries the
 //! reasoned exception.
 //!
-//! - [`command`] builds a short call that is waited on: `which`, the
+//! - [`command`] builds a call that is waited on: `which`, the
 //!   login-shell probe, the CLI's `--version`, the system browser, and git's
 //!   local reads. It scrubs the repo-selecting variables and nulls stdin, and
-//!   it leaves the child in our process group (its doc says why).
+//!   it leaves the child in our process group (its doc says why). Quick Look
+//!   is its one long-lived child: shell::open keeps one, ends the previous
+//!   preview on replacement or quit, and a waiter reaps it when it closes.
 //! - [`supervise`] starts a run that may have to be ended: the Claude Code
 //!   CLI, and git under a deadline (M58.3, `git::command::run_bounded`: the
 //!   network calls and each step of a commit). The child leads its own process
@@ -93,6 +95,34 @@ pub fn command(program: impl AsRef<OsStr>) -> Command {
     }
     cmd.stdin(Stdio::null());
     cmd
+}
+
+/// Bounded one-shot helpers that return no output. A timeout kills and reaps
+/// the whole child group; output is null, so a noisy helper cannot fill a pipe.
+pub fn wait_within(cmd: &mut Command, timeout: Duration) -> io::Result<Option<ExitStatus>> {
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(cmd, 0);
+    cmd.stdout(Stdio::null()).stderr(Stdio::null());
+    let mut child = cmd.spawn()?;
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(Some(status)),
+            Ok(None) if started.elapsed() < timeout => std::thread::sleep(POLL),
+            result => {
+                #[cfg(unix)]
+                if let Ok(pid) = i32::try_from(child.id()) {
+                    // SAFETY: this child leads the fresh group established above.
+                    unsafe {
+                        libc::kill(-pid, libc::SIGKILL);
+                    }
+                }
+                let _ = child.kill();
+                let _ = child.wait();
+                return result.map(|_| None);
+            }
+        }
+    }
 }
 
 /// The end of a supervised child's stderr: the last [`STDERR_TAIL_BYTES`] it
@@ -592,7 +622,10 @@ mod tests {
             status.unwrap().success(),
             "it left through its own trap, not to a KILL"
         );
-        assert_eq!(tail.last_chars(100), "bye");
+        // The shell may report "Terminated: 15" for its foreground sleep
+        // when the group receives TERM. Its final line and successful exit
+        // prove the cleanup trap still ran before we could send KILL.
+        assert_eq!(tail.last_chars(100).lines().last(), Some("bye"));
     }
 
     #[cfg(unix)]

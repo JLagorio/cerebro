@@ -46,6 +46,79 @@ describe('WakesSection', () => {
     vi.restoreAllMocks();
   });
 
+  it('names recorded writers and never labels an unrecorded writer as a person', async () => {
+    __seedWakes([
+      pending({ author: 'person', authorActor: 'human:me' }),
+      pending({ author: 'run', authorActor: 'claude-code' }),
+      pending({ author: 'run', authorActor: SCOUT }),
+      pending({ author: 'not_recorded' }),
+      pending({ author: null }),
+    ]);
+    render(<WakesSection vaultPath={VAULT} />);
+    const authors = await screen.findAllByTestId('agent-wake-author');
+    expect(authors.map((row) => row.textContent)).toEqual([
+      'by You',
+      'by Assistant',
+      'by Release scout',
+      'author not recorded',
+      'author not recorded',
+    ]);
+  });
+
+  it('shows each recorded chain refusal in its own words', async () => {
+    __seedWakes(
+      ['cycle', 'hop_limit', 'chain_spent'].map((reason) =>
+        pending({ outcome: 'skipped', reason, finishedAt: ago(MINUTE) }),
+      ),
+    );
+    render(<WakesSection vaultPath={VAULT} />);
+    const words = (await screen.findAllByTestId('agent-wake-words')).map((row) => row.textContent);
+    expect(words.some((word) => word?.includes('would wake itself'))).toBe(true);
+    expect(words.some((word) => word?.includes('second hop'))).toBe(true);
+    expect(words.some((word) => word?.includes('spent its allowance'))).toBe(true);
+  });
+
+  it('renders both condition skips with the question and reason as plain text', async () => {
+    __seedWakes(
+      ['condition_not_met', 'condition_unavailable'].map((reason) =>
+        pending({
+          outcome: 'skipped',
+          reason,
+          finishedAt: ago(MINUTE),
+          note: {
+            question: 'Is <b>this</b> urgent?',
+            reason:
+              reason === 'condition_not_met'
+                ? 'No <img src=x> work is due.'
+                : 'no answer within 10 minutes',
+          },
+        }),
+      ),
+    );
+    const { container } = render(<WakesSection vaultPath={VAULT} />);
+    const checks = await screen.findAllByTestId('agent-wake-check');
+    expect(checks.map((row) => row.textContent)).toEqual(
+      expect.arrayContaining([
+        '“Is <b>this</b> urgent?” — No <img src=x> work is due.',
+        '“Is <b>this</b> urgent?” — no answer within 10 minutes',
+      ]),
+    );
+    expect(container.querySelector('b,img')).toBeNull();
+    expect(
+      rows()
+        .map((row) => row.textContent)
+        .join(' '),
+    ).toContain("skipped — its check couldn't answer");
+  });
+
+  it('names the next retry while an unanswered check waits', async () => {
+    __seedWakes([pending({ notBefore: ahead(3 * MINUTE) })]);
+    render(<WakesSection vaultPath={VAULT} />);
+    expect((await screen.findByTestId('agent-wake-waits')).textContent).toMatch(
+      /^its check couldn't answer · tries again /,
+    );
+  });
+
   it('renders nothing while the read is out', () => {
     vi.spyOn(ipc, 'fleetWakes').mockImplementation(() => new Promise(() => undefined));
     const { container } = render(<WakesSection vaultPath={VAULT} />);
@@ -115,10 +188,40 @@ describe('WakesSection', () => {
     // Due now: no deferral and no cooldown to name.
     expect(within(rows()[0]).queryByTestId('agent-wake-waits')).toBeNull();
     expect(within(rows()[1]).getByTestId('agent-wake-words').textContent).toBe(
-      'skipped (or cancelled) for a reason this version does not name (cycle)',
+      'skipped — the change came from its own chain of runs, so it would wake itself',
     );
     expect(within(rows()[2]).getByTestId('agent-wake-words').textContent).toBe(
       'expired — waited more than 7 days',
+    );
+  });
+
+  it('names an assigned page and cause, with cooldown words only for an unrecorded link', async () => {
+    useUiStore.setState({ triggerRuns: { [VAULT]: { [SCOUT_ID]: ago(5 * MINUTE) } } });
+    __seedWakes([
+      pending({
+        cause: { kind: 'assigned', subject: PAGE, detail: 'via agent' },
+        author: 'person',
+        authorActor: 'human:me',
+      }),
+      pending({
+        cause: { kind: 'assigned', subject: PAGE, detail: 'via agent' },
+        author: 'not_recorded',
+      }),
+    ]);
+    render(<WakesSection vaultPath={VAULT} />);
+    await screen.findAllByTestId('agent-wake');
+    expect(screen.getByTestId('agent-wakes').textContent).toContain(
+      'Each assignment wakes its own run.',
+    );
+    expect(within(rows()[0]).getByTestId('agent-wake-subject').textContent).toBe(
+      'First-run walkthrough GA',
+    );
+    expect(within(rows()[0]).getByTestId('agent-wake-cause').textContent).toBe(
+      'work was assigned to it (via agent)',
+    );
+    expect(within(rows()[0]).queryByTestId('agent-wake-waits')).toBeNull();
+    expect(within(rows()[1]).getByTestId('agent-wake-waits').textContent).toMatch(
+      /^cooling down until /,
     );
   });
 

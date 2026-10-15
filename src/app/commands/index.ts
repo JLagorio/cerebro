@@ -1,5 +1,5 @@
 import { EDITOR_MOD_KEYS } from '@/lib/keys/claims';
-import { isLetter, parseKeys, specId } from '@/lib/keys/combo';
+import { comboId, isLetter, parseKeys, specId } from '@/lib/keys/combo';
 
 /**
  * The command catalog (M65.1): every app command, defined once.
@@ -89,8 +89,11 @@ export function checkCatalog(defs: readonly CommandDef[]): void {
     ids.add(def.id);
     if (scopesOf(def).length === 0) throw new Error(`command "${def.id}" names no scope`);
     for (const spec of def.keys) {
-      parseKeys(spec);
-      if (isLetter(spec) && (def.inEditor || def.inModal)) {
+      const steps = parseKeys(spec);
+      if (steps.length === 2 && !/^[a-z]$/.test(comboId(steps[0]))) {
+        throw new Error(`command "${def.id}": a chord starts with a plain letter`);
+      }
+      if (def.keys.every(isLetter) && (def.inEditor || def.inModal)) {
         throw new Error(`command "${def.id}": a letter key never runs in an editor or a modal`);
       }
       if (def.inEditor && isEditorKey(spec)) {
@@ -116,6 +119,19 @@ export function checkCatalog(defs: readonly CommandDef[]): void {
   }
   for (const def of defs) {
     for (const scope of scopesOf(def)) {
+      for (const spec of def.keys) {
+        const steps = parseKeys(spec);
+        if (steps.length !== 2) continue;
+        const leader = comboId(steps[0]);
+        for (const at of new Set([scope, 'app'])) {
+          const single = byScope.get(at)?.get(leader);
+          if (single !== undefined) {
+            throw new Error(
+              `chord leader "${leader}" is a single binding in scope ${at}: ${single}`,
+            );
+          }
+        }
+      }
       for (const outer of outerScopes(scope)) {
         for (const spec of def.keys) {
           const other = byScope.get(outer)?.get(specId(spec));

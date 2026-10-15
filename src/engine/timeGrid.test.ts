@@ -2,6 +2,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { parseDateProperty } from './dates';
 import {
   clockOf,
+  snapDelta,
+  moveTimed,
+  resizeTimed,
+  movePoint,
   MINUTES_PER_DAY,
   minuteOf,
   packDay,
@@ -211,4 +215,42 @@ describe('packDay', () => {
     expect(slots.get('long')).toEqual({ col: 0, cols: 2 });
     expect(slots.get('short')).toEqual({ col: 1, cols: 2 });
   });
+});
+
+describe('editing wall-clock minutes', () => {
+  it('snaps symmetrically to half hours', () => {
+    expect(snapDelta(25)).toBe(30);
+    expect(snapDelta(12.5)).toBe(0);
+    expect(snapDelta(-15)).toBe(-30);
+    expect(snapDelta(18, 15)).toBe(15);
+  });
+  it('keeps a moved interval inside its day without changing duration', () => {
+    expect(moveTimed({ start: 600, end: 660 }, 30)).toEqual({ start: 630, end: 690 });
+    expect(moveTimed({ start: 600, end: 660 }, -900)).toEqual({ start: 0, end: 60 });
+    expect(moveTimed({ start: 600, end: 660 }, 900)).toEqual({ start: 1380, end: 1440 });
+  });
+  it('clamps either resize edge to its day and a minimum of thirty minutes', () => {
+    expect(resizeTimed({ start: 600, end: 660 }, 'start', 90)).toEqual({ start: 630, end: 660 });
+    expect(resizeTimed({ start: 600, end: 660 }, 'end', -90)).toEqual({ start: 600, end: 630 });
+    expect(resizeTimed({ start: 600, end: 660 }, 'end', 900)).toEqual({ start: 600, end: 1440 });
+    expect(resizeTimed({ start: 600, end: 660 }, 'start', -900)).toEqual({ start: 0, end: 660 });
+    expect(movePoint(1400, 60)).toBe(1410);
+    expect(movePoint(10, -60)).toBe(0);
+  });
+});
+
+it('keeps a range fixed when either endpoint is an exact instant', () => {
+  const entry = makeEntry({
+    properties: { window: { start: '2026-07-28 00:00', end: '2026-07-28T23:00:00Z' } },
+  });
+  const placement = placementOf(entry, 'window');
+  expect(placement).toMatchObject({ kind: 'timed', fixed: true });
+});
+
+it('places a virtual exact file timestamp as a fixed point despite a frontmatter shadow', () => {
+  const entry = makeEntry({
+    createdAt: '2026-10-15T16:00:00Z',
+    properties: { createdAt: '1999-01-01' },
+  });
+  expect(placementOf(entry, 'createdAt')).toMatchObject({ kind: 'point', fixed: true });
 });

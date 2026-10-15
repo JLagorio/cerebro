@@ -1,18 +1,13 @@
+import { isMailUrl } from './mailPolicy';
 /**
- * Ingest (M8.2) — turning outside material into working docs.
- *
- * The knowledge pipeline has three inlets and one object: a dropped `.vtt`
- * transcript, a pasted wall of text, and a fetched Jira ticket all become the
- * same thing — an untyped note in `inbox/` carrying provenance about where it
- * came from. Distillation reads that one shape, so adding an inlet never means
- * teaching the distiller a new format.
- *
- * Untyped is the whole point: no `type:` is what puts a note in the Inbox
- * (engine/inbox.ts), so ingested material queues for filing rather than
- * appearing, unreviewed, in the surfaces you author.
+ * Outside material enters through transcript/text or kept document capture in Inbox, fetched
+ * source caches, or the batch import writer (M69.3). Imports become stamped
+ * pages in the person's databases; captures remain available for filing.
+ * Every route preserves where material came from before distillation reads it.
  */
 
 import { sha256Hex } from '@/lib/sha256';
+import { CACHE_KINDS } from './importSources';
 import { isKnowledgePath } from './okf';
 import type { Entry } from './types';
 
@@ -419,7 +414,7 @@ export function parseIssuePrefixes(raw: string): string[] {
  * stamps as `source_kind`. */
 export type SourceKind = 'issue' | 'web';
 
-const SOURCE_KINDS: readonly SourceKind[] = ['issue', 'web'];
+export const SOURCE_KINDS: readonly SourceKind[] = CACHE_KINDS as readonly SourceKind[];
 
 const sourceKindOf = (kind: ExternalRef['kind']): SourceKind =>
   kind === 'issue' ? 'issue' : 'web';
@@ -492,14 +487,13 @@ export function sourceCachePath(kind: SourceKind, id: string): string {
  * External references in a note, one per source however it is spelled. The
  * first spelling stands for the source: it is the one a fetch asks for.
  *
- * This is the trigger for the connector inlet: rather than syncing Jira or
- * Confluence on a schedule, the agent reaches for them exactly when a note
- * mentions something it cannot read, and writes the result down so the next
- * turn reads a local file instead of calling the API again.
+ * Tickets and pages may request a cached copy. Mail links never do: mail
+ * stays behind its own attended, gated inlet.
  */
 export function findExternalRefs(text: string, options: RefOptions = {}): ExternalRef[] {
   const refs = new Map<string, ExternalRef>();
   const add = (kind: ExternalRef['kind'], id: string) => {
+    if (kind === 'url' && isMailUrl(id)) return;
     const source = sourceKindOf(kind);
     const canonical = canonicalSourceId(source, id);
     // `https://` with nothing after it is nothing `cache_source` would write.

@@ -83,6 +83,8 @@ export function recordTabSet(
 const TAB_KINDS: { value: TabContent; label: string; icon: string }[] = [
   { value: 'sections', label: 'Sections', icon: 'text' },
   { value: 'overview', label: 'Overview', icon: 'layout-grid' },
+  { value: 'agents', label: 'Agents', icon: 'bot' },
+  { value: 'runs', label: 'Runs', icon: 'history' },
   { value: 'view', label: 'View', icon: 'table' },
 ];
 
@@ -760,8 +762,7 @@ function NewTabForm({
             }}
             width="100%"
           />
-          {/* 2×2 since the View tile made four: three columns left it
-              orphaned on its own row, and four don't fit 260px. */}
+          {/* Two columns fit this 260px popover as more tab kinds are added. */}
           <div className="mt-2 grid grid-cols-2 gap-1">
             {TAB_KINDS.map((k) => (
               <button

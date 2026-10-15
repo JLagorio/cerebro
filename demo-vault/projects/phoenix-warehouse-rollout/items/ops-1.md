@@ -1,6 +1,7 @@
 ---
 type: Work item
 key: OPS-1
+project: "[[phoenix-warehouse-rollout]]"
 status: done
 priority: high
 assignee: "[[marcus-webb]]"

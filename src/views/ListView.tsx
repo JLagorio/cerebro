@@ -5,7 +5,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { FieldEditor } from '@/detail/FieldEditor';
 import { FieldChip } from '@/views/FieldChip';
-import { QuickAddInline, useQuickAdd } from '@/views/QuickAdd';
+import { QuickAddInline } from '@/views/QuickAdd';
 import { RecordRowMenu } from '@/views/RecordRowMenu';
 import { buildRows, entryRows } from '@/engine/rows';
 import { typeStyle } from '@/engine/typeCatalog';
@@ -18,24 +18,14 @@ export interface ListViewProps {
   entries: Entry[];
   presentation: Presentation;
   schema: Schema;
-  /** project context enables the quick-add row; pass null outside a project */
-  project: Entry | null;
   /**
    * The whole vault (M10) — nested children resolve against it, so a filtered
    * list can still nest under a parent the filter excluded. Defaults to
    * `entries`; unread when the chain has no relation level.
    */
   allEntries?: Entry[];
-  /** Collapse-state namespace (M9.1) — `view:<id>`, `project:<path>`, … */
+  /** Collapse-state namespace (M9.1) — `view:<id>`, `type:<name>`, … */
   scope?: string;
-  /** Type new records get (M9.6); defaults to the project canvas's type. */
-  createType?: string;
-  /**
-   * M15: the same create contract the other layouts get. `project` alone gated
-   * this, and nothing outside the project canvas passed one — so switching a
-   * view tab from Table to List silently removed the only way to add a record
-   * from the canvas.
-   */
   onCreate?: (title: string, band: { groupBy: string; groupValue: string }) => Promise<boolean>;
   /** True when the view has filters, so the empty state can say why. */
   filtered?: boolean;
@@ -280,21 +270,16 @@ export function ListView({
   entries,
   presentation,
   schema,
-  project,
   allEntries = entries,
   scope = 'list',
-  createType = 'Work item',
   onCreate,
   filtered,
 }: ListViewProps) {
-  const quickAdd = useQuickAdd(createType, project);
   const collapsedMap = useUiStore((s) => s.collapsed[scope]);
   const toggle = useUiStore((s) => s.toggleCollapsed);
   const openPath = useOpenPath('in-place');
 
-  // M15: create where a create contract exists — `project !== null` alone meant
-  // no caller outside the project canvas could ever create from this layout.
-  const canCreate = onCreate !== undefined || project !== null;
+  const canCreate = onCreate !== undefined;
 
   // M10: one row list — bands, nesting, and the create row. The list no longer
   // needs a separate flat-fallback branch either: buildRows already emits a
@@ -367,20 +352,17 @@ export function ListView({
             );
           }
           if (row.kind === 'add') {
+            if (onCreate === undefined) return null;
             return (
               <QuickAddInline
                 key={row.key}
                 ariaLabel={row.band === null ? 'New item' : `New item in ${row.band.label}`}
                 label="Add item"
                 onCreate={(title) =>
-                  onCreate !== undefined
-                    ? onCreate(title, {
-                        groupBy: row.band?.field ?? '',
-                        groupValue: row.band?.key ?? '',
-                      })
-                    : row.band === null
-                      ? quickAdd(title)
-                      : quickAdd(title, { groupBy: row.band.field, groupValue: row.band.key })
+                  onCreate(title, {
+                    groupBy: row.band?.field ?? '',
+                    groupValue: row.band?.key ?? '',
+                  })
                 }
               />
             );

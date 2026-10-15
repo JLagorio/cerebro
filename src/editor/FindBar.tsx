@@ -1,3 +1,4 @@
+import { useCommands } from '@/lib/keys/useKeys';
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import type { BlockNoteEditor } from '@blocknote/core';
 import { closeHistory } from 'prosemirror-history';
@@ -33,8 +34,8 @@ import { blockElement, openTogglesAround } from './sectionLinks';
  * mounted bar registers here and a key acts on one: the bar whose page holds
  * focus, else the page focused last, else the first page in the document.
  * Focus anywhere else, or in a dialog or menu inside the page, and the key is
- * left alone, not even prevented. Not `hasLayers()`: the record peek is a
- * surface layer, and ⌘F inside it must still find.
+ * left alone, not even prevented. The record peek and focused find bar
+ * register non-modal layers, so their own keys still reach the registry.
  */
 
 type Editor = BlockNoteEditor<any, any, any>;
@@ -49,6 +50,10 @@ interface FindBarProps {
 interface Registered {
   host: () => HTMLElement | null;
   lastFocusAt: number;
+  open: () => boolean;
+  readOnly: () => boolean;
+  openBar: (replace: boolean) => void;
+  step: (by: 1 | -1) => void;
 }
 
 const bars = new Set<Registered>();
@@ -91,7 +96,7 @@ const MAX_SEED = 200;
 /** Escape, while focus is inside the bar: a layer only then (Q15), so Escape
  * in the page keeps its editor meanings and a surface behind stays open. */
 function EscapeWhileFocused({ onEscape }: { onEscape: () => void }) {
-  useEscapeLayer(onEscape, { kind: 'surface' });
+  useEscapeLayer(onEscape, { kind: 'surface', modal: false });
   return null;
 }
 
@@ -223,7 +228,7 @@ export function FindBar({ editor, host, readOnly }: FindBarProps) {
   const frame = useRef<number | null>(null);
   const reasonRef = useRef<'query' | 'doc'>('doc');
 
-  // The latest values, for the window listener and the frame callback.
+  // The latest values for registered commands and the frame callback.
   const live = useRef({ open, query, hits, current, entries, notePath, readOnly });
   live.current = { open, query, hits, current, entries, notePath, readOnly };
 
@@ -360,7 +365,14 @@ export function FindBar({ editor, host, readOnly }: FindBarProps) {
   const act = useRef({ openBar, step });
   act.current = { openBar, step };
   useEffect(() => {
-    const me: Registered = { host: () => host.current, lastFocusAt: 0 };
+    const me: Registered = {
+      host: () => host.current,
+      lastFocusAt: 0,
+      open: () => live.current.open,
+      readOnly: () => live.current.readOnly,
+      openBar: (replace) => act.current.openBar(replace),
+      step: (by) => act.current.step(by),
+    };
     bars.add(me);
     const el = host.current;
     const onFocusIn = () => {
@@ -368,32 +380,26 @@ export function FindBar({ editor, host, readOnly }: FindBarProps) {
       me.lastFocusAt = focusClock;
     };
     el?.addEventListener('focusin', onFocusIn);
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey)) return;
-      const find = !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f';
-      // ⌥ changes `key` on a Mac keyboard; `code` names the physical key.
-      const findReplace = !e.shiftKey && e.altKey && e.code === 'KeyF';
-      const move = !e.altKey && e.key.toLowerCase() === 'g';
-      if (!find && !findReplace && !move) return;
-      if (targetBar() !== me) return;
-      if (move) {
-        if (!live.current.open) return;
-        e.preventDefault();
-        act.current.step(e.shiftKey ? -1 : 1);
-        return;
-      }
-      e.preventDefault();
-      act.current.openBar(findReplace);
-    };
-    window.addEventListener('keydown', onKey);
     return () => {
       bars.delete(me);
       el?.removeEventListener('focusin', onFocusIn);
-      window.removeEventListener('keydown', onKey);
       if (frame.current !== null) window.cancelAnimationFrame(frame.current);
       frame.current = null;
     };
   }, [host]);
+
+  // Every mounted bar binds the same dispatcher. The newest binding may
+  // eclipse another, but it still delegates to the page that owns focus.
+  useCommands([
+    { id: 'find.open', when: () => targetBar() !== null, run: () => targetBar()?.openBar(false) },
+    {
+      id: 'find.replace',
+      when: () => targetBar()?.readOnly() === false,
+      run: () => targetBar()?.openBar(true),
+    },
+    { id: 'find.next', when: () => targetBar()?.open() === true, run: () => targetBar()?.step(1) },
+    { id: 'find.prev', when: () => targetBar()?.open() === true, run: () => targetBar()?.step(-1) },
+  ]);
 
   // Find again as the page changes, only while the bar is open.
   useEffect(() => {

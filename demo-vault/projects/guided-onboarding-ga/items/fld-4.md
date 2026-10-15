@@ -1,6 +1,7 @@
 ---
 type: Work item
 key: FLD-4
+project: "[[guided-onboarding-ga]]"
 status: progress
 priority: medium
 assignee: "[[priya-nair]]"

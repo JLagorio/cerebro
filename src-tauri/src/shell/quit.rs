@@ -20,7 +20,7 @@
 //!
 //! **The limit.** Dock Quit, the app switcher's Q, logout, restart, shutdown
 //! and a quit Apple Event all send `terminate:` to the application, and tao
-//! 0.35.3 implements only `applicationWillTerminate:`, never
+//! 0.37.1 implements only `applicationWillTerminate:`, never
 //! `applicationShouldTerminate:`. Those exit with no prepare, and a page's
 //! last half second can be lost. Patching tao's private delegate class at
 //! runtime was considered and rejected: it would break silently on any tao
@@ -229,7 +229,7 @@ pub struct Sub {
     pub items: &'static [Item],
 }
 
-/// Tauri 2.11.5's macOS default menu (menu.rs:142-241), with one change: the
+/// Tauri 2.12.4's macOS default menu (menu.rs:142-241), with one change: the
 /// app submenu's Quit is [`Item::Quit`]. The Edit entries carry WKWebView's
 /// clipboard and undo keys, so dropping one breaks ⌘C, ⌘V, ⌘X, ⌘Z or ⌘A in
 /// every page. Linux compiles this table and never shows it.

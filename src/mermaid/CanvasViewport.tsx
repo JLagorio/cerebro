@@ -181,7 +181,7 @@ function startsPan(target: EventTarget | null): boolean {
  * and the grid turns into grey noise that moires against the pixel grid, so it
  * fades out entirely rather than getting denser.
  */
-const DOT_GAP = 24;
+export const DOT_GAP = 24;
 const MIN_DOT_GAP = 9;
 
 export function CanvasViewport({
@@ -189,9 +189,17 @@ export function CanvasViewport({
   initialFit = false,
   dots = false,
   fitInsetLeft = 0,
+  initialTransform,
+  onTransformChange,
+  wheel = 'zoom',
+  controls = true,
 }: {
   children: React.ReactNode;
   initialFit?: boolean;
+  initialTransform?: CanvasTransform;
+  onTransformChange?: (transform: CanvasTransform) => void;
+  wheel?: 'zoom' | 'pan' | 'pass';
+  controls?: boolean;
   /**
    * Screen pixels along the left edge that a host's own overlay is covering
    * (M29.53). Fit measured the whole viewport and centred in it, so with the
@@ -212,7 +220,14 @@ export function CanvasViewport({
   // subtree that needs to portal into it. Set once, on mount.
   const [overlayHost, setOverlayHost] = useState<HTMLDivElement | null>(null);
   const planeRef = useRef<HTMLDivElement | null>(null);
-  const [t, setT] = useState<CanvasTransform>({ scale: 1, offset: { x: 0, y: 0 } });
+  const [t, setT] = useState<CanvasTransform>(
+    () => initialTransform ?? { scale: 1, offset: { x: 0, y: 0 } },
+  );
+  const changedRef = useRef(onTransformChange);
+  changedRef.current = onTransformChange;
+  useEffect(() => {
+    changedRef.current?.(t);
+  }, [t]);
   // The ref context's value. Assigned during render, not in an effect: a
   // handler that fires between a pan frame's commit and a passive effect must
   // still read the transform that is already on screen.
@@ -276,9 +291,12 @@ export function CanvasViewport({
   fitRef.current = (max = MAX_SCALE) => {
     const viewport = viewportRef.current;
     const plane = planeRef.current;
-    // The mermaid svg is the content bbox — the plane itself is viewport-wide,
-    // and the ghost-line overlay svg must not be the thing we fit to.
-    const content = plane?.querySelector('svg[id^="cerebro-mermaid-"]') ?? null;
+    // Hosts mark their content explicitly; older diagrams keep their SVG id.
+    // The viewport-wide plane and gesture overlays are never the fit bounds.
+    const content =
+      plane?.querySelector('[data-canvas-content]') ??
+      plane?.querySelector('svg[id^="cerebro-mermaid-"]') ??
+      null;
     if (viewport === null || plane === null || content === null) return;
     const vb = viewport.getBoundingClientRect();
     const cb = content.getBoundingClientRect();
@@ -308,22 +326,24 @@ export function CanvasViewport({
     });
   };
 
-  // Native, non-passive: React registers its root wheel listener passive, so a
-  // JSX onWheel + preventDefault is silently ignored and the host page scrolls
-  // under the zoom (the M29.5 lightbox lesson). `[]` deps are sound HERE —
-  // unlike the lightbox, this viewport renders unconditionally, so the ref has
-  // its element on the first effect run. If this component ever grows an
-  // `open`-style early return, this effect needs the lightbox's dep treatment.
+  // Native, non-passive: React's passive root listener cannot prevent the
+  // document from scrolling underneath a canvas. Embedded boards pass wheel
+  // events through; full boards pan plain wheels and zoom modified wheels.
   useEffect(() => {
     const el = viewportRef.current;
-    if (el === null) return;
+    if (el === null || wheel === 'pass') return;
     const handler = (e: WheelEvent) => {
       e.preventDefault();
-      zoomAtRef.current(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);
+      if (wheel === 'pan' && !e.ctrlKey && !e.metaKey) {
+        const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1;
+        panBy(-e.deltaX * unit, -e.deltaY * unit);
+      } else if (e.deltaY !== 0) {
+        zoomAtRef.current(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);
+      }
     };
     el.addEventListener('wheel', handler, { passive: false });
     return () => el.removeEventListener('wheel', handler);
-  }, []);
+  }, [wheel, panBy]);
 
   /**
    * A viewport that changes size keeps showing what it was showing (M29.53).
@@ -355,19 +375,18 @@ export function CanvasViewport({
     return () => ro.disconnect();
   }, [panBy]);
 
-  // initialFit waits for content: the mermaid svg arrives async (lazy chunk +
-  // render), so fitting at mount would measure nothing. A ResizeObserver on
-  // the plane fires when the injected svg gives it height; the first
-  // measurable content wins, once. jsdom has no ResizeObserver — initialFit is
-  // then a no-op, which the tests pin.
+  // Content may arrive asynchronously. Fit the first measurable content once;
+  // a saved camera takes precedence. jsdom without ResizeObserver is a no-op.
   useEffect(() => {
-    if (!initialFit) return;
+    if (!initialFit || initialTransform !== undefined) return;
     const plane = planeRef.current;
     if (plane === null || typeof ResizeObserver === 'undefined') return;
     let done = false;
     const ro = new ResizeObserver(() => {
       if (done) return;
-      const content = plane.querySelector('svg[id^="cerebro-mermaid-"]');
+      const content =
+        plane.querySelector('[data-canvas-content]') ??
+        plane.querySelector('svg[id^="cerebro-mermaid-"]');
       if (content === null || content.getBoundingClientRect().width === 0) return;
       done = true;
       fitRef.current(1);
@@ -375,7 +394,7 @@ export function CanvasViewport({
     });
     ro.observe(plane);
     return () => ro.disconnect();
-  }, [initialFit]);
+  }, [initialFit, initialTransform]);
 
   /**
    * Tell anything anchored INSIDE the plane that its anchor just moved
@@ -510,44 +529,46 @@ export function CanvasViewport({
                 >
                   {children}
                 </div>
-                <div
-                  data-testid="canvas-zoom-controls"
-                  data-no-pan
-                  className="absolute bottom-3 left-3 z-10 flex items-center gap-0.5 rounded-md border border-n-200 bg-n-0 px-1 py-0.5 shadow-sm"
-                >
-                  <IconButton
-                    icon="zoom-out"
-                    label="Zoom out"
-                    size="sm"
-                    onClick={() => zoomBy(1 / 1.1)}
-                  />
-                  <button
-                    type="button"
-                    aria-label="Reset zoom"
-                    className="rounded-xs border-0 bg-transparent px-1.5 py-0.5 text-xs tabular-nums text-n-600 hover:bg-n-50 focus-visible:outline-none focus-visible:ring"
-                    // 100% about the CURRENT view centre — what a percentage chip
-                    // means in Figma and in Lucidchart. It used to throw the pan
-                    // away with the zoom: MEASURED, a diagram centred at
-                    // translate(617.7, 187) jumped to translate(0, 0), i.e. into
-                    // the viewport's top-left corner, 680px left and 187px above
-                    // where the user was looking (M29.53).
-                    onClick={() => zoomBy(1 / t.scale)}
+                {controls && (
+                  <div
+                    data-testid="canvas-zoom-controls"
+                    data-no-pan
+                    className="absolute bottom-3 left-3 z-10 flex items-center gap-0.5 rounded-md border border-n-200 bg-n-0 px-1 py-0.5 shadow-sm"
                   >
-                    {Math.round(t.scale * 100)}%
-                  </button>
-                  <IconButton
-                    icon="zoom-in"
-                    label="Zoom in"
-                    size="sm"
-                    onClick={() => zoomBy(1.1)}
-                  />
-                  <IconButton
-                    icon="maximize"
-                    label="Fit diagram"
-                    size="sm"
-                    onClick={() => fitRef.current()}
-                  />
-                </div>
+                    <IconButton
+                      icon="zoom-out"
+                      label="Zoom out"
+                      size="sm"
+                      onClick={() => zoomBy(1 / 1.1)}
+                    />
+                    <button
+                      type="button"
+                      aria-label="Reset zoom"
+                      className="rounded-xs border-0 bg-transparent px-1.5 py-0.5 text-xs tabular-nums text-n-600 hover:bg-n-50 focus-visible:outline-none focus-visible:ring"
+                      // 100% about the CURRENT view centre — what a percentage chip
+                      // means in Figma and in Lucidchart. It used to throw the pan
+                      // away with the zoom: MEASURED, a diagram centred at
+                      // translate(617.7, 187) jumped to translate(0, 0), i.e. into
+                      // the viewport's top-left corner, 680px left and 187px above
+                      // where the user was looking (M29.53).
+                      onClick={() => zoomBy(1 / t.scale)}
+                    >
+                      {Math.round(t.scale * 100)}%
+                    </button>
+                    <IconButton
+                      icon="zoom-in"
+                      label="Zoom in"
+                      size="sm"
+                      onClick={() => zoomBy(1.1)}
+                    />
+                    <IconButton
+                      icon="maximize"
+                      label="Fit diagram"
+                      size="sm"
+                      onClick={() => fitRef.current()}
+                    />
+                  </div>
+                )}
               </div>
             </CanvasOverlayHostContext.Provider>
           </CanvasPanContext.Provider>

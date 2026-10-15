@@ -1,3 +1,4 @@
+import { IMPORT_KEYS } from './importSources';
 /**
  * Properties engine (M2.x): the write-side of the YAML schema. Type notes
  * declare fields (`fields:` frontmatter on `type: Type` docs).
@@ -8,13 +9,14 @@
  * shared/calendar/dates.v1.json. This module keeps the UI half (each kind's
  * label, icon and seed, in "+ Add property" catalog order), interprets the
  * table in `validateValue`, and computes the computed kinds (created and
- * last-edited time, rollups).
+ * last-edited time, rollups and formulas).
  *
  * Enforcement philosophy: SHAPE is strict (a number field never stores
  * "abc"), option membership stays advisory — unknown select values render
  * as ghosts rather than being rejected (locked M1 decision).
  */
 
+import { parseRepeat } from './recurrence';
 import { DATE_GRAMMAR, dateRangeFault, isDateText, parseDateText } from './dateGrammar';
 import {
   kindFacts,
@@ -23,6 +25,7 @@ import {
   type Atom,
   type MessageKey,
 } from './fieldKindTable';
+import { isLibraryType } from './library';
 import { isPageChromeKey } from './pageChrome';
 import { childrenOf, rollupSpec, type RelationIndex } from './relations';
 import { resolveTarget } from './wikilink';
@@ -34,6 +37,7 @@ import type {
   FilterFamily,
   RollupCalc,
   Schema,
+  StatusDef,
 } from './types';
 
 // --- System properties (M4) -------------------------------------------------
@@ -50,7 +54,11 @@ import type {
  * another tool survives a round-trip through cerebro untouched.
  */
 export function isSystemProperty(name: string): boolean {
-  return name.startsWith('_') || isPageChromeKey(name);
+  return (
+    name.startsWith('_') ||
+    isPageChromeKey(name) ||
+    (name !== 'source_url' && IMPORT_KEYS.includes(name))
+  );
 }
 
 /** Drop app-managed keys from a list of frontmatter names for display. */
@@ -65,7 +73,7 @@ export interface RollupCalcMeta {
   label: string;
   /** Reads a property on each target (false = the targets themselves count). */
   needsProperty: boolean;
-  /** Only meaningful over numeric properties. */
+  /** Numeric aggregation; percent_done counts status and checkbox outcomes. */
   numeric: boolean;
   /** The result is a number a view compares and sums as one (M60.1); the
    * others yield text (a date string, or a list of values). The table's
@@ -94,6 +102,7 @@ export const ROLLUP_CALCS: RollupCalcMeta[] = [
   rollupCalc('avg', 'Average', true, true),
   rollupCalc('min', 'Min', true, true),
   rollupCalc('max', 'Max', true, true),
+  rollupCalc('percent_done', 'Percent done', true, true),
   rollupCalc('earliest', 'Earliest', true, false),
   rollupCalc('latest', 'Latest', true, false),
   rollupCalc('show', 'Show values', true, false),
@@ -238,6 +247,7 @@ const KIND_UI = {
   status: { label: 'Status', icon: 'loader', seed: '' },
   date: { label: 'Date', icon: 'calendar', seed: '' },
   daterange: { label: 'Date range', icon: 'calendar-range', seed: '' },
+  repeat: { label: 'Repeat', icon: 'repeat', seed: '' },
   person: { label: 'Person', icon: 'circle-user', seed: '' },
   files: { label: 'Files & media', icon: 'paperclip', seed: '' },
   checkbox: { label: 'Checkbox', icon: 'square-check', seed: false },
@@ -246,6 +256,7 @@ const KIND_UI = {
   phone: { label: 'Phone', icon: 'phone', seed: '' },
   relation: { label: 'Relation', icon: 'arrow-up-right', seed: '' },
   rollup: { label: 'Rollup', icon: 'sigma', seed: null },
+  formula: { label: 'Formula', icon: 'square-function', seed: null },
   created_time: { label: 'Created time', icon: 'clock', seed: null },
   last_edited_time: { label: 'Last edited time', icon: 'history', seed: null },
 } satisfies Record<FieldKind, KindUi>;
@@ -306,7 +317,8 @@ export const NUMERIC_KINDS: ReadonlySet<FieldKind> = new Set(
 
 /**
  * The majority type among a set of raw wikilink targets — the type a field is
- * evidently pointing at, when nobody declared one.
+ * evidently pointing at, when nobody declared one. A library type is reached
+ * only by a declared target.
  *
  * Lived in `engine/adopt.ts`, where only the adoption doctor could reach it.
  * It answers exactly the question a person field asks about the values it
@@ -316,7 +328,13 @@ export function inferTarget(rawTargets: string[], entries: Entry[]): string | nu
   const counts = new Map<string, number>();
   for (const raw of rawTargets) {
     const resolved = resolveTarget(raw, entries);
-    if (resolved === null || resolved.type === null || resolved.type === '') continue;
+    if (
+      resolved === null ||
+      resolved.type === null ||
+      resolved.type === '' ||
+      isLibraryType(resolved.type)
+    )
+      continue;
     counts.set(resolved.type, (counts.get(resolved.type) ?? 0) + 1);
   }
   let best: string | null = null;
@@ -332,6 +350,7 @@ export function inferTarget(rawTargets: string[], entries: Entry[]): string | nu
 
 /**
  * Which type a relation-family field points at, or null for "any record".
+ * A library type is reached only by a declared target.
  *
  * A `person` field IS a relation with an avatar renderer, so it answers the
  * same question the same way — except that three call sites answered it with
@@ -368,7 +387,8 @@ export function relationTargetFor(
 }
 
 /**
- * The types this vault treats as people: every type a `person` field targets.
+ * The types this vault treats as people: every non-library type a `person` field
+ * targets. A library type is reached only by a declared relation target.
  *
  * Derived rather than declared, because the surfaces that need it most — the
  * editor's `@` menu, a person field with no target yet — have no FieldDef to
@@ -385,7 +405,7 @@ export function peopleTypes(schema: Schema, entries: Entry[]): ReadonlySet<strin
     for (const field of def.fields) {
       if (field.kind !== 'person') continue;
       const target = relationTargetFor(field, entries, typeName);
-      if (target !== null) found.add(target);
+      if (target !== null && !isLibraryType(target)) found.add(target);
     }
   }
   if (found.size === 0 && schema.types.has('Person')) found.add('Person');
@@ -426,6 +446,8 @@ export function personCandidates(
   owner?: Entry | null,
 ): Entry[] {
   const target = relationTargetFor(def, entries, owner?.type);
+  // A hand-written person target cannot make an agent or skill a person.
+  if (isLibraryType(target)) return [];
   const notSelf = (e: Entry) => e.path !== owner?.path;
   if (target !== null) return entries.filter((e) => e.type === target && notSelf(e));
   const people = peopleTypes(schema, entries);
@@ -788,6 +810,9 @@ export function coerceValueToKind(raw: unknown, kind: FieldKind): unknown {
             .filter((v) => v !== '')
             .map((v) => `[[${v}]]`)
         : null;
+    case 'repeat':
+      return typeof raw === 'string' && parseRepeat(raw)?.kind === 'rule' ? raw : null;
+    case 'formula':
     case 'rollup':
     case 'created_time':
     case 'last_edited_time':
@@ -830,7 +855,13 @@ export function validatePatch(
 // --- Rollups ---------------------------------------------------------------
 
 const asNumbers = (values: unknown[]): number[] =>
-  values.map((v) => (typeof v === 'number' ? v : Number(v))).filter((n) => Number.isFinite(n));
+  values.flatMap((value) => {
+    // Number(null), Number(false) and Number([]) are zero; none records a
+    // measured number (CV-05). Numeric scalar text remains readable.
+    if (typeof value !== 'number' && (typeof value !== 'string' || value.trim() === '')) return [];
+    const number = Number(value);
+    return Number.isFinite(number) ? [number] : [];
+  });
 
 /** The calcs that reduce a list of values to one number. */
 export type NumericCalc = Extract<RollupCalc, 'sum' | 'avg' | 'min' | 'max'>;
@@ -872,6 +903,10 @@ export function computeRollup(
   def: FieldDef,
   entries: Entry[],
   index?: RelationIndex,
+  ctx?: {
+    fieldDef: (entry: Entry, property: string) => FieldDef | null;
+    statuses: (entry: Entry) => readonly StatusDef[];
+  },
 ): string {
   // M3.5: forward (`relation:`) and reverse (`from:`) sources both resolve
   // here, so a parent can aggregate children that point at it.
@@ -880,6 +915,25 @@ export function computeRollup(
   const calc: RollupCalc = def.calculate ?? 'count';
   if (calc === 'count') return String(targets.length);
   const prop = def.property ?? '';
+  if (calc === 'percent_done') {
+    let counted = 0;
+    let done = 0;
+    for (const target of targets) {
+      const kind = ctx?.fieldDef(target, prop)?.kind;
+      const raw = target.properties[prop];
+      if (kind === 'checkbox') {
+        counted += 1;
+        if (raw === true) done += 1;
+      } else if (kind === 'status') {
+        const value = Array.isArray(raw) ? raw[0] : raw;
+        const group = ctx?.statuses(target).find((status) => status.id === value)?.group;
+        if (group === 'closed') continue;
+        counted += 1;
+        if (group === 'done') done += 1;
+      }
+    }
+    return counted === 0 ? '' : String(Math.round((done / counted) * 10_000) / 100);
+  }
   const values = targets
     .map((t) => t.properties[prop])
     .filter((v) => v !== undefined && v !== null && v !== '');

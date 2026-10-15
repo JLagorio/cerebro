@@ -89,6 +89,9 @@ function parse(name: string, text: string): ts.SourceFile {
 function importProblems(name: string, source: ts.SourceFile): string[] {
   return specifiers(source).flatMap((spec) => {
     if (SIBLING.test(spec)) return [];
+    if (name === 'format.ts' && spec === '../../../shared/canvas/format.v1.json') return [];
+    if (name === 'canvasLimits.ts' && spec === '../../../shared/canvas/agent-limits.v1.json')
+      return [];
     const home = LIBRARIES[spec];
     if (home === name) return [];
     if (home !== undefined) return [`${name} imports ${spec}, which only ${home} may load`];

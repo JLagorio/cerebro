@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { CalendarTimeGrid, HOUR_PX, type TimeGridItem } from '@/views/CalendarTimeGrid';
+import { buildSchema } from '@/engine/schema';
 import { makeEntry } from '@/test/factories';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -162,4 +163,178 @@ describe('CalendarTimeGrid is read-only (M61.8)', () => {
     fireEvent.pointerUp(window, { clientX: 200, clientY: 300 });
     expect(patchFrontmatter).not.toHaveBeenCalled();
   });
+});
+
+describe('CalendarTimeGrid editing (M61.9)', () => {
+  function editable(
+    kind: 'date' | 'daterange' = 'daterange',
+    fixed = false,
+    onCreateOn?: (
+      title: string,
+      day: string,
+      slot?: { start: number; end: number },
+    ) => Promise<boolean>,
+  ) {
+    const entry = record('standup');
+    entry.properties.window =
+      kind === 'date'
+        ? '2026-07-28 10:00'
+        : ({ start: '2026-07-28 10:00', end: '2026-07-28 11:00' } as never);
+    const doc = makeEntry({
+      path: 'types/work-item.md',
+      type: 'Type',
+      title: 'Work item',
+      properties: { fields: { window: { kind } } } as never,
+    });
+    const schema = buildSchema([doc, entry]);
+    const patch = vi.fn(async () => true);
+    useVaultStore.setState({ entries: [doc, entry], patchFrontmatter: patch });
+    const placement: TimeGridItem['placement'] =
+      kind === 'date'
+        ? { kind: 'point', day: '2026-07-28', at: 600, fixed }
+        : { kind: 'timed', day: '2026-07-28', start: 600, end: 660, fixed };
+    render(
+      <CalendarTimeGrid
+        days={WEEK}
+        items={[{ entry, placement }]}
+        today="2026-07-28"
+        timeFormat="24"
+        schema={schema}
+        dateField="window"
+        onCreateOn={onCreateOn}
+      />,
+    );
+    return {
+      patch,
+      entry,
+      el: screen.getByTestId(kind === 'date' ? 'calendar-point' : 'calendar-block'),
+    };
+  }
+  const pointer = (type: string, y: number) =>
+    new MouseEvent(type, { bubbles: true, button: 0, clientY: y, clientX: 10 });
+  const drag = (element: HTMLElement, dy: number, release = true) => {
+    fireEvent(element, pointer('pointerdown', 500));
+    fireEvent(window, pointer('pointermove', 500 + dy));
+    if (release) fireEvent(window, pointer('pointerup', 500 + dy));
+  };
+  it('moves both endpoints by half an hour', () => {
+    const { patch, entry, el } = editable();
+    drag(el, 24);
+    expect(patch).toHaveBeenCalledWith(entry.path, {
+      window: { start: '2026-07-28 10:30', end: '2026-07-28 11:30' },
+    });
+  });
+  it.each(['start', 'end'] as const)('resizes only its %s grip', (edge) => {
+    const { patch, entry } = editable();
+    drag(screen.getByTestId(`calendar-block-grip-${edge}`), 24);
+    expect(patch).toHaveBeenCalledOnce();
+    expect(patch).toHaveBeenCalledWith(entry.path, {
+      window: {
+        start: edge === 'start' ? '2026-07-28 10:30' : '2026-07-28 10:00',
+        end: edge === 'end' ? '2026-07-28 11:30' : '2026-07-28 11:00',
+      },
+    });
+  });
+  it('moves into the hovered day in Week and previews the new placement', () => {
+    const { patch, entry, el } = editable();
+    drag(el, 24, false);
+    fireEvent.pointerEnter(screen.getAllByTestId('calendar-hours-day')[3]);
+    expect(screen.getByTestId('calendar-block').getAttribute('data-day')).toBe('2026-07-29');
+    fireEvent(window, pointer('pointerup', 524));
+    expect(patch).toHaveBeenCalledWith(entry.path, {
+      window: { start: '2026-07-29 10:30', end: '2026-07-29 11:30' },
+    });
+  });
+  it('abandons a live move on Escape and does not open the record after a committed drag', () => {
+    const { patch, el } = editable();
+    drag(el, 48, false);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent(window, pointer('pointerup', 548));
+    expect(patch).not.toHaveBeenCalled();
+    expect(screen.getByTestId('calendar-block').getAttribute('data-start')).toBe('600');
+    useUiStore.setState({ detailPath: null });
+    drag(el, 24);
+    fireEvent.click(el);
+    expect(useUiStore.getState().detailPath).toBeNull();
+  });
+  it('moves and resizes with keys, while a point only moves and stays scalar', () => {
+    const { patch, entry, el } = editable('date');
+    expect(screen.queryByTestId('calendar-block-grip-end')).toBeNull();
+    fireEvent.keyDown(el, { key: 'ArrowDown', shiftKey: true });
+    expect(patch).not.toHaveBeenCalled();
+    fireEvent.keyDown(el, { key: 'ArrowDown' });
+    expect(patch).toHaveBeenCalledWith(entry.path, { window: '2026-07-28 10:30' });
+  });
+  it('does not offer handles or write when an instant is dragged or keyed', () => {
+    const { patch, el } = editable('daterange', true);
+    expect(screen.queryByTestId('calendar-block-grip-start')).toBeNull();
+    drag(el, 48);
+    fireEvent.keyDown(el, { key: 'ArrowDown' });
+    expect(patch).not.toHaveBeenCalled();
+  });
+  it('creates from selected hours and Escape abandons only the title input', async () => {
+    const create = vi.fn(async () => true);
+    const { patch } = editable('daterange', false, create);
+    const day = screen.getAllByTestId('calendar-hours-day')[3];
+    fireEvent(day, pointer('pointerdown', 672));
+    fireEvent(window, pointer('pointermove', 696));
+    fireEvent(window, pointer('pointerup', 696));
+    expect(screen.getByTestId('calendar-new-slot')).toBeTruthy();
+    fireEvent.change(screen.getByRole('textbox', { name: 'New record title' }), {
+      target: { value: 'Review' },
+    });
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith('Review', '2026-07-29', { start: 840, end: 900 }),
+    );
+    await waitFor(() => expect(screen.queryByTestId('calendar-new-slot')).toBeNull());
+    fireEvent(day, pointer('pointerdown', 672));
+    fireEvent(window, pointer('pointerup', 672));
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' });
+    expect(screen.queryByTestId('calendar-new-slot')).toBeNull();
+    expect(create).toHaveBeenCalledOnce();
+    expect(patch).not.toHaveBeenCalled();
+  });
+});
+
+it('shows an occurrence without grips or keyboard writers and opens its menu', () => {
+  const entry = record('weekly');
+  const item = block('weekly', '2026-07-28', 540, 555);
+  const calendar = {
+    key: 'weekly@20260728T090000',
+    entry,
+    series: entry,
+    value: {
+      start: '2026-07-28',
+      end: '2026-07-28',
+      startTime: '09:00',
+      endTime: '09:15',
+      format: 'full' as const,
+      timeFormat: '12' as const,
+      remind: null,
+    },
+    repeat: 'occurrence' as const,
+    rule: null,
+  };
+  const onOccurrence = vi.fn();
+  const patch = vi.fn();
+  useVaultStore.setState({ patchFrontmatter: patch });
+  render(
+    <CalendarTimeGrid
+      items={[{ ...item, calendar }]}
+      days={WEEK}
+      today="2026-07-28"
+      timeFormat="12"
+      dateField="when"
+      onOccurrence={onOccurrence}
+    />,
+  );
+  const button = screen.getByTestId('calendar-block');
+  expect(button.getAttribute('data-occurrence')).toBe('20260728T090000');
+  expect(button.getAttribute('aria-label')).toContain('repeats');
+  expect(screen.queryByTestId('calendar-block-grip-end')).toBeNull();
+  fireEvent.keyDown(button, { key: 'ArrowDown' });
+  expect(patch).not.toHaveBeenCalled();
+  fireEvent.click(button);
+  expect(onOccurrence).toHaveBeenCalledWith(calendar, button);
 });

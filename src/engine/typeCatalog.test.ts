@@ -89,6 +89,18 @@ describe('listTypes', () => {
 });
 
 describe('serializeFields', () => {
+  it('round-trips reminders only on stored dates and ranges', () => {
+    const fields: FieldDef[] = [
+      { name: 'due', kind: 'date', remind: '1d' },
+      { name: 'window', kind: 'daterange', remind: '1w' },
+    ];
+    const entries = [typeDoc('Ticket', { properties: { fields: serializeFields(fields) } })];
+    expect(buildSchema(entries).types.get('Ticket')?.fields).toEqual(fields);
+    expect(serializeFields([{ name: 'words', kind: 'text', remind: '1d' }])).toEqual({
+      words: { kind: 'text' },
+    });
+  });
+
   it('round-trips through the schema parser', () => {
     const fields: FieldDef[] = [
       { name: 'status', kind: 'status' },

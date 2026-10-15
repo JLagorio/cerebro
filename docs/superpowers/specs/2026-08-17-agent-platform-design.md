@@ -113,7 +113,7 @@ joined to the record by actor string in `src/library/AgentDossier.tsx`.
 | G5 | The background runner imports its system prompt **from a React panel component**. | `src/agent/useJobRunner.ts:3` |
 | G6 | Schedules and fire-ledgers live in **localStorage**. Closed window fires nothing; clearing localStorage re-fires one catch-up. | `src/stores/uiStore.ts:338-341` |
 | G7 | **No agent-invokes-agent.** No MCP tool starts a run; `Task` is never in `tool_policy` and is withdrawn from internal runs by `INTERNAL_DISALLOWED` (`mod.rs:607`). | `src-tauri/src/agent/mod.rs:559-571` |
-| G8 | **No inbound events.** `tiny_http` on loopback is the only listener; no reqwest/hyper/axum in `Cargo.toml`. Trigger inputs are only renderer-diffed `VaultEvent`s. | `src-tauri/Cargo.toml` |
+| G8 | **No inbound trigger events.** Trigger inputs are renderer-diffed `VaultEvent`s. M63.8 (2026-10-13): plus an agent's own follow-ups, booked by its runs in runtime.db; still no inbound trigger listener. The separately authenticated personal-client MCP listener does not book trigger events. | `src-tauri/src/runtime/followups.rs` |
 
 ### One more fact that changes the risk calculus
 

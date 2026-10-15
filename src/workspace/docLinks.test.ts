@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { classifyHref, resolveRelative } from './docLinks';
+import { classifyHref, resolveRelative, resolveImagePath } from './docLinks';
+
+describe('contained image references', () => {
+  it.each([
+    ['docs/guide.md', '../images/a%20b.png', 'images/a b.png'],
+    ['docs/guide.md', '/images/a.png', 'images/a.png'],
+    ['docs/guide.md', './image.png?v=1#caption', 'docs/image.png'],
+    ['guide.md', '../../private.png', null],
+    ['guide.md', '%2e%2e/private.png', null],
+    ['guide.md', 'https://example.com/a.png', null],
+    ['guide.md', '//example.com/a.png', null],
+    ['guide.md', 'file%3A/private.png', null],
+    ['guide.md', '%zz.png', null],
+    ['guide.md', 'images%5cprivate.png', null],
+  ])('resolves %s → %s without escaping', (from, href, expected) => {
+    expect(resolveImagePath(from, href)).toBe(expected);
+  });
+});
 
 describe('resolveRelative', () => {
   it('resolves a sibling', () => {

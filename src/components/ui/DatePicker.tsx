@@ -7,6 +7,7 @@ import {
   formatTime,
   localTimezone,
   REMIND_OPTIONS,
+  remindLabel,
   toIsoDate,
   type DateDisplayFormat,
   type DateValue,
@@ -341,17 +342,17 @@ export function DatePicker({
             onClick={() => setFlyout(flyout === 'remind' ? null : 'remind')}
             value={
               <span className="flex items-center gap-1 text-sm text-n-500">
-                {REMIND_OPTIONS.find((o) => o.id === (value.remind ?? 'none'))?.label.replace(
-                  / \(9:00 AM\)$/,
-                  '',
-                )}
+                {remindLabel(value.remind ?? 'none', value)}
                 <Icon name="chevron-right" size={13} color="var(--n-400)" />
               </span>
             }
           >
             {flyout === 'remind' && (
               <FlyoutMenu
-                options={REMIND_OPTIONS}
+                options={REMIND_OPTIONS.map((option) => ({
+                  ...option,
+                  label: remindLabel(option.id, value),
+                }))}
                 activeId={value.remind ?? 'none'}
                 onPick={(id) => {
                   onChange({ ...value, remind: id === 'none' ? null : (id as RemindOffset) });
@@ -368,7 +369,9 @@ export function DatePicker({
       {showRemind && (
         <div className="flex items-center gap-1.5 border-t border-n-100 px-2 pb-0.5 pt-2 text-xs text-[var(--text-meta)]">
           <Icon name="circle-question-mark" size={13} />
-          Reminders fire as desktop notifications
+          Reminders show in Cerebro. Allow notifications in Settings to also see them in
+          Notification Center. A reminder that passes while Cerebro is closed is said once when it
+          opens.
         </div>
       )}
     </div>

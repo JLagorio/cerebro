@@ -116,6 +116,7 @@ describe('buildSystemPrompt names only the tools the run holds', () => {
         TOOLS_LINE,
         WIKILINKS,
         SCHEMA,
+        'Mail you read through a connector stays out of notes: never copy a message, its text or its addresses into a page unless the person asks you to in this conversation.',
         ORGANIZE,
         'Be concise.',
         WEB_LINE,

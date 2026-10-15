@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "artifact_version": 1,
+  "json_canvas": "1.0",
+  "cerebro_versions": [1],
+  "vocab": {
+    "node_types": ["file", "group", "link", "text"],
+    "sides": ["top", "right", "bottom", "left"],
+    "ends": ["none", "arrow"],
+    "background_styles": ["cover", "ratio", "repeat"],
+    "color_presets": ["1", "2", "3", "4", "5", "6"],
+    "shapes": ["diamond", "ellipse"]
+  },
+  "limits": {
+    "max_bytes": 8388608,
+    "max_depth": 32,
+    "max_id_chars": 128,
+    "max_coord": 1000000000,
+    "max_nodes": 5000,
+    "max_edges": 10000,
+    "max_strokes": 2000,
+    "max_ink_points": 16384,
+    "max_ink_size": 64
+  },
+  "key_order": {
+    "board": ["nodes", "edges", "cerebro"],
+    "text": ["id", "type", "text", "x", "y", "width", "height", "color"],
+    "file": ["id", "type", "file", "subpath", "x", "y", "width", "height", "color"],
+    "link": ["id", "type", "url", "x", "y", "width", "height", "color"],
+    "group": ["id", "type", "x", "y", "width", "height", "color", "label", "background", "backgroundStyle"],
+    "edge": ["id", "fromNode", "fromSide", "fromEnd", "toNode", "toSide", "toEnd", "color", "label"],
+    "cerebro": ["version", "cards", "ink"],
+    "card": ["shape"],
+    "stroke": ["id", "x", "y", "width", "height", "color", "size", "simulated", "points"]
+  },
+  "layout": { "indent": "\t", "trailing_newline": false }
+}

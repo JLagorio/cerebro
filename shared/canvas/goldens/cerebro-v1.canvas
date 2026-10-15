@@ -1,0 +1,15 @@
+{
+	"nodes": [
+		{"id":"text","type":"text","text":"Roadmap [[Vision]]","x":0,"y":0,"width":240,"height":120,"color":"1"}
+	],
+	"edges": [],
+	"cerebro": {
+		"version": 1,
+		"cards": {
+			"text": {"shape":"diamond"}
+		},
+		"ink": [
+			{"id":"ink","x":0,"y":160,"width":40,"height":30,"color":"#aabbcc","size":4,"simulated":true,"points":[0,0,500,400,300,1000]}
+		]
+	}
+}

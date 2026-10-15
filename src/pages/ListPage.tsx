@@ -1,5 +1,8 @@
+import { useEntryState } from '@/app/useEntryState';
+import type { TimeSlot } from '@/engine/timeGrid';
 import { useEffect, useMemo, useState } from 'react';
 import { addView, deleteList, deleteView, duplicateView, updateList } from '@/app/listActions';
+import { exportViewCsv } from '@/app/csvActions';
 import { ViewSettingsPanel } from '@/views/ViewSettingsPanel';
 import { Dialog } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -27,6 +30,8 @@ import { ViewTabs } from '@/views/ViewTabs';
 import { ViewToolbar } from '@/views/ViewToolbar';
 import { ViewLimitNotice } from '@/views/ViewLimitNotice';
 import { limitEntries, searchEntries } from '@/engine/viewFilters';
+import { checkView } from '@/engine/viewCheck';
+import { ViewProblems } from '@/views/ViewProblems';
 
 export type ListSelection = Extract<Selection, { kind: 'list' }>;
 
@@ -72,16 +77,13 @@ export function ListPage({ selection }: { selection: ListSelection }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   // M12.8: the chip bar below the tabs. Hidden until an icon engages it —
   // the icons tint when an axis is active, so nothing is silently filtered.
-  const [controlsOpen, setControlsOpen] = useState(false);
-  // M16.26: search is where you are looking RIGHT NOW, not part of what the
-  // saved view is — so it lives here and never reaches the YAML, and it
-  // clears with the tab for the same reason the presentation re-seeds.
-  const [search, setSearch] = useState('');
+  const [controlsOpen, setControlsOpen] = useEntryState('view.controls', false);
+  // Search never reaches the List file; it rides this Back entry.
+  const [search, setSearch] = useEntryState('view.search', '');
   // Re-seed when the LIST or the TAB changes — a tab carries its own
   // configuration, so switching tabs must not inherit the last one's.
   useEffect(() => {
     setPresentation(clonePresentation(surface.presentation));
-    setSearch('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection.id, selection.collection, activeId]);
 
@@ -112,6 +114,13 @@ export function ListPage({ selection }: { selection: ListSelection }) {
   );
 
   const sourceType = list?.definition.source.type ?? null;
+  const problems = useMemo(
+    () =>
+      activeView === null
+        ? []
+        : checkView({ ...activeView, presentation }, sourceType, schema, entries),
+    [activeView, presentation, sourceType, schema, entries],
+  );
   // M9.6: a typeless view has no single type to create into, so the
   // affordance is simply absent there rather than guessing one.
   const quickAdd = useQuickAdd(sourceType ?? '', null);
@@ -129,7 +138,10 @@ export function ListPage({ selection }: { selection: ListSelection }) {
   const onCreateOn =
     sourceType === null || dateField === null
       ? undefined
-      : (title: string, day: string) => createOnDay(title, day, dateField);
+      : (title: string, day: string, slot?: TimeSlot) =>
+          slot === undefined
+            ? createOnDay(title, day, dateField)
+            : createOnDay(title, day, dateField, slot);
   // Collapse state is namespaced per TAB: two views of one List group
   // differently, so a band collapsed in the board is not the same band.
   const scope = `list:${selection.collection ?? ''}:${selection.id}:${activeId}`;
@@ -307,6 +319,7 @@ export function ListPage({ selection }: { selection: ListSelection }) {
         <ViewTabs
           views={list.definition.views}
           activeId={activeId}
+          onExport={(view) => void exportViewCsv({ ...selection, view }, views)}
           onSelect={openTab}
           onCreate={createView}
           onRename={(id, name) =>
@@ -410,10 +423,13 @@ export function ListPage({ selection }: { selection: ListSelection }) {
             // than take you to another one.
             showLayout={false}
             filters={activeView.filters}
+            problems={problems}
             onFiltersChange={(filters) => changeView({ ...activeView, filters })}
           />
         )}
+        <ViewProblems problems={problems} source={sourceType} />
         <ViewCanvas
+          entryScrollKey="canvas.scroll"
           entries={shownEntries}
           allEntries={entries}
           presentation={presentation}

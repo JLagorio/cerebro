@@ -1,7 +1,7 @@
 {
   "format": 1,
-  "artifact_version": 6,
-  "rule_version": "tool-approval/2026-10-14",
+  "artifact_version": 7,
+  "rule_version": "tool-approval/2026-10-15",
   "cli_version": "2.1.250",
   "min_cli_version": "2.1.250",
   "ceilings": {
@@ -54,6 +54,7 @@
     "shell": "deny",
     "file_read": "deny"
   },
+  "unattended_hidden_paths": ["sources/mail"],
   "hidden_paths": {
     "folders": [
       ".trash"

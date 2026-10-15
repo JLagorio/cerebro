@@ -1,4 +1,5 @@
 import { useState, type ReactElement } from 'react';
+import { ViewSuggestionCard } from './ViewSuggestionCard';
 import { AiActionCard, toolIcon, toolPath, type GitHistory } from '@/agent/AiActionCard';
 import {
   transcriptRows,
@@ -30,6 +31,7 @@ export interface RowProps {
   onOpenPath: (path: string) => void;
   onViewDiff?: (path: string) => void;
   history?: GitHistory;
+  readOnly?: boolean;
 }
 
 /** One string field of a call's input, the whole one first. */
@@ -53,6 +55,14 @@ function outputOf(tool: ToolCall): string | null {
 
 function StepRow(props: RowProps) {
   return <AiActionCard {...props} />;
+}
+
+function ViewRow(props: RowProps) {
+  return props.status === 'done' && !props.tool.failed ? (
+    <ViewSuggestionCard tool={props.tool} readOnly={props.readOnly} />
+  ) : (
+    <AiActionCard {...props} />
+  );
 }
 
 /** A concept write: the card, and the way to the concept's review bar. */
@@ -159,6 +169,7 @@ function CommitRow(props: RowProps) {
 /** One renderer per value the manifest's vocabulary holds. */
 export const RENDERERS: Record<Renderer, (props: RowProps) => ReactElement> = {
   step: StepRow,
+  view: ViewRow,
   change: StepRow,
   concept: ConceptRow,
   handoff: HandoffRow,
@@ -243,7 +254,7 @@ export function TranscriptRows({
   readOnly?: boolean;
   waitingToolId?: string | null;
 }) {
-  const rest = readOnly ? { onOpenPath } : { onOpenPath, onViewDiff, history };
+  const rest = readOnly ? { onOpenPath, readOnly } : { onOpenPath, onViewDiff, history, readOnly };
   return (
     <div className="flex flex-col gap-1">
       {transcriptRows(tools, streaming, undefined, waitingToolId).map((row) =>

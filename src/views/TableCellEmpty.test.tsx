@@ -1,3 +1,4 @@
+import { navSeed } from '@/test/navSeed';
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
@@ -90,7 +91,7 @@ describe('an unset table cell is blank (M16.35)', () => {
     useUiStore.setState({ detailPath: null });
     useNavStore.setState({
       selection: { kind: 'list', id: 'at-risk-work' },
-      history: [{ kind: 'list', id: 'at-risk-work' }],
+      history: [navSeed({ kind: 'list', id: 'at-risk-work' })],
       historyIndex: 0,
     });
   });

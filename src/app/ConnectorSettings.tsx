@@ -78,7 +78,8 @@ function withoutCommand(spec: ConnectorSpec): string {
  * merged in, and a run is granted its tools by name unless its agent's record
  * narrows it (M54.9). A vault with no list keeps the legacy behavior for
  * turns you watch that name no connector: your own MCP config loads, and
- * Cerebro grants none of its tools. Credentials never enter cerebro: entries
+ * Cerebro grants none of its tools. Personal client access pins every run to
+ * its explicit connector list. Credentials never enter cerebro: entries
  * reference the user's own servers, and headers/env are edited in the file
  * itself, not here. A preset (M69.1) writes its own name, URL and oauth
  * scopes, and its sign-in happens in Claude Code like any other.
@@ -534,9 +535,11 @@ export function ConnectorSettings() {
         approved here, and left in by its agent’s record. One the file names on its own stays out of
         runs until you approve it here — for stdio the exact command it runs, for http the exact
         URL, headers and oauth. Approval is per machine, and any edit to the entry asks again. With
-        no list, a turn you watch loads your global MCP config but Cerebro grants none of its tools;
-        a turn whose agent or skill names a connector loads none of it, and background jobs never
-        load it. A background job reaches only the connectors its agent names.
+        no list and access for other apps off, a turn you watch loads your global MCP config but
+        Cerebro grants none of its tools. While access for other apps is on, runs use only this
+        explicit list; personal client connections never become run connectors. A turn whose agent
+        or skill names a connector loads none of it, and background jobs never load it. A background
+        job reaches only the connectors its agent names.
       </p>
     </div>
   );

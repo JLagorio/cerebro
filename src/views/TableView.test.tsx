@@ -1,7 +1,9 @@
+import { navSeed } from '@/test/navSeed';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TableView } from '@/views/TableView';
+import * as ipc from '@/lib/ipc';
 import { ownsEscape, pushLayer, resetLayers } from '@/components/ui/layers';
 import { buildSchema } from '@/engine/schema';
 import { columnUniverse } from '@/engine/columns';
@@ -39,7 +41,7 @@ describe('TableView row opening (M9.3)', () => {
     // Standing in a saved view — the case that used to navigate away.
     useNavStore.setState({
       selection: { kind: 'list', id: 'at-risk-work' },
-      history: [{ kind: 'list', id: 'at-risk-work' }],
+      history: [navSeed({ kind: 'list', id: 'at-risk-work' })],
       historyIndex: 0,
     });
   });
@@ -80,6 +82,26 @@ describe('TableView row opening (M9.3)', () => {
   });
 });
 
+it('counts a record in two value bands once in the table footer (M61.1)', () => {
+  const entry = makeEntry({
+    path: 'items/shared.md',
+    title: 'Shared',
+    properties: { tags: ['a', 'b'] },
+  });
+  const schema = buildSchema([entry]);
+  useVaultStore.setState({ entries: [entry] });
+  render(
+    <TableView
+      entries={[entry]}
+      presentation={{ ...presentation, group: [{ field: 'tags' }], titleCalc: 'count_all' }}
+      schema={schema}
+      fields={[]}
+    />,
+  );
+  expect(screen.getAllByTestId('table-row')).toHaveLength(2);
+  expect(screen.getByTestId('table-footer').textContent).toContain('1');
+});
+
 /**
  * Keyboard reachability of the grid (M15).
  *
@@ -95,7 +117,7 @@ describe('TableView keyboard access (M15)', () => {
     useUiStore.setState({ detailPath: null });
     useNavStore.setState({
       selection: { kind: 'list', id: 'at-risk-work' },
-      history: [{ kind: 'list', id: 'at-risk-work' }],
+      history: [navSeed({ kind: 'list', id: 'at-risk-work' })],
       historyIndex: 0,
     });
   });
@@ -406,7 +428,7 @@ describe('TableView cell cursor (M16.17)', () => {
     useUiStore.setState({ detailPath: null });
     useNavStore.setState({
       selection: { kind: 'list', id: 'at-risk-work' },
-      history: [{ kind: 'list', id: 'at-risk-work' }],
+      history: [navSeed({ kind: 'list', id: 'at-risk-work' })],
       historyIndex: 0,
     });
   });
@@ -553,17 +575,27 @@ describe('TableView cell cursor (M16.17)', () => {
  */
 describe('TableView row gutter (M16.16)', () => {
   beforeEach(() => {
-    useVaultStore.setState({ entries: fixtureVault(), vaultPath: '/vault' });
+    useVaultStore.setState({
+      entries: fixtureVault(),
+      vaultPath: '/vault',
+      entriesVault: '/vault',
+    });
+    vi.spyOn(ipc, 'readNoteSource').mockResolvedValue({
+      content: '# Test\n',
+      hash: 'a'.repeat(64),
+    });
     useUiStore.setState({ detailPath: null, toasts: [] });
     useNavStore.setState({
       selection: { kind: 'list', id: 'at-risk-work' },
-      history: [{ kind: 'list', id: 'at-risk-work' }],
+      history: [navSeed({ kind: 'list', id: 'at-risk-work' })],
       historyIndex: 0,
     });
   });
 
+  afterEach(() => vi.restoreAllMocks());
+
   function grid(props: Partial<React.ComponentProps<typeof TableView>> = {}) {
-    const entries = fixtureVault();
+    const entries = fixtureVault().map((entry) => ({ ...entry, hash: 'a'.repeat(64) }));
     const schema = buildSchema(entries);
     const items = entries.filter((e) => e.type === 'Work item');
     render(
@@ -609,6 +641,17 @@ describe('TableView row gutter (M16.16)', () => {
     await user.keyboard('{/Shift}');
     // Without an anchor a range select is just a second single click.
     expect(screen.getByTestId('bulk-bar').getAttribute('aria-label')).toBe('3 selected');
+  });
+
+  it('copies one filename-stem link per selected row', async () => {
+    const user = userEvent.setup();
+    const { items } = grid();
+    await user.click(screen.getByTestId('select-all'));
+    await user.click(screen.getByRole('button', { name: 'Copy links' }));
+    const copied = (await navigator.clipboard.readText()).split('\n').sort();
+    expect(copied).toEqual(
+      items.map((entry) => `[[${entry.filename.replace(/\.md$/i, '')}]]`).sort(),
+    );
   });
 
   it('select-all ticks every row and clicking it again clears them', async () => {
@@ -673,9 +716,12 @@ describe('TableView row gutter (M16.16)', () => {
     await user.click(screen.getByTestId('row-delete'));
     await user.click(screen.getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(applyBatch).toHaveBeenCalledTimes(1));
-    expect(applyBatch).toHaveBeenCalledWith([{ op: 'delete', path: items[0].path }], {
-      undo: `Moved “${items[0].title}” to Trash`,
-    });
+    expect(applyBatch).toHaveBeenCalledWith(
+      [{ op: 'delete', path: items[0].path, expectHash: items[0].hash }],
+      {
+        undo: `Moved “${items[0].title}” to Trash`,
+      },
+    );
   });
 
   it('deleting checked rows sends them all in one batch', async () => {
@@ -692,8 +738,8 @@ describe('TableView row gutter (M16.16)', () => {
     await waitFor(() => expect(applyBatch).toHaveBeenCalledTimes(1));
     expect(applyBatch).toHaveBeenCalledWith(
       [
-        { op: 'delete', path: items[0].path },
-        { op: 'delete', path: items[1].path },
+        { op: 'delete', path: items[0].path, expectHash: items[0].hash },
+        { op: 'delete', path: items[1].path, expectHash: items[1].hash },
       ],
       { undo: 'Moved 2 records to Trash' },
     );
@@ -712,6 +758,33 @@ describe('TableView row gutter (M16.16)', () => {
     await waitFor(() => expect(applyBatch).toHaveBeenCalledTimes(1));
     expect(useUiStore.getState().toasts).toEqual([]);
     expect(screen.getByTestId('bulk-bar')).toBeTruthy();
+    expect(screen.getByTestId('bulk-report').textContent).toContain("the change didn't go through");
+    expect(screen.getAllByTestId('table-row')[0].hasAttribute('data-bulk-failed')).toBe(true);
+    await user.click(screen.getByLabelText(`Select ${items[0].title}`));
+    expect(screen.queryByTestId('bulk-report')).toBeNull();
+  });
+
+  it('a late bulk result cannot reinstate a selection the person cleared', async () => {
+    let finish!: () => void;
+    const applyBatch = vi.fn(
+      () =>
+        new Promise<null>((resolve) => {
+          finish = () => resolve(null);
+        }),
+    );
+    useVaultStore.setState({ applyBatch });
+    const user = userEvent.setup();
+    const { items } = grid();
+    await user.click(screen.getByLabelText(`Select ${items[0].title}`));
+    await user.click(
+      within(screen.getByTestId('bulk-bar')).getByRole('button', { name: 'Delete' }),
+    );
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(applyBatch).toHaveBeenCalledOnce());
+    await user.click(screen.getByRole('button', { name: 'Clear selection' }));
+    finish();
+    await waitFor(() => expect(screen.queryByTestId('bulk-report')).toBeNull());
+    expect(screen.queryByTestId('bulk-bar')).toBeNull();
   });
 
   it('offers no insert affordance on a surface that cannot create', () => {
@@ -744,6 +817,38 @@ describe('TableView row gutter (M16.16)', () => {
  * other per-column setting, and the footer only reports.
  */
 describe('TableView calculations (M16.15, M19.5)', () => {
+  it('a numeric footer names a skipped row and clears the note when every row has a number', () => {
+    const doc = makeEntry({
+      path: 'types/metric.md',
+      title: 'Metric',
+      type: 'Type',
+      properties: { fields: { value: { kind: 'number' } } } as unknown as Entry['properties'],
+    });
+    const a = makeEntry({ path: 'metrics/a.md', type: 'Metric', properties: { value: 3 } });
+    const b = makeEntry({ path: 'metrics/b.md', type: 'Metric' });
+    const renderTable = (items: Entry[]) => {
+      const all = [doc, ...items];
+      const schema = buildSchema(all);
+      return (
+        <TableView
+          entries={items}
+          presentation={{ ...presentation, columns: [{ field: 'value', calc: 'sum' }] }}
+          schema={schema}
+          fields={schema.types.get('Metric')!.fields}
+        />
+      );
+    };
+    useVaultStore.setState({ entries: [doc, a, b] });
+    const rendered = render(renderTable([a, b]));
+    expect(screen.getByTestId('calc-value').textContent).toContain('3');
+    expect(screen.getByTestId('calc-skipped-value').textContent).toBe('· 1 skipped');
+    expect(screen.getByTestId('calc-skipped-value').title).toBe(
+      '1 row has no number here, so the sum leaves it out.',
+    );
+    rendered.rerender(renderTable([a, { ...b, properties: { value: 2 } }]));
+    expect(screen.getByTestId('calc-value').textContent).toContain('5');
+    expect(screen.queryByTestId('calc-skipped-value')).toBeNull();
+  });
   beforeEach(() => {
     useVaultStore.setState({ entries: fixtureVault() });
   });
@@ -958,7 +1063,7 @@ describe('TableView header settings (M16.18)', () => {
     await user.clear(rename);
     await user.type(rename, 'Urgency{Enter}');
     await waitFor(() => expect(batches).toHaveLength(1));
-    const doc = batches[0].find((op) => op.path === 'types/work-item.md');
+    const doc = batches[0].find((op) => op.op === 'patch' && op.path === 'types/work-item.md');
     expect(doc?.op === 'patch' && Object.keys(doc.set.fields as object)).toContain('urgency');
     expect(onColumnsChange).not.toHaveBeenCalled();
   });
@@ -2029,4 +2134,71 @@ describe('TableView Change type (M60.5)', () => {
     );
     expect(patches.map((p) => p.path)).toEqual(['types/bet.md', 'records/bets/bet-1.md']);
   });
+});
+
+it('renders formula cells from the schema without a cell editor, including an absent result', () => {
+  const doc = makeEntry({
+    path: 'types/metric.md',
+    type: 'Type',
+    title: 'Metric',
+    properties: {
+      fields: { current: { kind: 'number' }, gap: { kind: 'formula', formula: '100 - current' } },
+    } as never,
+  });
+  const full = makeEntry({
+    path: 'metrics/full.md',
+    title: 'Full metric',
+    type: 'Metric',
+    properties: { current: 30, gap: 999 },
+  });
+  const empty = makeEntry({
+    path: 'metrics/empty.md',
+    title: 'Empty metric',
+    type: 'Metric',
+    properties: { gap: 999 },
+  });
+  const schema = buildSchema([doc, full, empty]);
+  useVaultStore.setState({ entries: [doc, full, empty] });
+  render(
+    <TableView
+      entries={[full, empty]}
+      presentation={{ type: 'table', group: [], sort: [], columns: [{ field: 'gap' }] }}
+      schema={schema}
+      fields={schema.types.get('Metric')!.fields}
+    />,
+  );
+  const rows = screen.getAllByTestId('table-row');
+  expect(within(rows[0]).getByText('70')).toBeTruthy();
+  expect(within(rows[1]).getByText('—')).toBeTruthy();
+  for (const row of rows) {
+    const cell = within(row).getAllByRole('gridcell').at(-1)!;
+    fireEvent.doubleClick(cell);
+    expect(within(cell).queryByRole('textbox')).toBeNull();
+    expect(within(cell).queryByRole('spinbutton')).toBeNull();
+    expect(within(cell).queryByRole('button')).toBeNull();
+  }
+});
+
+it('captures and restores its scroll only when the host gives an entry key (M65.4)', () => {
+  useNavStore.getState().setLiveCheck(null);
+  useNavStore.getState().reset();
+  const entries = fixtureVault();
+  const schema = buildSchema(entries);
+  const mounted = render(
+    <TableView
+      entries={entries}
+      presentation={presentation}
+      schema={schema}
+      fields={[]}
+      entryScrollKey="canvas.scroll"
+    />,
+  );
+  screen.getByTestId('table-view').scrollTop = 240;
+  act(() => useNavStore.getState().navigate({ kind: 'settings' }));
+  screen.getByTestId('table-view').scrollTop = 10;
+  act(() => useNavStore.getState().back());
+  expect(screen.getByTestId('table-view').scrollTop).toBe(240);
+  mounted.unmount();
+  render(<TableView entries={entries} presentation={presentation} schema={schema} fields={[]} />);
+  expect(screen.getByTestId('table-view').scrollTop).toBe(0);
 });

@@ -84,7 +84,11 @@ export function canonicalKnowledgePath(path: string): string | null {
 /** True for notes inside the bundle — excluded from Docs, Inbox, and the
  * type screens so agent knowledge never mixes into your own content. */
 export function isConcept(entry: Entry): boolean {
-  return isKnowledgePath(entry.path) && !RESERVED_FILENAMES.includes(entry.filename);
+  return (
+    entry.path.endsWith('.md') &&
+    isKnowledgePath(entry.path) &&
+    !RESERVED_FILENAMES.includes(entry.filename)
+  );
 }
 
 // --- Actors (§7) -----------------------------------------------------------

@@ -1,6 +1,7 @@
 ---
 type: Work item
 key: LNC-1
+project: "[[field-app-launch-campaign]]"
 status: review
 priority: high
 assignee: "[[priya-nair]]"

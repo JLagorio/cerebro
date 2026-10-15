@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { renderHook } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { listenMock } = vi.hoisted(() => ({ listenMock: vi.fn() }));
 
-vi.mock('@/engine/schema', () => ({
+vi.mock('@/engine/schema', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/engine/schema')>()),
   buildSchema: vi.fn(() => ({ types: new Map() })),
 }));
 // Spy mode: implementations stay intact (delegating to mockIpc in the
@@ -997,6 +998,73 @@ describe('vaultStore rescans (M58.2)', () => {
  * refusal toasts once and rescans; it never throws.
  */
 describe('vaultStore.applyBatch (M60.6)', () => {
+  it('a vault switch while flushing prevents the batch and its optimistic patch', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    const path = useVaultStore.getState().entries.find((entry) => entry.type === 'Work item')!.path;
+    const before = useVaultStore.getState().entries;
+    const stop = registerFlush(async () => {
+      useVaultStore.setState({ vaultPath: '/other-vault', entriesVault: '/other-vault' });
+    });
+    try {
+      expect(
+        await useVaultStore.getState().applyBatch([{ op: 'patch', path, set: { status: 'done' } }]),
+      ).toBeNull();
+      expect(ipc.applyBatch).not.toHaveBeenCalled();
+      expect(useVaultStore.getState().entries).toBe(before);
+    } finally {
+      stop();
+    }
+  });
+
+  it('a batch already in flight cannot announce or repopulate Undo in a newer vault', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    useUndoStore.getState().clear();
+    useUiStore.setState({ toasts: [] });
+    const path = useVaultStore.getState().entries.find((entry) => entry.type === 'Work item')!.path;
+    let answer!: () => void;
+    vi.mocked(ipc.applyBatch).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = () =>
+            resolve({
+              batchId: 'b'.repeat(32),
+              files: [
+                {
+                  path,
+                  before: '# Before',
+                  beforeHash: 'a'.repeat(64),
+                  afterHash: 'b'.repeat(64),
+                  keys: [],
+                  trashed: null,
+                  restored: null,
+                  skipped: null,
+                },
+              ],
+            });
+        }),
+    );
+    const announced = vi.fn();
+    const stop = onExternalWrite(path, { pending: announced, settled: announced });
+    try {
+      const task = useVaultStore
+        .getState()
+        .applyBatch([{ op: 'patch', path, set: { status: 'done' } }], { undo: 'Set done' });
+      await vi.waitFor(() => expect(ipc.applyBatch).toHaveBeenCalled());
+      useVaultStore.setState({
+        vaultPath: '/other-vault',
+        entriesVault: '/other-vault',
+        entries: [],
+      });
+      answer();
+      expect(await task).not.toBeNull();
+      expect(useVaultStore.getState().entries).toEqual([]);
+      expect(announced).not.toHaveBeenCalled();
+      expect(useUndoStore.getState().past).toEqual([]);
+      expect(useUiStore.getState().toasts).toEqual([]);
+    } finally {
+      stop();
+    }
+  });
   const ITEM = 'projects/guided-onboarding-ga/items/fld-1.md';
   const OTHER = 'projects/guided-onboarding-ga/items/fld-2.md';
 
@@ -1160,5 +1228,69 @@ describe('vaultStore.applyBatch undo (M60.7)', () => {
     expect(applied).toBeNull();
     expect(heard).toEqual([staleWords(ITEM)]);
     expect(useUiStore.getState().toasts).toEqual([]);
+  });
+});
+
+describe('human filing inherits in its one write (M63.4)', () => {
+  const HOST = 'records/projects/guided-onboarding-ga.md';
+  const ITEM = 'projects/field-app-launch-campaign/items/lnc-1.md';
+  beforeEach(async () => {
+    const real = await vi.importActual<typeof import('@/engine/schema')>('@/engine/schema');
+    vi.mocked(buildSchema).mockImplementation(real.buildSchema);
+    await useVaultStore.getState().openVault('/demo-vault');
+    await useVaultStore.getState().patchFrontmatter(HOST, { agents: ['[[release-scout]]'] });
+    vi.mocked(ipc.updateFrontmatter).mockClear();
+  });
+  afterEach(() => vi.mocked(buildSchema).mockImplementation(() => ({ types: new Map() }) as never));
+  it('patchFrontmatter optimistically holds the host and its agent together and writes both once', async () => {
+    const before = findEntry('projects/guided-onboarding-ga/items/fld-1.md')!;
+    const saved = mockFsDisk().get(before.path);
+    const pending = useVaultStore
+      .getState()
+      .patchFrontmatter(ITEM, { project: ['[[guided-onboarding-ga]]'] });
+    expect(findEntry(ITEM)?.relationships).toMatchObject({
+      project: ['guided-onboarding-ga'],
+      agent: ['release-scout'],
+    });
+    expect(await pending).toBe(true);
+    expect(ipc.updateFrontmatter).toHaveBeenCalledTimes(1);
+    expect(ipc.updateFrontmatter).toHaveBeenCalledWith('/demo-vault', ITEM, {
+      project: ['[[guided-onboarding-ga]]'],
+      agent: ['[[release-scout]]'],
+    });
+    expect(mockFsDisk().get(before.path)).toBe(saved);
+  });
+  it('createItem adds inherited agents after the caller supplies its host link', async () => {
+    const path = await useVaultStore
+      .getState()
+      .createItem({
+        folder: 'work-items',
+        slug: 'inherited',
+        frontmatter: { type: 'Work item', project: ['[[guided-onboarding-ga]]'] },
+        body: '# Inherited',
+      });
+    expect(ipc.createNote).toHaveBeenCalledWith(
+      '/demo-vault',
+      'work-items',
+      'inherited',
+      { type: 'Work item', project: ['[[guided-onboarding-ga]]'], agent: ['[[release-scout]]'] },
+      '# Inherited',
+    );
+    expect(findEntry(path)?.relationships.agent).toEqual(['release-scout']);
+  });
+  it('an explicit assignment wins and direct batches never infer agents', async () => {
+    expect(
+      await useVaultStore
+        .getState()
+        .patchFrontmatter(ITEM, { project: ['[[guided-onboarding-ga]]'], agent: null }),
+    ).toBe(true);
+    expect(findEntry(ITEM)?.relationships.agent).toBeUndefined();
+    const other = 'projects/field-app-launch-campaign/items/lnc-2.md';
+    expect(
+      await useVaultStore
+        .getState()
+        .applyBatch([{ op: 'patch', path: other, set: { project: ['[[guided-onboarding-ga]]'] } }]),
+    ).not.toBeNull();
+    expect(findEntry(other)?.relationships.agent).toBeUndefined();
   });
 });

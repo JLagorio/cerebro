@@ -468,7 +468,7 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
               })}
               {convertTargets.length === 0 && (
                 <div className="px-2.5 py-4 text-xs text-n-500">
-                  No types yet — create one from the Types section of the sidebar first.
+                  No databases yet — create one from New or the Databases section of the sidebar.
                 </div>
               )}
             </div>

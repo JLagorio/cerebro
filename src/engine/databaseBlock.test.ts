@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   DATABASE_FENCE,
+  appendDatabaseFence,
+  canHoldDatabaseBlock,
   foldKey,
   parseDatabaseRef,
   pointerOccurrence,
+  renameDatabasePointers,
   resolveDatabaseRef,
   serializeDatabaseRef,
 } from './databaseBlock';
@@ -20,6 +23,76 @@ const typeDoc = (title: string, properties: Record<string, unknown> = {}): Entry
   });
 
 const view = (id: string) => ({ id, name: id, presentation: { type: 'table' } });
+
+describe('renameDatabasePointers (M60.11)', () => {
+  it('rewrites only matching pointers, keeps view ids and counts each fence', () => {
+    const body = [
+      'Work item in prose stays. [[Work item]]',
+      '```cerebro-database',
+      'database: Work item',
+      'view: all',
+      '```',
+      '~~~cerebro-database',
+      'database: Work item',
+      'view: at-risk-work',
+      '~~~~',
+      '```cerebro-database',
+      'database: Epic',
+      '```',
+    ].join('\n');
+    const result = renameDatabasePointers(body, 'Work item', 'Task');
+    expect(result).toEqual({
+      body: body.replaceAll('database: Work item', 'database: Task'),
+      count: 2,
+    });
+  });
+
+  it('quotes names through the YAML writer and preserves every other byte', () => {
+    const body =
+      '\ufeffProse\r\n  ```cerebro-database\r\n  database: Work item # owner comment\r\n  view: "all"\r\n  extra: retained\r\n  ```\r\n';
+    expect(renameDatabasePointers(body, 'Work item', 'Books: 2026')).toEqual({
+      body: body.replace('database: Work item', 'database: "Books: 2026"'),
+      count: 1,
+    });
+  });
+
+  it('leaves other languages, nested examples, empty and broken fences alone', () => {
+    for (const body of [
+      '```yaml\ndatabase: Work item\n```\n',
+      '````md\n```cerebro-database\ndatabase: Work item\n```\n````\n',
+      '```cerebro-database\n```\n',
+      '```cerebro-database\ndatabase: [\n```\n',
+      '```cerebro-database\ndatabase: Work item\n',
+      '```cerebro-database\ndatabase: Work item\n~~~\n',
+      '````cerebro-database\ndatabase: Work item\n```\n',
+      '    ```cerebro-database\n    database: Work item\n    ```\n',
+    ]) {
+      expect(renameDatabasePointers(body, 'Work item', 'Task')).toEqual({ body, count: 0 });
+    }
+  });
+
+  it('preserves a flow mapping and only compares the full database name', () => {
+    const body =
+      '```cerebro-database\n{ database: Work item, view: board }\n```\n' +
+      '```cerebro-database\ndatabase: Work items\n```\n';
+    expect(renameDatabasePointers(body, 'Work item', 'Notes #1')).toEqual({
+      body: body.replace('database: Work item,', 'database: "Notes #1",'),
+      count: 1,
+    });
+    expect(renameDatabasePointers(body, 'Work item', 'Work item')).toEqual({ body, count: 0 });
+    expect(renameDatabasePointers(body, 'Work item', 'Books, 2026').body).toBe(
+      body.replace('database: Work item,', 'database: "Books, 2026",'),
+    );
+  });
+
+  it('keeps the line after a folded database scalar separate', () => {
+    const body = '```cerebro-database\r\ndatabase: >-\r\n  Work item\r\nview: all\r\n```\r\n';
+    expect(renameDatabasePointers(body, 'Work item', 'Task')).toEqual({
+      body: '```cerebro-database\r\ndatabase: Task\r\nview: all\r\n```\r\n',
+      count: 1,
+    });
+  });
+});
 
 describe('parseDatabaseRef', () => {
   it('reads the database and the view it names', () => {
@@ -249,5 +322,45 @@ describe('DATABASE_FENCE', () => {
    */
   it('is the namespaced language, not a bare word another tool might claim', () => {
     expect(DATABASE_FENCE).toBe('cerebro-database');
+  });
+});
+
+describe('appending a database fence', () => {
+  const ref = { database: 'Books: 2026', view: 'reading' };
+  it.each(['', '# Page', '# Page\n', '# Page\n\n', '# Page\n\n\n', '\uFEFF# Page\r\n'])(
+    'keeps the original bytes: %j',
+    (content) => {
+      const next = appendDatabaseFence(content, ref)!;
+      expect(next.startsWith(content)).toBe(true);
+      const eol = content.includes('\r\n') ? '\r\n' : '\n';
+      expect(
+        next.endsWith(
+          ['```cerebro-database', 'database: "Books: 2026"', 'view: reading', '```', ''].join(eol),
+        ),
+      ).toBe(true);
+      if (eol === '\r\n') expect(next.replaceAll('\r\n', '')).not.toContain('\n');
+    },
+  );
+  it.each(['```ts\nunfinished', '~~~\nunfinished', '````md\n```\n', '```\n~~~\n'])(
+    'refuses an unclosed fence: %j',
+    (content) => {
+      expect(appendDatabaseFence(content, ref)).toBeNull();
+    },
+  );
+  it('a closed longer fence and an indented example do not swallow the new block', () => {
+    expect(appendDatabaseFence('````md\n```\n````\n', ref)).not.toBeNull();
+    expect(appendDatabaseFence('    ```\n', ref)).not.toBeNull();
+  });
+  it.each([
+    ['notes/a.md', 'Doc', null, true],
+    ['notes/a.MD', null, null, true],
+    ['knowledge/a.md', 'Concept', null, false],
+    ['types/a.md', 'Type', null, false],
+    ['library/agents/a.md', 'Agent', null, false],
+    ['library/skills/a.md', 'Skill', null, false],
+    ['a.mmd', null, null, false],
+    ['a.md', null, 'broken', false],
+  ] as const)('checks the page carrier: %s %s', (path, type, parseError, expected) => {
+    expect(canHoldDatabaseBlock(makeEntry({ path, type, parseError }))).toBe(expected);
   });
 });

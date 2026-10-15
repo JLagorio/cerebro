@@ -91,3 +91,22 @@ describe('useFocusRestore', () => {
     expect(() => rerender(<Harness open={false} />)).not.toThrow();
   });
 });
+
+it('returns to the active pane after a dialog hands navigation to another pane', () => {
+  function Panes({ open, second }: { open: boolean; second: boolean }) {
+    return (
+      <>
+        <section data-testid="pane" data-active={!second} tabIndex={-1}>
+          <button>First opener</button>
+        </section>
+        <section data-testid="pane" data-active={second} tabIndex={-1} aria-label="Second pane" />
+        {open && <Panel />}
+      </>
+    );
+  }
+  const { rerender } = render(<Panes open={false} second={false} />);
+  screen.getByRole('button').focus();
+  rerender(<Panes open second={false} />);
+  rerender(<Panes open={false} second />);
+  expect(document.activeElement).toBe(screen.getByLabelText('Second pane'));
+});

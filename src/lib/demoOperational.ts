@@ -453,6 +453,40 @@ export function withheldRun(fields: {
   };
 }
 
+/** A browser pre-run check: one booked row, with no invented usage or model. */
+export function conditionRun(fields: {
+  runId: string;
+  vault: string;
+  actor: string;
+  at: string;
+  cause: FleetRun['cause'];
+  parent: string | null;
+}): FleetRunDetail {
+  const detail = withheldRun({
+    runId: fields.runId,
+    actor: fields.actor,
+    mode: 'ambient',
+    lane: 'agent',
+    sessionId: fields.runId,
+    at: fields.at,
+    detail: '',
+  });
+  return {
+    ...detail,
+    run: {
+      ...detail.run,
+      vault_id: fields.vault,
+      parent_run_id: fields.parent,
+      ended_at: fields.at,
+      outcome: 'succeeded',
+      cause: fields.cause,
+    },
+    refusals: [],
+    refusals_total: 0,
+    wrote: { state: 'recorded', writes: [] },
+  };
+}
+
 /** A detail with no cost or assembly rows recorded, nothing refused, and
  * writes not booked: every demo run but two is from before M58.1 booked
  * them, and a mock run's writes are logged under its attach id, never under
@@ -472,6 +506,7 @@ function unrecorded(run: FleetRun, model: string | null): FleetRunDetail {
 export function demoReviewCards(): ReviewCard[] {
   return [
     {
+      submitted_at: '2026-07-28T11:58:00Z',
       proposal_id: 'p0000000000000000000000000000001',
       commit_set_id: 'c0000000000000000000000000000001',
       run_id: 'run-scout-1',
@@ -506,6 +541,7 @@ export function demoReviewCards(): ReviewCard[] {
       set_ready: true,
     },
     {
+      submitted_at: '2026-07-28T11:58:00Z',
       proposal_id: 'p0000000000000000000000000000002',
       commit_set_id: 'c0000000000000000000000000000002',
       run_id: 'run-scout-1',
@@ -539,6 +575,7 @@ export function demoReviewCards(): ReviewCard[] {
       set_ready: true,
     },
     {
+      submitted_at: '2026-07-28T11:58:00Z',
       proposal_id: 'p0000000000000000000000000000003',
       commit_set_id: 'c0000000000000000000000000000003',
       run_id: 'run-maint-1',
@@ -771,6 +808,7 @@ export function demoLanes(): LanesView {
  * Rust has never had ("coverage"), with sentences no `match` arm writes. */
 export function demoChanges(): ChangesView {
   return {
+    changed_at: '2026-07-28T09:26:00.000Z',
     schema_version: 'convergence-v1',
     window: { from_seq: 118, to_seq: 147 },
     quiet: false,

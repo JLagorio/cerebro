@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AGGREGATES,
   aggregate,
+  aggregateSkipped,
   aggregateMeta,
   aggregatesFor,
   parseAggregateCalc,
@@ -81,6 +82,20 @@ describe('counting calculations', () => {
 });
 
 describe('numeric calculations', () => {
+  it.each(['sum', 'avg', 'min', 'max', 'range'] as const)(
+    '%s reports absent and unreadable cells it skipped',
+    (calc) => {
+      expect(aggregateSkipped(calc, cells(2, null, 'unknown', NaN, Infinity, 0))).toBe(4);
+      expect(aggregateSkipped(calc, cells(2, 0, -1))).toBe(0);
+      expect(aggregateSkipped(calc, [cell(2, '')])).toBe(1);
+    },
+  );
+  it.each(['count_all', 'count_empty', 'count_unique', 'percent_empty'] as const)(
+    '%s reports no skips',
+    (calc) => {
+      expect(aggregateSkipped(calc, cells(null, 'unknown', 1))).toBe(0);
+    },
+  );
   it('sums, averages, and spans', () => {
     const rows = cells(2, 4, 9);
     expect(aggregate('sum', rows)).toBe('15');

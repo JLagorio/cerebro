@@ -107,7 +107,7 @@
 //! property of the singleton.
 
 use chrono::{DateTime, Duration, Utc};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use crate::agent::usage::{RunFacts, Usage};
 
@@ -147,9 +147,10 @@ pub enum Woken {
     /// wake's stored cause, the one the run row now carries; `also` the
     /// causes of the wakes of the same trigger it took with it.
     Started {
-        lease: Lease,
+        lease: Box<Lease>,
         cause: Option<RunCause>,
         also: Vec<RunCause>,
+        parent_run_id: Option<String>,
     },
     /// Not now: the wake stays pending with a time to try again. The gate's
     /// reasons, or `agent_running`.
@@ -157,6 +158,8 @@ pub enum Woken {
     /// Nothing to run: the wake is no longer pending, is another vault's, or
     /// was just cancelled (expired, or its agent is paused).
     Gone,
+    /// Its parent chain spent its allowance before this wake could claim.
+    Skipped,
 }
 
 /// What the claim transaction answered, before `claim` or `claim_woken`
@@ -164,6 +167,7 @@ pub enum Woken {
 enum Answer {
     Dispatched(Dispatched),
     Woken(Woken),
+    Check(CheckClaim),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -246,10 +250,71 @@ pub fn claim(
         actor,
         cause,
         None,
+        None,
         now,
     )? {
         Answer::Dispatched(dispatched) => Ok(dispatched),
-        Answer::Woken(_) => Err("dispatch: a claim without a wake answered for one".into()),
+        Answer::Woken(_) | Answer::Check(_) => {
+            Err("dispatch: a claim without a wake answered for one".into())
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum CheckClaim {
+    Started(Lease),
+    Deferred(Vec<String>),
+    Gone,
+    ChainSpent,
+}
+
+#[derive(Clone, Copy)]
+struct CheckContext<'a> {
+    parent: Option<&'a str>,
+    wakes: &'a [String],
+}
+
+/// A check keeps its wakes pending, but bills its own run to their parent chain.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the check books the existing claim columns plus the wake's recorded parent"
+)]
+pub(crate) fn claim_check(
+    conn: &Connection,
+    vault_id: &str,
+    store_uuid: &str,
+    reservation: Reservation,
+    actor: &str,
+    cause: &RunCause,
+    parent: Option<&str>,
+    wakes: &[String],
+    now: DateTime<Utc>,
+) -> Result<CheckClaim, String> {
+    if !status::ambient_allowed() {
+        return Ok(CheckClaim::Deferred(vec![GateReason::AccountingUnknown
+            .as_str()
+            .into()]));
+    }
+    match claim_with(
+        conn,
+        vault_id,
+        store_uuid,
+        "agent",
+        reservation,
+        &[],
+        Some(actor),
+        Some(cause),
+        None,
+        Some(CheckContext { parent, wakes }),
+        now,
+    )? {
+        Answer::Dispatched(Dispatched::Started(lease)) => Ok(CheckClaim::Started(lease)),
+        Answer::Dispatched(Dispatched::Deferred(reasons)) => Ok(CheckClaim::Deferred(
+            reasons.iter().map(|r| r.as_str().into()).collect(),
+        )),
+        Answer::Dispatched(Dispatched::NothingToClaim) => Ok(CheckClaim::Gone),
+        Answer::Check(answer) => Ok(answer),
+        Answer::Woken(_) => Err("dispatch: a check answered for a woken claim".into()),
     }
 }
 
@@ -308,10 +373,13 @@ pub fn claim_woken(
         Some(actor),
         None,
         Some(wake),
+        None,
         now,
     )? {
         Answer::Woken(woken) => Ok(woken),
-        Answer::Dispatched(_) => Err("dispatch: a woken claim answered without its wake".into()),
+        Answer::Dispatched(_) | Answer::Check(_) => {
+            Err("dispatch: a woken claim answered without its wake".into())
+        }
     }
 }
 
@@ -331,6 +399,7 @@ fn claim_with(
     actor: Option<&str>,
     cause: Option<&RunCause>,
     wake: Option<&WakeRequest>,
+    check: Option<CheckContext<'_>>,
     now: DateTime<Utc>,
 ) -> Result<Answer, String> {
     conn.execute_batch("BEGIN IMMEDIATE")
@@ -346,6 +415,7 @@ fn claim_with(
         actor,
         cause,
         wake,
+        check,
         now,
     );
     match outcome {
@@ -365,7 +435,7 @@ fn claim_with(
 /// Keep a pending wake pending with the reasons it waits on and a time to try
 /// again: [`wakes::BUSY_RETRY_SECS`] when every reason is about a busy slot,
 /// [`wakes::BUDGET_RETRY_SECS`] otherwise.
-fn defer_wake(
+pub(crate) fn defer_wake(
     conn: &Connection,
     wake_id: &str,
     reasons: &[String],
@@ -396,6 +466,7 @@ fn defer_wake(
 struct WakeRow {
     trigger_digest: String,
     cause: String,
+    parent_run_id: Option<String>,
 }
 
 /// The woken half of the claim before the gate: `Ok(Err(answer))` when the
@@ -407,9 +478,18 @@ fn wake_before_gate(
     wake: &WakeRequest,
     now: DateTime<Utc>,
 ) -> Result<Result<WakeRow, Woken>, String> {
-    let found: Option<(String, String, String, String, String, String)> = conn
+    type StoredWake = (
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        Option<String>,
+    );
+    let found: Option<StoredWake> = conn
         .query_row(
-            "SELECT vault_id, agent, state, admitted_at, trigger_digest, cause \
+            "SELECT vault_id, agent, state, admitted_at, trigger_digest, cause, parent_run_id \
              FROM agent_wakes WHERE wake_id = ?1",
             [&wake.claim],
             |row| {
@@ -420,6 +500,7 @@ fn wake_before_gate(
                     row.get(3)?,
                     row.get(4)?,
                     row.get(5)?,
+                    row.get(6)?,
                 ))
             },
         )
@@ -428,7 +509,8 @@ fn wake_before_gate(
             rusqlite::Error::QueryReturnedNoRows => Ok(None),
             other => Err(format!("agent_wakes: {other}")),
         })?;
-    let Some((wake_vault, agent, state, admitted_at, trigger_digest, cause)) = found else {
+    let Some((wake_vault, agent, state, admitted_at, trigger_digest, cause, parent_run_id)) = found
+    else {
         return Ok(Err(Woken::Gone));
     };
     if wake_vault != vault_id || state != "pending" {
@@ -444,6 +526,15 @@ fn wake_before_gate(
     if admitted_at <= wakes::ttl_cutoff(now) {
         wakes::cancel_one(conn, &wake.claim, wakes::EXPIRED, None, now)?;
         return Ok(Err(Woken::Gone));
+    }
+    if let Some(parent) = parent_run_id.as_deref() {
+        if let Err(detail) = refuse_if_chain_spent(conn, parent, now) {
+            if !detail.starts_with("refused:") {
+                return Err(detail);
+            }
+            wakes::skip_pending(conn, &wake.claim, wakes::CHAIN_SPENT, now)?;
+            return Ok(Err(Woken::Skipped));
+        }
     }
     // Single flight: one run of an agent at a time, whatever started the one
     // that is going, and one started wake per agent, which the index holds.
@@ -464,6 +555,7 @@ fn wake_before_gate(
     Ok(Ok(WakeRow {
         trigger_digest,
         cause,
+        parent_run_id,
     }))
 }
 
@@ -521,9 +613,9 @@ fn start_wake(
                 "UPDATE agent_wakes SET state = 'finished', outcome = 'coalesced', run_id = ?2, \
                  finished_at = ?3, not_before = NULL, deferred = NULL \
                  WHERE wake_id = ?1 AND state = 'pending' AND vault_id = ?4 AND agent = ?5 \
-                 AND trigger_digest = ?6 AND json_extract(cause, '$.kind') = 'event' \
+                 AND trigger_digest = ?6 AND parent_run_id IS ?7 AND json_extract(cause, '$.kind') = 'event' \
                  RETURNING cause",
-                rusqlite::params![id, run_id, stamp(now), vault_id, agent, row.trigger_digest],
+                rusqlite::params![id, run_id, stamp(now), vault_id, agent, row.trigger_digest, row.parent_run_id],
                 |r| r.get(0),
             )
             .map(Some)
@@ -552,8 +644,32 @@ fn claim_inner(
     actor: Option<&str>,
     cause: Option<&RunCause>,
     wake: Option<&WakeRequest>,
+    check: Option<CheckContext<'_>>,
     now: DateTime<Utc>,
 ) -> Result<Answer, String> {
+    // This runs under the same BEGIN IMMEDIATE that inserts the run. Two
+    // windows cannot both see an idle actor, or book after its chain spent.
+    if let Some(check) = check {
+        let pending: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM agent_wakes WHERE vault_id=?1 AND agent=?2 AND state='pending' AND wake_id IN (SELECT value FROM json_each(?3)))",
+            rusqlite::params![vault_id,actor,serde_json::to_string(check.wakes).map_err(|e|e.to_string())?],|row|row.get(0))
+            .map_err(|error|format!("pre-run check: {error}"))?;
+        if !pending {
+            return Ok(Answer::Check(CheckClaim::Gone));
+        }
+        if let Some(parent) = check.parent {
+            if chain_spent(conn, parent, now)? {
+                return Ok(Answer::Check(CheckClaim::ChainSpent));
+            }
+        }
+        let active: bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM runs WHERE vault_id=?1 AND actor=?2 AND outcome='running')",rusqlite::params![vault_id,actor],|row|row.get(0))
+            .map_err(|error|format!("pre-run check: {error}"))?;
+        if active {
+            return Ok(Answer::Check(CheckClaim::Deferred(vec![
+                wakes::AGENT_RUNNING.into(),
+            ])));
+        }
+    }
     // A woken claim reads its wake first (M63.1): one that cannot run ends
     // the claim before a gate decision is recorded, as an empty item list
     // does.
@@ -634,9 +750,9 @@ fn claim_inner(
         "INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, outcome, \
          usage_state, input_tokens, output_tokens, cache_read, cache_write, \
          reserved_total_tokens, reserved_output_tokens, lease_expires_at, proposals_submitted, \
-         applied, rejected, actor, counters_booked, cause) \
+         applied, rejected, actor, counters_booked, cause, parent_run_id) \
          VALUES (?1, ?2, ?3, 'ambient', ?4, ?5, 'running', 'pending', 0, 0, 0, 0, ?6, ?7, ?8, \
-                 0, 0, 0, ?9, 1, ?10)",
+                 0, 0, 0, ?9, 1, ?10, ?11)",
         rusqlite::params![
             run_id,
             vault_id,
@@ -648,6 +764,10 @@ fn claim_inner(
             lease_expires_at,
             actor,
             cause_column,
+            wake_row
+                .as_ref()
+                .and_then(|row| row.parent_run_id.as_deref())
+                .or(check.and_then(|c| c.parent)),
         ],
     )
     .map_err(|e| format!("runs: {e}"))?;
@@ -720,9 +840,10 @@ fn claim_inner(
     };
     Ok(match wake_row {
         Some(row) => Answer::Woken(Woken::Started {
-            lease,
+            lease: Box::new(lease),
             cause: RunCause::from_column(&row.cause),
             also,
+            parent_run_id: row.parent_run_id,
         }),
         None => Answer::Dispatched(Dispatched::Started(lease)),
     })
@@ -847,6 +968,57 @@ pub fn finalize_until_reset(
     quota_resets_at: Option<DateTime<Utc>>,
     now: DateTime<Utc>,
 ) -> Result<(), String> {
+    finalize_with(
+        conn,
+        run_id,
+        outcome,
+        usage,
+        facts,
+        items,
+        quota_resets_at,
+        false,
+        now,
+    )
+}
+
+/// A pre-run check is metered normally, but never changes the agent lane's
+/// consecutive-failure counter. A crashed check is still swept normally.
+pub fn finalize_check(
+    conn: &Connection,
+    run_id: &str,
+    outcome: RunOutcome,
+    usage: Option<Usage>,
+    facts: Option<&RunFacts>,
+    now: DateTime<Utc>,
+) -> Result<(), String> {
+    finalize_with(
+        conn,
+        run_id,
+        outcome,
+        usage,
+        facts,
+        ItemOutcome::Consume,
+        None,
+        true,
+        now,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the common finalizer keeps the public call contracts, with one supervisor flag"
+)]
+fn finalize_with(
+    conn: &Connection,
+    run_id: &str,
+    outcome: RunOutcome,
+    usage: Option<Usage>,
+    facts: Option<&RunFacts>,
+    items: ItemOutcome,
+    quota_resets_at: Option<DateTime<Utc>>,
+    check: bool,
+    now: DateTime<Utc>,
+) -> Result<(), String> {
     conn.execute_batch("BEGIN IMMEDIATE")
         .map_err(|e| format!("finalize: {e}"))?;
     crate::crash::crash_point("runtime-finalize-begun");
@@ -858,6 +1030,7 @@ pub fn finalize_until_reset(
         facts,
         items,
         quota_resets_at,
+        check,
         now,
     );
     match result {
@@ -894,6 +1067,7 @@ fn finalize_inner(
     facts: Option<&RunFacts>,
     items: ItemOutcome,
     quota_resets_at: Option<DateTime<Utc>>,
+    check: bool,
     now: DateTime<Utc>,
 ) -> Result<bool, String> {
     let (vault_id, store_uuid, lane, mode, reserved_total, reserved_output, started_at): (
@@ -1026,9 +1200,12 @@ fn finalize_inner(
     }
 
     if let (Some(vault_id), Some(store_uuid)) = (vault_id, store_uuid) {
-        // A success resets the lane's failure counter; anything else adds to
-        // it. Three in a row and the lane stops asking.
-        let sql = if outcome.is_success() {
+        // Checks release their active marker without changing the agent's
+        // failure streak; ordinary success resets it and ordinary failure adds.
+        let sql = if check {
+            "UPDATE ambient_gate_state SET active_run_started_at = NULL, last_outcome = ?4 \
+             WHERE vault_id = ?1 AND store_uuid = ?2 AND lane = ?3"
+        } else if outcome.is_success() {
             "INSERT INTO ambient_gate_state (vault_id, store_uuid, lane, consecutive_failures, \
              active_run_started_at, last_outcome) VALUES (?1, ?2, ?3, 0, NULL, ?4) \
              ON CONFLICT (vault_id, store_uuid, lane) DO UPDATE SET consecutive_failures = 0, \
@@ -1097,6 +1274,29 @@ pub fn recover_expired_leases(conn: &Connection, now: DateTime<Utc>) -> Result<u
     Ok(expired.len())
 }
 
+/// The actors above a run, root first, bounded even if an old database has
+/// corrupt ancestry. A missing run is no chain; a recorded NULL actor is the
+/// assistant's default actor, never a fabricated person.
+pub fn chain_actors(conn: &Connection, run_id: &str) -> Result<Option<Vec<String>>, String> {
+    let mut stmt = conn
+        .prepare(
+            "WITH RECURSIVE up(run_id, parent, actor, depth) AS ( \
+         SELECT run_id, parent_run_id, actor, 0 FROM runs WHERE run_id = ?1 \
+         UNION ALL SELECT r.run_id, r.parent_run_id, r.actor, up.depth + 1 \
+         FROM runs r JOIN up ON r.run_id = up.parent WHERE up.depth < 15) \
+         SELECT actor FROM up ORDER BY depth DESC",
+        )
+        .map_err(|e| format!("run chain: {e}"))?;
+    let rows = stmt
+        .query_map([run_id], |row| row.get::<_, Option<String>>(0))
+        .map_err(|e| format!("run chain: {e}"))?;
+    let actors = rows
+        .map(|row| row.map(|actor| crate::mcp::normalize_actor(actor.as_deref()).to_string()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("run chain: {e}"))?;
+    Ok((!actors.is_empty()).then_some(actors))
+}
+
 /// The root's ceiling stops the chain (M36.6, settled design decision 5).
 ///
 /// Hops bill to the root — `parent_run_id` is the migration that made both
@@ -1117,6 +1317,33 @@ pub fn refuse_if_chain_spent(
     caller_run_id: &str,
     now: DateTime<Utc>,
 ) -> Result<(), String> {
+    let (root, spent, ceiling) = chain_totals(conn, caller_run_id, now)?;
+    if (spent as u64) >= ceiling {
+        return Err(format!(
+            "refused: this chain has already spent {spent} tokens, at or past the \
+             {ceiling}-token ceiling its root ({root}) runs under — a spent chain stops, \
+             however many hops it has left"
+        ));
+    }
+    Ok(())
+}
+
+/// A spent allowance is distinct from an unreadable account: only the former
+/// ends a wake as chain_spent; a failed read must remain retryable.
+pub(crate) fn chain_spent(
+    conn: &Connection,
+    caller_run_id: &str,
+    now: DateTime<Utc>,
+) -> Result<bool, String> {
+    let (_, spent, ceiling) = chain_totals(conn, caller_run_id, now)?;
+    Ok(spent as u64 >= ceiling)
+}
+
+fn chain_totals(
+    conn: &Connection,
+    caller_run_id: &str,
+    now: DateTime<Utc>,
+) -> Result<(String, i64, u64), String> {
     let root: String = conn
         .query_row(
             "WITH RECURSIVE up(run_id, parent) AS ( \
@@ -1129,7 +1356,9 @@ pub fn refuse_if_chain_spent(
         )
         // No row: a caller whose meter could not open one (no runtime DB at
         // its spawn). The caller IS the root as far as the table can see.
-        .unwrap_or_else(|_| caller_run_id.to_string());
+        .optional()
+        .map_err(|error| format!("chain root: {error}"))?
+        .unwrap_or_else(|| caller_run_id.to_string());
     let spent: i64 = conn
         .query_row(
             "WITH RECURSIVE chain(run_id) AS ( \
@@ -1145,14 +1374,7 @@ pub fn refuse_if_chain_spent(
     let ceiling = super::budget::ensure_day(conn, now)?
         .ceilings
         .max_ambient_run_tokens;
-    if (spent as u64) >= ceiling {
-        return Err(format!(
-            "refused: this chain has already spent {spent} tokens, at or past the \
-             {ceiling}-token ceiling its root ({root}) runs under — a spent chain stops, \
-             however many hops it has left"
-        ));
-    }
-    Ok(())
+    Ok((root, spent, ceiling))
 }
 
 /// Open one attended run's row, BEFORE its child exists (M49.9, K25).
@@ -1206,6 +1428,53 @@ pub fn begin_attended(
     )
     .map_err(|e| format!("runs (attended, open): {e}"))?;
     Ok(())
+}
+
+/// A personal-token session is an attributed run, not a model invocation.
+/// Usage stays pending until it ends unknown; recorded counters and writes
+/// are available immediately while the session dispatches calls.
+pub struct ClientSession<'a> {
+    pub run_id: &'a str,
+    pub vault_id: &'a str,
+    pub store_uuid: &'a str,
+    pub actor: &'a str,
+    pub token_name: &'a str,
+    pub client_info: Option<&'a str>,
+    pub started_at: DateTime<Utc>,
+}
+
+/// The caller opens its BEGIN IMMEDIATE before this insert and stamps the
+/// token in that same transaction, so no unrecorded session can answer.
+pub fn begin_client_session(conn: &Connection, session: &ClientSession<'_>) -> Result<(), String> {
+    if !session
+        .actor
+        .starts_with(crate::client_access::CLIENT_ACTOR_PREFIX)
+    {
+        return Err("a client session needs a client actor".into());
+    }
+    let cause = RunCause::new(
+        super::cause::CauseKind::Client,
+        Some(session.token_name),
+        session.client_info,
+        None,
+    );
+    conn.execute("INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, outcome, usage_state, input_tokens, output_tokens, cache_read, cache_write, reserved_total_tokens, reserved_output_tokens, proposals_submitted, applied, rejected, actor, counters_booked, writes_booked, cause) VALUES (?1,?2,?3,'attended','agent',?4,'running','pending',0,0,0,0,0,0,0,0,0,?5,1,1,?6)",
+        rusqlite::params![session.run_id,session.vault_id,session.store_uuid,stamp(session.started_at),session.actor,cause.to_column()])
+        .map_err(|e| format!("runs (client, open): {e}"))?;
+    Ok(())
+}
+
+/// Only running client rows can finish here. A repeated close is inert and
+/// nobody invents usage for a request processed by another app's model.
+pub fn finish_client_session(
+    conn: &Connection,
+    run_id: &str,
+    succeeded: bool,
+    ended_at: DateTime<Utc>,
+) -> Result<bool, String> {
+    conn.execute("UPDATE runs SET ended_at=?2, outcome=?3, usage_state='unknown' WHERE run_id=?1 AND outcome='running' AND actor LIKE 'client:%' AND json_extract(cause, '$.kind')='client'",
+        rusqlite::params![run_id,stamp(ended_at),if succeeded {"succeeded"} else {"cancelled"}])
+        .map(|changed| changed != 0).map_err(|e| format!("runs (client, finish): {e}"))
 }
 
 /// Does `approval` let the CLI's own writers or its shell run, asked or not
@@ -1568,6 +1837,9 @@ pub(crate) fn crash_wake_fixture(dir: &std::path::Path) -> (Connection, String, 
     let (conn, vault) = crash_fixture(dir);
     let offer = wakes::WakeOffer {
         agent: "process:scout".into(),
+        path: "records/a.md".into(),
+        hash: "a".repeat(64),
+        event: "changed".into(),
         wake_key: "a".repeat(64),
         trigger: "1".repeat(16),
         cause: super::cause::CauseRequest {
@@ -1576,10 +1848,15 @@ pub(crate) fn crash_wake_fixture(dir: &std::path::Path) -> (Connection, String, 
             ..Default::default()
         },
     };
-    wakes::admit(
+    tests::seed_run(&conn, &vault, "wake-parent", None, 0);
+    wakes::admit_with_writers(
         &conn,
         &vault,
         &[offer],
+        &[super::write_log::EventWriter::Run {
+            actor: "claude-code".into(),
+            run_id: "wake-parent".into(),
+        }],
         DateTime::parse_from_rfc3339("2026-08-09T09:00:00Z")
             .unwrap()
             .with_timezone(&Utc),
@@ -1697,7 +1974,13 @@ mod tests {
 
     /// One finished run row, raw — enough for the chain walk, which reads
     /// only identity, parentage and the two token columns.
-    fn seed_run(conn: &Connection, vault: &str, run_id: &str, parent: Option<&str>, tokens: i64) {
+    pub(super) fn seed_run(
+        conn: &Connection,
+        vault: &str,
+        run_id: &str,
+        parent: Option<&str>,
+        tokens: i64,
+    ) {
         conn.execute(
             "INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, ended_at, \
              outcome, usage_state, input_tokens, output_tokens, cache_read, cache_write, \
@@ -3692,8 +3975,9 @@ mod tests {
                 ("runtime/dispatch.rs".to_string(), true),
                 ("runtime/dispatch.rs".to_string(), true),
                 ("runtime/dispatch.rs".to_string(), true),
+                ("runtime/dispatch.rs".to_string(), true),
             ],
-            "the claim, the attended open and the meter's fallback insert, each naming cause"
+            "the claim, attended open, client session and meter fallback, each naming cause"
         );
     }
 
@@ -3775,6 +4059,9 @@ mod tests {
     fn event_offer(agent: &str, key: char, trigger: char, subject: &str) -> wakes::WakeOffer {
         wakes::WakeOffer {
             agent: agent.into(),
+            path: subject.into(),
+            hash: "a".repeat(64),
+            event: "changed".into(),
             wake_key: key.to_string().repeat(64),
             trigger: trigger.to_string().repeat(16),
             cause: crate::runtime::cause::CauseRequest {
@@ -3882,8 +4169,9 @@ mod tests {
             event_offer("process:scout", 'a', '1', "records/risks/r.md"),
             now,
         );
-        let Woken::Started { lease, cause, also } =
-            woken(&conn, &vault, "process:scout", &wake, &[], now).unwrap()
+        let Woken::Started {
+            lease, cause, also, ..
+        } = woken(&conn, &vault, "process:scout", &wake, &[], now).unwrap()
         else {
             panic!("not started");
         };
@@ -4360,7 +4648,18 @@ mod tests {
                 .unwrap();
             if started {
                 assert_eq!(state, "started", "{point}");
-                assert_eq!(runs, 1, "{point}");
+                assert_eq!(runs, 2, "{point}: parent plus exactly one child");
+                let parent: String = conn
+                    .query_row(
+                        "SELECT parent_run_id FROM runs WHERE run_id = ?1",
+                        [run_id.as_ref().unwrap()],
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    parent, "wake-parent",
+                    "{point}: lineage commits with the claim"
+                );
                 let running: String = conn
                     .query_row(
                         "SELECT outcome FROM runs WHERE run_id = ?1",
@@ -4383,7 +4682,7 @@ mod tests {
                     "{point}: an uncommitted claim starts nothing"
                 );
                 assert_eq!(run_id, None, "{point}");
-                assert_eq!(runs, 0, "{point}");
+                assert_eq!(runs, 1, "{point}: only the preexisting parent");
             }
             drop(conn);
             crate::runtime::status::clear();
@@ -4680,5 +4979,275 @@ mod tests {
         status::clear();
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn chain_actors_walks_root_first_and_reads_a_missing_row_as_none() {
+        let (dir, conn, vault) = fixture("wake-chain-actors");
+        seed_run(&conn, &vault, "root", None, 0);
+        seed_run(&conn, &vault, "hop", Some("root"), 0);
+        conn.execute(
+            "UPDATE runs SET actor = 'process:scout' WHERE run_id = 'hop'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            chain_actors(&conn, "hop").unwrap(),
+            Some(vec!["claude-code".into(), "process:scout".into()])
+        );
+        assert_eq!(chain_actors(&conn, "missing").unwrap(), None);
+        conn.execute(
+            "UPDATE runs SET parent_run_id = 'hop' WHERE run_id = 'root'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            chain_actors(&conn, "hop").unwrap().unwrap().len(),
+            16,
+            "corrupt cycles are bounded"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn parented_wake(
+        conn: &Connection,
+        vault: &str,
+        key: char,
+        parent: &str,
+        now: DateTime<Utc>,
+    ) -> String {
+        let offered = event_offer("process:scout", key, '1', "records/a.md");
+        let hash = offered.wake_key.clone();
+        wakes::admit_with_writers(
+            conn,
+            vault,
+            &[offered],
+            &[super::super::write_log::EventWriter::Run {
+                actor: "claude-code".into(),
+                run_id: parent.into(),
+            }],
+            now,
+        )
+        .unwrap();
+        conn.query_row(
+            "SELECT wake_id FROM agent_wakes WHERE wake_key = ?1",
+            [hash],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_woken_hop_claim_books_its_parent_on_the_run_row() {
+        let _lock = status::test_lock();
+        status::clear();
+        let (dir, conn, vault) = fixture("wake-claim-parent");
+        let now = at("2026-08-09T10:00:00Z");
+        seed_run(&conn, &vault, "root", None, 100);
+        let wake = parented_wake(&conn, &vault, 'a', "root", now);
+        let Woken::Started {
+            lease,
+            parent_run_id,
+            ..
+        } = woken(&conn, &vault, "process:scout", &wake, &[], now).unwrap()
+        else {
+            panic!("not started")
+        };
+        assert_eq!(parent_run_id.as_deref(), Some("root"));
+        assert_eq!(
+            conn.query_row(
+                "SELECT parent_run_id FROM runs WHERE run_id = ?1",
+                [&lease.run_id],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "root"
+        );
+        drop(conn);
+        status::clear();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_spent_chain_skips_the_hop_at_claim() {
+        let _lock = status::test_lock();
+        status::clear();
+        let (dir, conn, vault) = fixture("wake-claim-spent");
+        let now = at("2026-08-09T10:00:00Z");
+        seed_run(&conn, &vault, "root", None, 21_000);
+        let wake = parented_wake(&conn, &vault, 'a', "root", now);
+        assert_eq!(
+            woken(&conn, &vault, "process:scout", &wake, &[], now).unwrap(),
+            Woken::Skipped
+        );
+        let row = wake_state(&conn, &wake);
+        assert_eq!(
+            (row.0.as_str(), row.1.as_deref(), row.2.as_deref()),
+            ("finished", Some("skipped"), Some("chain_spent"))
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM runs", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        drop(conn);
+        status::clear();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_claim_never_coalesces_wakes_of_another_parent() {
+        let _lock = status::test_lock();
+        status::clear();
+        let (dir, conn, vault) = fixture("wake-coalesce-parent");
+        let now = at("2026-08-09T10:00:00Z");
+        seed_run(&conn, &vault, "root-a", None, 0);
+        seed_run(&conn, &vault, "root-b", None, 0);
+        let head = parented_wake(&conn, &vault, 'a', "root-a", now);
+        let same = parented_wake(&conn, &vault, 'b', "root-a", now);
+        let other = parented_wake(&conn, &vault, 'c', "root-b", now);
+        let root = admit_one(
+            &conn,
+            &vault,
+            event_offer("process:scout", 'd', '1', "records/a.md"),
+            now,
+        );
+        let Woken::Started { also, .. } = woken(
+            &conn,
+            &vault,
+            "process:scout",
+            &head,
+            &[&same, &other, &root],
+            now,
+        )
+        .unwrap() else {
+            panic!("not started")
+        };
+        assert_eq!(also.len(), 1);
+        assert_eq!(wake_state(&conn, &same).1.as_deref(), Some("coalesced"));
+        for id in [other, root] {
+            assert_eq!(wake_state(&conn, &id).0, "pending");
+        }
+        drop(conn);
+        status::clear();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    #[test]
+    fn a_client_session_opens_finishes_once_and_preserves_unknown_usage() {
+        let (dir, conn, vault) = fixture("dispatch-client-session");
+        let started = at("2026-10-15T12:00:00Z");
+        let ended = started + Duration::minutes(1);
+        begin_client_session(
+            &conn,
+            &ClientSession {
+                run_id: "client-run",
+                vault_id: &vault,
+                store_uuid: "store",
+                actor: "client:terminal",
+                token_name: "Terminal",
+                client_info: Some("Test 1"),
+                started_at: started,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            books(&conn, "client-run"),
+            ("running".into(), "pending".into(), 0, 0, 0, 1)
+        );
+        assert!(finish_client_session(&conn, "client-run", true, ended).unwrap());
+        assert!(
+            !finish_client_session(&conn, "client-run", false, ended + Duration::minutes(1))
+                .unwrap()
+        );
+        assert_eq!(books(&conn, "client-run").0, "succeeded");
+        assert_eq!(books(&conn, "client-run").1, "unknown");
+        let recorded: String = conn
+            .query_row(
+                "SELECT ended_at FROM runs WHERE run_id='client-run'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(recorded, stamp(ended));
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    #[test]
+    fn an_orphaned_client_session_is_recovered_as_unknown() {
+        let (dir, conn, vault) = fixture("dispatch-client-orphan");
+        let started = at("2026-10-15T12:00:00Z");
+        begin_client_session(
+            &conn,
+            &ClientSession {
+                run_id: "client-orphan",
+                vault_id: &vault,
+                store_uuid: "store",
+                actor: "client:terminal",
+                token_name: "Terminal",
+                client_info: None,
+                started_at: started,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            recover_orphaned_attended(
+                &conn,
+                started + Duration::minutes(1),
+                started + Duration::minutes(2)
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(books(&conn, "client-orphan").0, "abandoned_usage_unknown");
+        assert_eq!(books(&conn, "client-orphan").1, "unknown");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    #[test]
+    fn finalize_check_neither_adds_to_nor_resets_the_failure_counter() {
+        let (dir, conn, vault) = fixture("check-failure-counter");
+        let _lock = status::test_lock();
+        status::clear();
+        let now = at("2026-08-09T10:00:00Z");
+        for outcome in [RunOutcome::Failed, RunOutcome::Succeeded] {
+            let Dispatched::Started(lease) = claim(
+                &conn,
+                &vault,
+                "store",
+                "agent",
+                small(),
+                &[],
+                Some("process:scout"),
+                None,
+                now,
+            )
+            .unwrap() else {
+                panic!("check may book")
+            };
+            conn.execute(
+                "UPDATE ambient_gate_state SET consecutive_failures=2 WHERE lane='agent'",
+                [],
+            )
+            .unwrap();
+            finalize_check(
+                &conn,
+                &lease.run_id,
+                outcome,
+                Some(Usage::default()),
+                None,
+                now,
+            )
+            .unwrap();
+            let failures: i64 = conn
+                .query_row(
+                    "SELECT consecutive_failures FROM ambient_gate_state WHERE lane='agent'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(failures, 2);
+        }
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

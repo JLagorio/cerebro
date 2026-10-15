@@ -278,8 +278,10 @@ export function Popover({
     if (panel === null || typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(() => measure());
     ro.observe(panel);
+    const anchor = anchorEl();
+    if (anchor !== null && anchor !== panel) ro.observe(anchor);
     return () => ro.disconnect();
-  }, [measure]);
+  }, [measure, anchorEl]);
 
   useEffect(() => {
     const onResize = () => measure();
@@ -302,7 +304,12 @@ export function Popover({
   const layerId = useDismiss({ onClose, surfaceRef: panelRef, anchorEl, onEscape });
 
   useEffect(() => {
-    if (!closeOnScroll) return;
+    if (!closeOnScroll) {
+      // Persistent editors follow a scrolling host, including scroll caused
+      // by their own preview edits, instead of floating at the old position.
+      document.addEventListener('scroll', measure, true);
+      return () => document.removeEventListener('scroll', measure, true);
+    }
     /**
      * Armed one frame late, and that frame is the whole fix (M18.4).
      *
@@ -338,7 +345,7 @@ export function Popover({
       cancelAnimationFrame(frame);
       document.removeEventListener('scroll', onScroll, true);
     };
-  }, [closeOnScroll, layerId]);
+  }, [closeOnScroll, layerId, measure]);
 
   /**
    * A trapped popover hands focus to its first control ONCE IT IS PLACED

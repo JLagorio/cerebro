@@ -1,3 +1,4 @@
+import { keysText } from '@/components/ui/Keycaps';
 import { useState } from 'react';
 import { useLayer } from '@/components/ui/layers';
 import { MAX_QUEUED_NOTES, type ReviewNote } from '@/engine/reviewNotes';
@@ -69,7 +70,7 @@ export function NoteComposer({
           type="button"
           data-testid="diff-note-add"
           disabled={empty || full}
-          title="⌘Enter"
+          title={keysText('mod+enter')}
           onClick={add}
           className={BUTTON}
         >

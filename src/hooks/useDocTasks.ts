@@ -2,94 +2,144 @@ import { useCallback, useEffect, useState } from 'react';
 import { parseTasks, toggleTaskLine, type DocTask } from '@/engine/tasks';
 import { isTaskRecord } from '@/engine/typeCatalog';
 import type { Entry, Schema } from '@/engine/types';
-import { readNote, saveNote } from '@/lib/ipc';
+import { splitFrontmatter } from '@/engine/frontmatter';
+import { isStaleContent } from '@/engine/staleContent';
+import { readNoteSource, saveNote } from '@/lib/ipc';
 import { isTemplate } from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
-/** Any markdown note can carry tasks except task-like records (M12.2: a
- * record with a status IS the task — its checklists are its own subtasks),
- * Type docs (schema), and templates (scaffolding, not commitments). */
 const isTaskSource = (e: Entry, schema: Schema): boolean =>
-  e.type !== 'Type' && !isTemplate(e) && !isTaskRecord(e, schema);
-
-// Body cache keyed by path — invalidated by modifiedAt, so the watcher's
-// rescans keep the rollup fresh without rereading unchanged files.
-const cache = new Map<string, { modifiedAt: string; tasks: DocTask[] }>();
-
-/**
- * Every checklist task across the vault's docs (M2.x docs polish, Home
- * rollup). Reads note bodies lazily with a modifiedAt cache; `toggle`
- * writes the checkbox straight back to the file.
- */
+  e.path.endsWith('.md') && e.type !== 'Type' && !isTemplate(e) && !isTaskRecord(e, schema);
+// The same path in another vault never borrows its task body.
+const cache = new Map<string, { version: string; tasks: DocTask[] }>();
+const keyOf = (vault: string, path: string) => JSON.stringify([vault, path]);
+interface TaskRead {
+  vault: string | null;
+  tasks: DocTask[];
+  unreadable: string[];
+  loading: boolean;
+}
+/** Lazy body reads; unreadable names are surfaced rather than silently omitted. */
 export function useDocTasks(): {
   tasks: DocTask[];
+  unreadable: string[];
   loading: boolean;
   toggle: (task: DocTask, done: boolean) => Promise<void>;
 } {
   const entries = useVaultStore((s) => s.entries);
   const vaultPath = useVaultStore((s) => s.vaultPath);
-  const rescan = useVaultStore((s) => s.rescan);
+  const entriesVault = useVaultStore((s) => s.entriesVault);
   const schema = useSchema();
-  const toast = useUiStore((s) => s.toast);
-  const [tasks, setTasks] = useState<DocTask[]>([]);
-  const [loading, setLoading] = useState(true);
-
+  const [read, setRead] = useState<TaskRead>({
+    vault: null,
+    tasks: [],
+    unreadable: [],
+    loading: true,
+  });
   useEffect(() => {
-    if (vaultPath === null) return;
-    let cancelled = false;
-    const sources = entries.filter((e) => isTaskSource(e, schema));
+    if (vaultPath === null || (entriesVault !== null && entriesVault !== vaultPath)) return;
+    let live = true;
+    setRead({ vault: vaultPath, tasks: [], unreadable: [], loading: true });
     void (async () => {
-      const results = await Promise.all(
-        sources.map(async (e) => {
-          const hit = cache.get(e.path);
-          if (hit !== undefined && hit.modifiedAt === e.modifiedAt) return hit.tasks;
-          try {
-            const body = await readNote(vaultPath, e.path);
-            const parsed = parseTasks(e.path, body);
-            cache.set(e.path, { modifiedAt: e.modifiedAt, tasks: parsed });
-            return parsed;
-          } catch {
-            return []; // unreadable note: skip rather than fail the rollup
+      const sources = entries.filter((entry) => isTaskSource(entry, schema));
+      const results: { tasks: DocTask[]; unreadable: string[] }[] = new Array(sources.length);
+      let cursor = 0;
+      await Promise.all(
+        Array.from({ length: Math.min(8, sources.length) }, async () => {
+          while (live && cursor < sources.length) {
+            const index = cursor++,
+              entry = sources[index],
+              key = keyOf(vaultPath, entry.path);
+            const hit = cache.get(key);
+            try {
+              let tasks: DocTask[];
+              if (entry.hash !== null && hit?.version === entry.hash) tasks = hit.tasks;
+              else {
+                const source = await readNoteSource(vaultPath, entry.path);
+                tasks = parseTasks(entry.path, splitFrontmatter(source.content).body, source.hash);
+                if (live) cache.set(key, { version: source.hash, tasks });
+              }
+              results[index] = { tasks, unreadable: [] };
+            } catch {
+              results[index] = { tasks: [], unreadable: [entry.path] };
+            }
           }
         }),
       );
-      if (cancelled) return;
-      setTasks(results.flat());
-      setLoading(false);
+      if (live)
+        setRead({
+          vault: vaultPath,
+          tasks: results.flatMap((r) => r.tasks),
+          unreadable: results.flatMap((r) => r.unreadable),
+          loading: false,
+        });
     })();
     return () => {
-      cancelled = true;
+      live = false;
     };
-  }, [entries, vaultPath, schema]);
-
+  }, [entries, vaultPath, entriesVault, schema]);
   const toggle = useCallback(
     async (task: DocTask, done: boolean) => {
-      if (vaultPath === null) return;
+      if (vaultPath === null || useVaultStore.getState().vaultPath !== vaultPath) return;
+      const refresh = async () => {
+        cache.delete(keyOf(vaultPath, task.sourcePath));
+        if (useVaultStore.getState().vaultPath !== vaultPath) return;
+        useUiStore
+          .getState()
+          .toast(
+            `“${task.text}” changed since this list was read, so the tick wasn't saved. The list is refreshed — tick it again.`,
+          );
+        await useVaultStore.getState().rescan();
+      };
       try {
-        // Fresh read: the cached line index may be stale after edits.
-        const body = await readNote(vaultPath, task.sourcePath);
-        const next = toggleTaskLine(body, task.line, done);
-        if (next === null) {
-          toast('That task moved — refreshing');
-          await rescan();
+        const source = await readNoteSource(vaultPath, task.sourcePath);
+        if (task.version === null || source.hash !== task.version) {
+          await refresh();
           return;
         }
-        await saveNote(vaultPath, task.sourcePath, next);
-        cache.delete(task.sourcePath);
-        // Optimistic flip so the row responds before the rescan lands.
-        setTasks((prev) =>
-          prev.map((t) =>
-            t.sourcePath === task.sourcePath && t.line === task.line ? { ...t, done } : t,
-          ),
+        const body = splitFrontmatter(source.content).body;
+        const current = parseTasks(task.sourcePath, body, source.hash).find(
+          (row) => row.line === task.line,
         );
-        await rescan();
-      } catch {
-        toast("Couldn't update task");
+        const next = current?.text === task.text ? toggleTaskLine(body, task.line, done) : null;
+        if (next === null) {
+          await refresh();
+          return;
+        }
+        if (useVaultStore.getState().vaultPath !== vaultPath) return;
+        const version = await saveNote(vaultPath, task.sourcePath, next, task.version);
+        cache.delete(keyOf(vaultPath, task.sourcePath));
+        if (useVaultStore.getState().vaultPath !== vaultPath) return;
+        setRead((prev) =>
+          prev.vault !== vaultPath
+            ? prev
+            : {
+                ...prev,
+                tasks: prev.tasks.map((row) =>
+                  row.sourcePath === task.sourcePath
+                    ? { ...row, version, done: row.line === task.line ? done : row.done }
+                    : row,
+                ),
+              },
+        );
+        await useVaultStore.getState().rescan();
+      } catch (error) {
+        if (isStaleContent(error)) {
+          await refresh().catch(() => {});
+          return;
+        }
+        if (useVaultStore.getState().vaultPath === vaultPath)
+          useUiStore.getState().toast("Couldn't update task");
       }
     },
-    [vaultPath, rescan, toast],
+    [vaultPath],
   );
-
-  return { tasks, loading, toggle };
+  const current = read.vault === vaultPath && (entriesVault === null || entriesVault === vaultPath);
+  return {
+    tasks: current ? read.tasks : [],
+    unreadable: current ? read.unreadable : [],
+    loading: !current || read.loading,
+    toggle,
+  };
 }

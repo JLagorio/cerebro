@@ -175,6 +175,7 @@ describe('mock git and live runs', () => {
     await agentAppend('/v', 'notes/a.md', 'Run line.', undefined, stamp);
     expect(settleMockRun(stamp.runId, stamp.actor, null)).toEqual({
       state: 'not_a_repo',
+      kept_out_of_git: 0,
       run_id: stamp.runId,
       files: ['notes/a.md'],
       shell_unrecorded: false,
@@ -352,4 +353,21 @@ describe('mock git versions and Restore', () => {
     seam([history[0]]);
     expect(window.__cerebroMockGit?.commits[0].hash).toBe(h('3'));
   });
+});
+
+it('keeps mail out of a run and a checkpoint while preserving its page', async () => {
+  const files = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+  resetMockFs();
+  resetMockGit({ modified: [{ path: 'sources/mail/one.md', status: 'modified', staged: false }] });
+  files.set('sources/mail/one.md', '# Private\n');
+  const stamp = { actor: 'claude-code', runId: 'mail-only' };
+  beginMockRun(stamp.runId, stamp.actor);
+  await agentAppend('/v', 'sources/mail/one.md', 'Seen.', undefined, stamp);
+  expect(settleMockRun(stamp.runId, stamp.actor, null)).toMatchObject({
+    state: 'nothing',
+    kept_out_of_git: 1,
+  });
+  endMockRun(stamp.runId);
+  expect(await gitCommit('/v', 'checkpoint')).toBeNull();
+  expect(files.get('sources/mail/one.md')).toContain('Seen.');
 });

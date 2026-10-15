@@ -3,6 +3,24 @@
   "about": "set_fields' planner (M60.4), held by both twins: src-tauri/src/vault/set_fields.rs (replays_the_shared_set_fields_cases) and src/engine/setFields.ts (src/engine/setFields.test.ts). `corpus` is the vault the case runs in: its Type docs make the schema, and every entry answers links. A case plans `args` against `frontmatter`, the record's frontmatter as its bytes hold it now, for the record at `record` in `project`, with `unreadable` the paths the run may not read. It lands as `patch` (null removes a key) and `notes`, is `refused` with every problem, or is a parse `error`. `texts` pins the report and refusal words. Non-ASCII is written as \\u escapes. Judgment calls: ghosts are kept (M1); a link's type is checked only for a declared target and a page the run may read; links are never re-spelled.",
   "corpus": [
     {
+      "path": "types/formula-work.md",
+      "title": "Formula work",
+      "type": "Type",
+      "properties": {
+        "fields": {
+          "target_value": { "kind": "number" },
+          "current_value": { "kind": "number" },
+          "gap": { "kind": "formula", "formula": "target_value - current_value" }
+        }
+      }
+    },
+    {
+      "path": "formula-work/result.md",
+      "title": "Result",
+      "type": "Formula work",
+      "properties": {}
+    },
+    {
       "path": "types/task.md",
       "title": "Task",
       "type": "Type",
@@ -218,6 +236,15 @@
     }
   ],
   "cases": [
+    {
+      "name": "A formula is computed and refused without changing its inputs.",
+      "record": "formula-work/result.md",
+      "project": null,
+      "frontmatter": { "type": "Formula work", "target_value": 100, "current_value": 30 },
+      "unreadable": [],
+      "args": { "path": "formula-work/result.md", "set": { "gap": 5, "current_value": 40 } },
+      "refused": ["gap is computed and can't be edited"]
+    },
     {
       "name": "A request with no path is refused before anything is read.",
       "record": "tasks/t1.md",

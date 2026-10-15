@@ -15,20 +15,20 @@ import type { Entry } from './types';
  *
  * So: `when:` is answered from the scanned frontmatter alone — no model, no
  * tokens, and a person reading the record can say exactly what will fire it.
- * Only once it passes does `ask:` get evaluated, and that is a full agent turn
- * whose first job is to answer yes or no.
+ * Only once it passes does a short pre-run check answer `ask:`. A no records
+ * a skip; a yes lets the full agent run begin.
  *
  * ## What it can ask about
  *
  * Only what the scanner already parsed. `event`, `field`, `to`, `in` are all
- * answerable from an Entry and its predecessor, which is what makes layer one
+ * answered from the scanned records and their declared schema, which makes layer one
  * deterministic. There is deliberately no `matches:` regex or expression
  * language: the moment a trigger needs one, the honest answer is `ask:`.
  */
 export interface Trigger {
-  /** created | changed | moved. Absent matches any of the three. */
-  event?: VaultEvent['kind'];
-  /** A property that must have changed (`changed` only). */
+  /** Absent matches created, changed or moved; assigned is explicit. */
+  event?: VaultEvent['kind'] | 'assigned';
+  /** A changed property, or the declared Agent relation assigning the work. */
   field?: string;
   /** The value that property must now hold. */
   to?: string;
@@ -36,7 +36,7 @@ export interface Trigger {
    * never matches `workspace/` — the same rule scope uses. */
   in?: string;
   /**
-   * The model gate: a yes/no question the agent answers before doing the work.
+   * The pre-run check: a yes/no question answered before the agent starts.
    *
    * Layer two, and only reached when layer one has already passed. Kept as
    * prose because that is the one thing a model is better at than a rule —
@@ -83,7 +83,9 @@ export function parseTriggers(raw: unknown): Trigger[] {
     const r = item as Record<string, unknown>;
     const event = str(r.event);
     const trigger: Trigger = {
-      ...(event === 'created' || event === 'changed' || event === 'moved' ? { event } : {}),
+      ...(event === 'created' || event === 'changed' || event === 'moved' || event === 'assigned'
+        ? { event }
+        : {}),
       ...(str(r.field) === undefined ? {} : { field: str(r.field) }),
       ...(str(r.to) === undefined ? {} : { to: str(r.to) }),
       ...(str(r.in) === undefined
@@ -93,9 +95,13 @@ export function parseTriggers(raw: unknown): Trigger[] {
               .replace(/^\.?\/+/, '')
               .replace(/\/+$/, ''),
           }),
-      ...(str(r.ask) === undefined ? {} : { ask: str(r.ask) }),
+      ...(typeof r.ask === 'string' ? { ask: r.ask.trim() } : {}),
       ...(str(r.do) === undefined ? {} : { do: str(r.do) }),
     };
+    if (event === 'assigned') {
+      if (trigger.field === undefined) continue;
+      delete trigger.to;
+    }
     // A trigger that constrains nothing would fire on every change in the
     // vault. That is never what someone meant to write, so it is not a
     // trigger — it is a typo, and firing on it would be the worst outcome.
@@ -125,9 +131,8 @@ export function fires(trigger: Trigger, event: VaultEvent): boolean {
   if (trigger.event !== undefined && trigger.event !== event.kind) return false;
   if (trigger.in !== undefined && !inFolder(event.path, trigger.in)) return false;
   if (trigger.field !== undefined) {
-    // A field condition is about a CHANGE, so it can only be satisfied by one.
-    // `created` with `field:` would otherwise fire on every new record that
-    // happens to carry the property — which is every record of that type.
+    // Ordinary field conditions need a change. Assignment creates are judged
+    // separately by assignment.ts against declared Agent relations.
     if (event.kind !== 'changed') return false;
     if (!event.fields.includes(trigger.field)) return false;
   }
@@ -150,16 +155,18 @@ export function firstMatch(triggers: readonly Trigger[], event: VaultEvent): Tri
 export function describeTrigger(trigger: Trigger): string {
   const parts: string[] = [];
   parts.push(
-    trigger.event === 'created'
-      ? 'a record is created'
-      : trigger.event === 'moved'
-        ? 'a record is moved'
-        : trigger.event === 'changed'
-          ? 'a record changes'
-          : 'a record is created, changed or moved',
+    trigger.event === 'assigned'
+      ? `it is assigned via ${trigger.field ?? ''}`
+      : trigger.event === 'created'
+        ? 'a record is created'
+        : trigger.event === 'moved'
+          ? 'a record is moved'
+          : trigger.event === 'changed'
+            ? 'a record changes'
+            : 'a record is created, changed or moved',
   );
   if (trigger.in !== undefined) parts.push(`in ${trigger.in}`);
-  if (trigger.field !== undefined) {
+  if (trigger.event !== 'assigned' && trigger.field !== undefined) {
     parts.push(trigger.to === undefined ? `and ${trigger.field} changes` : '');
     if (trigger.to !== undefined) parts.push(`and ${trigger.field} becomes ${trigger.to}`);
   }

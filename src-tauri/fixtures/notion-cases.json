@@ -1,0 +1,246 @@
+{
+  "format": 1,
+  "about": "Synthetic toy envelopes using documented Notion enhanced markdown, not a live recording. Rust normalizes; the editor replays expected markdown. UPDATE_NOTION_CASES=1 cargo test write_notion_cases -- --ignored regenerates expectations; review each changed byte.",
+  "cases": [
+    {
+      "name": "callout and nested columns",
+      "page": "11111111111111111111111111111111",
+      "capture": "<page url=\"https://www.notion.so/11111111111111111111111111111111\">\n<properties>\n{\"title\": \"Toy page\"}\n</properties>\n<content>\n<callout color=\"yellow_background\">Careful\n\nAnother paragraph</callout>\n<columns><column>Left</column><column><details><summary>Open</summary>Hidden</details></column></columns>\n</content>\n</page>",
+      "linkable": {},
+      "expect": {
+        "markdown": "---\n---\n\n# Toy page\n\n> [!warning]\n> Careful\n\n\n\n:::indent\n\nAnother paragraph\n\n:::\n\n\n\n\n:::columns\n\n::::column\n\nLeft\n\n::::\n\n\n\n::::column\n\n:::::toggle Open\n\nHidden\n\n:::::\n\n::::\n\n:::\n",
+        "counts": {
+          "linked": 0,
+          "media": 0,
+          "databases": 0
+        }
+      }
+    },
+    {
+      "name": "colours",
+      "page": "11111111111111111111111111111111",
+      "capture": "<page url=\"https://www.notion.so/11111111111111111111111111111111\">\n<properties>\n{\"title\": \"Toy page\"}\n</properties>\n<content>\n<callout color=\"red\">Red</callout>\n<callout color=\"green\">Green</callout>\n<callout color=\"blue\">Blue</callout>\n</content>\n</page>",
+      "linkable": {},
+      "expect": {
+        "markdown": "---\n---\n\n# Toy page\n\n> [!danger]\n> Red\n\n\n\n\n> [!tip]\n> Green\n\n\n\n\n> [!note]\n> Blue\n",
+        "counts": {
+          "linked": 0,
+          "media": 0,
+          "databases": 0
+        }
+      }
+    },
+    {
+      "name": "toggle heading",
+      "page": "11111111111111111111111111111111",
+      "capture": "<page url=\"https://www.notion.so/11111111111111111111111111111111\">\n<properties>\n{\"title\": \"Toy page\"}\n</properties>\n<content>\n## Heading {toggle=\"true\"}\n\tHidden\n\nAfter\n</content>\n</page>",
+      "linkable": {},
+      "expect": {
+        "markdown": "---\n---\n\n# Toy page\n\n:::toggle-heading\n\n## Heading\n\nHidden\n\n:::\n\n\nAfter\n",
+        "counts": {
+          "linked": 0,
+          "media": 0,
+          "databases": 0
+        }
+      }
+    },
+    {
+      "name": "table rectangular",
+      "page": "11111111111111111111111111111111",
+      "capture": "<page url=\"https://www.notion.so/11111111111111111111111111111111\">\n<properties>\n{\"title\": \"Toy page\"}\n</properties>\n<content>\n<table><colgroup><col width=\"100\"></colgroup><tr><th>Name</th><th>Value</th></tr><tr><td>One</td></tr></table>\n</content>\n</page>",
+      "linkable": {},
+      "expect": {
+        "markdown": "---\n---\n\n# Toy page\n\n| Name | Value |\n| --- | --- |\n| One |  |\n",
+        "counts": {
+          "linked": 0,
+          "media": 0,
+          "databases": 0
+        }
+      }
+    },
+    {
+      "name": "code and marker lookalikes",
+      "page": "11111111111111111111111111111111",
+      "capture": "<page url=\"https://www.notion.so/11111111111111111111111111111111\">\n<properties>\n{\"title\": \"Toy page\"}\n</properties>\n<content>\n```xml\n<database>literal</database>\n:::columns\n```\n\n`<page>code</page>`\n\n:::columns\n</content>\n</page>",
+      "linkable": {},
+      "expect": {
+        "markdown": "---\n---\n\n# Toy page\n\n```xml\n<database>literal</database>\n:::columns\n```\n\n`<page>code</page>`\n\n\\:::columns\n",
+        "counts": {
+          "linked": 0,
+          "media": 0,
+          "databases": 0
+        }
+      }
+    },
+    {
+      "name": "links and mentions",
+      "page": "11111111111111111111111111111111",
+      "capture": "<page url=\"https://www.notion.so/11111111111111111111111111111111\">\n<properties>\n{\"title\": \"Toy page\"}\n</properties>\n<content>\n<page url=\"https://notion.so/22222222222222222222222222222222\">Other</page>\n<mention-user>Maya</mention-user> <mention-date start=\"2026-10-15\"/>\n[Other](https://notion.so/22222222222222222222222222222222)\n</content>\n</page>",
+      "linkable": {
+        "22222222222222222222222222222222": "other-page"
+      },
+      "expect": {
+        "markdown": "---\n---\n\n# Toy page\n\n[[other-page]]\n\n\nMaya 2026-10-15\n[[other-page]]\n",
+        "counts": {
+          "linked": 2,
+          "media": 0,
+          "databases": 0
+        }
+      }
+    },
+    {
+      "name": "unreadable page link",
+      "page": "11111111111111111111111111111111",
+      "capture": "<page url=\"https://www.notion.so/11111111111111111111111111111111\">\n<properties>\n{\"title\": \"Toy page\"}\n</properties>\n<content>\n<page url=\"https://notion.so/22222222222222222222222222222222\">Other</page>\n</content>\n</page>",
+      "linkable": {},
+      "expect": {
+        "markdown": "---\n---\n\n# Toy page\n\n[Other](https://notion.so/22222222222222222222222222222222)\n",
+        "counts": {
+          "linked": 0,
+          "media": 0,
+          "databases": 0
+        }
+      }
+    },
+    {
+      "name": "media links and dropped database",
+      "page": "11111111111111111111111111111111",
+      "capture": "<page url=\"https://www.notion.so/11111111111111111111111111111111\">\n<properties>\n{\"title\": \"Toy page\"}\n</properties>\n<content>\n<file src=\"https://example.test/report\">Report</file>\n![Picture](https://example.test/picture.png)\n<database url=\"https://notion.so/22222222222222222222222222222222\">Database</database>\n</content>\n</page>",
+      "linkable": {},
+      "expect": {
+        "markdown": "---\n---\n\n# Toy page\n\n[Report](https://example.test/report)\n\n\n[Picture](https://example.test/picture.png)\n",
+        "counts": {
+          "linked": 0,
+          "media": 2,
+          "databases": 1
+        }
+      }
+    },
+    {
+      "name": "simple v2 blocks",
+      "page": "11111111111111111111111111111111",
+      "capture": "<page url=\"https://www.notion.so/11111111111111111111111111111111\">\n<properties>\n{\"title\": \"Toy page\"}\n</properties>\n<content>\n<h2>Heading</h2><p>Paragraph <strong>bold</strong> and <em>italic</em>.</p><ul><li>First</li><li>Second</li></ul><todo checked=\"true\">Done</todo><hr/><p>After</p>\n</content>\n</page>",
+      "linkable": {},
+      "expect": {
+        "markdown": "---\n---\n\n# Toy page\n\n## Heading\n\n\n\nParagraph **bold** and *italic*.\n\n\n\n- First\n- Second\n\n\n\n- [x] Done\n\n\n\n---\n\n\n\nAfter\n",
+        "counts": {
+          "linked": 0,
+          "media": 0,
+          "databases": 0
+        }
+      }
+    },
+    {
+      "name": "properties",
+      "page": "11111111111111111111111111111111",
+      "capture": "<page url=\"https://www.notion.so/11111111111111111111111111111111\">\n<properties>\n{\"title\": \"Toy page\", \"Type\": \"Meeting\", \"__Due Date\": \"2026-10-15\", \"Done\": true, \"source_system\": \"toy\", \"Done \": \"second\"}\n</properties>\n<content>\nBody\n</content>\n</page>",
+      "linkable": {},
+      "expect": {
+        "markdown": "---\ntype_2: Meeting\ndue_date: 2026-10-15\ndone: true\nsource_system_2: toy\ndone_2: second\n---\n\n# Toy page\n\nBody\n",
+        "counts": {
+          "linked": 0,
+          "media": 0,
+          "databases": 0
+        }
+      }
+    },
+    {
+      "name": "empty",
+      "page": "11111111111111111111111111111111",
+      "capture": "",
+      "linkable": {},
+      "expect": {
+        "refusal": {
+          "reason": "empty",
+          "words": "The fetch returned no page text."
+        }
+      }
+    },
+    {
+      "name": "narrated",
+      "page": "11111111111111111111111111111111",
+      "capture": "The page says hello.",
+      "linkable": {},
+      "expect": {
+        "refusal": {
+          "reason": "narrated",
+          "words": "The fetch returned prose instead of a complete page envelope."
+        }
+      }
+    },
+    {
+      "name": "database",
+      "page": "11111111111111111111111111111111",
+      "capture": "<database/>",
+      "linkable": {},
+      "expect": {
+        "refusal": {
+          "reason": "database_first",
+          "words": "The fetch returned a database. Fetch one page instead."
+        }
+      }
+    },
+    {
+      "name": "not a page",
+      "page": "11111111111111111111111111111111",
+      "capture": "<person/>",
+      "linkable": {},
+      "expect": {
+        "refusal": {
+          "reason": "not_a_page",
+          "words": "The fetch did not return a page."
+        }
+      }
+    },
+    {
+      "name": "unhandled",
+      "page": "11111111111111111111111111111111",
+      "capture": "<page url=\"https://www.notion.so/11111111111111111111111111111111\">\n<properties>\n{\"title\": \"Toy page\"}\n</properties>\n<content>\n<unknown>Keep me</unknown>\n</content>\n</page>",
+      "linkable": {},
+      "expect": {
+        "refusal": {
+          "reason": "unhandled_markup",
+          "words": "The fetch holds <unknown> markup this importer cannot carry."
+        }
+      }
+    },
+    {
+      "name": "missing close",
+      "page": "11111111111111111111111111111111",
+      "capture": "<page url=\"https://notion.so/11111111111111111111111111111111\">",
+      "linkable": {},
+      "expect": {
+        "refusal": {
+          "reason": "truncated",
+          "words": "The page envelope has no end."
+        }
+      }
+    },
+    {
+      "name": "failed",
+      "page": "11111111111111111111111111111111",
+      "capture": "Fetch failed",
+      "is_error": true,
+      "linkable": {},
+      "expect": {
+        "refusal": {
+          "reason": "fetch_failed",
+          "words": "The connector reported that its fetch failed."
+        }
+      }
+    },
+    {
+      "name": "truncated",
+      "page": "11111111111111111111111111111111",
+      "capture": "<page url=\"https://www.notion.so/11111111111111111111111111111111\">\n<properties>\n{\"title\": \"Toy page\"}\n</properties>\n<content>\ncut\n</content>\n</page>",
+      "truncated": true,
+      "linkable": {},
+      "expect": {
+        "refusal": {
+          "reason": "truncated",
+          "words": "The fetch exceeded the capture limit."
+        }
+      }
+    }
+  ]
+}

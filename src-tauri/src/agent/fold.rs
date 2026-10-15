@@ -141,6 +141,7 @@ struct Turn {
 /// The line-by-line fold. `fold_lines` is the batch fold, a loop over it.
 #[derive(Debug, Default)]
 pub struct TranscriptFold {
+    capture: Option<crate::import::capture::Handle>,
     seen: HashSet<String>,
     open: Option<OpenMessage>,
     turn: Turn,
@@ -214,6 +215,13 @@ fn ignored(kind: &str) -> LineClass {
 }
 
 impl TranscriptFold {
+    /// Live stream only. The batch/session fold deliberately has no handle.
+    pub fn with_capture(capture: crate::import::capture::Handle) -> Self {
+        Self {
+            capture: Some(capture),
+            ..Self::default()
+        }
+    }
     /// Fold one parsed line. Never fails: a line it cannot read is classed,
     /// and the events it could read are still returned.
     pub fn entry(&mut self, line: &Value) -> (LineClass, Vec<AgentEvent>) {
@@ -471,6 +479,9 @@ impl TranscriptFold {
                     if open.tools.insert(tool_id.clone()) {
                         self.turn.pending.insert(tool_id.clone());
                         let input = block.get("input");
+                        if let Some(capture) = &self.capture {
+                            capture.begin(str_of(block, "name").unwrap_or(""), &tool_id, input);
+                        }
                         let preview = input.map(tool_input_preview);
                         // The whole input, when the preview cut a string.
                         let whole = input
@@ -539,6 +550,15 @@ impl TranscriptFold {
                 // whole rides a ToolPayload only when the preview cut it, so a
                 // short result crosses once.
                 let whole = tool_result_whole(block);
+                // The run-owned capture precedes both preview and payload cuts;
+                // it never becomes an event or a session-file reader's state.
+                if let Some(capture) = &self.capture {
+                    capture.put(
+                        &tool_id,
+                        whole.as_deref().unwrap_or(""),
+                        flag(block, "is_error"),
+                    );
+                }
                 events.push(AgentEvent::ToolDone {
                     tool_id: tool_id.clone(),
                     output: whole.as_deref().map(result_preview),
@@ -1958,5 +1978,65 @@ mod tests {
                 path.display()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod capture_tests {
+    use super::*;
+    use crate::import::capture;
+    use serde_json::json;
+    use std::time::Duration;
+    const PAGE: &str = "33333333333333333333333333333333";
+    const TOOL: &str = "mcp__notion__notion-fetch";
+    fn call() -> Value {
+        json!({"type":"assistant","message":{"id":"message","role":"assistant","content":[{"type":"tool_use","id":"fetch-call","name":TOOL,"input":{"id":PAGE}}]}})
+    }
+    fn answer(text: &str) -> Value {
+        json!({"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"fetch-call","content":text}]}})
+    }
+    #[test]
+    fn an_eligible_result_is_kept_whole_while_the_event_is_cut() {
+        let lease = capture::arm("fold-capture-whole", vec![TOOL.into()]).unwrap();
+        let mut fold = TranscriptFold::with_capture(lease.handle());
+        fold.entry(&call());
+        let text = "z".repeat(PAYLOAD_LIMIT_BYTES + 4096);
+        let (_, events) = fold.entry(&answer(&text));
+        let saved = capture::find("fold-capture-whole", PAGE, Duration::ZERO).unwrap();
+        assert_eq!(&*saved.text, text);
+        assert!(!saved.truncated);
+        let done = events
+            .iter()
+            .find_map(|e| match e {
+                AgentEvent::ToolDone { output, .. } => output.as_ref(),
+                _ => None,
+            })
+            .unwrap();
+        assert!(done.len() < text.len());
+        let encoded = serde_json::to_string(&events).unwrap();
+        assert!(!encoded.contains(&text));
+        drop(lease);
+        assert!(capture::find("fold-capture-whole", PAGE, Duration::ZERO).is_none());
+    }
+    #[test]
+    fn session_files_and_unarmed_folds_never_capture() {
+        let _lease = capture::arm("fold-capture-session", vec![TOOL.into()]).unwrap();
+        let lines = vec![call(), answer("private")];
+        fold_lines(&lines);
+        let mut fold = TranscriptFold::default();
+        for line in &lines {
+            fold.entry(line);
+        }
+        assert!(capture::find("fold-capture-session", PAGE, Duration::ZERO).is_none());
+    }
+    #[test]
+    fn a_subagents_result_cannot_supply_the_parent_page() {
+        let lease = capture::arm("fold-capture-sidechain", vec![TOOL.into()]).unwrap();
+        let mut fold = TranscriptFold::with_capture(lease.handle());
+        fold.entry(&call());
+        let mut result = answer("wrong run");
+        result["parent_tool_use_id"] = json!("child");
+        fold.entry(&result);
+        assert!(capture::find("fold-capture-sidechain", PAGE, Duration::ZERO).is_none());
     }
 }

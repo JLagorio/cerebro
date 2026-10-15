@@ -1,3 +1,4 @@
+import { followTypeRename } from './pointers';
 /**
  * Type schema write-side (M3): every mutation of a Type doc's `fields:`
  * mapping goes through here so the sidebar, the type screen, and the doc
@@ -18,10 +19,13 @@ import {
 } from '@/engine/castRules';
 import type { BatchOp } from '@/engine/batch';
 import { homeFolderFor } from '@/engine/createRecord';
+import { checkFormula } from '@/engine/formula';
 import {
   deleteBlockedWords,
   deleteBlockers,
+  formulaUses,
   groupingUses,
+  planDatabaseRename,
   planFieldRename,
   renameFlagWords,
   renameRefusalWords,
@@ -32,8 +36,11 @@ import { humanize, serializeDisplayConfig, serializeLayoutConfig } from '@/engin
 import {
   isLockedField,
   isReservedTypeName,
+  isSystemType,
+  listTypes,
   serializeFields,
   serializeOptions,
+  type TypeListing,
 } from '@/engine/typeCatalog';
 import {
   addedFromLabel,
@@ -42,7 +49,7 @@ import {
   kindChangedLabel,
   renamedLabel,
 } from '@/engine/undoPlan';
-import { serializeTabList, serializeViewList } from '@/engine/views';
+import { parseListYaml, serializeTabList, serializeViewList } from '@/engine/views';
 import type {
   DisplayConfig,
   Entry,
@@ -57,8 +64,10 @@ import type {
   ViewDefinition,
 } from '@/engine/types';
 import { slugify } from '@/lib/slug';
+import { listViews, readNoteSource, scanVault } from '@/lib/ipc';
+import { flushOpenPages, heldOpenPages } from '@/editor/openPages';
 import { useUiStore } from '@/stores/uiStore';
-import { getSchema, useVaultStore } from '@/stores/vaultStore';
+import { getSchema, refusedAcrossVaults, useVaultStore } from '@/stores/vaultStore';
 
 /** Frontmatter keys with schema meaning on a Type doc, and the page chrome
  * keys every page may carry (`icon`, `cover`: M55.11, engine/pageChrome) —
@@ -113,6 +122,112 @@ export async function ensureTypeDoc(
   });
 }
 
+/** Rename a database and its schema references as one human batch (M60.11). */
+export async function renameDatabase(listing: TypeListing, rawNext: string): Promise<boolean> {
+  const next = rawNext.trim();
+  const state = useVaultStore.getState();
+  const vault = state.vaultPath;
+  const { toast } = useUiStore.getState();
+  if (vault === null || refusedAcrossVaults(state)) return false;
+  if (next === '' || next === listing.name) return false;
+  if (isReservedTypeName(next) || isSystemType(listing.name) || listing.system) {
+    toast('System and library database names cannot be renamed.');
+    return false;
+  }
+  if (/[*`\r\n]|\[\[|\]\]/.test(next)) {
+    toast('Choose a database name without markdown formatting or line breaks.');
+    return false;
+  }
+  const conflicts = (entries = useVaultStore.getState().entries) =>
+    listTypes(entries, getSchema(entries)).some(
+      (type) =>
+        type.name.toLowerCase() === next.toLowerCase() &&
+        type.name.toLowerCase() !== listing.name.toLowerCase(),
+    );
+  if (conflicts()) {
+    toast(`A database named “${next}” already exists.`);
+    return false;
+  }
+  const sameVault = () => useVaultStore.getState().vaultPath === vault;
+  try {
+    await ensureTypeDoc({ name: listing.name, docPath: listing.docPath ?? null });
+    if (!sameVault()) return false;
+    await flushOpenPages();
+    if (!sameVault()) return false;
+    if (heldOpenPages().length > 0) {
+      toast('Some pages have changes waiting on you. Settle them before renaming the database.');
+      return false;
+    }
+    // A store rescan deliberately keeps its old snapshot on failure. Planning
+    // a schema rename needs a successful read of every current reference.
+    const [entries, rawLists] = await Promise.all([scanVault(vault), listViews(vault)]);
+    if (!sameVault()) return false;
+    if (conflicts(entries)) {
+      toast(`A database named “${next}” already exists.`);
+      return false;
+    }
+    const lists = rawLists.map((list) =>
+      parseListYaml(list.id, list.yaml, {
+        project: list.project,
+        collection: list.collection,
+        path: list.path,
+      }),
+    );
+    const reads = new Map<string, Awaited<ReturnType<typeof readNoteSource>>>();
+    const pages = entries.filter((entry) => entry.path.endsWith('.md'));
+    for (let offset = 0; offset < pages.length; offset += 8) {
+      await Promise.all(
+        pages.slice(offset, offset + 8).map(async (entry) => {
+          try {
+            reads.set(entry.path, await readNoteSource(vault, entry.path));
+          } catch {
+            // The planner names each unavailable page; it cannot invent bytes.
+          }
+        }),
+      );
+      if (!sameVault()) return false;
+    }
+    const planned = planDatabaseRename(
+      { from: listing.name, to: next },
+      {
+        entries,
+        schema: getSchema(entries),
+        lists,
+        reads,
+      },
+    );
+    if (!planned.ok) {
+      toast(
+        planned.refusal.code === 'sourceInvalid'
+          ? `The database page for “${listing.name}” has invalid metadata, so nothing was renamed.`
+          : `The database page for “${listing.name}” could not be read unchanged. Try again.`,
+      );
+      return false;
+    }
+    const { records, schemaReferences, pointers } = planned.counts;
+    const label = `Renamed “${listing.name}” to “${next}”: ${records} records, ${schemaReferences} schema references, ${pointers} page blocks`;
+    if (heldOpenPages().length > 0) {
+      toast('Some pages have changes waiting on you. Settle them before renaming the database.');
+      return false;
+    }
+    const applied = await useVaultStore.getState().applyBatch(planned.ops, { undo: label });
+    if (applied === null) return false;
+    followTypeRename(vault, listing.name, next);
+    if (planned.flagged.length > 0) {
+      toast(
+        `Not changed: ${planned.flagged.map((flag) => flag.path).join(', ')}. Check their references to ${listing.name}.`,
+      );
+    }
+    return true;
+  } catch (error) {
+    if (sameVault())
+      toast(
+        `Couldn't rename “${listing.name}”: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    return false;
+  }
+}
+
 function rawFieldsOf(doc: Entry): Record<string, unknown> {
   const raw = (doc.properties as Record<string, unknown>).fields;
   return typeof raw === 'object' && raw !== null && !Array.isArray(raw)
@@ -122,7 +237,7 @@ function rawFieldsOf(doc: Entry): Record<string, unknown> {
 
 /** Refuse `fields:` edits when the doc can't be trusted: a parse error means
  * our in-memory copy may be empty and a write would clobber the mapping. */
-function guardEditable(doc: Entry | null, typeName: string): boolean {
+export function guardEditable(doc: Entry | null, typeName: string): boolean {
   if (doc === null || doc.parseError === null) return true;
   useUiStore.getState().toast(`Can't edit "${typeName}" — its type doc has YAML errors`);
   return false;
@@ -215,9 +330,10 @@ const KIND_KEYS: Record<string, string[]> = {
   // dropped and leaving the picker pointing at nothing.
   person: ['target', 'limit', 'from'],
   rollup: ['relation', 'property', 'calculate', 'from', 'format', 'precision'],
+  formula: ['formula', 'format', 'precision'],
   number: ['format', 'precision'],
-  date: ['dateFormat', 'timeFormat'],
-  daterange: ['dateFormat', 'timeFormat'],
+  date: ['dateFormat', 'timeFormat', 'remind'],
+  daterange: ['dateFormat', 'timeFormat', 'remind'],
 };
 
 /** A field's declared kind, read from its raw spec (`field: text` or
@@ -271,7 +387,8 @@ function patchOp(entry: Entry, set: Record<string, unknown>): BatchOp {
 const byPath = (entries: Entry[]) => new Map(entries.map((e) => [e.path, e]));
 
 /** How many pages a change's ops touch: the count its undo label names. */
-const pagesIn = (ops: BatchOp[]) => new Set(ops.map((op) => op.path)).size;
+const pagesIn = (ops: BatchOp[]) =>
+  new Set(ops.map((op) => (op.op === 'rename' ? op.to : op.path))).size;
 
 /**
  * Change a declared field's kind in place (M60.5), only when every value
@@ -345,6 +462,12 @@ export async function changeFieldKind(
   fields[actual] = spec;
 
   const patch: Record<string, unknown> = { fields };
+  if (
+    ctx.schema.types.get(typeName)?.deadline === actual &&
+    kind !== 'date' &&
+    kind !== 'daterange'
+  )
+    patch.deadline = null;
   if (preview.stripped > 0) {
     const typeViews = ctx.schema.types.get(typeName)?.views ?? [];
     patch.views = serializeViewList(stripMisfitTests(typeViews, actual, kind).views);
@@ -512,14 +635,51 @@ export async function removeFieldFromType(typeName: string, fieldName: string): 
   const blockers = deleteBlockers(
     groupingUses(entries, lists, typeName, actual, getSchema(entries)),
   );
+  const formulas = formulaUses(entries, typeName, actual);
+  if (formulas.length > 0) {
+    const more = formulas.length - 1;
+    toast(
+      `Can't delete “${humanize(actual)}”: the formula “${humanize(formulas[0].field)}”${more > 0 ? ` and ${more} more read it. Change those formulas first.` : ' reads it. Change that formula first.'}`,
+    );
+    return false;
+  }
   if (blockers.length > 0) {
     toast(deleteBlockedWords(humanize(actual), blockers));
     return false;
   }
   delete fields[actual];
-  if (isKnowledgePath(doc.path)) return patchFrontmatter(doc.path, { fields });
+  const patch: Record<string, unknown> = { fields };
+  if (getSchema(entries).types.get(typeName)?.deadline === actual) patch.deadline = null;
+  if (isKnowledgePath(doc.path)) return patchFrontmatter(doc.path, patch);
   const label = deletedPropertyLabel(humanize(actual));
-  return (await applyBatch([patchOp(doc, { fields })], { undo: label })) !== null;
+  return (await applyBatch([patchOp(doc, patch)], { undo: label })) !== null;
+}
+
+/** A database may declare one stored date field as its work deadline. */
+export async function setTypeDeadline(
+  typeName: string,
+  fieldName: string | null,
+): Promise<boolean> {
+  const { entries, patchFrontmatter } = useVaultStore.getState();
+  const toast = useUiStore.getState().toast;
+  try {
+    const doc = findTypeDoc(entries, typeName);
+    if (doc === null || !guardEditable(doc, typeName)) return false;
+    const name = fieldName?.trim() ?? null;
+    if (name !== null) {
+      const def = getSchema(entries)
+        .types.get(typeName)
+        ?.fields.find((field) => field.name === name);
+      if (def === undefined || (def.kind !== 'date' && def.kind !== 'daterange')) {
+        toast('Choose a stored date or date range for the deadline.');
+        return false;
+      }
+    }
+    return await patchFrontmatter(doc.path, { deadline: name });
+  } catch {
+    toast(`Couldn't change the deadline for “${typeName}”.`);
+    return false;
+  }
 }
 
 /**
@@ -619,6 +779,7 @@ export async function setFieldConfig(
       | 'relation'
       | 'property'
       | 'calculate'
+      | 'formula'
       | 'format'
       | 'precision'
       | 'target'
@@ -629,6 +790,7 @@ export async function setFieldConfig(
       // closed. `dateFormat`, never `format`: numbers own that key.
       | 'dateFormat'
       | 'timeFormat'
+      | 'remind'
       // M16.10. Pass null for the default ('show') so the key is deleted
       // rather than written — a Type doc should not carry the absence of an
       // opinion.
@@ -637,26 +799,48 @@ export async function setFieldConfig(
     >
   >,
 ): Promise<boolean> {
-  const { entries, patchFrontmatter } = useVaultStore.getState();
-  const doc = findTypeDoc(entries, typeName);
-  if (doc === null) return false;
-  if (!guardEditable(doc, typeName)) return false;
-  const fields = rawFieldsOf(doc);
-  const actual = Object.keys(fields).find((k) => k.toLowerCase() === fieldName.toLowerCase());
-  if (actual === undefined) return false;
-  const raw = fields[actual];
-  // A bare `field: text` shorthand has to grow into a mapping to hold config.
-  const spec: Record<string, unknown> =
-    typeof raw === 'object' && raw !== null && !Array.isArray(raw)
-      ? { ...(raw as Record<string, unknown>) }
-      : { kind: typeof raw === 'string' ? raw : 'text' };
-  for (const [key, value] of Object.entries(config)) {
-    if (value === null || value === undefined || value === '') delete spec[key];
-    else spec[key] = value;
+  try {
+    const { entries, patchFrontmatter } = useVaultStore.getState();
+    const doc = findTypeDoc(entries, typeName);
+    if (doc === null) return false;
+    if (!guardEditable(doc, typeName)) return false;
+    const fields = rawFieldsOf(doc);
+    const actual = Object.keys(fields).find((k) => k.toLowerCase() === fieldName.toLowerCase());
+    if (actual === undefined) return false;
+    const raw = fields[actual];
+    // A bare `field: text` shorthand has to grow into a mapping to hold config.
+    const spec: Record<string, unknown> =
+      typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+        ? { ...(raw as Record<string, unknown>) }
+        : { kind: typeof raw === 'string' ? raw : 'text' };
+    if (config.formula !== undefined && config.formula !== null) {
+      const checked =
+        typeof config.formula === 'string' && rawKindOf(raw) === 'formula'
+          ? checkFormula(config.formula, getSchema(entries).types.get(typeName)?.fields ?? [], {
+              typeName,
+              ownName: actual,
+            })
+          : {
+              ok: false as const,
+              error: "Write a formula over this database's number and date properties.",
+            };
+      if (!checked.ok) {
+        useUiStore.getState().toast(checked.error);
+        return false;
+      }
+      config = { ...config, formula: checked.canonical };
+    }
+    for (const [key, value] of Object.entries(config)) {
+      if (value === null || value === undefined || value === '') delete spec[key];
+      else spec[key] = value;
+    }
+    fields[actual] = spec;
+    if (!(await patchFrontmatter(doc.path, { fields }))) return false;
+    return true;
+  } catch {
+    useUiStore.getState().toast(`Couldn't save ${humanize(fieldName)} settings.`);
+    return false;
   }
-  fields[actual] = spec;
-  if (!(await patchFrontmatter(doc.path, { fields }))) return false;
-  return true;
 }
 
 /**
@@ -999,9 +1183,8 @@ const STARTER_STATUSES = [
  * stops being a question about folders.
  *
  * Returns the name on success and null on failure — a human-UI action, so it
- * toasts rather than throwing (the store-layer error invariant). It
- * deliberately does NOT navigate: the whole point of Door 2 is that you never
- * leave the page you are writing.
+ * toasts rather than throwing (the store-layer error invariant). Its caller
+ * decides whether to open the new database or stay on the current page.
  */
 export async function createDatabase(rawName: string): Promise<string | null> {
   const name = rawName.trim();

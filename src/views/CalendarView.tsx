@@ -1,3 +1,8 @@
+import { kindFacts } from '@/engine/fieldKindTable';
+import { expandForCalendar, exceptionStamp, type CalendarItem } from '@/engine/recurrence';
+import { OccurrenceMenu } from './OccurrenceMenu';
+import type { MouseEvent } from 'react';
+import type { TimeSlot } from '@/engine/timeGrid';
 import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useOpenPath } from '@/app/useOpenPath';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -7,6 +12,7 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { addDays, DEFAULT_TIME_FORMAT, fromIsoDate, toIsoDate } from '@/engine/dates';
 import {
   addMonths,
+  canReschedule,
   dateKindOf,
   dayLabel,
   dayOffset,
@@ -66,7 +72,7 @@ export interface CalendarViewProps {
   /** Pins the hours grid's now line for tests; omitted, it follows the clock. */
   now?: Date;
   /** Create a record dated to the clicked day. */
-  onCreateOn?: (title: string, day: string) => Promise<boolean>;
+  onCreateOn?: (title: string, day: string, slot?: TimeSlot) => Promise<boolean>;
 }
 
 /**
@@ -77,7 +83,7 @@ export interface CalendarViewProps {
  * records with no time of day, then `CalendarTimeGrid`, where a timed record
  * is a block at its hours and an open-ended one a point chip.
  *
- * A record appears on every day its span covers, so a two-week range reads as a
+ * A record appears on every day its span covers and every day its repeat rule names, so a two-week range reads as a
  * band across the weeks rather than as a single chip on its start date — which
  * is the whole reason a `daterange` is a distinct kind.
  *
@@ -92,11 +98,21 @@ export function CalendarView({
   fields,
   today = toIsoDate(new Date()),
   now,
-  onCreateOn,
+  onCreateOn: createOnDate,
 }: CalendarViewProps) {
   const dateField = resolveDateField(presentation, fields);
+  const dateKind = fields.find((field) => field.name === dateField)?.kind;
+  const onCreateOn =
+    dateField === 'createdAt' ||
+    dateField === 'modifiedAt' ||
+    (dateKind !== undefined && kindFacts(dateKind).computed)
+      ? undefined
+      : createOnDate;
   const [anchor, setAnchor] = useState(today);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [occurrence, setOccurrence] = useState<{ item: CalendarItem; anchor: HTMLElement } | null>(
+    null,
+  );
   const openPath = useOpenPath('in-place');
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
 
@@ -128,11 +144,52 @@ export function CalendarView({
     [span, anchor, weekStart, showWeekends],
   );
 
-  const dated = useMemo(
-    () => entries.filter((e) => spanOf(e, dateField) !== null),
-    [entries, dateField],
+  const calendarItems = useMemo(
+    () =>
+      expandForCalendar(entries, dateField, schema, {
+        start: weeks[0][0],
+        end: weeks.at(-1)!.at(-1)!,
+      }),
+    [entries, dateField, schema, weeks],
   );
-  const undated = useMemo(() => unscheduled(entries, dateField), [entries, dateField]);
+  const itemFor = useMemo(
+    () => new Map(calendarItems.map((item) => [item.entry, item])),
+    [calendarItems],
+  );
+  const dated = useMemo(
+    () => calendarItems.filter((item) => item.value !== null).map((item) => item.entry),
+    [calendarItems],
+  );
+  const keyFor = (entry: Entry) => itemFor.get(entry)?.key ?? entry.path;
+  const repeating = (entry: Entry) => itemFor.get(entry)?.repeat !== 'none';
+  const marks = (entry: Entry) => {
+    const item = itemFor.get(entry);
+    return {
+      'data-occurrence':
+        item?.repeat === 'occurrence' && item.value !== null
+          ? exceptionStamp(item.value)
+          : undefined,
+      'data-repeat': item?.repeat === 'unknown' ? 'not-understood' : undefined,
+    };
+  };
+  const repeatLabel = (entry: Entry) =>
+    itemFor.get(entry)?.repeat === 'occurrence'
+      ? ', repeats'
+      : itemFor.get(entry)?.repeat === 'unknown'
+        ? ', Repeat rule not understood'
+        : canReschedule(entry, dateField, schema)
+          ? '. Arrow keys move it.'
+          : '';
+  const itemIcon = (entry: Entry, normal: string) =>
+    itemFor.get(entry)?.repeat === 'occurrence'
+      ? 'repeat'
+      : itemFor.get(entry)?.repeat === 'unknown'
+        ? 'circle-alert'
+        : normal;
+  const undated = useMemo(
+    () => unscheduled(entries, dateField, schema),
+    [entries, dateField, schema],
+  );
   const [showUndated, setShowUndated] = useState(false);
 
   // The day the pointer went down on, so a drop can be read as a delta from it
@@ -144,9 +201,15 @@ export function CalendarView({
     onCommit: (path, edge, days) => {
       if (dateField === null) return;
       const entry = dated.find((e) => e.path === path);
-      const current = entry === undefined ? null : spanOf(entry, dateField);
-      if (entry === undefined || current === null) return;
-      // The calendar only ever MOVES. Resizing needs an edge you can aim at,
+      const current = entry === undefined ? null : spanOf(entry, dateField, schema);
+      if (
+        entry === undefined ||
+        current === null ||
+        repeating(entry) ||
+        !canReschedule(entry, dateField, schema)
+      )
+        return;
+      // The month grid and all-day row only MOVE. Resizing needs an edge you can aim at,
       // and a grid cell's edge is already the week's edge.
       if (edge !== 'move') return;
       const kind = dateKindOf(entry, dateField, schema);
@@ -158,27 +221,27 @@ export function CalendarView({
 
   /** Where each dated entry sits once Week and Day draw the hours. */
   const placements = useMemo(() => {
-    const out = new Map<string, Placement>();
+    const out = new Map<Entry, Placement>();
     for (const entry of dated) {
-      const placed = placementOf(entry, dateField);
-      if (placed !== null) out.set(entry.path, placed);
+      const placed = placementOf(entry, dateField, schema);
+      if (placed !== null) out.set(entry, placed);
     }
     return out;
-  }, [dated, dateField]);
+  }, [dated, dateField, schema]);
 
   /** Each dated entry with its span resolved once, with the drag previewed.
    * In Week and Day only the all-day ones: the rest are in the hours. */
   const spans: Scheduled[] = useMemo(() => {
     const active = drag.drag;
     return dated.flatMap((entry) => {
-      const resolved = spanOf(entry, dateField);
+      const resolved = spanOf(entry, dateField, schema);
       if (resolved === null) return [];
-      if (hours && placements.get(entry.path)?.kind !== 'allDay') return [];
+      if (hours && placements.get(entry)?.kind !== 'allDay') return [];
       const preview =
         active !== null && active.id === entry.path ? shiftSpan(resolved, active.days) : resolved;
       return [{ entry, span: preview }];
     });
-  }, [dated, dateField, drag.drag, hours, placements]);
+  }, [dated, dateField, drag.drag, hours, placements, schema]);
 
   /** The timed and point records of the visible days, for the hours grid. */
   const timedItems: TimeGridItem[] = useMemo(() => {
@@ -187,11 +250,11 @@ export function CalendarView({
       weeks.flatMap((week) => (span === 'day' ? week : visibleDays(week, showWeekends))),
     );
     return dated.flatMap((entry) => {
-      const placement = placements.get(entry.path);
+      const placement = placements.get(entry);
       if (placement === undefined || placement.kind === 'allDay') return [];
-      return shown.has(placement.day) ? [{ entry, placement }] : [];
+      return shown.has(placement.day) ? [{ entry, placement, calendar: itemFor.get(entry) }] : [];
     });
-  }, [hours, weeks, dated, placements, span, showWeekends]);
+  }, [hours, weeks, dated, placements, span, showWeekends, itemFor]);
   const timeFormat = fields.find((f) => f.name === dateField)?.timeFormat ?? DEFAULT_TIME_FORMAT;
 
   /** Move the grid by one screenful of whatever it is showing. */
@@ -229,8 +292,9 @@ export function CalendarView({
   }
 
   /** Spread onto anything draggable, remembering which day it was grabbed on. */
-  const grabProps = (path: string, day: string) => {
-    const handle = drag.handleProps(path);
+  const grabProps = (entry: Entry, day: string) => {
+    if (repeating(entry) || !canReschedule(entry, dateField, schema)) return {};
+    const handle = drag.handleProps(entry.path);
     return {
       ...handle,
       onPointerDown: (e: ReactPointerEvent) => {
@@ -240,9 +304,11 @@ export function CalendarView({
     };
   };
 
-  const openUnlessDragged = (path: string) => () => {
+  const openUnlessDragged = (entry: Entry) => (event: MouseEvent<HTMLButtonElement>) => {
     if (drag.consumeClick()) return;
-    openPath(path);
+    const item = itemFor.get(entry);
+    if (item?.repeat === 'occurrence') setOccurrence({ item, anchor: event.currentTarget });
+    else openPath(entry.path);
   };
 
   /** One week row of day cells and bars: every Month row, and the all-day
@@ -280,7 +346,7 @@ export function CalendarView({
               key={day}
               data-testid="calendar-day"
               data-day={day}
-              data-count={onDay(dated, dateField, day).length}
+              data-count={onDay(dated, dateField, day, schema).length}
               // Where a release would land. `pointerover` and not
               // `pointerenter`: React derives enter from over/out at the
               // root, so a dispatched `pointerenter` reaches no handler.
@@ -319,20 +385,25 @@ export function CalendarView({
                 const style = typeStyle(entry.type, schema);
                 return (
                   <button
-                    key={entry.path}
+                    key={keyFor(entry)}
                     type="button"
                     data-testid="calendar-chip"
                     data-path={entry.path}
-                    {...grabProps(entry.path, day)}
-                    onClick={openUnlessDragged(entry.path)}
+                    {...marks(entry)}
+                    {...grabProps(entry, day)}
+                    onClick={openUnlessDragged(entry)}
                     title={entry.title}
-                    aria-label={`${entry.title} on ${day}. Arrow keys move it.`}
+                    aria-label={`${entry.title} on ${day}${repeatLabel(entry)}`}
                     className={[
                       'flex min-w-0 touch-none select-none items-center gap-1 rounded-xs border-0 bg-n-50 px-1 py-px text-left text-xs text-n-800 hover:bg-n-100',
                       drag.drag?.id === entry.path ? 'opacity-60 ring-1 ring-cortex-500' : '',
                     ].join(' ')}
                   >
-                    <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-400)'} />
+                    <Icon
+                      name={itemIcon(entry, style.icon)}
+                      size={10}
+                      color={style.color ?? 'var(--n-400)'}
+                    />
                     <span className="min-w-0 flex-1 truncate">{entry.title}</span>
                   </button>
                 );
@@ -371,14 +442,15 @@ export function CalendarView({
             const style = typeStyle(seg.entry.type, schema);
             return (
               <button
-                key={`${seg.entry.path}:${week[0]}`}
+                key={`${keyFor(seg.entry)}:${week[0]}`}
                 type="button"
                 data-testid="calendar-bar"
                 data-path={seg.entry.path}
-                {...grabProps(seg.entry.path, visible[seg.startCol])}
-                onClick={openUnlessDragged(seg.entry.path)}
+                {...marks(seg.entry)}
+                {...grabProps(seg.entry, visible[seg.startCol])}
+                onClick={openUnlessDragged(seg.entry)}
                 title={`${seg.entry.title} · ${seg.span.start} → ${seg.span.end}`}
-                aria-label={`${seg.entry.title}, ${seg.span.start} to ${seg.span.end}. Arrow keys move it.`}
+                aria-label={`${seg.entry.title}, ${seg.span.start} to ${seg.span.end}${repeatLabel(seg.entry)}`}
                 className={[
                   'pointer-events-auto absolute flex touch-none select-none items-center gap-1 overflow-hidden border border-cortex-500 bg-cortex-50 px-1 text-left text-xs text-n-900 hover:bg-cortex-100',
                   seg.continuesLeft ? 'border-l-0' : 'rounded-l-sm',
@@ -396,7 +468,11 @@ export function CalendarView({
                   <Icon name="chevron-left" size={10} color="var(--cortex-600)" />
                 )}
                 {!seg.continuesLeft && (
-                  <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-400)'} />
+                  <Icon
+                    name={itemIcon(seg.entry, style.icon)}
+                    size={10}
+                    color={style.color ?? 'var(--n-400)'}
+                  />
                 )}
                 <span className="min-w-0 flex-1 truncate">{seg.entry.title}</span>
                 {seg.continuesRight && (
@@ -505,6 +581,9 @@ export function CalendarView({
           <CalendarTimeGrid
             days={weeks.flatMap((week) => visibleOf(week))}
             items={timedItems}
+            onOccurrence={(item, anchor) => setOccurrence({ item, anchor })}
+            dateField={dateField}
+            onCreateOn={onCreateOn}
             today={today}
             timeFormat={timeFormat}
             schema={schema}
@@ -513,6 +592,13 @@ export function CalendarView({
         </>
       ) : (
         <div className="min-h-0 flex-1 overflow-auto">{weeks.map(weekRow)}</div>
+      )}
+      {occurrence !== null && (
+        <OccurrenceMenu
+          item={occurrence.item}
+          anchor={occurrence.anchor}
+          onClose={() => setOccurrence(null)}
+        />
       )}
       {showUndated && undated.length > 0 && (
         <div
@@ -554,7 +640,7 @@ function DayAdd({
   onCreate,
 }: {
   day: string;
-  onCreate: (title: string, day: string) => Promise<boolean>;
+  onCreate: (title: string, day: string, slot?: TimeSlot) => Promise<boolean>;
 }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState('');

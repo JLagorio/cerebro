@@ -1,6 +1,7 @@
 ---
 type: Work item
 key: SYN-2
+project: "[[offline-sync-hardening]]"
 status: todo
 priority: medium
 assignee: "[[sam-ito]]"

@@ -1,0 +1,23 @@
+{
+  "sizes": [
+    { "input": 0, "expected": 128 },
+    { "input": 1, "expected": 128 },
+    { "input": 128, "expected": 128 },
+    { "input": 129, "expected": 256 },
+    { "input": 256, "expected": 256 },
+    { "input": 257, "expected": 512 },
+    { "input": 512, "expected": 512 },
+    { "input": 1024, "expected": 512 }
+  ],
+  "reasons": [
+    "tooLarge",
+    "unsupported",
+    "corrupt",
+    "noPreview",
+    "notFound",
+    "toolMissing",
+    "timedOut"
+  ],
+  "sources": ["image", "fig", "psd", "quickLook"],
+  "cached": ["tooLarge", "unsupported", "corrupt", "noPreview"]
+}

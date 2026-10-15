@@ -1,3 +1,6 @@
+import { computeChart } from './chart';
+import { evaluateFilters } from './viewFilters';
+import { sortEntries } from './surface';
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_STATUSES,
@@ -56,6 +59,52 @@ const project = makeEntry({
   title: 'Flight deck',
   type: 'Project',
   properties: { key: 'FLD' },
+});
+
+describe('project progress (M61.11b)', () => {
+  const progressType = makeEntry({
+    path: 'types/project.md',
+    type: 'Type',
+    title: 'Project',
+    properties: {
+      fields: {
+        progress: {
+          kind: 'rollup',
+          from: { type: 'Work item', field: 'project' },
+          property: 'status',
+          calculate: 'percent_done',
+          format: 'progress',
+          precision: 0,
+        },
+      },
+    },
+  });
+  const workType = makeEntry({
+    path: 'types/work-item.md',
+    type: 'Type',
+    title: 'Work item',
+    properties: { fields: { status: 'status', project: { kind: 'relation', target: 'Project' } } },
+  });
+  const work = ['done', 'todo', 'todo', 'todo', 'cancelled'].map((status, i) =>
+    makeEntry({
+      path: `records/work-items/${i}.md`,
+      type: 'Work item',
+      properties: { status },
+      relationships: { project: ['flight-deck'] },
+    }),
+  );
+
+  it('is numeric in reads and percent-formatted on the page', () => {
+    const schema = buildSchema([progressType, workType, project, ...work]);
+    expect(schema.fieldValue(project, 'progress')).toBe(25);
+    expect(schema.resolveField(project, 'progress').display).toBe('25%');
+  });
+
+  it('leaves a project with no measured work blank', () => {
+    const schema = buildSchema([progressType, workType, project]);
+    expect(schema.fieldValue(project, 'progress')).toBeUndefined();
+    expect(schema.resolveField(project, 'progress').display).toBe('');
+  });
 });
 
 // A project with its own `statuses:` override (locked decision 4).
@@ -658,5 +707,149 @@ describe('layout config (M45.1)', () => {
       heading: [],
       groups: [],
     });
+  });
+});
+
+describe('declared reminder offsets (M64.3b)', () => {
+  it('reads only supported offsets on stored date and date-range fields', () => {
+    const doc = makeEntry({
+      path: 'types/dated.md',
+      title: 'Dated',
+      type: 'Type',
+      properties: {
+        fields: {
+          due: { kind: 'date', remind: '1d' },
+          window: { kind: 'daterange', remind: '0d' },
+          other: { kind: 'date', remind: '3h' },
+          words: { kind: 'text', remind: '1d' },
+          created: { kind: 'created_time', remind: '1w' },
+        },
+      },
+    });
+    expect(buildSchema([doc]).types.get('Dated')?.fields).toEqual([
+      { name: 'due', kind: 'date', remind: '1d' },
+      { name: 'window', kind: 'daterange', remind: '0d' },
+      { name: 'other', kind: 'date' },
+      { name: 'words', kind: 'text' },
+      { name: 'created', kind: 'created_time' },
+    ]);
+  });
+});
+
+describe('declared deadlines (M61.3b)', () => {
+  it.each([
+    ['date', 'due', 'due'],
+    ['daterange', 'due', 'due'],
+    ['date', ' due ', 'due'],
+    ['date', 'Due', null],
+    ['date', 'unknown', null],
+    ['select', 'due', null],
+    ['created_time', 'due', null],
+    ['date', 2, null],
+    ['date', ['due'], null],
+    ['date', null, null],
+  ])('resolves %s / %s without guessing', (kind, deadline, expected) => {
+    const doc = makeEntry({
+      type: 'Type',
+      title: 'Dated',
+      properties: { fields: { due: { kind } }, deadline },
+    });
+    expect(buildSchema([doc]).types.get('Dated')?.deadline).toBe(expected);
+  });
+});
+
+describe('formula reads (M61.4)', () => {
+  function formulaVault() {
+    const doc = makeEntry({
+      path: 'types/key-result.md',
+      title: 'Key result',
+      type: 'Type',
+      properties: {
+        fields: {
+          target: { kind: 'number' },
+          current: { kind: 'number' },
+          starts: { kind: 'date' },
+          gap: { kind: 'formula', formula: 'target - current', format: 'currency' },
+          doubled: { kind: 'formula', formula: 'gap * 2' },
+          next: { kind: 'formula', formula: 'starts + .5', dateFormat: 'ymd', timeFormat: '24' },
+          broken: { kind: 'formula', formula: 'missing + 1' },
+          cycle: { kind: 'formula', formula: 'cycle + 1' },
+        },
+      },
+    });
+    const full = makeEntry({
+      path: 'results/full.md',
+      type: 'Key result',
+      properties: {
+        target: 100,
+        current: 30,
+        starts: '2026-07-28 14:30',
+        gap: 999,
+        doubled: 999,
+      },
+    });
+    const empty = makeEntry({
+      path: 'results/empty.md',
+      type: 'Key result',
+      properties: {
+        target: 100,
+        gap: 999,
+      },
+    });
+    return { full, empty, schema: buildSchema([doc, full, empty]) };
+  }
+
+  it('computes numbers and nested formulas, ignores stored output, and formats the result', () => {
+    const { full, schema } = formulaVault();
+    expect(schema.fieldValue(full, 'gap')).toBe(70);
+    expect(schema.fieldValue(full, 'doubled')).toBe(140);
+    expect(schema.resolveField(full, 'gap')).toMatchObject({ raw: 70, display: '$70' });
+    expect(schema.resolveField(full, 'doubled')).toMatchObject({ raw: 140, display: '140' });
+  });
+
+  it('computes and displays date results with their property format', () => {
+    const { full, schema } = formulaVault();
+    expect(schema.fieldValue(full, 'next')).toBe('2026-07-29 02:30');
+    expect(schema.resolveField(full, 'next').display).toBe('2026/07/29 02:30');
+  });
+
+  it('keeps missing, invalid and cyclic results empty even when frontmatter stores output', () => {
+    const { full, empty, schema } = formulaVault();
+    for (const [entry, field] of [
+      [empty, 'gap'],
+      [empty, 'doubled'],
+      [full, 'broken'],
+      [full, 'cycle'],
+    ] as const) {
+      expect(schema.fieldValue(entry, field)).toBeUndefined();
+      expect(schema.resolveField(entry, field)).toMatchObject({ raw: undefined, display: '' });
+    }
+  });
+
+  it('shares one computed value with filters, sorts and chart measures', () => {
+    const { full, empty, schema } = formulaVault();
+    expect(evaluateFilters(full, { all: [{ field: 'gap', op: 'gt', value: 60 }] }, schema)).toBe(
+      true,
+    );
+    expect(
+      evaluateFilters(empty, { all: [{ field: 'gap', op: 'equals', value: 0 }] }, schema),
+    ).toBe(false);
+    expect(evaluateFilters(empty, { all: [{ field: 'gap', op: 'is_empty' }] }, schema)).toBe(true);
+    expect(sortEntries([empty, full], [{ field: 'gap', dir: 'desc' }], schema)).toEqual([
+      full,
+      empty,
+    ]);
+    const chart = computeChart(
+      [full, empty],
+      {
+        type: 'chart',
+        group: [],
+        sort: [],
+        columns: [],
+        chart: { kind: 'number', agg: 'sum', value: 'gap' },
+      },
+      schema,
+    );
+    expect(chart.total).toBe(70);
   });
 });

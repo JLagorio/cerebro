@@ -1,3 +1,11 @@
+import type { Extraction } from '@/engine/extracted';
+import type { Followup, FollowupClaim } from '@/engine/followups';
+import type {
+  ClientTokenRequest,
+  ClientToken,
+  CreatedClientToken,
+  ClientAccessStatus,
+} from '@/engine/clientAccess';
 // IPC facade: every vault operation in the app goes through these functions.
 // Inside Tauri (detected via __TAURI_INTERNALS__) they invoke the Rust
 // commands; in the browser (pnpm dev, vitest, Playwright) they delegate to
@@ -18,6 +26,9 @@ import type { ConnectorStatusRow } from '@/engine/connectors';
 import type { TrashedItem } from '@/engine/trash';
 import type { BatchApplied, BatchOp, OpenReport } from '@/engine/batch';
 import type { Entry } from '@/engine/types';
+import type { SheetInput, SheetResult } from '@/engine/sheet/fence';
+import type { DroppedFile, DroppedText, OsDropEvent } from '@/engine/osDrop';
+import type { AttachmentImport } from '@/engine/attachments';
 import { faulted } from './mockFaults';
 import * as mock from './mockIpc';
 
@@ -40,6 +51,28 @@ export function pickVault(): Promise<string | null> {
  */
 export function openDemoVault(): Promise<string> {
   return inTauri() ? invokeTauri('open_demo_vault') : mock.openDemoVault();
+}
+
+export interface StarterMarker {
+  kit: number;
+  outcome: 'added' | 'declined';
+  offered_at?: string;
+}
+
+export function starterMarker(vault: string): Promise<StarterMarker | null> {
+  return inTauri()
+    ? invokeTauri('starter_marker', { vault })
+    : faulted('starter_marker', () => mock.starterMarker(vault));
+}
+
+export function installStarterKit(vault: string): Promise<{ marker_saved: boolean }> {
+  return inTauri()
+    ? invokeTauri('install_starter_kit', { vault })
+    : faulted('install_starter_kit', () => mock.installStarterKit(vault));
+}
+
+export function declineStarterKit(vault: string): Promise<void> {
+  return inTauri() ? invokeTauri('decline_starter_kit', { vault }) : mock.declineStarterKit(vault);
 }
 
 export function getLastVault(): Promise<string | null> {
@@ -72,7 +105,19 @@ export function scanVault(vault: string): Promise<Entry[]> {
 }
 
 export function readNote(vault: string, path: string): Promise<string> {
-  return inTauri() ? invokeTauri('read_note', { vault, path }) : mock.readNote(vault, path);
+  return inTauri()
+    ? invokeTauri('read_note', { vault, path })
+    : faulted('read_note', () => mock.readNote(vault, path));
+}
+
+/** Whole bytes and their hash from one read, for a save that compares versions. */
+export function readNoteSource(
+  vault: string,
+  path: string,
+): Promise<{ content: string; hash: string }> {
+  return inTauri()
+    ? invokeTauri('read_note_source', { vault, path })
+    : faulted('read_note', () => mock.readNoteSource(vault, path));
 }
 
 import type { ExcerptPart, VaultHit, VaultSearch } from './mockIpc';
@@ -156,9 +201,16 @@ export function __resetPageWrites(): void {
   pageWriteFailureCount = 0;
 }
 
-export function saveNote(vault: string, path: string, body: string): Promise<void> {
+export function saveNote(
+  vault: string,
+  path: string,
+  body: string,
+  expectHash?: string,
+): Promise<string | null> {
   return pageWrite(
-    inTauri() ? invokeTauri('save_note', { vault, path, body }) : mock.saveNote(vault, path, body),
+    inTauri()
+      ? invokeTauri('save_note', { vault, path, body, expectHash })
+      : mock.saveNote(vault, path, body, expectHash),
   );
 }
 
@@ -357,7 +409,9 @@ export function restoreFromTrash(vault: string, stamp: string): Promise<string> 
  * page written; rejects in the backend's words, a stale page as
  * `stale_content: …`. The store's `applyBatch` is the caller. */
 export function applyBatch(vault: string, ops: BatchOp[]): Promise<BatchApplied> {
-  return inTauri() ? invokeTauri('apply_batch', { vault, ops }) : mock.applyBatch(vault, ops);
+  return inTauri()
+    ? invokeTauri('apply_batch', { vault, ops })
+    : faulted('apply_batch', () => mock.applyBatch(vault, ops));
 }
 
 /** All vault directories (for folder trees, including empty folders). */
@@ -472,18 +526,58 @@ export function pickFiles(): Promise<string[]> {
   return inTauri() ? invokeTauri('pick_files') : mock.pickFiles();
 }
 
+export function inspectDropped(paths: readonly string[]): Promise<DroppedFile[]> {
+  return inTauri() ? invokeTauri('inspect_dropped', { paths }) : mock.inspectDropped(paths);
+}
+
+export function readDroppedText(path: string): Promise<DroppedText> {
+  return inTauri() ? invokeTauri('read_dropped_text', { path }) : mock.readDroppedText(path);
+}
+
+/** Read a kept Office document; the original is never modified. */
+export function extractDocument(vault: string, path: string): Promise<Extraction> {
+  return inTauri()
+    ? invokeTauri('extract_document', { vault, path })
+    : mock.extractDocument(vault, path);
+}
+
+/** Tauri positions are physical pixels; DOM hit testing uses CSS pixels. */
+export async function listenOsFileDrop(handler: (event: OsDropEvent) => void): Promise<() => void> {
+  if (!inTauri()) return mock.listenOsFileDrop(handler);
+  const { getCurrentWebview } = await import('@tauri-apps/api/webview');
+  return getCurrentWebview().onDragDropEvent(({ payload }) => {
+    if (payload.type === 'leave') handler({ type: 'leave' });
+    else {
+      const ratio = window.devicePixelRatio || 1;
+      const position = { x: payload.position.x / ratio, y: payload.position.y / ratio };
+      if (payload.type === 'over') handler({ type: 'over', position });
+      else handler({ type: payload.type, paths: payload.paths, position });
+    }
+  });
+}
+
 /**
  * Copy a file from anywhere on disk into the vault's `attachments/` folder and
- * return its VAULT-RELATIVE path.
+ * return its vault-relative path and whether identical bytes were reused.
  *
  * Relative is the whole point: an absolute path breaks the moment the vault is
  * synced to another machine, and a files-first vault has to survive being
  * moved. The destination folder is chosen by the backend, not passed in.
  */
-export function importAttachment(vault: string, source: string): Promise<string> {
+export function importAttachment(vault: string, source: string): Promise<AttachmentImport> {
   return inTauri()
     ? invokeTauri('import_attachment', { vault, source })
     : mock.importAttachment(vault, source);
+}
+
+export function importAttachmentBytes(
+  vault: string,
+  name: string,
+  bytesBase64: string,
+): Promise<AttachmentImport> {
+  return inTauri()
+    ? invokeTauri('import_attachment_bytes', { vault, name, bytesBase64 })
+    : mock.importAttachmentBytes(vault, name, bytesBase64);
 }
 
 /**
@@ -556,9 +650,8 @@ export function writeClipboard(text: string): Promise<void> {
 // --- Mermaid diagram export (M29.4) -----------------------------------------
 
 /**
- * Save PNG bytes via the native save dialog (M29.4). Base64 because Tauri's
- * JSON invoke channel has no efficient raw-bytes lane for commands; diagrams
- * are small enough that this does not matter. Returns the chosen absolute
+ * Save PNG bytes via the native save dialog (M29.4). The export_png command
+ * accepts base64 in its JSON request. Returns the chosen absolute
  * path, or null when the user cancels.
  */
 export function exportPng(defaultName: string, bytes: Uint8Array): Promise<string | null> {
@@ -581,6 +674,13 @@ export function exportSvg(defaultName: string, svg: string): Promise<string | nu
   return inTauri()
     ? invokeTauri('export_svg', { defaultName, svg })
     : mock.exportSvg(defaultName, svg);
+}
+
+/** A CSV document leaves through a save dialog, outside the vault write doors. */
+export function exportCsv(defaultName: string, csv: string): Promise<string | null> {
+  return inTauri()
+    ? invokeTauri('export_csv', { defaultName, csv })
+    : mock.exportCsv(defaultName, csv);
 }
 
 /** The ledger chain head, as `{ seq, hash }` — or null when the vault has no
@@ -658,7 +758,9 @@ export type {
 /** Cards awaiting a human. Rebuilt from the ledger on every call — nothing
  * is cached, so a wiped app-data directory cannot lose one. */
 export function reviewQueue(vault: string): Promise<ReviewCard[]> {
-  return inTauri() ? invokeTauri('review_queue', { vault }) : mock.reviewQueue(vault);
+  return inTauri()
+    ? invokeTauri('review_queue', { vault })
+    : faulted('review_queue', () => mock.reviewQueue(vault));
 }
 
 /** Support/Coverage/Validity per belief facet (M27.5b).
@@ -682,9 +784,8 @@ export function attentionLanes(vault: string): Promise<LanesView> {
   return inTauri() ? invokeTauri('attention_lanes', { vault }) : mock.attentionLanes(vault);
 }
 
-/** What changed since the last time anybody looked (M26.8, read aloud in
- * M27.8b). `fromSeq` omitted means "since the last stored run", which is the
- * question a person actually asks. */
+/** The convergence window after the last stored run, unless explicitly set.
+ * Home reads its Done window through homeChanges (M64.4b). */
 export function converge(vault: string, fromSeq?: number): Promise<ChangesView> {
   return inTauri()
     ? invokeTauri('converge', { vault, fromSeq: fromSeq ?? null })
@@ -838,6 +939,17 @@ export type {
   RunWrite,
 };
 
+/** Runs placed by recorded subjects and their bounded hop descendants. */
+export function fleetSubjectRuns(
+  vault: string,
+  subjects: string[],
+  limit = 100,
+): Promise<FleetRun[]> {
+  return inTauri()
+    ? invokeTauri('fleet_subject_runs', { vault, subjects, limit })
+    : faulted('fleet_subject_runs', () => mock.fleetSubjectRuns(vault, subjects, limit));
+}
+
 /**
  * One page of run history, newest first (M33.2).
  *
@@ -939,7 +1051,9 @@ export function jobLedgerRead(vault: string): Promise<JobLedgers> {
 
 /** Record a run key and learn whether the record was FRESH — false means this
  * exact fire was already answered (another window, an earlier session) and
- * the caller must not spawn. The two-window arbitration lives in the store,
+ * a queue caller must not spawn. Run now may still run manually without
+ * consuming that fire. Resume and schedule edits claim without running,
+ * recording the newest fire owed nothing. The two-window arbitration lives in the store,
  * not in a renderer promise to be quick. */
 export function jobLedgerClaim(
   vault: string,
@@ -1199,8 +1313,26 @@ export type { AdmitReport, PendingWake, WakeCancel, WakeOffer };
  * counted, never admitted twice, and a malformed offer or an agent paused on
  * the fleet is refused by name. Throws without a runtime database; the runner
  * keeps the batch and offers it again. */
-export function admitWakes(vault: string, wakes: readonly WakeOffer[]): Promise<AdmitReport> {
-  return inTauri() ? invokeTauri('admit_wakes', { vault, wakes }) : mock.admitWakes(vault, wakes);
+export function admitWakes(
+  vault: string,
+  seenAt: string,
+  wakes: readonly WakeOffer[],
+): Promise<AdmitReport> {
+  return inTauri()
+    ? invokeTauri('admit_wakes', { vault, seenAt, wakes })
+    : mock.admitWakes(vault, wakes, new Date(), seenAt);
+}
+
+/** A removed assignment cancels its pending wake, leaving started work alone. */
+export function releaseAssignedWakes(
+  vault: string,
+  agentKey: string,
+  subject: string,
+  keyPrefix: string,
+): Promise<number> {
+  return inTauri()
+    ? invokeTauri('release_assigned_wakes', { vault, agentKey, subject, keyPrefix })
+    : mock.releaseAssignedWakes(vault, agentKey, subject, keyPrefix);
 }
 
 /** The vault's pending wakes, oldest first. A failed read throws, and the
@@ -1274,4 +1406,281 @@ export function finishQuit(): Promise<void> {
 /** A save failed: stay open, and let a later quit ask again. */
 export function cancelQuit(): Promise<void> {
   return inTauri() ? invokeTauri('cancel_quit') : mock.cancelQuit();
+}
+
+// Durable reminder and Done state (M64.3). Only these adapters reach Rust.
+import type {
+  ReminderClaim,
+  ReminderClaimResult,
+  ReminderState,
+  DoneMark,
+  DoneMarkInput,
+  DoneMarkResult,
+} from '@/engine/reminderState';
+export function reminderState(vault: string): Promise<ReminderState> {
+  return inTauri()
+    ? invokeTauri('reminder_state', { vault })
+    : faulted('reminder_state', () => mock.reminderState(vault));
+}
+export function reminderClaim(
+  vault: string,
+  fires: ReminderClaim[],
+): Promise<ReminderClaimResult[]> {
+  return inTauri()
+    ? invokeTauri('reminder_claim', { vault, fires })
+    : mock.reminderClaim(vault, fires);
+}
+export function reminderImport(vault: string, fires: ReminderClaim[]): Promise<number> {
+  return inTauri()
+    ? invokeTauri('reminder_import', { vault, fires })
+    : mock.reminderImport(vault, fires);
+}
+export function doneMarksRead(vault: string): Promise<DoneMark[]> {
+  return inTauri()
+    ? invokeTauri('done_marks_read', { vault })
+    : faulted('done_marks_read', () => mock.doneMarksRead(vault));
+}
+export function doneMark(vault: string, mark: DoneMarkInput): Promise<DoneMarkResult> {
+  return inTauri() ? invokeTauri('done_mark', { vault, mark }) : mock.doneMark(vault, mark);
+}
+export function doneUnmark(
+  vault: string,
+  mark: DoneMark,
+  restore: DoneMark | null = null,
+): Promise<boolean> {
+  return inTauri()
+    ? invokeTauri('done_unmark', { vault, mark, restore })
+    : mock.doneUnmark(vault, mark, restore);
+}
+export function doneMarksImport(
+  vault: string,
+  marks: Pick<DoneMarkInput, 'lane' | 'subject'>[],
+): Promise<number> {
+  return inTauri()
+    ? invokeTauri('done_marks_import', { vault, marks })
+    : mock.doneMarksImport(vault, marks);
+}
+
+export function homeRuns(
+  vault: string,
+  limit?: number,
+): Promise<{ runs: FleetRun[]; truncated: boolean }> {
+  return inTauri()
+    ? invokeTauri('home_runs', { vault, limit: limit ?? null })
+    : faulted('home_runs', () => mock.homeRuns(vault, limit));
+}
+export function homeChanges(vault: string, afterSeq?: number): Promise<ChangesView | null> {
+  return inTauri()
+    ? invokeTauri('home_changes', { vault, afterSeq: afterSeq ?? null })
+    : faulted('home_changes', () => mock.homeChanges(vault, afterSeq));
+}
+
+export type NotificationPermission = 'allowed' | 'quiet' | 'denied' | 'not-asked' | 'unknown';
+export type NotificationPost = NotificationPermission | 'posted' | 'failed';
+function permissionWord(word: string): NotificationPermission {
+  return word === 'allowed' || word === 'quiet' || word === 'denied' || word === 'not-asked'
+    ? word
+    : 'unknown';
+}
+export async function notificationPermission(): Promise<NotificationPermission> {
+  const word: string = inTauri()
+    ? await invokeTauri('notification_permission')
+    : await faulted('notification_permission', () => mock.notificationPermission());
+  return permissionWord(word);
+}
+export async function requestNotificationPermission(): Promise<NotificationPermission> {
+  return permissionWord(
+    inTauri()
+      ? await invokeTauri('request_notification_permission')
+      : await mock.requestNotificationPermission(),
+  );
+}
+export async function postNotification(
+  id: string,
+  title: string,
+  body: string,
+): Promise<NotificationPost> {
+  const word: string = inTauri()
+    ? await invokeTauri('post_notification', { id, title, body })
+    : await mock.postNotification(id, title, body);
+  return word === 'posted' || word === 'failed' ? word : permissionWord(word);
+}
+
+export function clientTokens(vault: string): Promise<ClientToken[]> {
+  return inTauri()
+    ? invokeTauri('client_tokens', { vault })
+    : faulted('client_tokens', () => mock.clientTokens(vault));
+}
+export function createClientToken(
+  vault: string,
+  request: ClientTokenRequest,
+): Promise<CreatedClientToken> {
+  return inTauri()
+    ? invokeTauri('create_client_token', { vault, request })
+    : mock.createClientToken(vault, request);
+}
+export function revokeClientToken(tokenId: string): Promise<boolean> {
+  return inTauri()
+    ? invokeTauri('revoke_client_token', { tokenId })
+    : mock.revokeClientToken(tokenId);
+}
+export function clientAccessStatus(): Promise<ClientAccessStatus> {
+  return inTauri()
+    ? invokeTauri('client_access_status')
+    : faulted('client_access_status', () => mock.clientAccessStatus());
+}
+export function setClientAccess(enabled: boolean, port: number): Promise<ClientAccessStatus> {
+  return inTauri()
+    ? invokeTauri('set_client_access', { enabled, port })
+    : mock.setClientAccess(enabled, port);
+}
+
+/** App links are already parsed by Rust; the webview only checks the payload shape. */
+export function takeDeepLink(): Promise<unknown> {
+  return inTauri() ? invokeTauri('take_deep_link') : mock.takeDeepLink();
+}
+export async function listenDeepLinks(handler: (payload: unknown) => void): Promise<() => void> {
+  if (!inTauri()) return mock.listenDeepLinks(handler);
+  const { listen } = await import('@tauri-apps/api/event');
+  return listen<unknown>('cerebro://deep-link', (event) => handler(event.payload));
+}
+export function appLink(vault: string, path: string): Promise<string> {
+  return inTauri() ? invokeTauri('app_link', { vault, path }) : mock.appLink(vault, path);
+}
+
+/** Sheet calculations return values only; source cells stay on the page. */
+export function calculateSheets(sheets: SheetInput[]): Promise<SheetResult[]> {
+  return inTauri() ? invokeTauri('calculate_sheets', { sheets }) : mock.calculateSheets(sheets);
+}
+
+/** An agent's booked later runs; failed reads remain unavailable. */
+export function listFollowups(vault: string): Promise<Followup[]> {
+  return inTauri() ? invokeTauri('list_followups', { vault }) : mock.listFollowups(vault);
+}
+export function claimFollowup(vault: string, id: string): Promise<FollowupClaim> {
+  return inTauri() ? invokeTauri('claim_followup', { vault, id }) : mock.claimFollowup(vault, id);
+}
+export function cancelFollowup(vault: string, id: string): Promise<boolean> {
+  return inTauri() ? invokeTauri('cancel_followup', { vault, id }) : mock.cancelFollowup(vault, id);
+}
+
+/** UI refusals from the whiteboard doors; transport failures still reject. */
+export interface CanvasRefusal {
+  code:
+    | 'missing'
+    | 'too_large'
+    | 'not_text'
+    | 'not_a_board_path'
+    | 'unreadable_on_disk'
+    | 'invalid_content'
+    | 'read_only';
+  message: string;
+}
+export type CanvasResult<T> = ({ ok: true } & T) | { ok: false; refusal: CanvasRefusal };
+export type CanvasSource = { content: string; hash: string };
+
+function isCanvasRefusal(value: unknown): value is CanvasRefusal {
+  if (typeof value !== 'object' || value === null) return false;
+  const item = value as Partial<CanvasRefusal>;
+  return (
+    typeof item.message === 'string' &&
+    [
+      'missing',
+      'too_large',
+      'not_text',
+      'not_a_board_path',
+      'unreadable_on_disk',
+      'invalid_content',
+      'read_only',
+    ].includes(item.code ?? '')
+  );
+}
+async function canvasResult<T>(read: () => Promise<T>): Promise<CanvasResult<T>> {
+  try {
+    return { ok: true, ...(await read()) };
+  } catch (error) {
+    if (isCanvasRefusal(error)) return { ok: false, refusal: error };
+    throw error;
+  }
+}
+export function readCanvasFile(vault: string, path: string): Promise<CanvasResult<CanvasSource>> {
+  return canvasResult(() =>
+    inTauri()
+      ? invokeTauri<CanvasSource>('read_canvas_file', { vault, path })
+      : mock.readCanvasFile(vault, path),
+  );
+}
+export function saveCanvasFile(
+  vault: string,
+  path: string,
+  content: string,
+): Promise<CanvasResult<{ hash: string }>> {
+  return canvasResult(() =>
+    inTauri()
+      ? invokeTauri<{ hash: string }>('save_canvas_file', { vault, path, content })
+      : mock.saveCanvasFile(vault, path, content),
+  );
+}
+export function createCanvasFile(
+  vault: string,
+  path: string,
+  content: string,
+  mode: 'preview' | 'commit',
+): Promise<CanvasResult<{ path: string; hash: string | null }>> {
+  return canvasResult(() =>
+    inTauri()
+      ? invokeTauri<{ path: string; hash: string | null }>('create_canvas_file', {
+          vault,
+          path,
+          content,
+          mode,
+        })
+      : mock.createCanvasFile(vault, path, content, mode),
+  );
+}
+
+export function sheetRestructure(
+  sheets: SheetInput[],
+  sheet: number,
+  change: import('@/engine/sheet/gridEdit').GridChange,
+  at: number,
+  count: number,
+): Promise<import('@/engine/sheet/gridEdit').RestructureResult> {
+  return inTauri()
+    ? invokeTauri('sheet_restructure', { sheets, sheet, change, at, count })
+    : mock.sheetRestructure(sheets, sheet, change, at, count);
+}
+export function sheetFill(
+  sheets: SheetInput[],
+  sheet: number,
+  area: import('@/engine/sheet/selection').Area,
+  axis: import('@/engine/sheet/gridEdit').FillAxis,
+  to: number,
+): Promise<import('@/engine/sheet/gridEdit').FillResult> {
+  return inTauri()
+    ? invokeTauri('sheet_fill', { sheets, sheet, area, axis, to })
+    : mock.sheetFill(sheets, sheet, area, axis, to);
+}
+export function sheetComplete(
+  names: string[],
+  sheet: number,
+  row: number,
+  column: number,
+  text: string,
+  cursor: number,
+): Promise<import('@/engine/sheet/formulaComplete').CompletionContext> {
+  return inTauri()
+    ? invokeTauri('sheet_complete', { names, sheet, row, column, text, cursor })
+    : mock.sheetComplete(names, sheet, row, column, text, cursor);
+}
+
+export function pickSheetFile(): Promise<import('@/engine/sheet/import').PickedSheet | null> {
+  return inTauri() ? invokeTauri('pick_sheet_file') : mock.pickSheetFile();
+}
+
+/** Export the live page's sheets through the native workbook writer and save dialog. */
+export function exportSheetXlsx(defaultName: string, page: string): Promise<string | null> {
+  return inTauri()
+    ? invokeTauri('export_sheet_xlsx', { defaultName, page })
+    : mock.exportSheetXlsx(defaultName, page);
 }

@@ -944,7 +944,7 @@ describe('ChartView stacks, series and the interactive legend (M44.3)', () => {
     expect(onChartChange).toHaveBeenCalledWith({ hidden: ['doing'] });
   });
 
-  // The engine already filtered the hidden slice out of `total`, so the arcs
+  // The engine already filtered the hidden slice out of `ringTotal`, so the arcs
   // must still close the ring — their lengths sum to the circumference.
   it('a donut with hidden slices still closes its ring', () => {
     const entries = wide();
@@ -963,6 +963,33 @@ describe('ChartView stacks, series and the interactive legend (M44.3)', () => {
       0,
     );
     expect(total).toBeCloseTo(2 * Math.PI * 92, 6);
+  });
+
+  it('a multi-value ring closes once, counts records once and names the overlap (M61.1)', () => {
+    const entries = [
+      makeEntry({ path: 'a.md', properties: { tags: ['infra', 'sensor'] } }),
+      makeEntry({ path: 'b.md', properties: { tags: ['sensor'] } }),
+    ];
+    render(
+      <ChartView
+        entries={entries}
+        presentation={view({ group: [{ field: 'tags' }], chart: { kind: 'donut' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const arcs = screen.getAllByTestId('chart-arc');
+    const length = arcs.reduce(
+      (sum, arc) => sum + Number(arc.getAttribute('stroke-dasharray')?.split(' ')[0]),
+      0,
+    );
+    expect(length).toBeCloseTo(2 * Math.PI * 92, 6);
+    expect(screen.getByTestId('chart-donut-total').textContent).toContain('2');
+    expect(screen.getByTestId('chart-caption').textContent).toContain(
+      '1 record appears in more than one band',
+    );
+    fireEvent.mouseEnter(arcs[0], { clientX: 20, clientY: 20 });
+    expect(screen.getByTestId('chart-tooltip').textContent).toContain('33%');
   });
 
   // Decision C (M44.3): the caption reads "Average of X", but a stacked BAR
@@ -1509,8 +1536,7 @@ describe('ChartView drilldown (M44.3)', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Save as view' }));
     const saved = onSaveView.mock.calls[0][0] as ViewDefinition;
-    // Membership, not equality: grouping bands a multi-value record by its
-    // FIRST value, and any_of catches every record the band holds.
+    // Membership restates every value: a record appears in each band it holds.
     expect(saved.filters).toEqual({ all: [{ field: 'tags', op: 'any_of', value: ['infra'] }] });
   });
 
@@ -1635,5 +1661,120 @@ describe('sliceColor', () => {
     // resolveOptionColor answers `default` (neutral grey) for those, and
     // several grey bands are indistinguishable.
     expect(sliceColor(slice({ color: 'chartreuse-ish' }), 4)).toBe('var(--opt-green)');
+  });
+});
+
+describe('immutable date-band drilldowns (M61.3)', () => {
+  it.each([
+    ['day', '2026-07-28', 'Jul 28, 2026', { field: 'due', op: 'equals', value: '2026-07-28' }],
+    [
+      'week',
+      '2026-07-28',
+      'Week of Jul 26, 2026',
+      { field: 'due', op: 'is_between', value: ['2026-07-26', '2026-08-01'] },
+    ],
+    [
+      'month',
+      '2026-07-28',
+      'July 2026',
+      { field: 'due', op: 'is_between', value: ['2026-07-01', '2026-07-31'] },
+    ],
+    [
+      'year',
+      '2026-07-28',
+      '2026',
+      { field: 'due', op: 'is_between', value: ['2026-01-01', '2026-12-31'] },
+    ],
+    [undefined, null, 'No due', { field: 'due', op: 'is_empty', value: '' }],
+    [undefined, '2026-07-28', 'Today', { field: 'due', op: 'equals', value: 'today' }],
+    [undefined, '2026-07-29', 'Tomorrow', { field: 'due', op: 'equals', value: 'tomorrow' }],
+    [undefined, '2026-08-04', 'Next week', { field: 'due', op: 'equals', value: 'next_week' }],
+    [undefined, '2026-07-31', 'This week', null],
+    ['day', 'sometime', 'sometime', null],
+  ] as const)('%s / %s saves only a stable predicate', (dateBucket, due, label, rule) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 28, 12));
+    try {
+      const doc = makeEntry({
+        path: 'types/dated.md',
+        title: 'Dated',
+        type: 'Type',
+        properties: { fields: { due: { kind: 'date' } } } as never,
+      });
+      const entry = makeEntry({
+        path: 'dated.md',
+        title: 'Dated record',
+        type: 'Dated',
+        properties: { due },
+      });
+      const onSaveView = vi.fn();
+      render(
+        <ChartView
+          entries={[entry]}
+          schema={buildSchema([doc, entry])}
+          filtered={false}
+          presentation={view({ group: [{ field: 'due', dateBucket }], chart: { xField: 'due' } })}
+          onSaveView={onSaveView}
+        />,
+      );
+      const bar = screen
+        .getAllByTestId('chart-bar')
+        .find((b) => b.getAttribute('data-label') === label)!;
+      expect(bar).toBeTruthy();
+      fireEvent.click(bar);
+      const save = screen.getByRole('button', { name: 'Save as view' }) as HTMLButtonElement;
+      expect(save.disabled).toBe(rule === null);
+      if (rule !== null) {
+        fireEvent.click(save);
+        expect((onSaveView.mock.calls[0][0] as ViewDefinition).filters).toEqual({ all: [rule] });
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ['date', '2026-07-24', undefined, 'Overdue'],
+    ['daterange', { start: '2026-07-24', end: '2026-07-28' }, undefined, 'Today'],
+    ['daterange', { start: '2026-07-24', end: '2026-07-28' }, 'day', 'Jul 28, 2026'],
+  ] as const)('never saves a misleading %s deadline band', (kind, due, dateBucket, label) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 28, 12));
+    try {
+      const doc = makeEntry({
+        path: 'types/work.md',
+        title: 'Work',
+        type: 'Type',
+        properties: {
+          deadline: 'due',
+          fields: { due: { kind } },
+        } as never,
+      });
+      const entry = makeEntry({
+        path: 'work.md',
+        type: 'Work',
+        title: 'Work',
+        properties: { due } as never,
+      });
+      render(
+        <ChartView
+          entries={[entry]}
+          schema={buildSchema([doc, entry])}
+          filtered={false}
+          presentation={view({ group: [{ field: 'due', dateBucket }], chart: { xField: 'due' } })}
+          onSaveView={vi.fn()}
+        />,
+      );
+      const bar = screen
+        .getAllByTestId('chart-bar')
+        .find((bar) => bar.getAttribute('data-label') === label)!;
+      expect(bar).toBeTruthy();
+      fireEvent.click(bar);
+      expect(
+        (screen.getByRole('button', { name: 'Save as view' }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -1,3 +1,5 @@
+import { openBesideIntent } from '@/app/openIntent';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FileTree } from '@/components/FileTree';
 import { EntryIcon } from '@/components/PageIcon';
@@ -12,6 +14,7 @@ import {
   TypeStyleDialog,
 } from '@/app/TypeDialogs';
 import { AdoptSchemaDialog } from '@/app/AdoptSchemaDialog';
+import { CsvImportDialog } from '@/app/CsvImportDialog';
 import { CollectionTree } from '@/app/CollectionTree';
 import { CollectionDialog } from '@/app/CollectionDialog';
 import { CreateMenu } from '@/app/CreateMenu';
@@ -112,26 +115,29 @@ function CollapsedControls({ onExpand }: { onExpand: () => void }) {
       >
         <Icon name="panel-left" size={15} />
       </button>
-      <button
-        type="button"
-        aria-label="Assistant"
-        aria-pressed={aiPanelOpen}
-        onClick={() => setAiPanelOpen(!aiPanelOpen)}
-        className={`${CHROME_BUTTON} ${
-          aiPanelOpen ? 'bg-surface-selected' : 'bg-transparent'
-        } hover:bg-n-100`}
-      >
-        <Icon name="zap" size={15} color="var(--synapse-500)" />
-      </button>
-      <button
-        type="button"
-        aria-label="Search"
-        title="Search  ⌘K"
-        onClick={() => setQuickOpen(true)}
-        className={`${CHROME_BUTTON} bg-transparent text-n-600 hover:bg-n-100 hover:text-n-900`}
-      >
-        <Icon name="search" size={15} />
-      </button>
+      <Tooltip label="Assistant" command="assistant.toggle">
+        <button
+          type="button"
+          aria-label="Assistant"
+          aria-pressed={aiPanelOpen}
+          onClick={() => setAiPanelOpen(!aiPanelOpen)}
+          className={`${CHROME_BUTTON} ${
+            aiPanelOpen ? 'bg-surface-selected' : 'bg-transparent'
+          } hover:bg-n-100`}
+        >
+          <Icon name="zap" size={15} color="var(--synapse-500)" />
+        </button>
+      </Tooltip>
+      <Tooltip label="Search" command="palette.open">
+        <button
+          type="button"
+          aria-label="Search"
+          onClick={() => setQuickOpen(true)}
+          className={`${CHROME_BUTTON} bg-transparent text-n-600 hover:bg-n-100 hover:text-n-900`}
+        >
+          <Icon name="search" size={15} />
+        </button>
+      </Tooltip>
     </>
   );
 }
@@ -149,6 +155,7 @@ function SurfaceRow({
   label,
   active,
   toggle = false,
+  command,
   count,
   hot = false,
   onClick,
@@ -158,6 +165,7 @@ function SurfaceRow({
   active: boolean;
   /** Opens and closes a panel rather than going somewhere. */
   toggle?: boolean;
+  command?: string;
   /** Queue size shown as a badge; omitted or 0 renders nothing. */
   count?: number;
   /** A count that wants acting on — cortex ink instead of the quiet gray
@@ -166,29 +174,31 @@ function SurfaceRow({
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={count !== undefined && count > 0 ? `${label} (${count})` : label}
-      aria-current={!toggle && active ? 'page' : undefined}
-      aria-pressed={toggle ? active : undefined}
-      className={rowClass(active)}
-    >
-      <Icon name={icon} size={15} />
-      <span className="overflow-hidden text-ellipsis whitespace-nowrap">{label}</span>
-      {count !== undefined && count > 0 && (
-        <span
-          // DS: "numbers are quiet facts" — a count, not a filled pill
-          // shouting from the chrome (M42.1). Same testid, same text.
-          data-testid="nav-badge"
-          className={`ml-auto [font-family:var(--font-mono)] text-2xs tabular-nums ${
-            hot ? 'text-cortex-600' : 'text-n-500'
-          }`}
-        >
-          {count > 99 ? '99+' : count}
-        </span>
-      )}
-    </button>
+    <Tooltip label={label} command={command}>
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={count !== undefined && count > 0 ? `${label} (${count})` : label}
+        aria-current={!toggle && active ? 'page' : undefined}
+        aria-pressed={toggle ? active : undefined}
+        className={rowClass(active)}
+      >
+        <Icon name={icon} size={15} />
+        <span className="overflow-hidden text-ellipsis whitespace-nowrap">{label}</span>
+        {count !== undefined && count > 0 && (
+          <span
+            // DS: "numbers are quiet facts" — a count, not a filled pill
+            // shouting from the chrome (M42.1). Same testid, same text.
+            data-testid="nav-badge"
+            className={`ml-auto [font-family:var(--font-mono)] text-2xs tabular-nums ${
+              hot ? 'text-cortex-600' : 'text-n-500'
+            }`}
+          >
+            {count > 99 ? '99+' : count}
+          </span>
+        )}
+      </button>
+    </Tooltip>
   );
 }
 
@@ -214,10 +224,15 @@ export function Sidebar({
 }: SidebarProps) {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const entries = useVaultStore((s) => s.entries);
+  const entriesVault = useVaultStore((s) => s.entriesVault);
+  const status = useVaultStore((s) => s.status);
   const views = useVaultStore((s) => s.views);
   const schema = useSchema();
   const selection = useNavStore((s) => s.selection);
-  const navigate = useNavStore((s) => s.navigate);
+  const navigateInPlace = useNavStore((s) => s.navigate);
+  const openPane = useNavStore((s) => s.openPane);
+  const navigate = (selection: import('@/engine/types').Selection) =>
+    openBesideIntent() ? openPane(selection) : navigateInPlace(selection);
   const typesOpen = useUiStore((s) => s.typesOpen);
   const setTypesOpen = useUiStore((s) => s.setTypesOpen);
   const width = useUiStore((s) => s.sidebarWidth);
@@ -232,6 +247,9 @@ export function Sidebar({
   const themeMode = useUiStore((s) => s.themeMode);
   const setThemeMode = useUiStore((s) => s.setThemeMode);
   const favoritesByVault = useUiStore((s) => s.favorites);
+  const renamePending = useUiStore(
+    (s) => vaultPath !== null && (s.pendingRenames[vaultPath] ?? 0) > 0,
+  );
   const pruneFavorites = useUiStore((s) => s.pruneFavorites);
   const openPath = useOpenPath();
 
@@ -239,6 +257,7 @@ export function Sidebar({
   const [collectionDialog, setCollectionDialog] = useState<CollectionDialogState | null>(null);
   const [typeDialog, setTypeDialog] = useState<TypeDialog | null>(null);
   const [adopting, setAdopting] = useState(false);
+  const [importingCsv, setImportingCsv] = useState(false);
   const [addMenu, setAddMenu] = useState<{ x: number; y: number; folder: string } | null>(null);
   const [typeMenu, setTypeMenu] = useState<{ x: number; y: number; listing: TypeListing } | null>(
     null,
@@ -369,9 +388,10 @@ export function Sidebar({
     });
   }, [favorites, entries, schema, openPath]);
   useEffect(() => {
-    if (vaultPath === null) return;
+    if (vaultPath === null || status !== 'ready' || entriesVault !== vaultPath || renamePending)
+      return;
     pruneFavorites(vaultPath, new Set(entries.map((e) => e.path)));
-  }, [entries, pruneFavorites, vaultPath]);
+  }, [entries, entriesVault, pruneFavorites, status, vaultPath, renamePending]);
 
   const nodeMenuItems = (node: CollectionNode): ContextMenuItem[] => {
     if (node.kind === 'collection') {
@@ -588,28 +608,31 @@ export function Sidebar({
         </span>
         <span className="flex-1" />
         {/* The one AI act in the chrome — synapse, and a toggle, not a door. */}
-        <button
-          type="button"
-          aria-label="Assistant"
-          aria-pressed={aiPanelOpen}
-          onClick={() => setAiPanelOpen(!aiPanelOpen)}
-          className={`flex h-[26px] w-[26px] flex-none items-center justify-center rounded-md border-0 ${
-            aiPanelOpen ? 'bg-surface-selected' : 'bg-transparent'
-          } hover:bg-n-100`}
-        >
-          <Icon name="zap" size={15} color="var(--synapse-500)" />
-        </button>
+        <Tooltip label="Assistant" command="assistant.toggle">
+          <button
+            type="button"
+            aria-label="Assistant"
+            aria-pressed={aiPanelOpen}
+            onClick={() => setAiPanelOpen(!aiPanelOpen)}
+            className={`flex h-[26px] w-[26px] flex-none items-center justify-center rounded-md border-0 ${
+              aiPanelOpen ? 'bg-surface-selected' : 'bg-transparent'
+            } hover:bg-n-100`}
+          >
+            <Icon name="zap" size={15} color="var(--synapse-500)" />
+          </button>
+        </Tooltip>
         {/* The same ⌘K QuickOpen; here because a one-column nav is where the
             hand already is. One dialog, one door since the Topbar dissolved. */}
-        <button
-          type="button"
-          aria-label="Search"
-          title="Search  ⌘K"
-          onClick={() => setQuickOpen(true)}
-          className="flex h-[26px] w-[26px] flex-none items-center justify-center rounded-md border-0 bg-transparent text-n-600 hover:bg-n-100 hover:text-n-900"
-        >
-          <Icon name="search" size={15} />
-        </button>
+        <Tooltip label="Search" command="palette.open">
+          <button
+            type="button"
+            aria-label="Search"
+            onClick={() => setQuickOpen(true)}
+            className="flex h-[26px] w-[26px] flex-none items-center justify-center rounded-md border-0 bg-transparent text-n-600 hover:bg-n-100 hover:text-n-900"
+          >
+            <Icon name="search" size={15} />
+          </button>
+        </Tooltip>
         {/* In the drawer, hiding closes the drawer: the rail was the shell's
             doing, and collapsing is the user's word — never written for it. */}
         <button
@@ -638,6 +661,7 @@ export function Sidebar({
               key={d.kind}
               icon={d.icon}
               label={d.label}
+              command={`go.${d.id}`}
               hot={d.hot === true}
               active={d.lights.includes(selection.kind)}
               count={counts[d.kind]}
@@ -726,6 +750,7 @@ export function Sidebar({
             {
               icon: 'arrow-up-right',
               label: work.door ?? work.label,
+              command: `go.${work.id}`,
               onClick: () => navigate(work.selection),
             },
           ]}
@@ -771,6 +796,7 @@ export function Sidebar({
             {
               icon: 'arrow-up-right',
               label: knowledge.door ?? knowledge.label,
+              command: `go.${knowledge.id}`,
               onClick: () => navigate(knowledge.selection),
             },
           ]}
@@ -793,6 +819,7 @@ export function Sidebar({
             {
               icon: 'arrow-up-right',
               label: fleet.door ?? fleet.label,
+              command: `go.${fleet.id}`,
               onClick: () => navigate(fleet.selection),
             },
             {
@@ -854,6 +881,7 @@ export function Sidebar({
               label: 'Adopt vault schema',
               onClick: () => setAdopting(true),
             },
+            { icon: 'upload', label: 'Import CSV', onClick: () => setImportingCsv(true) },
             { icon: 'plus', label: 'New database', onClick: () => setTypeDialog({ mode: 'new' }) },
           ]}
         />
@@ -933,19 +961,21 @@ export function Sidebar({
           <Icon name={THEME_ICONS[themeMode]} size={15} />
           Theme
         </button>
-        <button
-          type="button"
-          aria-current={settings.lights.includes(selection.kind) ? 'page' : undefined}
-          onClick={() => navigate(settings.selection)}
-          className={`flex h-[30px] flex-1 items-center gap-2 rounded-md border-0 px-2 text-left text-xs ${
-            settings.lights.includes(selection.kind)
-              ? 'bg-surface-selected font-medium text-cortex-700'
-              : 'bg-transparent text-n-600 hover:bg-n-100 hover:text-n-800'
-          }`}
-        >
-          <Icon name={settings.icon} size={15} />
-          {settings.label}
-        </button>
+        <Tooltip label={settings.label} command={`go.${settings.id}`}>
+          <button
+            type="button"
+            aria-current={settings.lights.includes(selection.kind) ? 'page' : undefined}
+            onClick={() => navigate(settings.selection)}
+            className={`flex h-[30px] flex-1 items-center gap-2 rounded-md border-0 px-2 text-left text-xs ${
+              settings.lights.includes(selection.kind)
+                ? 'bg-surface-selected font-medium text-cortex-700'
+                : 'bg-transparent text-n-600 hover:bg-n-100 hover:text-n-800'
+            }`}
+          >
+            <Icon name={settings.icon} size={15} />
+            {settings.label}
+          </button>
+        </Tooltip>
       </div>
       {typeMenu !== null && (
         <ContextMenu
@@ -981,6 +1011,7 @@ export function Sidebar({
         <DeleteTypeDialog listing={typeDialog.listing} onClose={() => setTypeDialog(null)} />
       )}
       {adopting && <AdoptSchemaDialog onClose={() => setAdopting(false)} />}
+      {importingCsv && <CsvImportDialog onClose={() => setImportingCsv(false)} />}
     </nav>
   );
   // One shape whether or not there is a rail or a drawer, so neither ever

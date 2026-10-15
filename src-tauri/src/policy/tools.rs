@@ -129,6 +129,10 @@ impl Axis {
 #[serde(rename_all = "snake_case")]
 pub enum TargetKind {
     Note,
+    /// Any contained, visible file; only a read with no write door.
+    File,
+    /// A JSON Canvas board, judged by the board door before a bounded read.
+    Canvas,
     Folder,
     Concept,
     SourceId,
@@ -140,6 +144,8 @@ impl TargetKind {
     pub fn as_str(self) -> &'static str {
         match self {
             TargetKind::Note => "note",
+            TargetKind::File => "file",
+            TargetKind::Canvas => "canvas",
             TargetKind::Folder => "folder",
             TargetKind::Concept => "concept",
             TargetKind::SourceId => "source_id",
@@ -150,7 +156,7 @@ impl TargetKind {
 
 /// How a transcript shows a call (M56.8): a step in the run, a change card,
 /// or one of the rows a cerebro tool owns: a concept to review, a handoff to
-/// another agent, a commit of proposals.
+/// another agent, a commit of proposals, or a checked view suggestion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Renderer {
@@ -159,6 +165,7 @@ pub enum Renderer {
     Concept,
     Handoff,
     Commit,
+    View,
 }
 
 impl Renderer {
@@ -169,6 +176,7 @@ impl Renderer {
             Renderer::Concept => "concept",
             Renderer::Handoff => "handoff",
             Renderer::Commit => "commit",
+            Renderer::View => "view",
         }
     }
 
@@ -179,6 +187,7 @@ impl Renderer {
             Renderer::Concept => Some("concept"),
             Renderer::Handoff => Some("run"),
             Renderer::Commit => Some("ledger"),
+            Renderer::View => Some("none"),
             Renderer::Step | Renderer::Change => None,
         }
     }
@@ -317,6 +326,15 @@ pub struct CliTool {
     pub icon: String,
 }
 
+/// Which toolsets a personal token may hold (D17 (b), M62.5).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Clients {
+    pub default: String,
+    pub grantable: Vec<String>,
+    pub why: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ToolsManifest {
@@ -327,6 +345,7 @@ pub struct ToolsManifest {
     pub tokens: BTreeMap<String, Token>,
     pub doors: Vec<Door>,
     pub toolsets: Vec<Toolset>,
+    pub clients: Clients,
     pub prefix_exceptions: Vec<PrefixException>,
     /// In served order, which is meaning: nothing sorts it.
     pub tools: Vec<ToolRow>,
@@ -517,6 +536,7 @@ impl ToolsManifest {
             self.check_row(row)?;
         }
         self.check_generated()?;
+        self.check_clients()?;
         for token in self.tokens.keys() {
             let marker = format!("{{{{{token}}}}}");
             let used = self.tools.iter().any(|row| {
@@ -557,6 +577,62 @@ impl ToolsManifest {
         }
         for tool in &self.cli_tools {
             check_cli(tool)?;
+        }
+        Ok(())
+    }
+
+    fn check_clients(&self) -> Result<(), String> {
+        let clients = &self.clients;
+        if clients.why.trim().is_empty() {
+            return Err(refusal("clients", "why", "is empty"));
+        }
+        if !self.toolsets.iter().any(|set| set.id == clients.default) {
+            return Err(refusal(
+                "clients",
+                "default",
+                format!("names no declared toolset: {:?}", clients.default),
+            ));
+        }
+        let rows: Vec<_> = self
+            .tools
+            .iter()
+            .filter(|row| row.toolset.as_deref() == Some(clients.default.as_str()))
+            .collect();
+        if rows.is_empty()
+            || rows.iter().any(|row| {
+                row.kind != Kind::ReadOnly || self.door(&row.door).is_none_or(|door| door.writes)
+            })
+            || clients.default == self.generated.toolset
+        {
+            return Err(refusal(
+                "clients",
+                "default",
+                "must name a toolset of read_only rows on non-writing doors",
+            ));
+        }
+        let mut seen = BTreeSet::new();
+        for id in &clients.grantable {
+            let problem =
+                if !self.toolsets.iter().any(|set| set.id == *id) {
+                    Some(format!("names no declared toolset: {id:?}"))
+                } else if !seen.insert(id) {
+                    Some(format!("repeats toolset {id:?}"))
+                } else if *id == clients.default {
+                    Some(format!("includes the default toolset {id:?}"))
+                } else if *id == self.generated.toolset {
+                    Some(format!("includes the generated toolset {id:?}"))
+                } else if self.tools.iter().any(|row| {
+                    row.toolset.as_deref() == Some(id.as_str()) && row.axis == Axis::None
+                }) {
+                    Some(format!(
+                        "toolset {id:?} contains a row no folder scope bounds"
+                    ))
+                } else {
+                    None
+                };
+            if let Some(problem) = problem {
+                return Err(refusal("clients", "grantable", problem));
+            }
         }
         Ok(())
     }
@@ -779,6 +855,24 @@ impl ToolsManifest {
 
     /// The rules a row and the generated block both answer to.
     fn check_facts(&self, subject: &str, facts: &Facts) -> Result<(), String> {
+        if facts.target.is_some_and(|t| t.kind == TargetKind::Canvas)
+            && (facts.axis != Axis::Read || facts.door != "none")
+        {
+            return Err(refusal(
+                subject,
+                "target",
+                "canvas targets require the read axis and door none",
+            ));
+        }
+        if facts.target.is_some_and(|t| t.kind == TargetKind::File)
+            && (facts.axis != Axis::Read || facts.door != "none")
+        {
+            return Err(refusal(
+                subject,
+                "target",
+                "file targets require the read axis and door none",
+            ));
+        }
         if let Some(toolset) = facts.toolset {
             if !self.toolsets.iter().any(|t| t.id == toolset) {
                 return Err(refusal(
@@ -857,12 +951,17 @@ impl ToolsManifest {
                     "must name a note argument on the read_write axis",
                 ));
             }
-            (Axis::Read, Some(kind)) if !matches!(kind, TargetKind::Note | TargetKind::Bundle) => {
+            (Axis::Read, Some(kind))
+                if !matches!(
+                    kind,
+                    TargetKind::Note | TargetKind::File | TargetKind::Canvas | TargetKind::Bundle
+                ) =>
+            {
                 return Err(refusal(
                     subject,
                     "target",
                     format!(
-                        "on the read axis must be a note or the bundle, not {}",
+                        "on the read axis must be a note, file, canvas or the bundle, not {}",
                         kind.as_str()
                     ),
                 ));
@@ -939,6 +1038,14 @@ impl ToolsManifest {
 /// posts beside it and draws as a step. Judged before the door's own lists,
 /// so a misplaced row hears this one sentence whatever else it breaks.
 fn check_comment_door(subject: &str, row: &ToolRow) -> Result<(), String> {
+    // File targets have one cross-loader refusal, checked by check_facts.
+    if row
+        .target
+        .as_ref()
+        .is_some_and(|t| matches!(t.kind, TargetKind::File | TargetKind::Canvas))
+    {
+        return Ok(());
+    }
     let shaped = row.axis == Axis::Read
         && row
             .target
@@ -1082,6 +1189,50 @@ pub fn rows(surface: Surface) -> impl Iterator<Item = &'static ToolRow> {
 
 pub fn generated() -> &'static Generated {
     &manifest().generated
+}
+
+pub fn clients() -> &'static Clients {
+    &manifest().clients
+}
+
+pub fn toolset_writes(id: &str) -> bool {
+    manifest()
+        .tools
+        .iter()
+        .any(|row| row.toolset.as_deref() == Some(id) && door(&row.door).is_some_and(|d| d.writes))
+}
+
+/// A token holds its default and only the explicit grantable sets. Names
+/// stay in served order, regardless of the order of the person's checkboxes.
+pub fn client_tool_names(toolsets: &[String]) -> Result<Vec<String>, String> {
+    let clients = clients();
+    if !toolsets.contains(&clients.default) {
+        return Err(format!(
+            "A token must include the {:?} toolset.",
+            clients.default
+        ));
+    }
+    let mut seen = BTreeSet::new();
+    for id in toolsets {
+        if !seen.insert(id) {
+            return Err(format!(
+                "A token can't repeat the {} toolset.",
+                serde_json::to_string(id).expect("a string serializes")
+            ));
+        }
+        if *id != clients.default && !clients.grantable.contains(id) {
+            return Err(format!(
+                "A token can't hold the {} toolset.",
+                serde_json::to_string(id).expect("a string serializes")
+            ));
+        }
+    }
+    Ok(manifest()
+        .tools
+        .iter()
+        .filter(|row| row.toolset.as_ref().is_some_and(|id| toolsets.contains(id)))
+        .map(|row| row.name.clone())
+        .collect())
 }
 
 /// A declared door.
@@ -1405,7 +1556,7 @@ mod tests {
     }
 
     #[test]
-    fn the_shipped_manifest_confirms_exactly_the_five_note_writers() {
+    fn the_shipped_manifest_confirms_exactly_the_note_writers() {
         let rows: Vec<&str> = manifest()
             .tools
             .iter()
@@ -1419,7 +1570,8 @@ mod tests {
                 "update_frontmatter",
                 "set_fields",
                 "append_to_note",
-                "edit_note"
+                "edit_note",
+                "edit_sheet"
             ]
         );
         assert!(!generated().confirmable);
@@ -1430,7 +1582,8 @@ mod tests {
                 "mcp__cerebro__update_frontmatter",
                 "mcp__cerebro__set_fields",
                 "mcp__cerebro__append_to_note",
-                "mcp__cerebro__edit_note"
+                "mcp__cerebro__edit_note",
+                "mcp__cerebro__edit_sheet"
             ]
         );
         // Every spelling the one name test takes, and nothing else.
@@ -2095,6 +2248,14 @@ mod tests {
                 ],
             ),
             (
+                Box::new(|v| tool(v, "open_note")["renderer"] = json!("view")),
+                &[
+                    "tool open_note",
+                    "`renderer`",
+                    "view needs door none, not ui",
+                ],
+            ),
+            (
                 Box::new(|v| tool(v, "open_note")["renderer"] = json!("handoff")),
                 &[
                     "tool open_note",
@@ -2145,9 +2306,9 @@ mod tests {
     }
 
     #[test]
-    fn the_shipped_manifest_folds_exactly_the_reads() {
-        // Every read folds, cerebro's and the CLI's own, and nothing else
-        // does: a write keeps its path in view.
+    fn the_shipped_manifest_folds_exactly_the_step_reads() {
+        // Step-rendered reads fold; owned cards keep their own rows, and a
+        // write keeps its path in view.
         let folded: BTreeSet<&str> = manifest()
             .tools
             .iter()
@@ -2157,7 +2318,7 @@ mod tests {
         let reads: BTreeSet<&str> = manifest()
             .tools
             .iter()
-            .filter(|row| row.kind == Kind::ReadOnly)
+            .filter(|row| row.kind == Kind::ReadOnly && row.renderer == Renderer::Step)
             .map(|row| row.name.as_str())
             .collect();
         assert_eq!(folded, reads);
@@ -2167,7 +2328,15 @@ mod tests {
                 "get_vault_context",
                 "search_notes",
                 "list_notes",
+                "read_activity",
+                "describe_database",
+                "query_records",
+                "list_agenda",
                 "get_note",
+                "read_document",
+                "read_sheet",
+                "calculate_sheet",
+                "read_canvas",
                 "knowledge_about",
                 "list_inbox"
             ])
@@ -2199,10 +2368,123 @@ mod tests {
             ("create_note", Renderer::Change),
             ("propose_create_belief", Renderer::Step),
             ("propose_organize", Renderer::Step),
+            ("suggest_view", Renderer::View),
             ("MultiEdit", Renderer::Change),
             ("mcp__gmail__search", Renderer::Step),
         ] {
             assert_eq!(renderer(name), expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn the_client_default_is_one_toolset_that_only_reads() {
+        let default = &clients().default;
+        let rows: Vec<_> = manifest()
+            .tools
+            .iter()
+            .filter(|r| r.toolset.as_ref() == Some(default))
+            .collect();
+        assert!(!rows.is_empty());
+        assert!(rows
+            .iter()
+            .all(|r| r.kind == Kind::ReadOnly && !door(&r.door).unwrap().writes));
+        assert!(!toolset_writes(default));
+        assert!(toolset_writes("write"));
+        assert!(!toolset_writes("comment"));
+    }
+
+    #[test]
+    fn grantable_toolsets_hold_only_rows_a_folder_scope_bounds() {
+        for id in &clients().grantable {
+            assert!(manifest()
+                .tools
+                .iter()
+                .filter(|row| row.toolset.as_ref() == Some(id))
+                .all(|row| row.axis != Axis::None));
+        }
+    }
+
+    #[test]
+    fn the_proposal_toolset_is_never_a_clients() {
+        assert!(!clients().grantable.contains(&generated().toolset));
+    }
+
+    #[test]
+    fn client_tool_names_needs_the_default_and_only_grantable_sets() {
+        let default = clients().default.clone();
+        let names = client_tool_names(std::slice::from_ref(&default)).unwrap();
+        assert_eq!(
+            names,
+            manifest()
+                .tools
+                .iter()
+                .filter(|row| row.toolset.as_ref() == Some(&default))
+                .map(|row| row.name.clone())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            client_tool_names(&[]).unwrap_err(),
+            "A token must include the \"read\" toolset."
+        );
+        assert_eq!(
+            client_tool_names(&[default.clone(), "knowledge".into()]).unwrap_err(),
+            "A token can't hold the \"knowledge\" toolset."
+        );
+        assert_eq!(
+            client_tool_names(&[default.clone(), default]).unwrap_err(),
+            "A token can't repeat the \"read\" toolset."
+        );
+    }
+
+    #[test]
+    fn client_manifest_refusals_name_the_field_in_shared_words() {
+        for (field, value, problem) in [
+            ("why", json!(" "), "is empty"),
+            (
+                "default",
+                json!("missing"),
+                "names no declared toolset: \"missing\"",
+            ),
+            (
+                "default",
+                json!("write"),
+                "must name a toolset of read_only rows on non-writing doors",
+            ),
+            (
+                "default",
+                json!("comment"),
+                "must name a toolset of read_only rows on non-writing doors",
+            ),
+            (
+                "grantable",
+                json!(["missing"]),
+                "names no declared toolset: \"missing\"",
+            ),
+            (
+                "grantable",
+                json!(["write", "write"]),
+                "repeats toolset \"write\"",
+            ),
+            (
+                "grantable",
+                json!(["read"]),
+                "includes the default toolset \"read\"",
+            ),
+            (
+                "grantable",
+                json!(["proposals"]),
+                "includes the generated toolset \"proposals\"",
+            ),
+            (
+                "grantable",
+                json!(["knowledge"]),
+                "toolset \"knowledge\" contains a row no folder scope bounds",
+            ),
+        ] {
+            assert_eq!(
+                refused(|v| v["clients"][field] = value),
+                refusal("clients", field, problem)
+            );
         }
     }
 
@@ -2218,5 +2500,47 @@ mod tests {
         assert_eq!(row("mcp__cerebro__get_note"), Some(short));
         assert_eq!(row("mcp__other__get_note"), None);
         assert_eq!(row("Get_note"), None);
+    }
+    #[test]
+    fn a_file_target_sits_only_on_reads() {
+        assert_eq!(
+            row("read_document").unwrap().target.as_ref().unwrap().kind,
+            TargetKind::File
+        );
+        for (field, value) in [("axis", json!("write")), ("door", json!("comment"))] {
+            assert_names(
+                &refused(|v| tool(v, "read_document")[field] = value),
+                &[
+                    "tool read_document",
+                    "target",
+                    "file targets require the read axis and door none",
+                ],
+            );
+        }
+        assert_names(
+            &refused(|v| tool(v, "read_document")["target"]["arg"] = Value::Null),
+            &["tool read_document", "target", "file needs an argument"],
+        );
+    }
+    #[test]
+    fn a_canvas_target_sits_only_on_reads() {
+        assert_eq!(
+            row("read_canvas").unwrap().target.as_ref().unwrap().kind,
+            TargetKind::Canvas
+        );
+        for (field, value) in [("axis", json!("write")), ("door", json!("comment"))] {
+            assert_names(
+                &refused(|v| tool(v, "read_canvas")[field] = value),
+                &[
+                    "tool read_canvas",
+                    "target",
+                    "canvas targets require the read axis and door none",
+                ],
+            );
+        }
+        assert_names(
+            &refused(|v| tool(v, "read_canvas")["target"]["arg"] = Value::Null),
+            &["tool read_canvas", "target", "canvas needs an argument"],
+        );
     }
 }

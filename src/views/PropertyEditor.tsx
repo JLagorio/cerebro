@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
+import { Switch } from '@/components/ui/Switch';
+import { Select } from '@/components/ui/Select';
 import {
   addFieldToType,
   changeFieldKind,
@@ -12,12 +14,16 @@ import {
   setFieldConfig,
   setFieldOptions,
   setTypeStatuses,
+  setTypeDeadline,
 } from '@/app/typeActions';
 import { OptionListEditor } from '@/detail/OptionListEditor';
+import { FormulaConfigEditor } from '@/detail/FormulaConfigEditor';
+import { checkFormula } from '@/engine/formula';
 import { RelationConfigEditor } from '@/detail/RelationConfigEditor';
 import { FormatRow, RollupConfigEditor } from '@/detail/RollupConfigEditor';
 import { StatusListEditor } from '@/detail/StatusListEditor';
 import type { KindChangePreview } from '@/engine/castRules';
+import { REMIND_OPTIONS } from '@/engine/dates';
 import { insertColumn, type ColumnDef } from '@/engine/columns';
 import { kindMeta } from '@/engine/properties';
 import { DEFAULT_STATUSES, humanize } from '@/engine/schema';
@@ -74,7 +80,9 @@ export function ConfirmKindChange({
         secondaryAction={{ label: 'Cancel', onClick: onCancel }}
       >
         <p className="m-0 text-sm leading-relaxed text-n-600" data-testid="kind-change-body">
-          {`${preview.failures} won't convert: ${preview.examples.join(', ')}. A new property, “${humanize(preview.newName)}”, is added after ${name} holding ${kept}. ${name} keeps every value.`}
+          {preview.copyOnly
+            ? `${preview.reason} A new property, “${humanize(preview.newName)}”, is added after ${name} holding ${count(preview.converts, 'converted value', 'converted values')}. ${name} keeps every value.`
+            : `${preview.failures} won't convert: ${preview.examples.join(', ')}. A new property, “${humanize(preview.newName)}”, is added after ${name} holding ${kept}. ${name} keeps every value.`}
         </p>
       </Dialog>
     );
@@ -225,6 +233,7 @@ export function PropertyEditor({
   // renderer. Leaving it out meant a person field had no control anywhere that
   // could change which records it picks from.
   const hasConfig =
+    def.kind === 'formula' ||
     def.kind === 'rollup' ||
     def.kind === 'number' ||
     def.kind === 'relation' ||
@@ -291,6 +300,38 @@ export function PropertyEditor({
         </div>
       )}
 
+      {(def.kind === 'date' || def.kind === 'daterange') && (
+        <div className="space-y-2 border-t border-n-100 px-1 pt-2">
+          <div data-testid="property-deadline">
+            <Switch
+              label="Deadline"
+              checked={schema.types.get(sourceType)?.deadline === def.name}
+              onChange={(checked) => void setTypeDeadline(sourceType, checked ? def.name : null)}
+            />
+          </div>
+          <div data-testid="property-remind" className="space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm text-n-700">Remind</span>
+              <Select
+                ariaLabel="Remind"
+                size="sm"
+                value={def.remind ?? 'none'}
+                options={REMIND_OPTIONS.map(({ id, label }) => ({ value: id, label }))}
+                onChange={(event) =>
+                  void setFieldConfig(sourceType, def.name, {
+                    remind: event.target.value === 'none' ? null : event.target.value,
+                  })
+                }
+              />
+            </div>
+            <p className="m-0 text-xs leading-relaxed text-n-500">
+              Every {sourceType} with a {humanize(def.name)} reminds. Dates without a time remind at
+              9:00 AM.
+            </p>
+          </div>
+        </div>
+      )}
+
       {(hasValues || hasConfig) && (
         <div className="border-t border-n-100 pt-1.5">
           {def.kind === 'status' ? (
@@ -300,6 +341,28 @@ export function PropertyEditor({
               statuses={statuses}
               onChange={(next) => void setTypeStatuses({ name: sourceType, docPath }, next)}
             />
+          ) : def.kind === 'formula' ? (
+            <>
+              <FormulaConfigEditor
+                key={`${sourceType}:${def.name}`}
+                typeName={sourceType}
+                def={def}
+                schema={schema}
+                onChange={(config) => setFieldConfig(sourceType, def.name, config)}
+              />
+              {(() => {
+                const checked = checkFormula(def.formula ?? '', typeDef?.fields ?? [], {
+                  typeName: sourceType,
+                  ownName: def.name,
+                });
+                return checked.ok && checked.result === 'number' ? (
+                  <FormatRow
+                    def={def}
+                    onChange={(config) => void setFieldConfig(sourceType, def.name, config)}
+                  />
+                ) : null;
+              })()}
+            </>
           ) : def.kind === 'rollup' ? (
             <RollupConfigEditor
               typeName={sourceType}

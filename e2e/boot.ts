@@ -2,7 +2,7 @@ import { expect, type Page } from '@playwright/test';
 import { VAULT_TODAY } from '../src/lib/vaultToday';
 
 /**
- * Booting the app into the demo vault, the same way in every spec (M26.3e).
+ * Booting the app into its chosen vault, the same way in every spec (M26.3e).
  *
  * This used to be six copies of the same function — five specs plus an inline
  * one in `smoke` — and AGENTS.md told you to add a seventh by copying an
@@ -16,31 +16,40 @@ export { VAULT_TODAY };
 
 /** What a spec may change about the boot (M57.2). */
 export interface BootOptions {
+  vault?: 'demo' | 'empty';
   /** Let the background job runner fire (M8.6): off unless a spec is about
    * a scheduled run. */
   autoLearn?: boolean;
 }
 
-export async function boot(page: Page, { autoLearn = false }: BootOptions = {}): Promise<void> {
+export async function boot(
+  page: Page,
+  { autoLearn = false, vault = 'demo' }: BootOptions = {},
+): Promise<void> {
   // `setFixedTime` and not `install`: this freezes what the clock READS
   // without faking timers, so the app's intervals, debounces and Playwright's
   // own waiting all still run on real time.
   await page.clock.setFixedTime(new Date(VAULT_TODAY));
   // The background distiller (M8.6) is off for tests that are not about it:
   // a reader that fires four seconds in would rescan the vault mid-assertion.
-  await page.addInitScript((learn) => {
-    window.localStorage.setItem('cerebro.autoLearn', String(learn));
-    // Pin the theme (M16.39). These specs assert on rendered UI, and an unset
-    // themeMode resolves 'system' — so a dark display would flip every colour
-    // out from under them. The app has two palettes now; the specs assume one.
-    window.localStorage.setItem('cerebro.themeMode', 'light');
-  }, autoLearn);
+  await page.addInitScript(
+    ({ learn, empty }) => {
+      (window as unknown as { __cerebroEmptyVault?: boolean }).__cerebroEmptyVault = empty;
+      window.localStorage.setItem('cerebro.autoLearn', String(learn));
+      // Pin the theme (M16.39). These specs assert on rendered UI, and an unset
+      // themeMode resolves 'system' — so a dark display would flip every colour
+      // out from under them. The app has two palettes now; the specs assume one.
+      window.localStorage.setItem('cerebro.themeMode', 'light');
+    },
+    { learn: autoLearn, empty: vault === 'empty' },
+  );
   await page.goto('/');
   // With no persisted vault the first-launch chooser renders "Open demo
   // vault"; if the mock IPC restored a last vault it boots straight to the
   // shell. Handle both.
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
+  const sidebarTypes =
+    vault === 'empty' ? page.getByTestId('nav-surfaces') : page.getByTestId('sidebar-type');
   await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
   if (await demoButton.isVisible()) await demoButton.click();
   await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
@@ -161,6 +170,23 @@ export interface E2eLabPreset {
 declare global {
   interface Window {
     __cerebroMockFs: Map<string, string>;
+    /** M66.2: actual byte fixtures; roots are mounted through __cerebroMockRoots. */
+    __cerebroMockBytes: {
+      seedBytes(
+        root: string,
+        path: string,
+        seed: {
+          base64?: string;
+          bytes?: number[];
+          text?: string;
+          size?: number;
+          executable?: boolean;
+          folder?: boolean;
+        },
+      ): void;
+      seedLink(root: string, path: string, target: string): void;
+      reset(): void;
+    };
     /** The M64.1 fault seam: the next read of this command fails once. */
     __cerebroFailNext: (command: string) => void;
     /** The M59.4 page-text seam: ⌘K's searchVault rejects with this message
@@ -282,4 +308,31 @@ export interface E2eCommentAnchor {
   occurrence: number;
   before: string;
   after: string;
+}
+
+/** Seed a note when the mock map is installed, before the first scan reads it. */
+export async function seedFileBeforeBoot(page: Page, path: string, text: string): Promise<void> {
+  await page.addInitScript(
+    ({ path, text }) => {
+      const target = window as unknown as { __cerebroMockFs?: Map<string, string> };
+      const previous = Object.getOwnPropertyDescriptor(target, '__cerebroMockFs');
+      if (target.__cerebroMockFs) {
+        target.__cerebroMockFs.set(path, text);
+        return;
+      }
+      Object.defineProperty(target, '__cerebroMockFs', {
+        configurable: true,
+        set(map: Map<string, string>) {
+          previous?.set?.call(target, map);
+          map.set(path, text);
+          Object.defineProperty(target, '__cerebroMockFs', {
+            configurable: true,
+            writable: true,
+            value: map,
+          });
+        },
+      });
+    },
+    { path, text },
+  );
 }

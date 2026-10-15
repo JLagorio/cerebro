@@ -45,6 +45,25 @@ describe('FilterChips shows one chip per rule (M16.25)', () => {
     expect(screen.getByTestId('filter-chip-1').textContent).toContain('Due is before Sep 1, 2026');
   });
 
+  it('states relative date tokens as words', () => {
+    render(
+      <FilterChips
+        filters={{
+          all: [
+            { field: 'due', op: 'on_or_before', value: 'today' },
+            { field: 'due', op: 'equals', value: 'this_week' },
+            { field: 'due', op: 'after', value: 'today-1' },
+          ],
+        }}
+        fields={fields}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('filter-chip-0').textContent).toContain('Due is on or before today');
+    expect(screen.getByTestId('filter-chip-1').textContent).toContain('Due is this week');
+    expect(screen.getByTestId('filter-chip-2').textContent).toContain('Due is after 1 day ago');
+  });
+
   it('removes exactly the rule whose X was pressed', () => {
     const onChange = vi.fn();
     render(<FilterChips filters={twoRules} fields={fields} onChange={onChange} />);

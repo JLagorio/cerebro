@@ -14,7 +14,9 @@ import {
   removeFieldFromType,
   renameFieldOnType,
   setFieldOptions,
+  setFieldConfig,
   setTypeStatuses,
+  setTypeDeadline,
   setTypeTabs,
   setTypeViews,
   type TypeLayoutDraft,
@@ -45,6 +47,13 @@ let batches: BatchOp[][];
 let labels: (string | undefined)[];
 let created: Record<string, unknown>[];
 let toasts: string[];
+
+/** These actions rewrite records; moving a file would be an unexpected side effect. */
+function writtenPath(op: BatchOp): string {
+  expect(op.op).not.toBe('rename');
+  if (op.op === 'rename') throw new Error('A field action must not rename a file');
+  return op.path;
+}
 
 /**
  * A store `applyBatch` (M60.6) into `log`: every batch is kept whole in
@@ -94,6 +103,195 @@ beforeEach(() => {
 describe('normalizeFieldName', () => {
   it('lowercases and underscores whitespace', () => {
     expect(normalizeFieldName('  Due Date ')).toBe('due_date');
+  });
+});
+
+describe('formula property coherence', () => {
+  const seed = () => {
+    const doc = makeEntry({
+      path: 'types/metric.md',
+      title: 'Metric',
+      type: 'Type',
+      properties: {
+        fields: {
+          current_value: { kind: 'number' },
+          target_value: { kind: 'number' },
+          gap: { kind: 'formula', formula: 'target_value - current_value' },
+        },
+      } as unknown as Entry['properties'],
+    });
+    useVaultStore.setState({
+      entries: [
+        doc,
+        makeEntry({
+          path: 'metrics/a.md',
+          type: 'Metric',
+          properties: { current_value: 2, target_value: 5 },
+        }),
+      ],
+      views: [],
+    });
+    return doc;
+  };
+  it('saves checked canonical formulas while preserving the other field config', async () => {
+    seed();
+    expect(
+      await setFieldConfig('Metric', 'gap', {
+        formula: '{Target value} + current_value',
+        precision: 2,
+      }),
+    ).toBe(true);
+    expect(patches[0].patch).toMatchObject({
+      fields: { gap: { kind: 'formula', formula: 'target_value + current_value', precision: 2 } },
+    });
+  });
+
+  it('contains a rejected formula write and keeps the draft caller retryable', async () => {
+    seed();
+    vi.mocked(useVaultStore.getState().patchFrontmatter).mockRejectedValueOnce(new Error('disk'));
+    await expect(setFieldConfig('Metric', 'gap', { formula: 'target_value + 1' })).resolves.toBe(
+      false,
+    );
+    expect(toasts.at(-1)).toBe("Couldn't save Gap settings.");
+  });
+  it.each(['missing + 1', 'gap + 1', 'current_value +'])(
+    'refuses invalid formula %j before writing',
+    async (formula) => {
+      seed();
+      expect(await setFieldConfig('Metric', 'gap', { formula })).toBe(false);
+      expect(patches).toEqual([]);
+    },
+  );
+  it('names a formula that prevents deleting or retyping its input, while Convert stays available', async () => {
+    seed();
+    expect(await removeFieldFromType('Metric', 'target_value')).toBe(false);
+    expect(toasts.at(-1)).toBe(
+      "Can't delete “Target value”: the formula “Gap” reads it. Change that formula first.",
+    );
+    expect(await changeFieldKind('Metric', 'target_value', 'text')).toBe(false);
+    expect(toasts.at(-1)).toBe('The formula “Gap” reads Target value; change that formula first.');
+    expect(patches).toEqual([]);
+    expect(await convertFieldToNewProperty('Metric', 'target_value', 'text')).toBe(
+      'target_value_text',
+    );
+    expect(patches[0].patch).toMatchObject({
+      fields: {
+        target_value: { kind: 'number' },
+        target_value_text: { kind: 'text' },
+        gap: { formula: 'target_value - current_value' },
+      },
+    });
+  });
+});
+
+describe('a type-level reminder', () => {
+  function seed(remind?: string) {
+    const doc = makeEntry({
+      path: 'types/recipe.md',
+      title: 'Recipe',
+      type: 'Type',
+      properties: {
+        fields: { due: { kind: 'date', ...(remind === undefined ? {} : { remind }) } },
+      } as unknown as Entry['properties'],
+    });
+    useVaultStore.setState({ entries: [doc], views: [] });
+    return doc;
+  }
+  it('writes the setting to the Type doc and removes it when cleared', async () => {
+    seed();
+    expect(await setFieldConfig('Recipe', 'due', { remind: '1d' })).toBe(true);
+    expect(patches.at(-1)).toEqual({
+      path: 'types/recipe.md',
+      patch: { fields: { due: { kind: 'date', remind: '1d' } } },
+    });
+    seed('1d');
+    expect(await setFieldConfig('Recipe', 'due', { remind: null })).toBe(true);
+    expect(patches.at(-1)?.patch).toEqual({ fields: { due: { kind: 'date' } } });
+  });
+  it('keeps the offset within the date family and drops it on a kind change away', async () => {
+    seed('1d');
+    expect(await changeFieldKind('Recipe', 'due', 'daterange')).toBe(true);
+    expect(patches.at(-1)?.patch).toMatchObject({
+      fields: { due: { kind: 'daterange', remind: '1d' } },
+    });
+    seed('1d');
+    expect(await changeFieldKind('Recipe', 'due', 'text')).toBe(true);
+    expect(patches.at(-1)?.patch).toMatchObject({ fields: { due: { kind: 'text' } } });
+    expect((patches.at(-1)?.patch.fields as Record<string, unknown>).due).not.toHaveProperty(
+      'remind',
+    );
+  });
+  it('reports a failed write without throwing', async () => {
+    seed();
+    vi.mocked(useVaultStore.getState().patchFrontmatter).mockRejectedValueOnce(new Error('disk'));
+    await expect(setFieldConfig('Recipe', 'due', { remind: '1d' })).resolves.toBe(false);
+    expect(toasts.length).toBeGreaterThan(0);
+  });
+});
+
+describe('a declared deadline', () => {
+  const seed = () => {
+    const doc = makeEntry({
+      path: 'types/recipe.md',
+      title: 'Recipe',
+      type: 'Type',
+      properties: {
+        deadline: 'due',
+        fields: {
+          due: { kind: 'date' },
+          window: { kind: 'daterange' },
+          count: { kind: 'number' },
+          created: { kind: 'created_time' },
+        },
+      } as unknown as Entry['properties'],
+    });
+    useVaultStore.setState({ entries: [doc], views: [] });
+    return doc;
+  };
+  it('writes a trimmed, exact stored date field or clears the declaration', async () => {
+    seed();
+    expect(await setTypeDeadline('Recipe', ' window ')).toBe(true);
+    expect(patches.at(-1)?.patch).toEqual({ deadline: 'window' });
+    expect(await setTypeDeadline('Recipe', null)).toBe(true);
+    expect(patches.at(-1)?.patch).toEqual({ deadline: null });
+  });
+  it.each(['Due', 'count', 'created', 'missing', ''])(
+    'refuses %j without changing the declaration',
+    async (field) => {
+      seed();
+      expect(await setTypeDeadline('Recipe', field)).toBe(false);
+      expect(patches).toEqual([]);
+    },
+  );
+  it('clears a deleted deadline in the same Type-doc op', async () => {
+    seed();
+    expect(await removeFieldFromType('Recipe', 'due')).toBe(true);
+    expect(batches).toHaveLength(1);
+    expect(patches[0].patch.deadline).toBeNull();
+    expect((patches[0].patch.fields as Record<string, unknown>).due).toBeUndefined();
+  });
+  it('clears a retyped deadline but keeps it within the date family', async () => {
+    seed();
+    expect(await changeFieldKind('Recipe', 'due', 'text')).toBe(true);
+    expect(patches[0].patch).toMatchObject({ deadline: null, fields: { due: { kind: 'text' } } });
+    patches.length = 0;
+    seed();
+    expect(await changeFieldKind('Recipe', 'due', 'daterange')).toBe(true);
+    expect(patches[0].patch).not.toHaveProperty('deadline');
+  });
+  it('renames the deadline in the same field rename batch', async () => {
+    seed();
+    expect(await renameFieldOnType('Recipe', 'due', 'When')).toBe(true);
+    expect(patches[0].patch).toMatchObject({
+      deadline: 'when',
+      fields: { when: { kind: 'date' } },
+    });
+  });
+  it('contains a failed write and reports it', async () => {
+    seed();
+    vi.mocked(useVaultStore.getState().patchFrontmatter).mockRejectedValueOnce(new Error('disk'));
+    await expect(setTypeDeadline('Recipe', 'due')).resolves.toBe(false);
+    expect(toasts).toContain("Couldn't change the deadline for “Recipe”.");
   });
 });
 
@@ -322,7 +520,7 @@ describe('renameFieldOnType follows every reference in one batch (M60.2)', () =>
     useVaultStore.setState({ entries: [doc, record], views: [list] });
     expect(await renameFieldOnType('Recipe', 'cuisine', 'kitchen')).toBe(true);
     expect(batches).toHaveLength(1);
-    expect(batches[0].map((op) => op.path)).not.toContain('lists/mine.list.yml');
+    expect(batches[0].map(writtenPath)).not.toContain('lists/mine.list.yml');
     expect(toasts).toEqual(['Not changed: 1 list file still names “cuisine”.']);
   });
 });
@@ -372,7 +570,7 @@ describe('database-wide rewrites send one batch', () => {
     makeEntry({ path: 'recipes/a.md', title: 'A', type: 'Recipe', properties: { cuisine: '12' } }),
     makeEntry({ path: 'recipes/b.md', title: 'B', type: 'Recipe', properties: { cuisine: '7' } }),
   ];
-  const paths = () => batches.map((ops) => ops.map((op) => op.path));
+  const paths = () => batches.map((ops) => ops.map(writtenPath));
   const everyRecord = ['types/recipe.md', 'recipes/a.md', 'recipes/b.md'];
 
   beforeEach(() => {
@@ -928,7 +1126,7 @@ describe('kind change keeps every value (M60.5)', () => {
     useVaultStore.setState({
       entries,
       views: [],
-      applyBatch: batchInto(patches, (ops) => ops.every((op) => ok(op.path))),
+      applyBatch: batchInto(patches, (ops) => ops.every((op) => ok(writtenPath(op)))),
     });
   };
 
@@ -990,7 +1188,7 @@ describe('kind change keeps every value (M60.5)', () => {
   it('a refused batch writes nothing, and the change reports it did not land', async () => {
     use([betDoc, bet(1, '12'), bet(2, '7')], (path) => path !== 'records/bets/bet-2.md');
     expect(await changeFieldKind('Bet', 'stake', 'number')).toBe(false);
-    expect(batches.map((ops) => ops.map((op) => op.path))).toEqual([
+    expect(batches.map((ops) => ops.map(writtenPath))).toEqual([
       ['types/bet.md', 'records/bets/bet-1.md', 'records/bets/bet-2.md'],
     ]);
     expect(patches).toEqual([]);

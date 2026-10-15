@@ -1,0 +1,12 @@
+[
+  {"path":["format"],"value":2,"message":"Canvas format must be 1."},
+  {"path":["extra"],"value":true,"message":"Canvas format has missing, unknown or invalid fields."},
+  {"path":["json_canvas"],"remove":true,"message":"Canvas format has missing, unknown or invalid fields."},
+  {"path":["cerebro_versions"],"value":[1,1],"message":"Canvas format has missing, unknown or invalid fields."},
+  {"path":["vocab","sides"],"value":[],"message":"Canvas vocabulary must contain each non-empty, unique list."},
+  {"path":["vocab","ends"],"value":["arrow","arrow"],"message":"Canvas vocabulary must contain each non-empty, unique list."},
+  {"path":["limits","max_nodes"],"value":0,"message":"Canvas limits must be positive whole numbers."},
+  {"path":["limits","max_bytes"],"value":1.5,"message":"Canvas limits must be positive whole numbers."},
+  {"path":["key_order","stroke"],"remove":true,"message":"Canvas key order must contain every object type."},
+  {"path":["layout","indent"],"value":"x","message":"Canvas layout must name an indent and trailing newline choice."}
+]

@@ -536,3 +536,18 @@ describe('writesInWords', () => {
     expect(writesInWords(grant(['records/risks'], null, false), 'on')).toBe(scoped);
   });
 });
+
+it('mail reads are explained as attended and never offered to unattended rows', () => {
+  const path = 'sources/mail/a.md';
+  const rows = access(
+    vault(scout({ 'allowed-tools': ['get_note'], 'read-scope': ['sources'] })),
+    path,
+  ).rows;
+  const agent = row(rows, 'process:release-scout');
+  expect(agent.read).toBe(true);
+  expect(agent.unattendedRead).toBe(false);
+  expect(accessLines(agent).reasons).toContain(
+    'Mail is read only in a conversation a person is in.',
+  );
+  expect(panelRow(rows).read).toBe(true);
+});

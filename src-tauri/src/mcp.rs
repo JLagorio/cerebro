@@ -31,7 +31,7 @@
 //! (M17.1, M49.7): `write_concept`, which refuses a `verified` field and
 //! stamps `generated` from the run's actor, so it is where provenance comes
 //! from, and `recheck_concept`, which moves only `stale_after`; `create_note`,
-//! `update_frontmatter`, `set_fields`, `append_to_note` and `edit_note`
+//! `update_frontmatter`, `set_fields`, `append_to_note`, `edit_note` and `edit_sheet`
 //! therefore mint their receipt through `cleared_for_note`, which calls
 //! `knowledge::guard_agent_write` and refuses the bundle outright. This module used to say the agent's tools were "NOT
 //! subject to the knowledge/ guard" and treat that as the design — it was the
@@ -58,6 +58,9 @@ use crate::policy::tools::{Axis, Kind, Surface, TargetKind, ToolRow};
 use crate::vault;
 use crate::vault::receipt::{Agent, ConceptDoor, RunDoor, WriteReceipt, HUMAN_ACTOR};
 use crate::vault::write::WriteMode;
+
+#[path = "import/notion_door.rs"]
+mod notion_door;
 
 pub const UI_ACTION_EVENT: &str = "cerebro://ui-action";
 const PROTOCOL_VERSION: &str = "2025-06-18";
@@ -126,8 +129,8 @@ pub struct RunGrant {
     /// its empty entry set (surface.ts) is not consulted and does not matter.
     pub scope: Option<Vec<String>>,
     /// Vault-relative folders this run may READ inside (M34.4). `None` is
-    /// unrestricted — every run before this shipped, and every run whose
-    /// record declares no `read-scope:`. Its own axis rather than a reuse of
+    /// unrestricted by folder scope; mail still needs an attended Cerebro
+    /// conversation, even when the record declares no `read-scope:`. Its own axis rather than a reuse of
     /// `scope`, because the normal agent reads broadly and writes narrowly —
     /// folding the two together would make the safest write scope also the
     /// blindest reader. Folders only, same reasoning as `scope`.
@@ -211,6 +214,36 @@ fn run_id_of(token: &str) -> String {
 }
 
 impl RunGrant {
+    /// Personal tokens name no authority beyond their checked toolsets and
+    /// folders. Every field is explicit so a new grant axis must be reviewed
+    /// here too; a renderer can never manufacture this grant.
+    pub(crate) fn for_client(
+        actor: &str,
+        run_id: &str,
+        vault: &Path,
+        grant: &crate::runtime::client_tokens::Grant,
+    ) -> Result<Self, String> {
+        let grant = crate::runtime::client_tokens::validate_grant(
+            &grant.toolsets,
+            &grant.write_scope,
+            grant.read_scope.as_deref(),
+        )?;
+        let tools = crate::policy::tools::client_tool_names(&grant.toolsets)?;
+        Ok(Self {
+            actor: actor.into(),
+            run_id: run_id.into(),
+            scope: Some(grant.write_scope),
+            read_scope: grant.read_scope,
+            tools: Some(tools),
+            chain: vec![actor.into()],
+            vault: Some(vault.to_path_buf()),
+            asks: WriteAsks {
+                kind: crate::policy::tool_approval::RunKind::Attended,
+                ask_first: false,
+            },
+        })
+    }
+
     /// A grant narrowed on no axis and bound to no vault, for test fixtures
     /// only (M53.11). Production mints every grant through `run_token` or
     /// `handoff_token`, each bound to a vault; the one production grant this
@@ -237,11 +270,9 @@ impl RunGrant {
         scope_admits(&self.scope, path)
     }
 
-    /// Is this run allowed to read here? (M34.4) Same containment, same
-    /// separator matching, different axis — see `read_scope` for why the two
-    /// are never one list.
+    /// Folder scope and the attended-mail boundary both admit this path.
     pub fn may_read(&self, path: &str) -> bool {
-        scope_admits(&self.read_scope, path)
+        scope_admits(&self.read_scope, path) && crate::mail::readable_by(self, path)
     }
 }
 
@@ -335,14 +366,32 @@ pub fn run_token_window() -> usize {
     RUN_TOKEN_WINDOW
 }
 
+fn root_grant(
+    actor: Option<&str>,
+    scope: Option<Vec<String>>,
+    read_scope: Option<Vec<String>>,
+    tools: Option<Vec<String>>,
+    run_id: String,
+    vault: &Path,
+    asks: WriteAsks,
+) -> RunGrant {
+    let actor = normalize_actor(actor).to_string();
+    RunGrant {
+        chain: vec![actor.clone()],
+        actor,
+        run_id,
+        scope,
+        read_scope,
+        tools,
+        vault: Some(vault.to_path_buf()),
+        asks,
+    }
+}
+
 fn push_run_token(runs: &mut Vec<(String, RunGrant)>, token: String, grant: RunGrant) {
     runs.push((token, grant));
     let mut excess = runs.len().saturating_sub(RUN_TOKEN_WINDOW);
-    // A run whose token is gone can never propose again, so its attempt
-    // counters go with it — and its tool-call counts (M31.2b) and recorded
-    // refusals (M54.10), for the same reason. Bounding the counters by the
-    // same window that bounds the tokens is what stops these maps growing
-    // for the life of the process.
+    // A retired bearer releases its per-run maps through `forget_run`.
     //
     // M31.2b — but an attended run has no elapsed limit, and enough ambient
     // mints during one long run would evict its token mid-question: with it
@@ -356,17 +405,23 @@ fn push_run_token(runs: &mut Vec<(String, RunGrant)>, token: String, grant: RunG
     // worse than any leak.
     let mut i = 0;
     while excess > 0 && i + 1 < runs.len() {
-        if holds_open_question(&runs[i].1.run_id) {
+        if holds_open_question(&runs[i].1.run_id) || retains_condition(&runs[i].1.run_id) {
             i += 1;
             continue;
         }
         let (_, dropped) = runs.remove(i);
-        forget_attempts(&dropped.run_id);
-        forget_tool_calls(&dropped.run_id);
-        forget_refusals(&dropped.run_id);
-        crate::comment_tools::forget_posts(&dropped.run_id);
+        forget_run(&dropped.run_id);
         excess -= 1;
     }
+}
+
+/// A closed run, from either transport, leaves no per-run retry, call,
+/// refusal or comment-post map behind. No credential is retained here.
+pub(crate) fn forget_run(run_id: &str) {
+    forget_attempts(run_id);
+    forget_tool_calls(run_id);
+    forget_refusals(run_id);
+    crate::comment_tools::forget_posts(run_id);
 }
 
 /// Does this run hold an open question (M26.5e)? While it does, eviction
@@ -437,8 +492,8 @@ fn forget_attempts(run_id: &str) {
 /// `run_id` → tool name → dispatch count (M31.2b). Per NAME because gap 3's
 /// own question — "did the run READ outside its manifest" — is unanswerable
 /// from a scalar. Process-global for the same reason the attempt map is:
-/// a run is a bearer token, not a connection. Every entry belongs to a minted
-/// run, so eviction bounds the map with the token window; the one entry that
+/// a run is an attributed session, not a connection. Token eviction and
+/// client-session close both release its entry; the one entry that
 /// outlived it, the endpoint's own base bearer's, went with that bearer
 /// (M53.11).
 fn tool_calls() -> &'static Mutex<BTreeMap<String, BTreeMap<String, u64>>> {
@@ -585,6 +640,106 @@ fn questions() -> &'static Mutex<BTreeMap<String, QuestionSession>> {
     QUESTIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
+pub(crate) const CONDITION_TOOL: &str = "submit_condition";
+pub(crate) const FOLLOWUP_TOOL: &str = "schedule_followup";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConditionAnswer {
+    pub question: String,
+    pub met: bool,
+    pub reason: String,
+}
+
+struct ConditionSession {
+    question: String,
+    answer: Option<ConditionAnswer>,
+}
+
+fn conditions() -> &'static Mutex<BTreeMap<String, ConditionSession>> {
+    static CONDITIONS: OnceLock<Mutex<BTreeMap<String, ConditionSession>>> = OnceLock::new();
+    CONDITIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+pub(crate) fn open_condition(run_id: &str, question: &str) -> Result<(), String> {
+    let mut map = conditions().lock().map_err(|_| "condition lock poisoned")?;
+    if map.contains_key(run_id) {
+        return Err("this run already has a pre-run check open".into());
+    }
+    map.insert(
+        run_id.into(),
+        ConditionSession {
+            question: question.into(),
+            answer: None,
+        },
+    );
+    Ok(())
+}
+
+pub(crate) fn take_condition(run_id: &str) -> Option<ConditionAnswer> {
+    conditions().lock().ok()?.remove(run_id)?.answer
+}
+
+fn retains_condition(run_id: &str) -> bool {
+    conditions()
+        .lock()
+        .map(|map| map.contains_key(run_id))
+        .unwrap_or(true)
+}
+
+fn holds_condition(run_id: &str) -> bool {
+    conditions()
+        .lock()
+        .map(|map| map.contains_key(run_id))
+        .unwrap_or(false)
+}
+
+fn tool_submit_condition(args: &Map<String, Value>, grant: &RunGrant) -> Result<Value, String> {
+    let mut map = conditions().lock().map_err(|_| "condition lock poisoned")?;
+    let session = map
+        .get_mut(&grant.run_id)
+        .ok_or("this run has no pre-run check open, so there is nothing to answer")?;
+    if session.answer.is_some() {
+        return Err("this check is already answered. One run, one answer.".into());
+    }
+    let met = match args.get("answer").and_then(Value::as_str) {
+        Some("yes") => true,
+        Some("no") => false,
+        _ => return Err("answer must be yes or no".into()),
+    };
+    let raw = args
+        .get("reason")
+        .and_then(Value::as_str)
+        .filter(|reason| reason.chars().count() <= 300)
+        .ok_or("reason must be 1 to 300 characters")?;
+    let reason =
+        crate::runtime::cause::clean(Some(raw), 300).ok_or("reason must be 1 to 300 characters")?;
+    session.answer = Some(ConditionAnswer {
+        question: session.question.clone(),
+        met,
+        reason,
+    });
+    typed_result(json!({ "accepted": true }))
+}
+
+#[cfg(test)]
+pub(crate) fn test_submit_condition(
+    run_id: &str,
+    answer: &str,
+    reason: &str,
+) -> Result<(), String> {
+    let grant = RunGrant {
+        run_id: run_id.into(),
+        ..RunGrant::unrestricted("process:test-check")
+    };
+    tool_submit_condition(
+        json!({"answer":answer,"reason":reason})
+            .as_object()
+            .unwrap(),
+        &grant,
+    )
+    .map(|_| ())
+}
+
 /// Declare that this run is answering this assembly. Without it,
 /// `submit_answer` has nothing to answer and refuses.
 pub(crate) fn open_question(
@@ -677,7 +832,7 @@ fn work_key(op_kind: &str, targets: &[crate::ledger::schema::ProposalTarget]) ->
 /// length difference, so a near miss, a prefix and an extension each cost
 /// what a match costs. `==` stops at the first byte that differs, and how
 /// long it took tells a caller how many leading bytes it had right.
-fn tokens_match(presented: &[u8], known: &[u8]) -> bool {
+pub(crate) fn tokens_match(presented: &[u8], known: &[u8]) -> bool {
     let mut diff = presented.len() ^ known.len();
     for (i, byte) in known.iter().enumerate() {
         diff |= usize::from(presented.get(i).copied().unwrap_or(0) ^ byte);
@@ -815,20 +970,38 @@ impl McpState {
         vault: &Path,
         asks: WriteAsks,
     ) -> Result<String, String> {
-        // A root by definition: every caller of this mint is a person, a
-        // schedule, or an internal construct. A handed-to run is minted by
-        // `handoff_token`, which extends the caller's chain instead.
-        let actor = normalize_actor(actor).to_string();
-        self.mint(RunGrant {
-            chain: vec![actor.clone()],
-            actor,
-            run_id,
-            scope,
-            read_scope,
-            tools,
-            vault: Some(vault.to_path_buf()),
-            asks,
-        })
+        self.mint(root_grant(
+            actor, scope, read_scope, tools, run_id, vault, asks,
+        ))
+    }
+
+    /// A wake caused by a recorded run extends that run's chain while keeping
+    /// every grant axis, including ask-first and attendance, unchanged.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the root grant axes plus the recorded ancestry of a woken hop"
+    )]
+    pub fn hop_token(
+        &self,
+        actor: Option<&str>,
+        scope: Option<Vec<String>>,
+        read_scope: Option<Vec<String>>,
+        tools: Option<Vec<String>>,
+        run_id: String,
+        vault: &Path,
+        asks: WriteAsks,
+        chain_above: &[String],
+    ) -> Result<String, String> {
+        let mut grant = root_grant(actor, scope, read_scope, tools, run_id, vault, asks);
+        if chain_above.is_empty() || chain_above.len() >= 3 {
+            return Err("a woken hop needs one or two recorded ancestors".into());
+        }
+        if chain_above.contains(&grant.actor) {
+            return Err("a woken hop cannot repeat an actor in its chain".into());
+        }
+        grant.chain = chain_above.to_vec();
+        grant.chain.push(grant.actor.clone());
+        self.mint(grant)
     }
 
     /// The handoff mint (M34.3): the same token, with the CALLER's chain
@@ -954,7 +1127,7 @@ const LOOPBACK_WORKERS: usize = 2 * crate::agent::MAX_CONCURRENT_RUNS;
 /// The largest request body the endpoint reads. A tool call carries a note at
 /// most. A larger body gets 413: by its declared length, before any of it is
 /// read, or by reading one byte past the cap when it declares none.
-const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 
 // What a request refused before dispatch is told, as JSON-RPC -32600. Each
 // kind is logged once per launch (`log_first_refusal`).
@@ -983,7 +1156,7 @@ const PRESENTED_MAX: usize = 128;
 /// send one, but one that is present must be `http://` and one of those two
 /// addresses, so `null`, `tauri://localhost` and https all get 403. rmcp's
 /// `validate_dns_rebinding_headers` is the guide; the code is our own.
-fn loopback_refusal(
+pub(crate) fn loopback_refusal(
     host: Option<&str>,
     origin: Option<&str>,
     port: u16,
@@ -1023,7 +1196,7 @@ fn own_origin(origin: &str, port: u16) -> bool {
 /// Later ones of that kind are answered and not logged, so a page that keeps
 /// knocking cannot fill the diagnostic log. Nothing reaches runtime.db: a
 /// refusal here belongs to no run, as an unauthorized request never did.
-fn log_first_refusal(reason: &'static str, presented: &str) {
+pub(crate) fn log_first_refusal(reason: &'static str, presented: &str) {
     static SEEN: Mutex<BTreeSet<&'static str>> = Mutex::new(BTreeSet::new());
     if SEEN
         .lock()
@@ -1088,10 +1261,8 @@ fn routed(
 /// bearer. `dispatch` runs inside `catch_unwind`, so a call that panics
 /// answers -32603 and its worker takes the next request, and a panic anywhere
 /// else in answering, tiny_http's own included, costs that one request: the
-/// pool keeps its size. A worker stops when `unblock` hands it nothing, which
-/// only the tests do, or when the listener fails: tiny_http 0.12 stops
-/// accepting after one accept error, for good, and M54.5's init check is
-/// what makes that visible to a run.
+/// pool keeps its size. `serve_pool` owns worker shutdown for both listeners;
+/// M54.5's init check makes a failed run listener visible to its run.
 fn serve_loopback<F>(
     server: Arc<tiny_http::Server>,
     port: u16,
@@ -1102,17 +1273,37 @@ fn serve_loopback<F>(
 where
     F: Fn(Option<&str>, &str) -> Reply + Send + Sync + 'static,
 {
+    serve_pool(
+        server,
+        "cerebro-mcp",
+        workers,
+        Arc::new(move |request| {
+            answer_request(request, port, max_body, &*dispatch);
+        }),
+    )
+}
+
+/// Both loopback transports isolate a failed request and keep their worker
+/// pool alive. `unblock` retires workers when tests or client access stop a
+/// listener; an accept failure also ends that worker.
+pub(crate) fn serve_pool<F>(
+    server: Arc<tiny_http::Server>,
+    name: &str,
+    workers: usize,
+    answer: Arc<F>,
+) -> Vec<JoinHandle<()>>
+where
+    F: Fn(tiny_http::Request) + Send + Sync + 'static,
+{
     (0..workers)
         .filter_map(|n| {
             let server = Arc::clone(&server);
-            let dispatch = Arc::clone(&dispatch);
+            let answer = Arc::clone(&answer);
             std::thread::Builder::new()
-                .name(format!("cerebro-mcp-{n}"))
+                .name(format!("{name}-{n}"))
                 .spawn(move || {
                     for request in server.incoming_requests() {
-                        let _ = catch_unwind(AssertUnwindSafe(|| {
-                            answer_request(request, port, max_body, &*dispatch);
-                        }));
+                        let _ = catch_unwind(AssertUnwindSafe(|| answer(request)));
                     }
                 })
                 .inspect_err(|e| log::warn!("mcp endpoint: worker {n} did not start: {e}"))
@@ -1122,7 +1313,7 @@ where
 }
 
 /// A request body, read no further than the cap.
-enum Body {
+pub(crate) enum Body {
     Text(String),
     /// Over the cap: by its declared length, unread, or by one byte past it.
     TooLarge,
@@ -1193,7 +1384,7 @@ where
 /// when it sent none, itself when it sent one. A repeated Host or Origin
 /// joins into a value no check admits, so a second one cannot ride past the
 /// first.
-fn header_value(request: &tiny_http::Request, name: &'static str) -> Option<String> {
+pub(crate) fn header_value(request: &tiny_http::Request, name: &'static str) -> Option<String> {
     let values: Vec<&str> = request
         .headers()
         .iter()
@@ -1214,7 +1405,7 @@ fn bearer_of(request: &tiny_http::Request) -> Option<&str> {
 }
 
 /// The request's body, refused unread when it declares more than `max` bytes.
-fn read_body(request: &mut tiny_http::Request, max: usize) -> Body {
+pub(crate) fn read_body(request: &mut tiny_http::Request, max: usize) -> Body {
     if request.body_length().is_some_and(|len| len > max) {
         return Body::TooLarge;
     }
@@ -1236,7 +1427,7 @@ fn read_capped(reader: &mut dyn Read, max: usize) -> std::io::Result<Option<Vec<
     Ok((bytes.len() <= max).then_some(bytes))
 }
 
-fn respond_json(request: tiny_http::Request, status: u16, body: &Value) {
+pub(crate) fn respond_json(request: tiny_http::Request, status: u16, body: &Value) {
     let response = tiny_http::Response::from_string(body.to_string()).with_status_code(status);
     let response = match "Content-Type: application/json".parse::<tiny_http::Header>() {
         Ok(header) => response.with_header(header),
@@ -1250,7 +1441,7 @@ fn respond_json(request: tiny_http::Request, status: u16, body: &Value) {
 // ---------------------------------------------------------------------------
 
 /// A JSON-RPC notification: a method call with no `id` to respond to.
-fn is_notification(body: &str) -> bool {
+pub(crate) fn is_notification(body: &str) -> bool {
     serde_json::from_str::<Value>(body)
         .map(|v| v.get("method").is_some() && v.get("id").is_none())
         .unwrap_or(false)
@@ -1260,7 +1451,7 @@ fn rpc_result(id: Value, result: Value) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "result": result })
 }
 
-fn rpc_error(id: Value, code: i64, message: &str) -> Value {
+pub(crate) fn rpc_error(id: Value, code: i64, message: &str) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
 }
 
@@ -1311,7 +1502,13 @@ fn handle_rpc(app: &AppHandle, grant: &RunGrant, body: &str) -> Value {
         Ok(v) => v,
         Err(e) => return rpc_error(Value::Null, -32700, &format!("parse error: {e}")),
     };
-    if let Some(answer) = answer_protocol(&request) {
+    answer_value(app, grant, &request)
+}
+
+/// Dispatch one parsed request under a server-minted grant. Both transports
+/// take this same path through the tool, scope and knowledge guards.
+pub(crate) fn answer_value(app: &AppHandle, grant: &RunGrant, request: &Value) -> Value {
+    if let Some(answer) = answer_protocol(request) {
         return answer;
     }
     let id = request.get("id").cloned().unwrap_or(Value::Null);
@@ -1334,9 +1531,16 @@ fn handle_rpc(app: &AppHandle, grant: &RunGrant, body: &str) -> Value {
             use tauri::Manager;
             let agents = app.try_state::<crate::agent::AgentState>();
             let book = agents.as_ref().map(|a| a.interactions());
-            match answer_gate(name, &args, grant, book)
-                .or_else(|| answer_host(name, &args, grant, book))
+            let hook = if grant
+                .actor
+                .starts_with(crate::client_access::CLIENT_ACTOR_PREFIX)
             {
+                None
+            } else {
+                answer_gate(name, &args, grant, book)
+                    .or_else(|| answer_host(name, &args, grant, book))
+            };
+            match hook {
                 Some(answer) => Ok(answer),
                 None => call_tool(app, grant, name, &args),
             }
@@ -2347,10 +2551,13 @@ pub fn tool_catalog(proposals_enabled: bool) -> Vec<Value> {
 /// less every tool its grant would refuse at dispatch, so a narrowed run is
 /// shown only what it can call.
 ///
-/// The two held tools go only to the run that can use them:
+/// The three held tools go only to the run that can use them:
 /// `report_window_outcome` while it holds an open ingest window, and
-/// `submit_answer` while it holds an open question. Both open before their
+/// `submit_answer` while it holds an open question, and `submit_condition`
+/// while it holds a pre-run check. Each opens before its
 /// run spawns, so the list the CLI fetches at start already names them.
+/// A self-followup booking is shown only to process actors, whose own Agent
+/// record the handler checks again before it can book anything.
 ///
 /// Of the grant's axes, only its tools are filtered: a write its scope
 /// refuses, or a read its read scope refuses, stays listed, and dispatch
@@ -2368,6 +2575,8 @@ pub(crate) fn listed_tools(grant: &RunGrant, proposals_enabled: bool) -> Vec<Val
             match name {
                 REPORT_TOOL => holds_window(&grant.run_id),
                 crate::assembly::prompt::SUBMIT_TOOL => lists_question(&grant.run_id),
+                CONDITION_TOOL => holds_condition(&grant.run_id),
+                FOLLOWUP_TOOL => grant.actor.starts_with("process:"),
                 _ => true,
             }
         })
@@ -2622,9 +2831,9 @@ fn write_target(name: &str, args: &Map<String, Value>) -> Option<String> {
 }
 
 /// The vault path a read tool is aimed at, for the read scope (M34.4), off
-/// the tool's manifest row on the read or read_write axis. A note target is
+/// the tool's manifest row on the read or read_write axis. A note, file or canvas target is
 /// its argument; the bundle target is the bundle itself; a reader with no
-/// target enumerates, and filters inside its own body. A read_write writer
+/// target enumerates (including suggest_view and read_activity), and filters inside its own body. A read_write writer
 /// (edit_note, M55.5) quotes its note back in its answers, so it reads its
 /// target whether or not it carries `expect_hash`.
 fn read_target(name: &str, args: &Map<String, Value>) -> Option<String> {
@@ -2632,7 +2841,9 @@ fn read_target(name: &str, args: &Map<String, Value>) -> Option<String> {
         .filter(|row| matches!(row.axis, Axis::Read | Axis::ReadWrite))?;
     let target = row.target.as_ref()?;
     match target.kind {
-        TargetKind::Note => arg_str(args, target.arg.as_deref()?),
+        TargetKind::Note | TargetKind::File | TargetKind::Canvas => {
+            arg_str(args, target.arg.as_deref()?)
+        }
         TargetKind::Bundle => Some(crate::knowledge::KNOWLEDGE_DIR.to_string()),
         _ => None,
     }
@@ -2654,11 +2865,9 @@ fn hashed_read_target(name: &str, args: &Map<String, Value>) -> Option<String> {
 fn parse_expect_hash(args: &Map<String, Value>) -> Result<Option<String>, String> {
     match args.get("expect_hash") {
         None | Some(Value::Null) => Ok(None),
-        Some(Value::String(hash))
-            if hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()) =>
-        {
-            Ok(Some(hash.to_ascii_lowercase()))
-        }
+        Some(Value::String(hash)) => vault::write::normalize_expect_hash(hash)
+            .map(Some)
+            .map_err(|_| MALFORMED_EXPECT_HASH.to_string()),
         Some(_) => Err(MALFORMED_EXPECT_HASH.to_string()),
     }
 }
@@ -2821,12 +3030,12 @@ fn own_memory_record(
     })?;
     let records = agents_answering(&entries, handle);
     let loose = |p: &str| p.trim_start_matches("./").to_string();
-    let Some(record) = records
+    if !records
         .iter()
-        .find(|e| loose(&e.path).eq_ignore_ascii_case(&loose(&path)))
-    else {
+        .any(|e| loose(&e.path).eq_ignore_ascii_case(&loose(&path)))
+    {
         return Ok(None);
-    };
+    }
     if records.len() > 1 {
         let paths: Vec<&str> = records.iter().map(|e| e.path.as_str()).collect();
         return Err(format!(
@@ -2836,6 +3045,9 @@ fn own_memory_record(
             paths.join(", ")
         ));
     }
+    let Some(record) = own_agent_record(&entries, &grant.actor) else {
+        return Ok(None);
+    };
     let others: Vec<String> = patch
         .keys()
         .filter(|key| key.as_str() != RECENT_KEY)
@@ -3090,12 +3302,23 @@ fn grant_admission(
     // outside the grant is refused exactly like scope, before any tool body
     // runs. A call outside both keeps the write axis's refusal, which speaks
     // first, and an ungranted call never scans for its run's record.
+    // Personal clients first hear that their token does not hold this tool.
     if let Some(message) = ungranted_tool_refusal(grant, name) {
-        return Err(Refusal::Coded(outside.unwrap_or(GrantRefusal {
+        let tools = GrantRefusal {
             code: TOOL_OUTSIDE_GRANT,
             target: name.to_string(),
             message,
-        })));
+        };
+        return Err(Refusal::Coded(
+            if grant
+                .actor
+                .starts_with(crate::client_access::CLIENT_ACTOR_PREFIX)
+            {
+                tools
+            } else {
+                outside.unwrap_or(tools)
+            },
+        ));
     }
 
     // M56.10 (D7) — the one crossing. A run's working notes live on its own
@@ -3111,12 +3334,13 @@ fn grant_admission(
     }
 
     // M34.4 — and read PATHS, the axis the tool allowlist cannot express.
-    // The targeted reader (get_note) refuses here, before the body, and so
+    // Targeted readers refuse here, before any page bytes, and so
     // does a note write that carries `expect_hash` (M55.3): the hash says the
     // run read its target, so a run that may not read it cannot use the hash
     // to probe it. edit_note always does (M55.5): its refusals list the
     // passages they matched, so it is refused before any match. Every reader
-    // that ENUMERATES — search_notes, list_notes, list_inbox,
+    // that ENUMERATES — search_notes, list_notes, describe_database,
+    // query_records, list_inbox,
     // get_vault_context, and knowledge_about's subject index — filters inside
     // its own body instead, over the scanned corpus, and says how much was
     // withheld where a count is what it reports: a silently thinned result
@@ -3125,6 +3349,18 @@ fn grant_admission(
     // which notes it may name. Like the write axis, it binds where the target
     // lands, so a symlink inside the scope cannot carry a read out of it.
     if let Some(target) = read_target(name, args).or_else(|| hashed_read_target(name, args)) {
+        let landing = crate::vault::write::landing_path(vault, &target);
+        if let Some(message) = crate::mail::read_refusal(grant, &target).or_else(|| {
+            landing
+                .as_deref()
+                .and_then(|path| crate::mail::read_refusal(grant, path))
+        }) {
+            return Err(Refusal::Coded(GrantRefusal {
+                code: READ_OUTSIDE_SCOPE,
+                target,
+                message,
+            }));
+        }
         if !scope_admits_landing(vault, &grant.read_scope, &target) {
             return Err(Refusal::Coded(GrantRefusal {
                 code: READ_OUTSIDE_SCOPE,
@@ -3142,10 +3378,13 @@ fn grant_admission(
     }
 }
 
-/// The note a note door judges for one call (M54.10).
+/// The note or contained file judged before one call (M54.10, M66.8).
 enum CorpusTarget {
     /// A note the call names.
     Note(String),
+    /// A contained visible file, opened through the bounded file reader.
+    File(String),
+    Canvas(String),
     /// The note `create_note` would write: its folder and slug, which it
     /// judges in that order, and the file they name before a `-2` makes the
     /// name new.
@@ -3157,19 +3396,23 @@ enum CorpusTarget {
 }
 
 impl CorpusTarget {
-    /// The note judged: what the refusal is keyed on, and what tells a path
+    /// The file judged: what the refusal is keyed on, and what tells a path
     /// into `knowledge/` apart.
     fn path(&self) -> &str {
         match self {
-            CorpusTarget::Note(path) => path,
+            CorpusTarget::Note(path) | CorpusTarget::File(path) | CorpusTarget::Canvas(path) => {
+                path
+            }
             CorpusTarget::New { planned, .. } => planned,
         }
     }
 
-    /// The door's refusal of it as no note it may touch, in the door's words.
+    /// The door's refusal of a target outside its corpus, in the door's words.
     fn refusal(&self, vault: &Path) -> Option<String> {
         match self {
             CorpusTarget::Note(path) => vault::write::note_target_refusal(vault, path),
+            CorpusTarget::File(path) => crate::files::extract::vault_file(vault, path).err(),
+            CorpusTarget::Canvas(path) => vault::write::canvas_target_refusal(vault, path),
             CorpusTarget::New { folder, slug, .. } => {
                 vault::write::new_note_refusal(vault, folder, slug)
             }
@@ -3177,16 +3420,25 @@ impl CorpusTarget {
     }
 }
 
-/// What a note-door tool judges for this call, off its manifest row
-/// (M54.10): the note it names, or for a folder target the file
-/// `create_note` plans there. `None` for every other door, and for a call
-/// that names no note to judge, which its door answers in its own words.
+/// What a corpus-bound tool judges for this call, off its manifest row:
+/// a note, a contained document or canvas, or the note create_note plans.
+/// Calls with no target are answered by their own body in its own words.
 fn corpus_target(name: &str, args: &Map<String, Value>) -> Option<CorpusTarget> {
-    let row = crate::policy::tools::row(name).filter(|row| row.door == "note")?;
+    let row = crate::policy::tools::row(name)?;
+    if row.door != "note"
+        && !row
+            .target
+            .as_ref()
+            .is_some_and(|t| matches!(t.kind, TargetKind::File | TargetKind::Canvas))
+    {
+        return None;
+    }
     let target = row.target.as_ref()?;
     let arg = target.arg.as_deref()?;
     match target.kind {
         TargetKind::Note => arg_str(args, arg).map(CorpusTarget::Note),
+        TargetKind::File => arg_str(args, arg).map(CorpusTarget::File),
+        TargetKind::Canvas => arg_str(args, arg).map(CorpusTarget::Canvas),
         TargetKind::Folder => {
             let folder = arg_str(args, arg).unwrap_or_default();
             let slug = arg_str(args, "slug")?;
@@ -3208,7 +3460,9 @@ fn corpus_target(name: &str, args: &Map<String, Value>) -> Option<CorpusTarget> 
 /// always has.
 fn corpus_refusal(vault: &Path, name: &str, args: &Map<String, Value>) -> Option<GrantRefusal> {
     let target = corpus_target(name, args)?;
-    if crate::knowledge::is_knowledge_path(target.path()) {
+    if !matches!(target, CorpusTarget::File(_) | CorpusTarget::Canvas(_))
+        && crate::knowledge::is_knowledge_path(target.path())
+    {
         return None;
     }
     let message = target.refusal(vault)?;
@@ -3280,6 +3534,18 @@ fn admit_before_dispatch(
         }
         Err(Refusal::Plain(message)) => return Err(error_result(message)),
     };
+    if name == "cache_source" {
+        if let Some(message) = mail_cache_refusal(args) {
+            record_refusal(
+                &grant.run_id,
+                name,
+                "capability_unavailable",
+                "mail_web_cache",
+                &message,
+            );
+            return Err(error_result(message));
+        }
+    }
     if writes_preferences(&grant.actor, name, args) {
         return Err(error_result(PREFERENCES_REFUSAL.to_string()));
     }
@@ -3367,10 +3633,47 @@ fn call_tool(
         "get_vault_context" => tool_vault_context(&vault, grant),
         "search_notes" => tool_search(&vault, args, grant),
         "list_notes" => tool_list_notes(&vault, args, grant),
-        "get_note" => tool_get_note(&vault, args),
+        "read_activity" => tool_read_activity(
+            &crate::config_dir(app)?,
+            &vault,
+            args,
+            grant,
+            chrono::Utc::now(),
+        ),
+        "describe_database" => {
+            let zone = crate::runtime::budget::system_timezone()
+                .parse::<chrono_tz::Tz>()
+                .unwrap_or(chrono_tz::UTC);
+            let today = chrono::Utc::now().with_timezone(&zone).date_naive();
+            tool_describe_database(vault::corpus::shared(), &vault, args, grant, zone, today)
+        }
+        "query_records" => {
+            let zone = crate::runtime::budget::system_timezone()
+                .parse::<chrono_tz::Tz>()
+                .unwrap_or(chrono_tz::UTC);
+            let today = chrono::Utc::now().with_timezone(&zone).date_naive();
+            tool_query_records(vault::corpus::shared(), &vault, args, grant, zone, today)
+        }
+        "get_note" => tool_get_note_scoped(
+            &vault,
+            args,
+            ungranted_tool_refusal(grant, "read_sheet").is_none(),
+            Some(grant),
+        ),
+        "read_document" => tool_read_document(&vault, args, grant),
+        "read_sheet" => tool_read_sheet(&vault, args),
+        "calculate_sheet" => tool_calculate_sheet(&vault, args),
+        "read_canvas" => tool_read_canvas(&vault, args, grant),
         "knowledge_about" => tool_knowledge_about(&vault, args, grant),
         "list_inbox" => tool_list_inbox(&vault, grant),
+        "list_agenda" => {
+            let zone = crate::runtime::budget::system_timezone()
+                .parse()
+                .unwrap_or(chrono_tz::UTC);
+            tool_list_agenda(vault::corpus::shared(), &vault, args, grant, zone)
+        }
         "hand_to" => tool_hand_to(app, &vault, args, grant),
+        FOLLOWUP_TOOL => tool_schedule_followup(&vault, args, grant),
         "create_note" => tool_create_note_in(&vault, args, writer),
         // The writer books a stale `expect_hash` against the run (M55.3). And
         // the run's own record, when the patch is its notes (M56.10).
@@ -3380,6 +3683,8 @@ fn call_tool(
         "set_fields" => tool_set_fields_in(&vault, args, writer),
         "append_to_note" => tool_append_in(&vault, args, writer),
         "edit_note" => tool_edit_note_in(&vault, args, writer),
+        "edit_sheet" => tool_edit_sheet_in(&vault, args, writer),
+        "import_notion_page" => notion_door::call(&vault, args, grant),
         // The comment tools (M70.3) write the page's sidecar, never the page,
         // as the run's actor with its run id.
         "comment_on_note" | "reply_to_comment" | "resolve_comment" => {
@@ -3401,8 +3706,10 @@ fn call_tool(
             tool_cache_source(&vault, args, &WriteReceipt::run(cleared_for_source(grant)))
         }
         "propose_organize" => tool_propose_organize(app, args),
+        "suggest_view" => tool_suggest_view(vault::corpus::shared(), &vault, args, grant),
         "report_window_outcome" => tool_report_window_outcome(args, grant),
         name if name == crate::assembly::prompt::SUBMIT_TOOL => tool_submit_answer(args, grant),
+        CONDITION_TOOL => tool_submit_condition(args, grant),
         "open_note" => tool_ui(app, "open_note", args),
         // Checked against the places its served row lists (M59.1): an
         // unknown word is refused to the agent, never sent Home.
@@ -3796,7 +4103,7 @@ fn announced_change(
     let rescan = || json!({ "action": "vault_changed" });
     let at = |paths: Vec<String>| json!({ "action": "vault_changed", "paths": paths });
     match name {
-        "append_to_note" | "edit_note" => Some(match arg_str(args, "path") {
+        "append_to_note" | "edit_note" | "edit_sheet" => Some(match arg_str(args, "path") {
             Some(path) => at(vec![listed_path(vault, &path)]),
             None => rescan(),
         }),
@@ -4319,6 +4626,166 @@ fn search_notes_in(
     )))
 }
 
+/// Recorded activity, through a connection SQLite refuses writes on. A
+/// named page is guarded before any operational row or session is read.
+fn tool_read_activity(
+    config: &Path,
+    vault: &Path,
+    args: &Map<String, Value>,
+    grant: &RunGrant,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<Value, String> {
+    use crate::runtime::{activity_tool, ReadOnly};
+    let args = activity_tool::Args::parse(args, now)?;
+    if let Some(path) = args.path.as_deref() {
+        if !scope_admits_landing(vault, &grant.read_scope, path) {
+            return Err(format!(
+                "This run may read only {} and cannot read {path}.",
+                scope_words(&grant.read_scope)
+            ));
+        }
+    }
+    let ro =
+        ReadOnly::open(config).map_err(|error| format!("Activity could not be read: {error}"))?;
+    let tracked = crate::ledger::store::load(&crate::ledger::ledger_dir(vault))
+        .ok()
+        .map(|store| store.is_some());
+    activity_tool::read_activity_answer(
+        &ro,
+        &crate::runtime::scope::derive_vault_id(vault),
+        &args,
+        &|path| grant.may_read(path),
+        &crate::runtime::budget::system_timezone(),
+        tracked,
+    )
+    .map(text_result)
+    .map_err(|error| format!("Activity could not be read: {error}"))
+}
+
+// --- Structured database reads (M62.2) -----------------------------------
+
+/// The caller captures the local zone/day once. Scope precedes schema: an
+/// unreadable Type doc cannot lend its field names or options to an answer.
+fn tool_describe_database(
+    cache: &vault::corpus::CorpusCache,
+    vault: &Path,
+    args: &Map<String, Value>,
+    grant: &RunGrant,
+    zone: chrono_tz::Tz,
+    today: chrono::NaiveDate,
+) -> Result<Value, String> {
+    let corpus = cache.snapshot(vault)?;
+    let (readable, withheld) = readable_entries(&corpus, grant);
+    vault::query::describe_text(
+        &readable,
+        &Value::Object(args.clone()),
+        zone,
+        today,
+        withheld,
+    )
+    .map(text_result)
+}
+
+/// No writes, UI event or refusal record: a rejected read returns words the
+/// caller can use to correct its query. The core sees only readable entries.
+fn tool_query_records(
+    cache: &vault::corpus::CorpusCache,
+    vault: &Path,
+    args: &Map<String, Value>,
+    grant: &RunGrant,
+    zone: chrono_tz::Tz,
+    today: chrono::NaiveDate,
+) -> Result<Value, String> {
+    let corpus = cache.snapshot(vault)?;
+    let (readable, withheld) = readable_entries(&corpus, grant);
+    vault::query::records_text(
+        &readable,
+        &Value::Object(args.clone()),
+        zone,
+        today,
+        withheld,
+    )
+    .map(text_result)
+}
+
+// A checked suggestion is data, not a UI command or a pending proposal.
+// Scope is applied before resolving its Type doc or naming any field.
+fn tool_suggest_view(
+    cache: &vault::corpus::CorpusCache,
+    vault: &Path,
+    args: &Map<String, Value>,
+    grant: &RunGrant,
+) -> Result<Value, String> {
+    let vocabulary = vault::views::table()?;
+    let args = vault::views::parse_args(&Value::Object(args.clone()), vocabulary)?;
+    let corpus = cache.snapshot(vault)?;
+    let (readable, _) = readable_entries(&corpus, grant);
+    match vault::views::check(&readable, &args, vocabulary) {
+        Ok(suggestion) => Ok(text_result(vault::views::answer_json(&suggestion))),
+        Err(message) => {
+            if message.starts_with("schema_invalid:") {
+                record_refusal(
+                    &grant.run_id,
+                    "suggest_view",
+                    SCHEMA_INVALID,
+                    &args.database,
+                    &message,
+                );
+            }
+            Err(message)
+        }
+    }
+}
+
+// Stored dates answer an explicit local window, never a free-time question.
+fn tool_list_agenda(
+    cache: &vault::corpus::CorpusCache,
+    vault: &Path,
+    args: &Map<String, Value>,
+    grant: &RunGrant,
+    zone: chrono_tz::Tz,
+) -> Result<Value, String> {
+    let window = vault::agenda::parse_window(args.get("start"), args.get("end"), zone)?;
+    let (limit, limit_cut) = arg_limit(args, 200, 200)?;
+    let wanted = match args.get("type") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(name)) => wanted_type(Some(name)),
+        Some(_) => return Err("type must be a database name".into()),
+    };
+    let corpus = cache.snapshot(vault)?;
+    let (readable, withheld) = readable_entries(&corpus, grant);
+    let type_name = wanted
+        .map(|wanted| {
+            // A readable empty database is known even before its first record.
+            if let Some(doc) = readable.iter().find(|entry| {
+                entry.entry_type.as_deref() == Some("Type")
+                    && entry.title.eq_ignore_ascii_case(wanted)
+            }) {
+                return Ok(doc.title.clone());
+            }
+            type_filtered(&readable, Some(wanted)).map(|records| {
+                records[0]
+                    .entry_type
+                    .clone()
+                    .expect("type_filtered returned a typed record")
+            })
+        })
+        .transpose()?;
+    let schema = vault::schema::VaultSchema::from_entries(&readable, vault::schema::table()?);
+    let agenda = vault::agenda::collect(&readable, &schema, type_name.as_deref(), &window, zone);
+    Ok(text_result(vault::agenda::answer_text(
+        &agenda,
+        &window,
+        &vault::agenda::Listing {
+            type_name: type_name.as_deref(),
+            limit,
+            limit_cut,
+            withheld,
+            zone,
+        },
+    )))
+}
+
 // --- list_notes: browse without a search term (M59.5) ----------------------
 
 /// How list_notes orders what it lists.
@@ -4713,15 +5180,147 @@ unverified.\n";
 const DISPUTED_UNRECORDED: &str = "Disputed: Cerebro never recorded this file — it is not part \
 of the bundle's history. Treat it as unverified.\n";
 
-fn tool_get_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
+fn canvas_card_target(vault: &Path, path: &str, grant: &RunGrant) -> crate::canvas::answer::Target {
+    use crate::canvas::answer::Target;
+    if crate::files::bytes::rel_refusal("0", path).is_some()
+        || path.split('/').any(|part| part.starts_with('.'))
+    {
+        return Target::Outside;
+    }
+    // A lexical out-of-scope card is never looked up, including a missing one.
+    if !grant.may_read(path) {
+        return Target::Unchecked;
+    }
+    match crate::roots::tree::locate_within(vault, path) {
+        Ok(found) => {
+            let Ok(root) = vault.canonicalize() else {
+                return Target::Unchecked;
+            };
+            let Ok(relative) = found.strip_prefix(root) else {
+                return Target::Outside;
+            };
+            let relative = relative.to_string_lossy().replace('\\', "/");
+            if relative.split('/').any(|part| part.starts_with('.')) {
+                return Target::Outside;
+            }
+            if !grant.may_read(&relative) {
+                Target::Unchecked
+            } else {
+                Target::Exists
+            }
+        }
+        Err(crate::roots::tree::LocateRefusal::Outside) => Target::Outside,
+        Err(crate::roots::tree::LocateRefusal::Missing) => Target::Missing,
+        Err(crate::roots::tree::LocateRefusal::RootUnavailable(_)) => Target::Unchecked,
+    }
+}
+fn tool_read_canvas(
+    vault: &Path,
+    args: &Map<String, Value>,
+    grant: &RunGrant,
+) -> Result<Value, String> {
+    let path = arg_str(args, "path").ok_or("read_canvas needs a path")?;
+    let limits = &crate::canvas::agent_limits::table().read;
+    let request = crate::canvas::answer::Request::parse(&Value::Object(args.clone()), limits)?;
+    let source = vault::write::read_canvas_hashed(vault, &path, |opened| {
+        let relative = opened
+            .path
+            .strip_prefix(&opened.root)
+            .map_err(|_| vault::write::CanvasRefusal::new("not_a_board_path"))?
+            .to_string_lossy()
+            .replace('\\', "/");
+        if !grant.may_read(&path) || !grant.may_read(&relative) {
+            let target = if !grant.may_read(&path) {
+                path.clone()
+            } else {
+                relative
+            };
+            let refusal = GrantRefusal {
+                code: READ_OUTSIDE_SCOPE,
+                message: format!(
+                    "This run may read only {} and cannot read {target}.",
+                    scope_words(&grant.read_scope)
+                ),
+                target,
+            };
+            record_grant_refusal(grant, "read_canvas", &refusal);
+            return Err(vault::write::CanvasRefusal {
+                code: READ_OUTSIDE_SCOPE.into(),
+                message: refusal.message,
+            });
+        }
+        Ok(())
+    })
+    .map_err(|error| match error.code.as_str() {
+        "missing" => format!("no whiteboard at {path}"),
+        "not_text" => format!(
+            "{path} can't be read as a whiteboard ({}), so nothing was read.",
+            error.message
+        ),
+        _ => error.message,
+    })?;
+    let board = crate::canvas::read::read(&source.content).map_err(|error| {
+        format!(
+            "{path} can't be read as a whiteboard ({}), so nothing was read.",
+            error.message
+        )
+    })?;
+    let answer =
+        crate::canvas::answer::answer(&board, &source.hash, &path, &request, limits, |path| {
+            canvas_card_target(vault, path, grant)
+        })?;
+    Ok(text_result(answer))
+}
+
+fn tool_read_document(
+    vault: &Path,
+    args: &Map<String, Value>,
+    grant: &RunGrant,
+) -> Result<Value, String> {
+    crate::files::read::read_document(vault, args, |path| grant.may_read(path)).or_else(|error| {
+        match error {
+            crate::files::read::Error::Words(reason) => Err(reason),
+            crate::files::read::Error::OutsideScope(target) => {
+                let refusal = GrantRefusal {
+                    code: READ_OUTSIDE_SCOPE,
+                    message: format!(
+                        "This run may read only {} and cannot read {target}.",
+                        scope_words(&grant.read_scope)
+                    ),
+                    target,
+                };
+                record_grant_refusal(grant, "read_document", &refusal);
+                Ok(error_result(refusal.message))
+            }
+        }
+    })
+}
+
+#[cfg(test)]
+fn tool_get_note(
+    vault: &Path,
+    args: &Map<String, Value>,
+    holds_sheet_reader: bool,
+) -> Result<Value, String> {
+    tool_get_note_scoped(vault, args, holds_sheet_reader, None)
+}
+fn tool_get_note_scoped(
+    vault: &Path,
+    args: &Map<String, Value>,
+    holds_sheet_reader: bool,
+    grant: Option<&RunGrant>,
+) -> Result<Value, String> {
     let path = arg_str(args, "path").ok_or("get_note needs a path")?;
+    if crate::files::kinds::is_whiteboard(&path) {
+        return Err("This is a whiteboard. This page read cannot read its cards.".into());
+    }
     let entries = vault::scan::scan_vault(vault)?;
     let entry = entries
         .iter()
         .find(|e| e.path == path)
         .ok_or_else(|| format!("no note at {path}"))?;
     // One read gives the body and its hash (M55.2), so the Hash line names
-    // exactly the bytes whose body this result prints.
+    // the full saved bytes, including cells elided from a large sheet.
     let (body, hash) = vault::write::read_note_hashed(vault, &path)?;
 
     let mut header = format!(
@@ -4750,12 +5349,86 @@ fn tool_get_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, Strin
         ));
     }
     // The page's open comment threads (M70.3), before the separator, so the
-    // body stays last and byte for byte what edit_note matches.
+    // body stays last. Quotes still match its raw bytes, never an elision line.
     if let Some(threads) = crate::comment_tools::thread_listing(vault, &path, &body) {
         header.push_str(&threads);
         header.push('\n');
     }
-    Ok(text_result(format!("{header}\n---\n{body}")))
+    // Pictures join the header after Hash and threads, before the separator.
+    // Unscoped reads keep their exact old text result; scoped pictures never
+    // rewrite a byte of the note whose body edit_note will later match.
+    let pictures = grant.filter(|g| g.read_scope.is_some()).map(|g| {
+        crate::files::media::pictures_of(
+            vault,
+            &path,
+            &body,
+            header.chars().count() + body.chars().count() + 5 <= 40_000,
+            |picture| g.may_read(picture),
+        )
+    });
+    if let Some(pictures) = &pictures {
+        header.push_str(&pictures.header);
+    }
+    let body = crate::sheet::ai::elide_large_sheets(
+        &body,
+        &crate::sheet::fence::read_fences(&body),
+        holds_sheet_reader,
+    );
+    let mut result = text_result(format!("{header}\n---\n{body}"));
+    if let Some(pictures) = pictures {
+        result["content"]
+            .as_array_mut()
+            .expect("text result content")
+            .extend(pictures.content);
+    }
+    Ok(result)
+}
+
+// Both tools are admitted through their manifest read target before this
+// point. The full bytes are read once; private engine work happens off the
+// MCP worker and no writer, receipt or change announcement is involved.
+fn tool_sheet(vault: &Path, args: &Map<String, Value>, calculate: bool) -> Result<Value, String> {
+    let name = if calculate {
+        "calculate_sheet"
+    } else {
+        "read_sheet"
+    };
+    let path = arg_str(args, "path").ok_or_else(|| format!("{name} needs a path"))?;
+    if !path.ends_with(".md") {
+        return Err(format!("{path} is not a page, so it holds no sheet."));
+    }
+    // This checks the corpus and resolved containment before an existence
+    // answer; raw join(path).exists() would probe outside a refused target.
+    vault::write::existing_note(vault, &path).map_err(|reason| {
+        if reason == format!("{path} is not a file in the vault") {
+            format!("no note at {path}")
+        } else {
+            reason
+        }
+    })?;
+    let (body, hash) = vault::write::read_note_hashed(vault, &path)?;
+    let args = args.clone();
+    let zone = crate::runtime::budget::system_timezone();
+    let path_for_error = path.clone();
+    let answer = crate::sheet::engine::run_on_engine_thread(move |thread| {
+        if calculate { crate::sheet::ai::calculate(thread, &path, &hash, &body, &args, &zone) }
+        else { crate::sheet::ai::read(thread, &path, &hash, &body, &args, &zone) }
+    }).map_err(|reason| {
+        if reason == crate::sheet::engine::STOPPED {
+            format!("The sheets on {path_for_error} couldn't be computed ({reason}), so nothing was {}.", if calculate { "calculated" } else { "read" })
+        } else { reason }
+    })?;
+    serde_json::to_string(&answer)
+        .map(text_result)
+        .map_err(|error| error.to_string())
+}
+
+fn tool_read_sheet(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
+    tool_sheet(vault, args, false)
+}
+
+fn tool_calculate_sheet(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
+    tool_sheet(vault, args, true)
 }
 
 /// What the bundle knows about one entity, as an agent workflow can ask it
@@ -4995,6 +5668,70 @@ pub(crate) fn agents_answering<'a>(
         .filter(|e| e.entry_type.as_deref() == Some("Agent") && e.parse_error.is_none())
         .filter(|e| agent_handle(e) == handle)
         .collect()
+}
+
+/// Exactly one valid Agent record belongs to a process actor. Ambiguous
+/// identities never select a first record for an internal run.
+pub(crate) fn own_agent_record<'a>(
+    entries: &'a [vault::entry::Entry],
+    actor: &str,
+) -> Option<&'a vault::entry::Entry> {
+    let handle = actor
+        .strip_prefix("process:")
+        .filter(|handle| !handle.is_empty())?;
+    let records = agents_answering(entries, handle);
+    if records.len() == 1 {
+        Some(records[0])
+    } else {
+        None
+    }
+}
+
+fn tool_schedule_followup(
+    vault: &Path,
+    args: &Map<String, Value>,
+    grant: &RunGrant,
+) -> Result<Value, String> {
+    let entries = vault::scan::scan_vault(vault)?;
+    if own_agent_record(&entries, &grant.actor).is_none() {
+        return Err(crate::runtime::followups::OWN_RUN.into());
+    }
+    crate::runtime::sink::with_sink(|conn| {
+        schedule_followup_for(
+            conn,
+            &crate::runtime::scope::derive_vault_id(vault),
+            &entries,
+            args,
+            grant,
+            chrono::Utc::now(),
+        )
+    })
+    .unwrap_or_else(|| Err(crate::runtime::followups::RUNTIME_NEEDED.into()))
+}
+
+/// No target argument is read: the bearer and its one live Agent record
+/// determine the booking's identity, even if an extra `agent` key is sent.
+fn schedule_followup_for(
+    conn: &rusqlite::Connection,
+    vault_id: &str,
+    entries: &[vault::entry::Entry],
+    args: &Map<String, Value>,
+    grant: &RunGrant,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<Value, String> {
+    if own_agent_record(entries, &grant.actor).is_none() {
+        return Err(crate::runtime::followups::OWN_RUN.into());
+    }
+    let booked = crate::runtime::followups::schedule(
+        conn,
+        vault_id,
+        &grant.actor,
+        &grant.run_id,
+        args.get("at").and_then(Value::as_str).unwrap_or_default(),
+        args.get("note").and_then(Value::as_str).unwrap_or_default(),
+        now,
+    )?;
+    Ok(text_result(format!("Booked a follow-up for {} (UTC). Once it is due, it starts a run of you with your note as its subject, as soon as Cerebro is open and Learn on its own is on. Waiting now: {} of 3.", booked.row.due_at, booked.waiting)))
 }
 
 /// Does this run's agent ask before its page writes (M57.4)? The request
@@ -5322,11 +6059,15 @@ fn governed_bytes_refusal(content: &str) -> Option<&'static str> {
 }
 
 /// `governed_bytes_refusal` on both sides of an agent's note write: what the
-/// note is, then what the write would make it.
+/// note is, then what the write would make it. Writer-owned source stamps
+/// are compared only after both governed-type checks pass (M69.3b).
 fn governed_bytes_check(before: &str, after: &str) -> Result<(), String> {
     match governed_bytes_refusal(before).or_else(|| governed_bytes_refusal(after)) {
         Some(refusal) => Err(refusal.into()),
-        None => Ok(()),
+        None => match crate::import::stamp_bytes_refusal(before, after) {
+            Some(refusal) => Err(refusal),
+            None => Ok(()),
+        },
     }
 }
 
@@ -5345,9 +6086,11 @@ fn governed_compose_refusal(
     frontmatter: &Map<String, Value>,
     slug: &str,
     body: &str,
-) -> Option<&'static str> {
+) -> Option<String> {
     let content = vault::write::compose_new_note(frontmatter, slug, body).ok()?;
     governed_bytes_refusal(&content)
+        .map(str::to_string)
+        .or_else(|| crate::import::stamp_bytes_refusal("", &content))
 }
 
 /// Whether a person allowed a run's write (M57 Q21): `Person` only for a
@@ -5527,7 +6270,7 @@ fn create_note_write(
         .unwrap_or_default();
     let if_exists = parse_if_exists(args)?;
     if let Some(refusal) = governed_compose_refusal(&frontmatter, &slug, &body) {
-        return Err(refusal.into());
+        return Err(refusal);
     }
     let by = writer.cleared(&folder)?;
     let similar = || similar_block(vault, writer.grant, &folder, &slug, &frontmatter, &body);
@@ -5881,6 +6624,17 @@ fn set_fields_write(
             if let Some(refusal) = governed_bytes_refusal(current) {
                 return Err(refusal.into());
             }
+            // Judge writer-owned keys before schema diagnostics can hide the
+            // provenance refusal. The same byte check runs on the final plan.
+            if crate::import::table().value["agent_guard"]
+                .as_array()
+                .expect("validated guarded keys")
+                .iter()
+                .any(|key| request.set.contains_key(key.as_str().expect("guarded key")))
+            {
+                let proposed = vault::write::patch_bytes(&path, current, &request.set)?;
+                governed_bytes_check(current, &proposed)?;
+            }
             let frontmatter = vault::write::frontmatter_json(&path, current)?;
             match set_fields::plan(&context, &frontmatter, &request) {
                 Ok(plan) => {
@@ -6028,6 +6782,70 @@ fn edit_note_write(
     })
 }
 
+fn sheet_refusal(words: String) -> String {
+    if words.ends_with(crate::sheet::edit::SUFFIX) {
+        words
+    } else {
+        format!("{words}{}", crate::sheet::edit::SUFFIX)
+    }
+}
+
+#[cfg(test)]
+fn tool_edit_sheet(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
+    let grant = RunGrant::unrestricted(DEFAULT_ACTOR);
+    tool_edit_sheet_in(vault, args, test_writer(&grant))
+}
+
+fn tool_edit_sheet_in(
+    vault: &Path,
+    args: &Map<String, Value>,
+    writer: RunWriter<'_>,
+) -> Result<Value, String> {
+    edit_sheet_write(vault, args, writer, WriteMode::Commit).map(|write| write.reply)
+}
+
+/// Shape, bundle, target, stale version, governed bytes, pure sheet plan,
+/// one bounded calculation, and one recorded write, in that order.
+fn edit_sheet_write(
+    vault: &Path,
+    args: &Map<String, Value>,
+    writer: RunWriter<'_>,
+    mode: WriteMode,
+) -> Result<NoteWrite, String> {
+    let request = crate::sheet::edit::parse_request(args)?;
+    let expect = parse_expect_hash(args).map_err(sheet_refusal)?;
+    let path = request.path.clone();
+    let by = writer.cleared(&path).map_err(sheet_refusal)?;
+    let edited = vault::write::edit_sheet_page(
+        vault,
+        &path,
+        |body| crate::sheet::edit::plan(body, &request),
+        expect.as_deref(),
+        governed_bytes_check,
+        mode,
+        &by,
+    )
+    .map_err(|error| {
+        let stale = matches!(&error, vault::write::NoteWriteError::Stale(_));
+        let words = note_write_refusal(writer.run(), "edit_sheet", error);
+        if stale {
+            words
+        } else {
+            sheet_refusal(words)
+        }
+    })?;
+    let reply = json!({
+        "path":listed_path(vault, &path), "hash":edited.landing.after,
+        "wrote":edited.wrote, "ops":edited.ops,
+        "changed":edited.report.changed, "changed_total":edited.report.changed_total,
+        "errors":edited.report.errors, "errors_total":edited.report.errors_total,
+    });
+    Ok(NoteWrite {
+        reply: text_result(reply.to_string()),
+        landing: edited.landing,
+    })
+}
+
 /// One of the confirmable note writers by name, in `mode` (M57.4c), or None
 /// for any other tool. `own` is the run's own record when the call
 /// rewrites its notes (M56.10); `writer` stamps the write and books a stale
@@ -6046,6 +6864,7 @@ fn note_write(
         "set_fields" => set_fields_write(vault, args, writer, mode),
         "append_to_note" => append_write(vault, args, writer, mode),
         "edit_note" => edit_note_write(vault, args, writer, mode),
+        "edit_sheet" => edit_sheet_write(vault, args, writer, mode),
         _ => return None,
     })
 }
@@ -6394,22 +7213,36 @@ fn holds_source(entry: &vault::entry::Entry, kind: &str, canonical: &str) -> boo
 
 /// Cache fetched external material as a working doc (M8.2).
 ///
-/// This is the connector inlet. Cerebro owns no credentials and runs no sync:
-/// the agent reaches for whatever MCP server or CLI it has when a note names
-/// something it cannot read, and writes the answer down here. What makes that
-/// affordable is exactly this file — one fetch, a permanent local copy, and
-/// every later turn reads markdown instead of calling an API.
+/// Tickets and web pages may be cached; mail has its own attended, gated door.
+fn mail_cache_refusal(args: &Map<String, Value>) -> Option<String> {
+    let kind = args.get("kind").and_then(Value::as_str).unwrap_or("web");
+    if !matches!(kind, "issue" | "web") {
+        return None;
+    }
+    ["id", "source_url"]
+        .iter()
+        .filter_map(|key| args.get(*key).and_then(Value::as_str))
+        .find(|value| crate::mail::is_mail_url(value))
+        .map(|id| {
+            format!("{id} is mail, and mail is never cached as a web page. Nothing was written.")
+        })
+}
 fn tool_cache_source(
     vault: &Path,
     args: &Map<String, Value>,
     by: &WriteReceipt<Agent>,
 ) -> Result<Value, String> {
+    if let Some(message) = mail_cache_refusal(args) {
+        return Err(message);
+    }
     let actor = by.actor();
     let id = arg_str(args, "id").ok_or("cache_source needs an id")?;
     let kind = arg_str(args, "kind").unwrap_or_else(|| "web".into());
-    if kind != "issue" && kind != "web" {
+    let kinds = crate::import::cache_kinds();
+    if !kinds.contains(&kind.as_str()) {
         return Err(format!(
-            "cache_source kind must be issue or web, not {kind}"
+            "cache_source kind must be {}, not {kind}",
+            kinds.join(" or ")
         ));
     }
     let title = arg_str(args, "title").ok_or("cache_source needs a title")?;
@@ -6435,8 +7268,8 @@ fn tool_cache_source(
             .to_string()
     });
     frontmatter.insert("stale_after".into(), json!(stale));
-    // Provenance is stamped by us for the same reason it is on a concept: an
-    // agent that can author its own `generated` can disclaim its own work.
+    // Only the fetch writer stamps cached provenance. Ordinary agent note
+    // doors preserve these keys through the import stamp guard.
     frontmatter.insert("generated".into(), json!({ "by": actor, "at": now_iso() }));
 
     let doc = format!("# {title}\n\n{}\n", body.trim());
@@ -6643,6 +7476,7 @@ fn tool_ui(app: &AppHandle, action: &str, args: &Map<String, Value>) -> Result<V
 
 #[cfg(test)]
 mod tests {
+    include!("import/door_tests.rs");
     use super::*;
     use crate::vault::testutil::{temp_vault, write};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -6663,6 +7497,24 @@ mod tests {
         )
         .unwrap();
         tool_cache_source(vault, &args, &WriteReceipt::for_test(DEFAULT_ACTOR, None))
+    }
+
+    #[test]
+    fn cache_source_takes_the_artifacts_cache_kinds() {
+        let vault = temp_vault("source-kind-table");
+        for kind in crate::import::cache_kinds() {
+            let id = if kind == "issue" {
+                "ABC-1"
+            } else {
+                "https://example.test/source"
+            };
+            assert!(cache(&vault, kind, id, "Captured source").is_ok(), "{kind}");
+        }
+        assert_eq!(
+            cache(&vault, "unknown", "source", "Body").unwrap_err(),
+            "cache_source kind must be issue or web, not unknown"
+        );
+        let _ = std::fs::remove_dir_all(vault);
     }
 
     fn answer_text(answer: &Value) -> &str {
@@ -7156,6 +8008,8 @@ mod tests {
             REPORT_TOOL,
             ORGANIZE_TOOL,
             crate::assembly::prompt::SUBMIT_TOOL,
+            CONDITION_TOOL,
+            FOLLOWUP_TOOL,
         ] {
             assert_eq!(surface_of(name), Some(Surface::Base), "{name}");
         }
@@ -8556,7 +9410,8 @@ mod tests {
         let vault = temp_vault("search-line-get-note");
         write(&vault, "records/r.md", PELICAN_NOTE);
         let n = pelican_line(&vault);
-        let note = tool_get_note(&vault, &args_of(json!({ "path": "records/r.md" }))).unwrap();
+        let note =
+            tool_get_note(&vault, &args_of(json!({ "path": "records/r.md" })), true).unwrap();
         let printed = note["content"][0]["text"].as_str().unwrap();
         let (_, body) = printed.split_once("\n---\n").unwrap();
         assert_eq!(
@@ -9312,6 +10167,477 @@ mod tests {
         let _ = std::fs::remove_dir_all(&vault);
     }
 
+    fn database_read_as(
+        vault: &Path,
+        args: Value,
+        grant: &RunGrant,
+        describe: bool,
+    ) -> Result<String, String> {
+        let args: Map<String, Value> = serde_json::from_value(args).unwrap();
+        let cache = vault::corpus::CorpusCache::new(1);
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 7, 28).unwrap();
+        let answer = if describe {
+            tool_describe_database(&cache, vault, &args, grant, chrono_tz::UTC, today)
+        } else {
+            tool_query_records(&cache, vault, &args, grant, chrono_tz::UTC, today)
+        }?;
+        Ok(answer_text(&answer).to_owned())
+    }
+
+    fn suggestion_vault(label: &str) -> PathBuf {
+        let vault = temp_vault(label);
+        write(&vault, "types/work.md", "---\ntype: Type\nfields:\n  status: status\n  owner: person\n  estimate: number\n---\n# Work\n");
+        write(
+            &vault,
+            "visible/one.md",
+            "---\ntype: Work\nstatus: open\nheld_key: shown\n---\n# One\n",
+        );
+        write(
+            &vault,
+            "hidden/two.md",
+            "---\ntype: Work\nsecret_field: hidden\n---\n# Two\n",
+        );
+        vault
+    }
+    fn suggestion_as(vault: &Path, args: Value, grant: &RunGrant) -> Result<String, String> {
+        let cache = vault::corpus::CorpusCache::new(1);
+        tool_suggest_view(&cache, vault, &args_of(args), grant)
+            .map(|result| answer_text(&result).to_owned())
+    }
+    fn suggestion_args(field: &str) -> Value {
+        json!({"database":"Work","view":{"name":"By owner","presentation":{"type":"table","columns":[{"field":field}]}}})
+    }
+    #[test]
+    fn suggest_view_answers_the_view_and_writes_nothing() {
+        let _sink = ArmedSink::new("suggest-view-no-writes-sink");
+        let vault = suggestion_vault("suggest-view-no-writes");
+        let before = vault_bytes(&vault);
+        let mtimes: Vec<_> = before
+            .keys()
+            .map(|path| {
+                (
+                    path.clone(),
+                    std::fs::metadata(path).unwrap().modified().unwrap(),
+                )
+            })
+            .collect();
+        let writes = || {
+            crate::runtime::sink::with_sink(|db| {
+                db.query_row("SELECT COUNT(*) FROM vault_writes", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap()
+            })
+            .unwrap()
+        };
+        let count = writes();
+        let args = suggestion_args("owner");
+        let grant = bound(&vault);
+        let answer = suggestion_as(&vault, args.clone(), &grant).unwrap();
+        let answer: Value = serde_json::from_str(&answer).unwrap();
+        assert_eq!(answer["suggested"]["view"], args["view"]);
+        assert_eq!(vault_bytes(&vault), before);
+        assert_eq!(writes(), count);
+        for (path, at) in mtimes {
+            assert_eq!(std::fs::metadata(path).unwrap().modified().unwrap(), at);
+        }
+        assert!(announced_change(
+            &vault,
+            "suggest_view",
+            &args_of(args),
+            &Ok(text_result(answer.to_string()))
+        )
+        .is_none());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+    #[test]
+    fn suggest_view_refuses_an_unknown_field_naming_the_closest_one() {
+        let vault = suggestion_vault("suggest-view-field");
+        let answer = suggestion_as(&vault, suggestion_args("owenr"), &bound(&vault)).unwrap_err();
+        assert_eq!(answer, "schema_invalid: this view of Work can't be shown, so no card was made.\n- presentation.columns[0]: Work has no field \"owenr\". Did you mean \"owner\"?");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+    #[test]
+    fn a_refused_suggestion_records_one_schema_invalid_row_with_the_run_id() {
+        let _sink = ArmedSink::new("suggest-view-refusal-sink");
+        let vault = suggestion_vault("suggest-view-refusal");
+        let grant = bound(&vault);
+        let first = suggestion_as(&vault, suggestion_args("owenr"), &grant).unwrap_err();
+        assert_eq!(
+            suggestion_as(&vault, suggestion_args("owenr"), &grant),
+            Err(first.clone())
+        );
+        assert_eq!(
+            rows_for_run(&grant.run_id),
+            vec![("schema_invalid".into(), "suggest_view".into(), first)]
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+    #[test]
+    fn suggest_view_names_the_closest_database() {
+        let vault = suggestion_vault("suggest-view-database");
+        let mut args = suggestion_args("owner");
+        args["database"] = json!("Wrok");
+        assert_eq!(suggestion_as(&vault, args, &bound(&vault)), Err("schema_invalid: type: no note this run can read has type \"Wrok\". Closest: \"Work\". Types in use: Work".into()));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+    #[test]
+    fn a_database_outside_read_scope_is_refused_before_a_field_is_named() {
+        let vault = suggestion_vault("suggest-view-hidden-type");
+        let answer = suggestion_as(&vault, suggestion_args("owenr"), &read_scoped(&["visible"]))
+            .unwrap_err();
+        assert_eq!(
+            answer,
+            "schema_invalid: type: no note this run can read has type \"Work\". Types in use: "
+        );
+        assert!(!answer.contains("owner"));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+    #[test]
+    fn held_keys_come_only_from_readable_records() {
+        let vault = suggestion_vault("suggest-view-held-scope");
+        let grant = read_scoped(&["types", "visible"]);
+        assert!(suggestion_as(&vault, suggestion_args("held_key"), &grant).is_ok());
+        let answer = suggestion_as(&vault, suggestion_args("secret_field"), &grant).unwrap_err();
+        assert!(
+            answer.contains("Work has no field \"secret_field\""),
+            "{answer}"
+        );
+        assert!(!answer.contains("hidden/two.md"));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+    #[test]
+    fn suggest_view_is_served_read_only_and_titled() {
+        let catalog = tool_catalog(true);
+        let index = catalog
+            .iter()
+            .position(|row| row["name"] == "suggest_view")
+            .unwrap();
+        assert_eq!(catalog[index - 1]["name"], "propose_organize");
+        let row = &catalog[index];
+        assert_eq!(row["annotations"]["title"], "Suggest a view");
+        assert_eq!(row["annotations"]["readOnlyHint"], true);
+        assert_eq!(row["annotations"]["idempotentHint"], true);
+        assert_eq!(row["annotations"]["destructiveHint"], false);
+        assert!(proposal_op_of(
+            "suggest_view",
+            &crate::policy::table::PolicyTable::load().unwrap()
+        )
+        .is_none());
+    }
+    #[test]
+    fn a_record_without_suggest_view_never_lists_or_calls_it() {
+        let vault = suggestion_vault("suggest-view-grant");
+        let mut grant = bound(&vault);
+        grant.tools = Some(vec!["query_records".into()]);
+        assert!(ungranted_tool_refusal(&grant, "suggest_view").is_some());
+        assert!(refuse_before_dispatch(
+            &vault,
+            &grant,
+            "suggest_view",
+            &args_of(suggestion_args("owner"))
+        )
+        .is_some());
+        assert!(!listed_tools(&grant, true)
+            .iter()
+            .any(|row| row["name"] == "suggest_view"));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    fn agenda_as(vault: &Path, args: Value, grant: &RunGrant) -> Result<String, String> {
+        let cache = vault::corpus::CorpusCache::new(1);
+        tool_list_agenda(&cache, vault, &args_of(args), grant, chrono_tz::UTC)
+            .map(|answer| answer_text(&answer).to_owned())
+    }
+    #[test]
+    fn list_agenda_over_the_demo_window_lists_39_entries() {
+        let vault = Path::new(env!("CARGO_MANIFEST_DIR")).join("../demo-vault");
+        let answer = agenda_as(
+            &vault,
+            json!({"start":"2026-07-20","end":"2026-08-03"}),
+            &RunGrant::unrestricted("agenda-wide"),
+        )
+        .unwrap();
+        assert!(answer.starts_with("39 of 39 dated entries"), "{answer}");
+        assert!(!answer.contains("/lnc-11.md"));
+        assert!(!answer.contains("/ops-10.md"));
+        assert!(answer.contains("/lnc-2.md"));
+    }
+    #[test]
+    fn list_agenda_for_the_demo_week_returns_due_dates_and_decisions() {
+        let vault = Path::new(env!("CARGO_MANIFEST_DIR")).join("../demo-vault");
+        let grant = RunGrant::unrestricted("agenda-week");
+        let mut args = json!({"start":"2026-07-27","end":"2026-08-03"});
+        let answer = agenda_as(&vault, args.clone(), &grant).unwrap();
+        assert!(answer.starts_with("20 of 20 dated entries"), "{answer}");
+        assert_eq!(answer.matches(" · deadline").count(), 5);
+        for words in [
+            "dec-postpone-multi-tenant-billing",
+            "converted from 2026-07-28T09:20:00Z",
+            "Exact times were converted to local time in UTC.",
+            "2 records have no date in any of those fields.",
+        ] {
+            assert!(answer.contains(words), "missing {words}: {answer}");
+        }
+        args["limit"] = json!(5);
+        let answer = agenda_as(&vault, args, &grant).unwrap();
+        assert!(answer.starts_with("5 of 20 dated entries"), "{answer}");
+        assert!(answer.contains(
+            "15 more not listed; narrow the window or name a type, or raise limit (at most 200)."
+        ));
+    }
+    #[test]
+    fn list_agenda_is_served_read_only() {
+        let catalog = tool_catalog(true);
+        let index = catalog
+            .iter()
+            .position(|row| row["name"] == "list_agenda")
+            .unwrap();
+        assert_eq!(catalog[index - 1]["name"], "query_records");
+        let row = &catalog[index];
+        assert_eq!(row["annotations"]["title"], "List the agenda");
+        assert_eq!(row["annotations"]["readOnlyHint"], true);
+        assert_eq!(row["annotations"]["idempotentHint"], true);
+        assert_eq!(row["annotations"]["destructiveHint"], false);
+        let description = row["description"].as_str().unwrap();
+        assert!(description.chars().count() <= 2048);
+        assert!(description.contains("not free time"));
+        for other in &catalog {
+            assert!(!description.contains(other["name"].as_str().unwrap()));
+        }
+    }
+    #[test]
+    fn list_agenda_counts_withheld_notes_and_never_borrows_a_hidden_schema() {
+        let vault = temp_vault("agenda-scope");
+        write(
+            &vault,
+            "hidden/task.md",
+            "---\ntype: Type\nfields:\n  private_date: date\n---\n# Task\n",
+        );
+        write(
+            &vault,
+            "visible/a.md",
+            "---\ntype: Task\nprivate_date: 2026-07-28\n---\n# A\n",
+        );
+        write(&vault, "secret/b.md", "---\ntype: Hidden\n---\n# B\n");
+        let grant = read_scoped(&["visible"]);
+        let mut args = json!({"start":"2026-07-27","end":"2026-08-03","type":"Task"});
+        let answer = agenda_as(&vault, args.clone(), &grant).unwrap();
+        assert_eq!(answer, "No Type doc this run can read declares Task, so its records' dates are unknown. (2 notes outside this run's read scope were not listed)");
+        assert!(!answer.contains("private_date"));
+        args["type"] = json!("Hidden");
+        assert_eq!(
+            agenda_as(&vault, args, &grant),
+            Err("No note this run can read has type \"Hidden\". Types in use: Task.".into())
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+    #[test]
+    fn list_agenda_names_empty_and_dateless_databases_in_words() {
+        let vault = temp_vault("agenda-empty-types");
+        write(
+            &vault,
+            "types/dated.md",
+            "---\ntype: Type\nfields:\n  due: date\n---\n# Dated\n",
+        );
+        write(
+            &vault,
+            "types/plain.md",
+            "---\ntype: Type\nfields:\n  words: text\n---\n# Plain\n",
+        );
+        let grant = bound(&vault);
+        let mut args = json!({"start":"2026-07-27","end":"2026-08-03","type":"dated"});
+        let answer = agenda_as(&vault, args.clone(), &grant).unwrap();
+        assert!(answer.starts_with("No dated entries of type Dated"));
+        assert!(answer.contains("this says nothing about free time"));
+        args["type"] = json!("plain");
+        assert_eq!(
+            agenda_as(&vault, args, &grant).unwrap(),
+            "Plain declares no date or date range field, so its records have nothing to list."
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+    #[test]
+    fn list_agenda_states_a_cut_limit_and_writes_and_announces_nothing() {
+        let _sink = ArmedSink::new("agenda-no-writes-sink");
+        let vault = temp_vault("agenda-no-writes");
+        write(
+            &vault,
+            "types/task.md",
+            "---\ntype: Type\nfields:\n  due: date\n---\n# Task\n",
+        );
+        write(
+            &vault,
+            "a.md",
+            "---\ntype: Task\ndue: 2026-07-28\n---\n# A\n",
+        );
+        let before = vault_bytes(&vault);
+        let grant = bound(&vault);
+        let mut args = json!({"start":"2026-07-27","end":"2026-08-03","limit":201});
+        let text = agenda_as(&vault, args.clone(), &grant).unwrap();
+        assert!(text.contains("The limit is at most 200."));
+        assert!(announced_change(
+            &vault,
+            "list_agenda",
+            &args_of(args.clone()),
+            &Ok(text_result(text))
+        )
+        .is_none());
+        assert_eq!(vault_bytes(&vault), before);
+        assert_eq!(
+            crate::runtime::sink::with_sink(|conn| conn
+                .query_row(
+                    "SELECT COUNT(*) FROM vault_writes WHERE run_id = ?1",
+                    [&grant.run_id],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap())
+            .unwrap(),
+            0
+        );
+        args["limit"] = json!(0);
+        assert_eq!(
+            agenda_as(&vault, args, &grant),
+            Err("limit counts from 1 (default 200, at most 200)".into())
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn structured_database_tools_are_served_read_only_after_list_notes() {
+        let catalog = tool_catalog(true);
+        let at = |name: &str| catalog.iter().position(|row| row["name"] == name).unwrap();
+        assert_eq!(at("describe_database"), at("read_activity") + 1);
+        assert_eq!(at("query_records"), at("describe_database") + 1);
+        for name in ["describe_database", "query_records"] {
+            let row = &catalog[at(name)];
+            assert_eq!(row["annotations"]["readOnlyHint"], true);
+            assert_eq!(row["annotations"]["destructiveHint"], false);
+            assert_eq!(row["annotations"]["idempotentHint"], true);
+            let description = row["description"].as_str().unwrap();
+            assert!(description.chars().count() <= 2048);
+            for other in &catalog {
+                let tool = other["name"].as_str().unwrap();
+                assert!(!description.contains(tool), "{name} names {tool}");
+            }
+            assert!(announced_change(
+                Path::new("/unused"),
+                name,
+                &Map::new(),
+                &Ok(text_result("answer".into()))
+            )
+            .is_none());
+        }
+    }
+
+    #[test]
+    fn describe_database_names_fields_statuses_views_and_the_deadline() {
+        let vault = Path::new(env!("CARGO_MANIFEST_DIR")).join("../demo-vault");
+        let answer = database_read_as(
+            &vault,
+            json!({"type":"Work item"}),
+            &RunGrant::unrestricted("query-demo"),
+            true,
+        )
+        .unwrap();
+        for words in [
+            "45 records",
+            "Deadline: due",
+            "status",
+            "active",
+            "At risk",
+            "at-risk-work",
+            "2026-07-28",
+            "UTC",
+        ] {
+            assert!(answer.contains(words), "missing {words}: {answer}");
+        }
+    }
+
+    #[test]
+    fn query_records_matches_the_work_item_view_on_the_demo_vault() {
+        let cases: Value =
+            serde_json::from_str(include_str!("../fixtures/filter-cases.json")).unwrap();
+        let acceptance = &cases["acceptance"];
+        let args = json!({
+            "type": acceptance["type"],
+            "filters": acceptance["filters"],
+            "sort": acceptance["sort"],
+            "limit": 100
+        });
+        let vault = Path::new(env!("CARGO_MANIFEST_DIR")).join("../demo-vault");
+        let answer =
+            database_read_as(&vault, args, &RunGrant::unrestricted("query-view"), false).unwrap();
+        let paths: Vec<&str> = answer
+            .lines()
+            .filter_map(|line| {
+                line.strip_prefix("- ")?
+                    .split_once(" — ")
+                    .map(|(path, _)| path)
+            })
+            .filter(|path| path.ends_with(".md"))
+            .collect();
+        let expected: Vec<&str> = acceptance["expect"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|path| path.as_str().unwrap())
+            .collect();
+        assert_eq!(paths, expected, "{answer}");
+    }
+
+    #[test]
+    fn query_records_refuses_an_unknown_field_naming_the_closest() {
+        let vault = Path::new(env!("CARGO_MANIFEST_DIR")).join("../demo-vault");
+        let answer = database_read_as(&vault, json!({"type":"Work item","filters":{"all":[{"field":"dew","op":"before","value":"today"}]}}), &RunGrant::unrestricted("query-demo"), false).unwrap_err();
+        assert!(answer.starts_with("Nothing was queried:"), "{answer}");
+        assert!(answer.contains("Closest: \"due\""), "{answer}");
+    }
+
+    #[test]
+    fn database_reads_count_withheld_notes_vault_wide_and_never_borrow_hidden_schema() {
+        let vault = temp_vault("database-read-scope");
+        write(
+            &vault,
+            "types/decision.md",
+            "---\ntype: Type\nfields:\n  owner_secret: {kind: text}\n---\n# Decision\n",
+        );
+        write(
+            &vault,
+            "visible/a.md",
+            "---\ntype: Decision\npublic: yes\n---\n# A\n",
+        );
+        write(
+            &vault,
+            "hidden/b.md",
+            "---\ntype: Classified\n---\n# Hidden\n",
+        );
+        let grant = read_scoped(&["visible"]);
+        let answer = database_read_as(&vault, json!({"type":"Decision"}), &grant, true).unwrap();
+        assert!(
+            answer.contains("No Type doc this run can read declares Decision"),
+            "{answer}"
+        );
+        assert!(!answer.contains("owner_secret"), "{answer}");
+        let rows = database_read_as(
+            &vault,
+            json!({"type":"Decision","fields":["public"]}),
+            &grant,
+            false,
+        )
+        .unwrap();
+        assert!(
+            rows.contains("2 notes outside this run's read scope"),
+            "{rows}"
+        );
+        assert!(!rows.contains("Classified"), "{rows}");
+        let refused =
+            database_read_as(&vault, json!({"type":"Classified"}), &grant, true).unwrap_err();
+        assert!(!refused.contains("owner_secret"), "{refused}");
+        assert!(!refused.contains("hidden/b.md"), "{refused}");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
     #[test]
     fn list_notes_is_served_read_only() {
         let catalog = tool_catalog(true);
@@ -9564,6 +10890,98 @@ mod tests {
 
     /// M34.3 — the hop rules are structural, like scope: not a sentence a
     /// model can be talked out of, and refused before any child exists.
+    #[test]
+    fn a_hop_token_matches_run_token_but_its_chain() {
+        let state = test_state();
+        let asks = WriteAsks {
+            kind: crate::policy::tool_approval::RunKind::Unattended,
+            ask_first: true,
+        };
+        let root = state
+            .run_token(
+                Some("process:scout"),
+                Some(vec!["tasks".into()]),
+                Some(vec!["projects".into()]),
+                Some(vec!["get_note".into()]),
+                "same-run".into(),
+                Path::new("/vault"),
+                asks,
+            )
+            .unwrap();
+        let hop = state
+            .hop_token(
+                Some("process:scout"),
+                Some(vec!["tasks".into()]),
+                Some(vec!["projects".into()]),
+                Some(vec!["get_note".into()]),
+                "same-run".into(),
+                Path::new("/vault"),
+                asks,
+                &["claude-code".into()],
+            )
+            .unwrap();
+        let root = resolve_in(&state, &root, Instant::now()).unwrap();
+        let mut hop = resolve_in(&state, &hop, Instant::now()).unwrap();
+        assert_eq!(hop.chain, vec!["claude-code", "process:scout"]);
+        hop.chain = root.chain.clone();
+        assert_eq!(
+            hop, root,
+            "every grant axis, including ask-first, is unchanged"
+        );
+    }
+
+    #[test]
+    fn a_hop_token_carries_the_chain_above() {
+        let state = test_state();
+        for (above, allowed) in [
+            (vec!["process:a".into()], true),
+            (vec!["process:a".into(), "process:b".into()], false),
+        ] {
+            let token = state
+                .hop_token(
+                    Some("process:c"),
+                    None,
+                    None,
+                    None,
+                    "run".into(),
+                    Path::new("/vault"),
+                    WriteAsks::UNASKED,
+                    &above,
+                )
+                .unwrap();
+            let grant = resolve_in(&state, &token, Instant::now()).unwrap();
+            assert_eq!(grant.chain.len(), above.len() + 1);
+            assert_eq!(handoff_refusal(&grant, "process:d").is_none(), allowed);
+            assert!(
+                handoff_refusal(&grant, "process:a").is_some(),
+                "ancestor cannot be woken again"
+            );
+        }
+    }
+
+    #[test]
+    fn hop_token_refuses_an_empty_or_full_chain() {
+        let state = test_state();
+        for above in [
+            vec![],
+            vec!["a".into(), "b".into(), "c".into()],
+            vec!["process:scout".into()],
+        ] {
+            assert!(state
+                .hop_token(
+                    Some("process:scout"),
+                    None,
+                    None,
+                    None,
+                    "run".into(),
+                    Path::new("/vault"),
+                    WriteAsks::UNASKED,
+                    &above
+                )
+                .is_err());
+        }
+    }
+
     #[test]
     fn two_hops_then_it_stops_and_a_cycle_refuses_naming_the_agent() {
         let root = RunGrant::unrestricted("process:librarian");
@@ -11829,6 +13247,111 @@ mod tests {
     }
 
     #[test]
+    fn an_unattended_run_and_a_token_client_cannot_read_a_digest() {
+        let _sink = ArmedSink::new("mail-read-boundary");
+        let vault = crate::vault::testutil::temp_vault("mail-read-boundary-vault");
+        crate::vault::testutil::write(
+            &vault,
+            "sources/mail/a.md",
+            "# HiddenMailTitle\nprivate-message-bytes\n",
+        );
+        let args = args_of(json!({"path":"sources/mail/a.md"}));
+        for (actor, kind, phrase) in [
+            (
+                "process:mail-unattended",
+                crate::policy::tool_approval::RunKind::Unattended,
+                "This run is unattended",
+            ),
+            (
+                "client:mail-reader",
+                crate::policy::tool_approval::RunKind::Attended,
+                "another app can't read",
+            ),
+        ] {
+            let mut grant = RunGrant::unrestricted(actor);
+            grant.vault = Some(vault.clone());
+            grant.asks.kind = kind;
+            assert!(!grant.may_read("Sources/Mail/a.md"));
+            for _ in 0..2 {
+                let text = refused_text(refuse_before_dispatch(&vault, &grant, "get_note", &args));
+                assert!(text.contains(phrase), "{text}");
+                assert!(!text.contains("private-message-bytes"));
+            }
+            assert_eq!(rows_for_run(&grant.run_id).len(), 1);
+            assert_eq!(rows_for_run(&grant.run_id)[0].0, READ_OUTSIDE_SCOPE);
+        }
+        let mut attended = bound(&vault);
+        attended.asks.kind = crate::policy::tool_approval::RunKind::Attended;
+        assert!(attended.may_read("sources/mail/a.md"));
+        assert!(refuse_before_dispatch(&vault, &attended, "get_note", &args).is_none());
+        assert!(tool_get_note_scoped(&vault, &args, true, Some(&attended))
+            .unwrap()
+            .to_string()
+            .contains("private-message-bytes"));
+        std::fs::remove_dir_all(vault).ok();
+    }
+    #[test]
+    fn search_and_lists_withhold_digests_from_an_unattended_run() {
+        let vault = crate::vault::testutil::temp_vault("mail-list-boundary");
+        crate::vault::testutil::write(
+            &vault,
+            "sources/mail/a.md",
+            "# HiddenMailTitle\nneedle-private\n",
+        );
+        crate::vault::testutil::write(&vault, "notes/public.md", "# Visible\nneedle-public\n");
+        let grant = bound(&vault);
+        for value in [
+            tool_search(&vault, &args_of(json!({"query":"needle"})), &grant).unwrap(),
+            tool_list_notes(&vault, &Map::new(), &grant).unwrap(),
+        ] {
+            let text = value.to_string();
+            assert!(!text.contains("HiddenMailTitle"), "{text}");
+            assert!(!text.contains("needle-private"), "{text}");
+            assert!(!text.contains("sources/mail/a.md"), "{text}");
+            assert!(text.to_ascii_lowercase().contains("withheld"), "{text}");
+        }
+        std::fs::remove_dir_all(vault).ok();
+    }
+    #[test]
+    fn cache_source_refuses_mail_as_a_web_page() {
+        let _sink = ArmedSink::new("mail-web-cache");
+        let vault = crate::vault::testutil::temp_vault("mail-web-cache-vault");
+        let grant = bound(&vault);
+        for args in [
+            json!({"id":"https://mail.google.com/a","kind":"web"}),
+            json!({"id":"ISSUE-1","kind":"issue","source_url":"https://eu.mail.zoho.com/a"}),
+        ] {
+            let args = args_of(args);
+            let text = refused_text(refuse_before_dispatch(
+                &vault,
+                &grant,
+                "cache_source",
+                &args,
+            ));
+            assert!(
+                text.contains("mail is never cached as a web page"),
+                "{text}"
+            );
+            assert!(
+                tool_cache_source(&vault, &args, &WriteReceipt::for_test(DEFAULT_ACTOR, None))
+                    .unwrap_err()
+                    .contains("Nothing was written")
+            );
+        }
+        assert_eq!(rows_for_run(&grant.run_id).len(), 1);
+        assert_eq!(rows_for_run(&grant.run_id)[0].0, "capability_unavailable");
+        assert!(!vault.join("sources").exists());
+        let args = args_of(
+            json!({"id":"https://docs.example.test/a", "kind":"web", "title":"Page", "body":"Public text"}),
+        );
+        assert!(refuse_before_dispatch(&vault, &grant, "cache_source", &args).is_none());
+        assert!(
+            tool_cache_source(&vault, &args, &WriteReceipt::for_test(DEFAULT_ACTOR, None)).is_ok()
+        );
+        std::fs::remove_dir_all(vault).ok();
+    }
+
+    #[test]
     fn a_read_scope_refusal_writes_one_operational_row_with_its_run_id() {
         let _sink = ArmedSink::new("mcp-refusal-sink-read");
         let vault = crate::vault::testutil::temp_vault("mcp-refusal-read");
@@ -12050,7 +13573,7 @@ mod tests {
 
         let get = args_of(json!({ "path": trashed }));
         assert_eq!(
-            tool_get_note(&vault, &get).unwrap_err(),
+            tool_get_note(&vault, &get, true).unwrap_err(),
             format!("no note at {trashed}")
         );
         let search = args_of(json!({ "query": "Zanzibarquill" }));
@@ -12720,7 +14243,7 @@ mod tests {
         assert_eq!(answer["content"][0]["text"], "Appended to notes/b.md");
 
         let (dir, args) = (vault.clone(), path_args(&[("path", json!("notes/a.md"))]));
-        let read = in_thread(move || tool_get_note(&dir, &args));
+        let read = in_thread(move || tool_get_note(&dir, &args, true));
         let answer = read
             .recv_timeout(Duration::from_secs(5))
             .expect("a read takes no turn")
@@ -13207,7 +14730,9 @@ mod tests {
 
     /// A tool only the run holding its window or question is shown.
     fn is_held(name: &str) -> bool {
-        name == REPORT_TOOL || name == crate::assembly::prompt::SUBMIT_TOOL
+        name == REPORT_TOOL
+            || name == crate::assembly::prompt::SUBMIT_TOOL
+            || name == CONDITION_TOOL
     }
 
     #[test]
@@ -13297,6 +14822,7 @@ mod tests {
                 if open {
                     open_window(&grant.run_id, "window-1");
                     open_a_question(&grant.run_id);
+                    open_condition(&grant.run_id, "Ready?").unwrap();
                 }
                 for proposals in [false, true] {
                     let case = format!("{label}, open={open}, proposals={proposals}");
@@ -13312,7 +14838,9 @@ mod tests {
                         let passes = ungranted_tool_refusal(grant, &name).is_none();
                         assert_eq!(
                             listed.contains(&name),
-                            passes && (open || !is_held(&name)),
+                            passes
+                                && (open || !is_held(&name))
+                                && (name != FOLLOWUP_TOOL || grant.actor.starts_with("process:")),
                             "{case}: {name}"
                         );
                     }
@@ -13320,6 +14848,7 @@ mod tests {
                 if open {
                     take_window_report(&grant.run_id);
                     take_answer(&grant.run_id);
+                    take_condition(&grant.run_id);
                 }
             }
         }
@@ -13403,13 +14932,13 @@ mod tests {
     }
 
     #[test]
-    fn the_panel_lists_everything_but_the_held_tools() {
+    fn the_panel_lists_everything_but_the_held_and_self_only_tools() {
         // The panel's own turns: nothing narrowed, no window, no question.
         let panel = bearer(None, None, None);
         for proposals in [false, true] {
             let expected: Vec<String> = names_of(&tool_catalog(proposals))
                 .into_iter()
-                .filter(|name| !is_held(name))
+                .filter(|name| !is_held(name) && name != FOLLOWUP_TOOL)
                 .collect();
             assert_eq!(
                 listed_names(&panel, proposals),
@@ -13857,6 +15386,7 @@ mod tests {
                 let refusal = match tool {
                     "update_frontmatter" => tool_update_frontmatter(&dir, args),
                     "edit_note" => tool_edit_note(&dir, args),
+                    "edit_sheet" => tool_edit_sheet(&dir, args),
                     _ => tool_append(&dir, args),
                 }
                 .expect_err(&format!("{tool} must refuse {target}"));
@@ -14030,7 +15560,8 @@ mod tests {
     #[test]
     fn no_tool_deletes() {
         // Agents do not delete (M17.1). Cerebro's tools can create, revise and
-        // append; removing something a person may not have finished with is
+        // append; edit_note and edit_sheet revise in place, never delete a
+        // page or a sheet. Removing something a person may not have finished with is
         // not a capability the catalog offers, and the absence is the design
         // rather than an omission — assert it so nobody adds one casually.
         // Checked with the surface ON: a generated name is still a name, and
@@ -14446,7 +15977,7 @@ mod tests {
         let read = |path: &str| {
             let mut args = Map::new();
             args.insert("path".into(), json!(path));
-            tool_get_note(&dir, &args).unwrap().to_string()
+            tool_get_note(&dir, &args, true).unwrap().to_string()
         };
         assert!(!read("knowledge/systems/y.md").contains("Disputed"));
         let y = dir.join("knowledge/systems/y.md");
@@ -14468,7 +15999,7 @@ mod tests {
         crate::vault::testutil::write(&dir, "items/hashed.md", note);
         let mut args = Map::new();
         args.insert("path".into(), json!("items/hashed.md"));
-        let result = tool_get_note(&dir, &args).unwrap();
+        let result = tool_get_note(&dir, &args, true).unwrap();
         let text = result["content"][0]["text"].as_str().unwrap();
         let line = text
             .lines()
@@ -14487,9 +16018,397 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn get_note_refuses_a_whiteboard_in_words() {
+        let dir = crate::vault::testutil::temp_vault("mcp-whiteboard-read");
+        crate::vault::testutil::write(&dir, "boards/plan.canvas", "{\"nodes\":[],\"edges\":[]}");
+        let error =
+            tool_get_note(&dir, &args_of(json!({"path":"boards/plan.canvas"})), true).unwrap_err();
+        assert_eq!(
+            error,
+            "This is a whiteboard. This page read cannot read its cards."
+        );
+        assert!(!error.contains("read_canvas"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn budget_page() -> String {
+        "---\ntitle: Budget page\n---\n# Budget page\n\n```cerebro-sheet\n---\nformat: 1\nname: Budget\n---\nItem,Cost\nRent,1200\nFood,300\nTotal,=SUM(B2:B3)\n```\n\n```cerebro-sheet\n---\nname: Ratio\n---\n=Budget!B2/Budget!B4\n```\n".into()
+    }
+
+    fn sheet_json(answer: Value) -> Value {
+        serde_json::from_str(answer_text(&answer)).expect("compact JSON sheet answer")
+    }
+
+    #[test]
+    fn read_sheet_and_calculate_sheet_are_served_read_only_titled_and_folded() {
+        let catalog = tool_catalog(true);
+        let at = catalog
+            .iter()
+            .position(|row| row["name"] == "get_note")
+            .unwrap();
+        for (offset, name, title, fold) in [
+            (1, "read_sheet", "Read a sheet", "read a sheet"),
+            (
+                2,
+                "calculate_sheet",
+                "Calculate on a sheet",
+                "calculated on a sheet",
+            ),
+        ] {
+            let row = &catalog[at + offset];
+            assert_eq!(row["name"], name);
+            assert_eq!(row["annotations"]["title"], title);
+            assert_eq!(row["annotations"]["readOnlyHint"], true);
+            assert_eq!(row["annotations"]["idempotentHint"], true);
+            assert_eq!(row["annotations"]["destructiveHint"], false);
+            assert!(row["_meta"]["anthropic/alwaysLoad"].is_null());
+            let held = crate::policy::tools::manifest()
+                .tools
+                .iter()
+                .find(|row| row.name == name)
+                .unwrap();
+            assert_eq!(held.fold.as_ref().unwrap().one, fold);
+        }
+    }
+
+    #[test]
+    fn the_sheet_tool_descriptions_name_no_other_tool() {
+        let catalog = tool_catalog(true);
+        for name in ["read_sheet", "calculate_sheet"] {
+            let row = catalog.iter().find(|row| row["name"] == name).unwrap();
+            let description = row["description"].as_str().unwrap();
+            assert!(description.chars().count() <= 2048);
+            for other in &catalog {
+                assert!(
+                    !description.contains(other["name"].as_str().unwrap()),
+                    "{name} named {}",
+                    other["name"]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn read_sheet_prints_the_page_hash_get_note_prints() {
+        let vault = temp_vault("mcp-sheet-hash");
+        write(&vault, "notes/budget.md", &budget_page());
+        let args = args_of(json!({"path":"notes/budget.md","sheet":"Ratio"}));
+        let answer = sheet_json(tool_read_sheet(&vault, &args).unwrap());
+        assert_eq!(answer["hash"], get_note_hash(&vault, "notes/budget.md"));
+        assert_eq!(answer["sheets"].as_array().unwrap().len(), 2);
+        assert_eq!(answer["ranges"][0]["cells"][0]["value"], 0.8);
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+
+    #[test]
+    fn calculate_sheet_never_changes_bytes() {
+        let _sink = ArmedSink::new("sheet-no-write-sink");
+        let vault = temp_vault("sheet-no-write");
+        write(&vault, "notes/budget.md", &budget_page());
+        let before = vault_bytes(&vault);
+        let modified = std::fs::metadata(vault.join("notes/budget.md"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        let rows = stamped(&vault);
+        let args = args_of(
+            json!({"path":"notes/budget.md","formulas":[{"formula":"=B4"}],"overrides":[{"sheet":"Budget","cells":[{"address":"B2","value":"1500"}]}]}),
+        );
+        let grant = client_grant(&vault, false);
+        assert!(refuse_before_dispatch(&vault, &grant, "calculate_sheet", &args).is_none());
+        let answer = tool_calculate_sheet(&vault, &args).unwrap();
+        assert_eq!(sheet_json(answer.clone())["results"][0]["value"], 1800.0);
+        assert!(announced_change(&vault, "calculate_sheet", &args, &Ok(answer)).is_none());
+        assert_eq!(vault_bytes(&vault), before);
+        assert_eq!(
+            std::fs::metadata(vault.join("notes/budget.md"))
+                .unwrap()
+                .modified()
+                .unwrap(),
+            modified
+        );
+        assert_eq!(stamped(&vault), rows);
+        let read_args = args_of(json!({"path":"notes/budget.md","ranges":["B4"]}));
+        assert!(refuse_before_dispatch(&vault, &grant, "read_sheet", &read_args).is_none());
+        assert_eq!(
+            sheet_json(tool_read_sheet(&vault, &read_args).unwrap())["ranges"][0]["cells"][0]
+                ["value"],
+            1500.0
+        );
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+
+    #[test]
+    fn a_sheet_read_outside_read_scope_is_refused_before_any_cell_is_read() {
+        let _sink = ArmedSink::new("sheet-scope-sink");
+        let vault = temp_vault("sheet-scope");
+        // A directory cannot be read as a sheet; the scope refusal must win.
+        std::fs::create_dir_all(vault.join("hidden/budget.md")).unwrap();
+        for name in ["read_sheet", "calculate_sheet"] {
+            let grant = RunGrant {
+                read_scope: Some(vec!["visible".into()]),
+                ..bound(&vault)
+            };
+            let args = args_of(json!({"path":"hidden/budget.md","formulas":[{"formula":"=1"}]}));
+            for _ in 0..2 {
+                assert_eq!(
+                    refused_text(refuse_before_dispatch(&vault, &grant, name, &args)),
+                    "This run may read only visible and cannot read hidden/budget.md."
+                );
+            }
+            let rows = rows_for_run(&grant.run_id);
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].0, READ_OUTSIDE_SCOPE);
+            assert_eq!(rows[0].1, name);
+        }
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+
+    #[test]
+    fn read_sheet_refuses_a_missing_page_and_a_diagram() {
+        let vault = temp_vault("sheet-missing");
+        for calculate in [false, true] {
+            assert_eq!(
+                tool_sheet(&vault, &Map::new(), calculate).unwrap_err(),
+                format!(
+                    "{} needs a path",
+                    if calculate {
+                        "calculate_sheet"
+                    } else {
+                        "read_sheet"
+                    }
+                )
+            );
+            assert_eq!(
+                tool_sheet(&vault, &args_of(json!({"path":"gone.md"})), calculate).unwrap_err(),
+                "no note at gone.md"
+            );
+            assert_eq!(
+                tool_sheet(&vault, &args_of(json!({"path":"chart.mmd"})), calculate).unwrap_err(),
+                "chart.mmd is not a page, so it holds no sheet."
+            );
+        }
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+
+    #[test]
+    fn a_page_with_no_sheet_reads_as_none_and_cannot_be_calculated() {
+        let vault = temp_vault("sheet-none");
+        write(&vault, "notes/plain.md", "# Plain\nNo sheet here.\n");
+        let args = args_of(json!({"path":"notes/plain.md","formulas":[{"formula":"=1"}]}));
+        let answer = sheet_json(tool_read_sheet(&vault, &args).unwrap());
+        assert_eq!(answer["sheets"], json!([]));
+        assert_eq!(answer["ranges"], json!([]));
+        assert_eq!(
+            answer["warnings"],
+            json!(["notes/plain.md holds no sheet."])
+        );
+        assert_eq!(
+            tool_calculate_sheet(&vault, &args).unwrap_err(),
+            "notes/plain.md holds no sheet to calculate against."
+        );
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+
+    #[test]
+    fn get_note_shortens_a_large_sheet_fence_and_keeps_the_full_hash() {
+        let vault = temp_vault("sheet-elision-hash");
+        let js = format!("```js\n{}\n```\n", "z".repeat(10_000));
+        let page = format!(
+            "---\ntitle: Large sheet\n---\n# Large\n\n```cerebro-sheet\n{}\n```\n{js}",
+            "x".repeat(5000)
+        );
+        write(&vault, "notes/large.md", &page);
+        let answer =
+            tool_get_note(&vault, &args_of(json!({"path":"notes/large.md"})), true).unwrap();
+        let text = answer_text(&answer);
+        assert!(text.contains(&format!(
+            "Hash: {}",
+            crate::ledger::sha256_hex(page.as_bytes())
+        )));
+        assert!(!text.contains(&"x".repeat(5000)));
+        assert!(text.ends_with(&js));
+        assert!(text
+            .contains("1 filled cells in A1, 4.9 KB, not shown here. read_sheet reads its cells."));
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+
+    #[test]
+    fn get_note_names_the_sheet_reader_only_when_the_run_holds_it() {
+        let vault = temp_vault("sheet-elision-grant");
+        write(
+            &vault,
+            "notes/large.md",
+            &format!("```cerebro-sheet\n{}\n```\n", "x".repeat(5000)),
+        );
+        for (tools, held) in [
+            (vec!["get_note"], false),
+            (vec!["get_note", "mcp__cerebro__read_sheet"], true),
+        ] {
+            let grant = RunGrant {
+                tools: Some(tools.into_iter().map(str::to_string).collect()),
+                ..bound(&vault)
+            };
+            let readable = ungranted_tool_refusal(&grant, "read_sheet").is_none();
+            assert_eq!(readable, held);
+            let answer =
+                tool_get_note(&vault, &args_of(json!({"path":"notes/large.md"})), readable)
+                    .unwrap();
+            assert_eq!(
+                answer_text(&answer).contains("read_sheet reads its cells."),
+                held
+            );
+            assert_eq!(
+                answer_text(&answer).contains("This run holds no tool that reads sheet cells."),
+                !held
+            );
+        }
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+
+    #[test]
+    fn edit_note_cannot_quote_a_shortened_sheet() {
+        let _sink = ArmedSink::new("sheet-quote-sink");
+        let vault = temp_vault("sheet-quote");
+        let bytes = format!("```cerebro-sheet\n{}\n```\n", "x".repeat(5000));
+        write(&vault, "notes/large.md", &bytes);
+        let read = tool_get_note(&vault, &args_of(json!({"path":"notes/large.md"})), true).unwrap();
+        let summary = answer_text(&read)
+            .lines()
+            .find(|line| line.starts_with("[sheet "))
+            .unwrap();
+        let args =
+            args_of(json!({"path":"notes/large.md","edits":[{"old":summary,"new":"changed"}]}));
+        let grant = bound(&vault);
+        let refusal = tool_edit_note_in(&vault, &args, booked(&grant)).unwrap_err();
+        assert!(
+            refusal.contains("quoted text is not in the note's body"),
+            "{refusal}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(vault.join("notes/large.md")).unwrap(),
+            bytes
+        );
+        assert!(stamped(&vault).is_empty());
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+
+    #[test]
+    fn sheet_tools_compute_and_edit_the_snake_on_an_mcp_worker() {
+        let vault = temp_vault("sheet-worker-snake");
+        let csv = (0..500)
+            .map(|row| {
+                (0..20)
+                    .map(|col| {
+                        let at = row * 20 + col;
+                        if at == 0 {
+                            "1".to_string()
+                        } else {
+                            format!(
+                                "={}{}+1",
+                                char::from(b'A' + ((at - 1) % 20) as u8),
+                                (at - 1) / 20 + 1
+                            )
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        write(
+            &vault,
+            "notes/snake.md",
+            &format!("```cerebro-sheet\n{csv}\n```\n"),
+        );
+        let state = test_state();
+        let token = state
+            .run_token(
+                Some("process:sheet-test"),
+                None,
+                None,
+                None,
+                crate::ledger::new_run_id(),
+                &vault,
+                WriteAsks::UNASKED,
+            )
+            .unwrap();
+        let running = state.inner.lock().unwrap().clone().unwrap();
+        let pool = Pool::start(1, MAX_BODY_BYTES, move |bearer, body| {
+            assert!(std::thread::current()
+                .name()
+                .unwrap()
+                .starts_with("cerebro-mcp-"));
+            routed(bearer_grant(bearer, &running), body, |grant, body| {
+                let request: Value = serde_json::from_str(body).unwrap();
+                let name = request["params"]["name"].as_str().unwrap();
+                let args = request["params"]["arguments"].as_object().unwrap();
+                let found = bound_vault(grant).and_then(|vault| {
+                    if let Some(refused) = refuse_before_dispatch(&vault, grant, name, args) {
+                        return Ok(refused);
+                    }
+                    match name {
+                        "read_sheet" => tool_read_sheet(&vault, args),
+                        "calculate_sheet" => tool_calculate_sheet(&vault, args),
+                        "edit_sheet" => tool_edit_sheet_in(&vault, args, booked(grant)),
+                        _ => panic!("unexpected sheet tool"),
+                    }
+                });
+                match found {
+                    Ok(answer) => rpc_result(request["id"].clone(), answer),
+                    Err(reason) => rpc_error(request["id"].clone(), -32000, &reason),
+                }
+            })
+        });
+        let host = pool.host();
+        let bearer = format!("Bearer {token}");
+        for (index, name, args) in [
+            (
+                1,
+                "read_sheet",
+                json!({"path":"notes/snake.md","ranges":["T500"]}),
+            ),
+            (
+                2,
+                "calculate_sheet",
+                json!({"path":"notes/snake.md","formulas":[{"formula":"=T500"}]}),
+            ),
+            (
+                3,
+                "edit_sheet",
+                json!({"path":"notes/snake.md","ops":[{"op":"set_cells","sheet":"Sheet1","cells":[{"address":"A1","value":"2"}]}]}),
+            ),
+        ] {
+            let request = json!({"jsonrpc":"2.0","id":index,"method":"tools/call","params":{"name":name,"arguments":args}}).to_string();
+            let (status, answer) = post(
+                pool.port,
+                &[("Host", &host), ("Authorization", &bearer)],
+                &request,
+            );
+            assert_eq!(status, 200);
+            let answer = sheet_json(answer["result"].clone());
+            if index == 3 {
+                assert_eq!(answer["changed_total"], 10000);
+                assert_eq!(answer["changed"].as_array().unwrap().len(), 200);
+                assert_eq!(answer["changed"][0]["value"].as_f64(), Some(2.0));
+                assert_eq!(answer["wrote"], true);
+                continue;
+            }
+            let value = if index == 1 {
+                &answer["ranges"][0]["cells"][0]["value"]
+            } else {
+                &answer["results"][0]["value"]
+            };
+            assert_eq!(*value, json!(10000.0), "{answer}");
+        }
+        pool.stop();
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+
     /// get_note's `Hash:` line for `path`, as the model reads it.
     fn get_note_hash(vault: &Path, path: &str) -> String {
-        let read = tool_get_note(vault, &args_of(json!({ "path": path }))).unwrap();
+        let read = tool_get_note(vault, &args_of(json!({ "path": path })), true).unwrap();
         read["content"][0]["text"]
             .as_str()
             .unwrap()
@@ -14502,10 +16421,15 @@ mod tests {
     /// A run-taking note-write handler, as the server calls it.
     type HashedWriter = fn(&Path, &Map<String, Value>, RunWriter<'_>) -> Result<Value, String>;
 
-    /// The three agent note writers that take `expect_hash`, each with the
+    /// Agent note writers tested against `expect_hash`, each with the
     /// run-taking handler the server calls and its own arguments.
     fn hashed_writers() -> Vec<(&'static str, HashedWriter, Value)> {
         vec![
+            (
+                "edit_sheet",
+                tool_edit_sheet_in,
+                json!({"path":"notes/a.md","ops":[{"op":"add_sheet","name":"Added"}]}),
+            ),
             (
                 "edit_note",
                 tool_edit_note_in,
@@ -14644,7 +16568,11 @@ mod tests {
                         test_writer(&RunGrant::unrestricted(DEFAULT_ACTOR))
                     )
                     .unwrap_err(),
-                    "expect_hash must be the 64-character hash from get_note's Hash line",
+                    if tool == "edit_sheet" {
+                        "expect_hash must be the 64-character hash from get_note's Hash line\nNothing was written."
+                    } else {
+                        "expect_hash must be the 64-character hash from get_note's Hash line"
+                    },
                     "{tool}: {bad}"
                 );
             }
@@ -14696,7 +16624,7 @@ mod tests {
                 "{tool}: the file is unchanged"
             );
             let plain = args_of(args);
-            if tool == "edit_note" {
+            if matches!(tool, "edit_note" | "edit_sheet") {
                 // Its refusals quote the note back, so it reads its target
                 // with or without a hash (M55.5).
                 assert_eq!(
@@ -14729,7 +16657,7 @@ mod tests {
         let read = |dir: &Path, path: &str| {
             let mut args = Map::new();
             args.insert("path".into(), json!(path));
-            tool_get_note(dir, &args).unwrap().to_string()
+            tool_get_note(dir, &args, true).unwrap().to_string()
         };
         let stamped = "---\ntype: Reference\nverified: { by: \"human:someone\", at: 2026-08-01 }\n---\n\n# Z\n";
 
@@ -15162,7 +17090,8 @@ mod tests {
         write(&vault, "notes/plan.md", original);
         // With a thread listed in the header too (M70.3).
         comment_as_owner(&vault, "notes/plan.md", "Last line", "Keep it?");
-        let read = tool_get_note(&vault, &args_of(json!({ "path": "notes/plan.md" }))).unwrap();
+        let read =
+            tool_get_note(&vault, &args_of(json!({ "path": "notes/plan.md" })), true).unwrap();
         assert!(
             answer_text(&read).contains("Comments: 1 open thread(s)."),
             "{read}"
@@ -15231,7 +17160,7 @@ mod tests {
         let bytes = "---\nstatus: draft\n---\n\n# Plan\n\nWe ship on Thursdays.\n";
         write(&vault, "notes/plan.md", bytes);
         let plain = answer_text(
-            &tool_get_note(&vault, &args_of(json!({ "path": "notes/plan.md" }))).unwrap(),
+            &tool_get_note(&vault, &args_of(json!({ "path": "notes/plan.md" })), true).unwrap(),
         )
         .to_string();
         assert!(
@@ -15239,7 +17168,8 @@ mod tests {
             "no threads, no block: {plain}"
         );
         let id = comment_as_owner(&vault, "notes/plan.md", "Thursdays", "Firm?");
-        let read = tool_get_note(&vault, &args_of(json!({ "path": "notes/plan.md" }))).unwrap();
+        let read =
+            tool_get_note(&vault, &args_of(json!({ "path": "notes/plan.md" })), true).unwrap();
         let (header, body) = answer_text(&read).split_once("\n---\n").unwrap();
         assert_eq!(
             body,
@@ -15270,7 +17200,8 @@ mod tests {
         let vault = temp_vault("mcp-get-note-separator");
         write(&vault, "notes/plan.md", "# Plan\n\nBody line.\n");
         comment_as_owner(&vault, "notes/plan.md", "", "Above\n---\nBelow\n\n---\n");
-        let read = tool_get_note(&vault, &args_of(json!({ "path": "notes/plan.md" }))).unwrap();
+        let read =
+            tool_get_note(&vault, &args_of(json!({ "path": "notes/plan.md" })), true).unwrap();
         let text = answer_text(&read);
         assert_eq!(text.matches("\n---\n").count(), 1, "{text}");
         let (_, body) = text.split_once("\n---\n").unwrap();
@@ -16696,5 +18627,1185 @@ mod tests {
             vec![row("vault.write", "records/risks/r-1.md", &grant, None)]
         );
         let _ = std::fs::remove_dir_all(&vault);
+    }
+    #[test]
+    fn read_activity_without_a_runtime_database_refuses_in_words() {
+        let vault = crate::vault::testutil::temp_vault("activity-no-runtime");
+        let error = tool_read_activity(
+            &vault,
+            &vault,
+            &args_of(json!({"from":"2026-07-27"})),
+            &bound(&vault),
+            chrono::Utc::now(),
+        )
+        .unwrap_err();
+        assert!(error.starts_with("Activity could not be read:"), "{error}");
+        assert!(error.contains("no runtime database"));
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn read_activity_refuses_a_path_outside_read_scope_before_opening_the_runtime() {
+        let vault = crate::vault::testutil::temp_vault("activity-path-scope");
+        let mut grant = bound(&vault);
+        grant.read_scope = Some(vec!["notes".into()]);
+        let error = tool_read_activity(
+            &vault,
+            &vault,
+            &args_of(json!({"from":"2026-07-27","path":"hidden/private.md"})),
+            &grant,
+            chrono::Utc::now(),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            "This run may read only notes and cannot read hidden/private.md."
+        );
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn read_activity_is_served_read_only_and_deferred_after_list_notes() {
+        let catalog = tool_catalog(true);
+        let index = catalog
+            .iter()
+            .position(|row| row["name"] == "read_activity")
+            .unwrap();
+        assert_eq!(catalog[index - 1]["name"], "list_notes");
+        let row = &catalog[index];
+        assert_eq!(row["annotations"]["title"], "Read activity");
+        assert_eq!(row["annotations"]["readOnlyHint"], true);
+        assert_eq!(row["annotations"]["idempotentHint"], true);
+        assert_eq!(row["annotations"]["destructiveHint"], false);
+        assert!(row["_meta"]["anthropic/alwaysLoad"].is_null());
+        assert_eq!(row["inputSchema"]["required"], json!(["from"]));
+        for other in &catalog {
+            assert!(!row["description"]
+                .as_str()
+                .unwrap()
+                .contains(other["name"].as_str().unwrap()));
+        }
+        assert!(announced_change(
+            Path::new("/unused"),
+            "read_activity",
+            &Map::new(),
+            &Ok(text_result("answer".into()))
+        )
+        .is_none());
+    }
+    fn client_grant(vault: &Path, writing: bool) -> RunGrant {
+        let sets = if writing {
+            vec!["read".into(), "write".into()]
+        } else {
+            vec!["read".into()]
+        };
+        RunGrant::for_client(
+            "client:terminal",
+            &crate::ledger::new_run_id(),
+            vault,
+            &crate::runtime::client_tokens::Grant {
+                toolsets: sets,
+                write_scope: if writing {
+                    vec!["notes".into()]
+                } else {
+                    vec![]
+                },
+                read_scope: None,
+            },
+        )
+        .unwrap()
+    }
+    #[test]
+    fn a_read_token_lists_exactly_the_read_toolset() {
+        let g = client_grant(Path::new("/vault"), false);
+        let listed: Vec<_> = listed_tools(&g, true)
+            .iter()
+            .map(|v| v["name"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            listed,
+            crate::policy::tools::client_tool_names(&["read".into()]).unwrap()
+        );
+        assert_eq!(g.chain, vec!["client:terminal"]);
+        assert_eq!(g.scope, Some(vec![]));
+        assert!(!g.asks.ask_first);
+    }
+    #[test]
+    fn a_read_token_is_refused_every_writer() {
+        let vault = temp_vault("client-read-guard");
+        let g = client_grant(&vault, false);
+        let args = args_of(json!({"path":"notes/a.md","folder":"notes","slug":"a"}));
+        for name in every_served_name() {
+            if !g.tools.as_ref().unwrap().contains(&name) {
+                let Err(Refusal::Coded(refusal)) = grant_admission(&vault, &g, &name, &args) else {
+                    panic!("{name} must be outside the client grant")
+                };
+                assert_eq!(refusal.code, TOOL_OUTSIDE_GRANT, "{name}");
+            }
+        }
+        for name in [
+            crate::agent::interaction::GATE_TOOL,
+            crate::agent::interaction::HOST_TOOL,
+        ] {
+            assert!(ungranted_tool_refusal(&g, name).is_some());
+        }
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn a_write_token_writes_only_inside_its_folders() {
+        let vault = temp_vault("client-write-guard");
+        let g = client_grant(&vault, true);
+        let inside = args_of(json!({"folder":"notes","slug":"yes","body":"# Yes"}));
+        assert!(admit_before_dispatch(&vault, &g, "create_note", &inside).is_ok());
+        tool_create_note_in(&vault, &inside, test_writer(&g)).unwrap();
+        assert!(vault.join("notes/yes.md").exists());
+        let outside = args_of(json!({"folder":"outside","slug":"no","body":"# No"}));
+        let Err(Refusal::Coded(refusal)) = grant_admission(&vault, &g, "create_note", &outside)
+        else {
+            panic!("outside write must refuse")
+        };
+        assert_eq!(refusal.code, WRITE_OUTSIDE_SCOPE);
+        assert!(!vault.join("outside/no.md").exists());
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn a_token_never_writes_agent_pages_type_docs_or_knowledge() {
+        let vault = temp_vault("client-governed");
+        let g = client_grant(&vault, true);
+        for kind in ["Agent", "Type"] {
+            let args = args_of(
+                json!({"folder":"notes","slug":kind.to_lowercase(),"frontmatter":{"type":kind},"body":"# Forbidden"}),
+            );
+            assert!(tool_create_note_in(&vault, &args, test_writer(&g)).is_err());
+            assert!(!vault
+                .join(format!("notes/{}.md", kind.to_lowercase()))
+                .exists());
+        }
+        let args = args_of(json!({"folder":"knowledge","slug":"no","body":"# No"}));
+        assert!(grant_admission(&vault, &g, "create_note", &args).is_err());
+        assert!(RunGrant::for_client(
+            "client:x",
+            "x",
+            &vault,
+            &crate::runtime::client_tokens::Grant {
+                toolsets: vec!["read".into(), "write".into()],
+                write_scope: vec!["knowledge".into()],
+                read_scope: None
+            }
+        )
+        .is_err());
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn a_client_never_writes_preferences() {
+        let vault = temp_vault("client-preferences");
+        let g = client_grant(&vault, true);
+        write(
+            &vault,
+            "notes/a.md",
+            "---\npreferences: quiet\n---\n\n# Note\n",
+        );
+        let args = args_of(json!({"path":"notes/a.md","patch":{"preferences":"noisy"}}));
+        assert_eq!(
+            refused_text(refuse_before_dispatch(
+                &vault,
+                &g,
+                "update_frontmatter",
+                &args
+            )),
+            PREFERENCES_REFUSAL
+        );
+        assert!(std::fs::read_to_string(vault.join("notes/a.md"))
+            .unwrap()
+            .contains("quiet"));
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn a_cbr_token_on_the_run_port_is_an_unknown_bearer() {
+        let state = test_state();
+        let running = state.inner.lock().unwrap().as_ref().unwrap().clone();
+        let pool = Pool::start(
+            1,
+            MAX_BODY_BYTES,
+            move |bearer: Option<&str>, body: &str| {
+                routed(bearer_grant(bearer, &running), body, |_, _| {
+                    panic!("personal token reached run dispatch")
+                })
+            },
+        );
+        let host = pool.host();
+        let bearer = format!("Bearer cbr_{}", "a".repeat(64));
+        let (status, answer) = post(
+            pool.port,
+            &[("Host", &host), ("Authorization", &bearer)],
+            r#"{"id":1,"method":"initialize"}"#,
+        );
+        assert_eq!(status, 200);
+        assert_eq!(answer["error"]["code"], -32001);
+        pool.stop();
+    }
+    #[test]
+    fn the_eviction_forgets_through_forget_run_alone() {
+        let source = include_str!("mcp.rs");
+        let body = source
+            .split("fn push_run_token(")
+            .nth(1)
+            .unwrap()
+            .split("pub(crate) fn forget_run(")
+            .next()
+            .unwrap();
+        assert!(body.contains("forget_run(&dropped.run_id)"));
+        for helper in [
+            "forget_attempts(",
+            "forget_tool_calls(",
+            "forget_refusals(",
+            "forget_posts(",
+        ] {
+            assert!(!body.contains(helper));
+        }
+        let run = crate::ledger::new_run_id();
+        note_tool_call(&run, "get_note");
+        assert!(first_refusal(
+            &run,
+            READ_OUTSIDE_SCOPE,
+            "get_note",
+            "hidden.md"
+        ));
+        forget_run(&run);
+        assert_eq!(take_tool_calls(&run), Some(BTreeMap::new()));
+        assert!(first_refusal(
+            &run,
+            READ_OUTSIDE_SCOPE,
+            "get_note",
+            "hidden.md"
+        ));
+        forget_run(&run);
+    }
+    fn sheet_edit_args(path: &str) -> Map<String, Value> {
+        args_of(
+            json!({"path":path,"ops":[{"op":"set_cells","sheet":"Budget","cells":[{"address":"A4","value":"Total"},{"address":"B4","value":"=SUM(B2:B3)"}]}]}),
+        )
+    }
+    const SHEET_BUDGET: &str = "# Budget\n\n```cerebro-sheet\n---\nformat: 1\nname: Budget\n---\nItem,Cost\nRent,1200\nFood,300\n```\n";
+    #[test]
+    fn a_valid_edit_sheet_batch_writes_the_page_once() {
+        let _sink = ArmedSink::new("mcp-sheet-write-sink");
+        let vault = temp_vault("mcp-sheet-write");
+        write(&vault, "notes/budget.md", SHEET_BUDGET);
+        let grant = bound(&vault);
+        let args = sheet_edit_args("notes/budget.md");
+        let answer = tool_edit_sheet_in(&vault, &args, booked(&grant)).unwrap();
+        let report: Value = serde_json::from_str(answer_text(&answer)).unwrap();
+        let after = std::fs::read_to_string(vault.join("notes/budget.md")).unwrap();
+        assert!(after.contains("Total,=SUM(B2:B3)"));
+        assert!(!after.contains("1500"));
+        assert_eq!(report["changed"][1]["value"].as_f64(), Some(1500.0));
+        assert_eq!(report["hash"], crate::ledger::sha256_hex(after.as_bytes()));
+        assert_eq!(report["wrote"], true);
+        assert_eq!(
+            stamped(&vault),
+            vec![row("vault.write", "notes/budget.md", &grant, None)]
+        );
+        assert_eq!(
+            announced_change(&vault, "edit_sheet", &args, &Ok(answer)),
+            Some(json!({"action":"vault_changed","paths":["notes/budget.md"]}))
+        );
+        let unchanged = tool_edit_sheet_in(&vault, &args, booked(&grant)).unwrap();
+        let report: Value = serde_json::from_str(answer_text(&unchanged)).unwrap();
+        assert_eq!(report["wrote"], false);
+        assert_eq!(stamped(&vault).len(), 1);
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn edit_sheet_with_26_ops_is_refused_and_writes_nothing() {
+        let vault = temp_vault("mcp-sheet-26");
+        write(&vault, "notes/budget.md", SHEET_BUDGET);
+        let args = args_of(
+            json!({"path":"notes/budget.md","ops":vec![json!({"op":"add_sheet","name":"X"});26]}),
+        );
+        assert_eq!(
+            tool_edit_sheet(&vault, &args).unwrap_err(),
+            "edit_sheet takes at most 25 ops in one call; this call has 26.\nNothing was written."
+        );
+        assert_eq!(
+            std::fs::read_to_string(vault.join("notes/budget.md")).unwrap(),
+            SHEET_BUDGET
+        );
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn a_stale_expect_hash_refuses_edit_sheet() {
+        let _sink = ArmedSink::new("mcp-sheet-stale-sink");
+        let vault = temp_vault("mcp-sheet-stale");
+        write(&vault, "notes/budget.md", SHEET_BUDGET);
+        let grant = bound(&vault);
+        let mut args = sheet_edit_args("notes/budget.md");
+        args.insert("expect_hash".into(), json!("0".repeat(64)));
+        args.insert("ops".into(), json!([]));
+        assert!(tool_edit_sheet_in(&vault, &args, booked(&grant))
+            .unwrap_err()
+            .starts_with("stale_content:"));
+        assert_eq!(rows_for_run(&grant.run_id)[0].0, "stale_content");
+        assert_eq!(
+            std::fs::read_to_string(vault.join("notes/budget.md")).unwrap(),
+            SHEET_BUDGET
+        );
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn edit_sheet_refuses_the_bundle_type_docs_and_agent_records() {
+        let vault = temp_vault("mcp-sheet-governed");
+        for (path, prefix) in [
+            ("knowledge/a.md", ""),
+            ("types/Project.md", "---\ntype: Type\n---\n"),
+            ("library/agents/a.md", "---\ntype: Agent\n---\n"),
+        ] {
+            let before = format!("{prefix}{SHEET_BUDGET}");
+            write(&vault, path, &before);
+            let mut args = sheet_edit_args(path);
+            args.insert("ops".into(), json!([]));
+            let refusal = tool_edit_sheet(&vault, &args).unwrap_err();
+            assert!(refusal.ends_with("\nNothing was written."));
+            assert!(!refusal.contains("at least one op"), "{refusal}");
+            assert_eq!(std::fs::read_to_string(vault.join(path)).unwrap(), before);
+        }
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn edit_sheet_outside_write_scope_or_read_scope_is_refused() {
+        let vault = temp_vault("mcp-sheet-scope");
+        write(&vault, "notes/budget.md", SHEET_BUDGET);
+        let args = sheet_edit_args("notes/budget.md");
+        for grant in [
+            RunGrant {
+                scope: Some(vec!["elsewhere".into()]),
+                ..bound(&vault)
+            },
+            RunGrant {
+                read_scope: Some(vec!["elsewhere".into()]),
+                ..bound(&vault)
+            },
+        ] {
+            assert!(refuse_before_dispatch(&vault, &grant, "edit_sheet", &args).is_some());
+        }
+        assert_eq!(
+            std::fs::read_to_string(vault.join("notes/budget.md")).unwrap(),
+            SHEET_BUDGET
+        );
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn an_unattended_edit_sheet_waits_in_review_without_writing() {
+        let _sink = ArmedSink::new("mcp-sheet-queue-sink");
+        let vault = memory_vault("mcp-sheet-queue");
+        write(&vault, "records/risks/budget.md", SHEET_BUDGET);
+        let grant = scout_run(&vault, RunKind::Unattended, true);
+        let before = vault_bytes(&vault);
+        let answer = queued_call(
+            &vault,
+            &grant,
+            "edit_sheet",
+            Value::Object(sheet_edit_args("records/risks/budget.md")),
+        );
+        assert!(!is_error(&answer), "{}", result_text(&answer));
+        assert_eq!(vault_bytes(&vault), before);
+        let pending = waiting_in(&vault);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].tool, "edit_sheet");
+        assert!(pending[0].target_hash.is_some());
+        assert!(stamped(&vault).is_empty());
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn an_ask_first_edit_sheet_waits_for_allow_once() {
+        let _sink = ArmedSink::new("mcp-sheet-allow-sink");
+        let vault = memory_vault("mcp-sheet-allow");
+        let path = "records/risks/budget.md";
+        write(&vault, path, SHEET_BUDGET);
+        let args = sheet_edit_args(path);
+        let book = Interactions::with_asks(Vec::new());
+        let asking = scout_run(&vault, RunKind::Attended, true);
+        seat_for(&book, &vault, &asking, "s-1");
+        let before = vault_bytes(&vault);
+        assert!(admit_call(&vault, &asking, "edit_sheet", &args, Some(&book)).is_err());
+        assert_eq!(vault_bytes(&vault), before);
+        let call = GateCall {
+            session_id: "s-1".into(),
+            tool_use_id: "sheet-edit".into(),
+            tool_name: "mcp__cerebro__edit_sheet".into(),
+            tool_input: Value::Object(args.clone()),
+            agent_id: String::new(),
+        };
+        assert_eq!(book.gate(&asking.run_id, &call), GateAnswer::Defer);
+        let card = book.confirm("s-1", "sheet-edit").unwrap();
+        book.close_seat(&asking.run_id);
+        let resume = book
+            .begin_answer(
+                &crate::agent::vault_key(&vault),
+                &card.id,
+                PersonAnswer::from_ipc(allow_once()),
+            )
+            .unwrap();
+        book.record_write_approval(resume.approval.unwrap());
+        let resumed = scout_run(&vault, RunKind::Attended, true);
+        seat_for(&book, &vault, &resumed, "s-1");
+        book.finish_answer(&card.id, &resumed.run_id);
+        let admission = admit_call(&vault, &resumed, "edit_sheet", &args, Some(&book)).unwrap();
+        let answer = tool_edit_sheet_in(
+            &vault,
+            &args,
+            RunWriter {
+                grant: &resumed,
+                approval: admission.approval,
+                books: true,
+            },
+        )
+        .unwrap();
+        assert!(sheet_json(answer)["wrote"].as_bool().unwrap());
+        assert!(std::fs::read_to_string(vault.join(path))
+            .unwrap()
+            .contains("=SUM(B2:B3)"));
+        assert_eq!(stamped(&vault).len(), 1);
+        assert!(admit_call(&vault, &resumed, "edit_sheet", &args, Some(&book)).is_err());
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn edit_sheet_is_served_destructive_titled_and_confirmable() {
+        let catalog = tool_catalog(true);
+        let row = catalog
+            .iter()
+            .find(|row| row["name"] == "edit_sheet")
+            .unwrap();
+        assert_eq!(row["annotations"]["destructiveHint"], true);
+        assert_eq!(row["annotations"]["title"], "Edit a sheet");
+        assert!(crate::policy::tools::confirmable("edit_sheet"));
+    }
+    #[test]
+    fn read_canvas_reads_an_obsidian_board() {
+        let vault = temp_vault("canvas-obsidian");
+        let source = include_str!("../../shared/canvas/goldens/obsidian-layout.canvas");
+        std::fs::write(vault.join("plan.canvas"), source).unwrap();
+        let grant = client_grant(&vault, false);
+        let args = args_of(json!({"path":"plan.canvas"}));
+        assert!(refuse_before_dispatch(&vault, &grant, "read_canvas", &args).is_none());
+        let result = sheet_json(tool_read_canvas(&vault, &args, &grant).unwrap());
+        assert_eq!(result["board"]["nodes"], 4);
+        assert_eq!(result["nodes"].as_array().unwrap().len(), 4);
+        assert_eq!(result["edges"].as_array().unwrap().len(), 1);
+        assert_eq!(result["hash"], crate::ledger::sha256_hex(source.as_bytes()));
+        assert!(listed_tools(&grant, true)
+            .iter()
+            .any(|r| r["name"] == "read_canvas"));
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+    #[test]
+    fn read_canvas_never_changes_bytes() {
+        let _sink = ArmedSink::new("canvas-read-writes");
+        let vault = temp_vault("canvas-read-only");
+        let source = "{\"nodes\":[],\"unknown\":1.50}";
+        let file = vault.join("plan.canvas");
+        std::fs::write(&file, source).unwrap();
+        let before = std::fs::metadata(&file).unwrap().modified().unwrap();
+        let grant = bound(&vault);
+        let args = args_of(json!({"path":"plan.canvas"}));
+        let answer = tool_read_canvas(&vault, &args, &grant).unwrap();
+        assert!(announced_change(&vault, "read_canvas", &args, &Ok(answer)).is_none());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().modified().unwrap(),
+            before
+        );
+        assert!(stamped(&vault).is_empty());
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+    #[test]
+    fn a_board_outside_read_scope_is_refused_before_any_byte() {
+        let _sink = ArmedSink::new("canvas-read-scope");
+        let vault = temp_vault("canvas-scope");
+        // There is deliberately no board. Scope, not existence or parsing, answers.
+        let grant = RunGrant {
+            read_scope: Some(vec!["visible".into()]),
+            ..bound(&vault)
+        };
+        let args = args_of(json!({"path":"hidden/plan.canvas"}));
+        for _ in 0..2 {
+            assert_eq!(
+                refused_text(refuse_before_dispatch(&vault, &grant, "read_canvas", &args)),
+                "This run may read only visible and cannot read hidden/plan.canvas."
+            );
+        }
+        let rows = rows_for_run(&grant.run_id);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, READ_OUTSIDE_SCOPE);
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+    #[test]
+    fn read_canvas_refuses_dot_paths_and_climbing_as_outside_the_corpus() {
+        let vault = temp_vault("canvas-corpus");
+        for path in [".hidden/a.canvas", "../a.canvas", "a.md", "a.mmd"] {
+            let refusal =
+                corpus_refusal(&vault, "read_canvas", &args_of(json!({"path":path}))).unwrap();
+            assert_eq!(refusal.code, TARGET_OUTSIDE_CORPUS, "{path}");
+        }
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+    #[test]
+    fn an_unreadable_board_is_refused_in_words_never_read_as_empty() {
+        let vault = temp_vault("canvas-unreadable");
+        let grant = bound(&vault);
+        let args = args_of(json!({"path":"a.canvas"}));
+        assert_eq!(
+            tool_read_canvas(&vault, &args, &grant).unwrap_err(),
+            "no whiteboard at a.canvas"
+        );
+        for source in ["{oops", r#"{"cerebro":{"version":2}}"#] {
+            std::fs::write(vault.join("a.canvas"), source).unwrap();
+            let words = tool_read_canvas(&vault, &args, &grant).unwrap_err();
+            assert!(
+                words.starts_with("a.canvas can't be read as a whiteboard ("),
+                "{words}"
+            );
+            assert!(words.ends_with("so nothing was read."));
+            assert_eq!(
+                std::fs::read_to_string(vault.join("a.canvas")).unwrap(),
+                source
+            );
+        }
+        let file = std::fs::File::create(vault.join("a.canvas")).unwrap();
+        let size = crate::canvas::format::table().limits.max_bytes as u64 + 1;
+        file.set_len(size).unwrap();
+        assert_eq!(
+            tool_read_canvas(&vault, &args, &grant).unwrap_err(),
+            format!(
+                "a.canvas holds {size} bytes; a whiteboard is read up to {}.",
+                size - 1
+            )
+        );
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+    #[cfg(unix)]
+    #[test]
+    fn read_canvas_checks_the_opened_landing_and_card_targets() {
+        let _sink = ArmedSink::new("canvas-canonical-scope");
+        let vault = temp_vault("canvas-canonical");
+        for folder in ["visible", "hidden"] {
+            std::fs::create_dir_all(vault.join(folder)).unwrap();
+        }
+        std::fs::write(vault.join("visible/plan.canvas"), "{}").unwrap();
+        std::fs::write(vault.join("hidden/secret.canvas"), "{}").unwrap();
+        let grant = RunGrant {
+            read_scope: Some(vec!["visible".into()]),
+            ..bound(&vault)
+        };
+        let args = args_of(json!({"path":"visible/plan.canvas"}));
+        assert!(refuse_before_dispatch(&vault, &grant, "read_canvas", &args).is_none());
+        std::fs::remove_file(vault.join("visible/plan.canvas")).unwrap();
+        std::os::unix::fs::symlink("../hidden/secret.canvas", vault.join("visible/plan.canvas"))
+            .unwrap();
+        assert!(tool_read_canvas(&vault, &args, &grant)
+            .unwrap_err()
+            .contains("hidden/secret.canvas"));
+        let target = |path| serde_json::to_value(canvas_card_target(&vault, path, &grant)).unwrap();
+        assert_eq!(target("hidden/missing.md"), "unchecked");
+        assert_eq!(target("hidden/secret.canvas"), "unchecked");
+        assert_eq!(target("visible/missing.md"), "missing");
+        assert_eq!(target("visible/plan.canvas"), "unchecked");
+        assert_eq!(target("../outside.md"), "outside");
+        assert_eq!(target(".hidden/a.md"), "outside");
+        std::fs::write(vault.join("visible/a.md"), "hello").unwrap();
+        assert_eq!(target("visible/a.md"), "exists");
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+    #[test]
+    fn the_canvas_descriptions_name_no_other_tool() {
+        let catalog = tool_catalog(true);
+        let index = catalog
+            .iter()
+            .position(|r| r["name"] == "read_canvas")
+            .unwrap();
+        assert_eq!(catalog[index - 1]["name"], "calculate_sheet");
+        assert_eq!(catalog[index]["annotations"]["readOnlyHint"], true);
+        assert_eq!(catalog[index]["annotations"]["idempotentHint"], true);
+        assert_eq!(catalog[index]["annotations"]["destructiveHint"], false);
+        let description = catalog[index]["description"].as_str().unwrap();
+        for row in crate::policy::tools::manifest().tools.iter() {
+            assert!(!description.contains(&row.name), "{}", row.name);
+        }
+    }
+    #[test]
+    fn read_document_is_served_read_only() {
+        let catalog = tool_catalog(true);
+        let index = catalog
+            .iter()
+            .position(|r| r["name"] == "read_document")
+            .unwrap();
+        assert_eq!(catalog[index - 1]["name"], "get_note");
+        let row = &catalog[index];
+        assert_eq!(row["annotations"]["readOnlyHint"], true);
+        assert_eq!(row["annotations"]["idempotentHint"], true);
+        assert_eq!(row["annotations"]["destructiveHint"], false);
+        assert!(row["_meta"]["anthropic/alwaysLoad"].is_null());
+    }
+    #[test]
+    fn read_document_returns_slide_3_of_a_pptx() {
+        let vault = temp_vault("document-deck");
+        std::fs::create_dir_all(vault.join("attachments")).unwrap();
+        std::fs::write(
+            vault.join("attachments/deck.pptx"),
+            crate::files::extract::testdocs::pptx(),
+        )
+        .unwrap();
+        let grant = client_grant(&vault, false);
+        let args = args_of(json!({"path":"attachments/deck.pptx","slides":[3]}));
+        assert!(refuse_before_dispatch(&vault, &grant, "read_document", &args).is_none());
+        let answer = tool_read_document(&vault, &args, &grant).unwrap();
+        assert!(answer_text(&answer).contains("Speaker says hello"));
+        assert!(!answer_text(&answer).contains("## Slide 1:"));
+        assert!(announced_change(&vault, "read_document", &args, &Ok(answer)).is_none());
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+    #[test]
+    fn read_document_respects_read_scope_and_records_the_refusal() {
+        let _sink = ArmedSink::new("document-scope-sink");
+        let vault = temp_vault("document-scope");
+        let grant = RunGrant {
+            read_scope: Some(vec!["visible".into()]),
+            ..bound(&vault)
+        };
+        let args = args_of(json!({"path":"hidden/deck.pptx"}));
+        for _ in 0..2 {
+            assert_eq!(
+                refused_text(refuse_before_dispatch(
+                    &vault,
+                    &grant,
+                    "read_document",
+                    &args
+                )),
+                "This run may read only visible and cannot read hidden/deck.pptx."
+            );
+        }
+        let rows = rows_for_run(&grant.run_id);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, READ_OUTSIDE_SCOPE);
+        assert_eq!(rows[0].1, "read_document");
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+    #[cfg(unix)]
+    #[test]
+    fn read_document_refuses_climbing_and_an_out_of_vault_symlink() {
+        let vault = temp_vault("document-corpus");
+        let outside = temp_vault("document-outside");
+        std::fs::write(
+            outside.join("a.docx"),
+            crate::files::extract::testdocs::docx(),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(outside.join("a.docx"), vault.join("link.docx")).unwrap();
+        for path in ["../a.docx", "link.docx"] {
+            let refusal =
+                corpus_refusal(&vault, "read_document", &args_of(json!({"path":path}))).unwrap();
+            assert_eq!(refusal.code, TARGET_OUTSIDE_CORPUS);
+            assert!(refusal.message.contains("path escapes the vault"));
+        }
+        std::fs::remove_dir_all(vault).unwrap();
+        std::fs::remove_dir_all(outside).unwrap();
+    }
+    #[cfg(unix)]
+    #[test]
+    fn read_document_refuses_a_symlink_into_an_unreadable_folder() {
+        let vault = temp_vault("document-landing");
+        std::fs::create_dir_all(vault.join("public")).unwrap();
+        std::fs::create_dir_all(vault.join("private")).unwrap();
+        std::fs::write(
+            vault.join("private/a.docx"),
+            crate::files::extract::testdocs::docx(),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink("../private/a.docx", vault.join("public/link.docx")).unwrap();
+        let grant = RunGrant {
+            read_scope: Some(vec!["public".into()]),
+            ..bound(&vault)
+        };
+        let args = args_of(json!({"path":"public/link.docx"}));
+        let Err(Refusal::Coded(refusal)) = grant_admission(&vault, &grant, "read_document", &args)
+        else {
+            panic!("scope");
+        };
+        assert_eq!(refusal.code, READ_OUTSIDE_SCOPE);
+        let answer = tool_read_document(&vault, &args, &grant).unwrap();
+        assert_eq!(answer["isError"], true);
+        assert!(answer_text(&answer).contains("private/a.docx"));
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+    #[test]
+    fn read_document_refuses_dot_folders_as_outside_the_corpus() {
+        let _sink = ArmedSink::new("document-dot-sink");
+        let vault = temp_vault("document-dot");
+        let grant = bound(&vault);
+        let args = args_of(json!({"path":".hidden/a.docx"}));
+        for _ in 0..2 {
+            assert_eq!(
+                refused_text(refuse_before_dispatch(
+                    &vault,
+                    &grant,
+                    "read_document",
+                    &args
+                )),
+                "dot-folders and dotfiles are not readable here"
+            );
+        }
+        let rows = rows_for_run(&grant.run_id);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, TARGET_OUTSIDE_CORPUS);
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+    #[test]
+    fn an_ungranted_run_never_lists_or_calls_read_document() {
+        let vault = temp_vault("document-ungranted");
+        let grant = RunGrant {
+            tools: Some(vec!["get_note".into()]),
+            ..bound(&vault)
+        };
+        assert!(!listed_tools(&grant, true)
+            .iter()
+            .any(|r| r["name"] == "read_document"));
+        let Err(Refusal::Coded(refusal)) = grant_admission(
+            &vault,
+            &grant,
+            "read_document",
+            &args_of(json!({"path":"attachments/a.docx"})),
+        ) else {
+            panic!("grant");
+        };
+        assert_eq!(refusal.code, TOOL_OUTSIDE_GRANT);
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod condition_tests {
+    use super::*;
+
+    #[test]
+    fn submit_condition_needs_an_open_check() {
+        let id = crate::ledger::new_run_id();
+        assert_eq!(
+            test_submit_condition(&id, "yes", "Ready."),
+            Err("this run has no pre-run check open, so there is nothing to answer".into())
+        );
+    }
+
+    #[test]
+    fn submit_condition_answers_once() {
+        let id = crate::ledger::new_run_id();
+        open_condition(&id, "Is work needed?").unwrap();
+        test_submit_condition(&id, "no", "Nothing changed.").unwrap();
+        assert_eq!(
+            test_submit_condition(&id, "yes", "Changed."),
+            Err("this check is already answered. One run, one answer.".into())
+        );
+        assert_eq!(
+            take_condition(&id),
+            Some(ConditionAnswer {
+                question: "Is work needed?".into(),
+                met: false,
+                reason: "Nothing changed.".into()
+            })
+        );
+        assert!(take_condition(&id).is_none());
+    }
+
+    #[test]
+    fn submit_condition_takes_yes_or_no_and_a_short_reason() {
+        let id = crate::ledger::new_run_id();
+        open_condition(&id, "Ready?").unwrap();
+        for answer in ["Yes", "maybe", "", "yes "] {
+            assert_eq!(
+                test_submit_condition(&id, answer, "A reason."),
+                Err("answer must be yes or no".into())
+            );
+        }
+        for reason in [String::new(), "\n\0 \t".into(), "x".repeat(301)] {
+            assert_eq!(
+                test_submit_condition(&id, "yes", &reason),
+                Err("reason must be 1 to 300 characters".into())
+            );
+        }
+        test_submit_condition(&id, "yes", &"🟢".repeat(300)).unwrap();
+        assert_eq!(take_condition(&id).unwrap().reason.chars().count(), 300);
+        open_condition(&id, "Ready?").unwrap();
+        test_submit_condition(&id, "yes", "  This\nneeds\0work.  ").unwrap();
+        assert_eq!(take_condition(&id).unwrap().reason, "This needs work.");
+    }
+
+    #[test]
+    fn submit_condition_is_listed_only_while_a_check_is_open() {
+        let mut grant = RunGrant::unrestricted("process:check-list");
+        grant.run_id = crate::ledger::new_run_id();
+        grant.tools = Some(vec![CONDITION_TOOL.into()]);
+        assert!(listed_tools(&grant, false).is_empty());
+        open_condition(&grant.run_id, "Ready?").unwrap();
+        assert_eq!(
+            listed_tools(&grant, false)
+                .iter()
+                .map(|row| row["name"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec![CONDITION_TOOL]
+        );
+        take_condition(&grant.run_id);
+        assert!(listed_tools(&grant, false).is_empty());
+    }
+
+    #[test]
+    fn an_open_check_survives_token_eviction() {
+        let mut runs = Vec::new();
+        let mut grant = RunGrant::unrestricted("process:kept-check");
+        grant.run_id = crate::ledger::new_run_id();
+        open_condition(&grant.run_id, "Ready?").unwrap();
+        let id = grant.run_id.clone();
+        push_run_token(&mut runs, "held".into(), grant);
+        for i in 0..RUN_TOKEN_WINDOW + 4 {
+            push_run_token(
+                &mut runs,
+                format!("other-{i}"),
+                RunGrant::unrestricted(&format!("process:other-{i}")),
+            );
+        }
+        assert!(runs.iter().any(|(_, grant)| grant.run_id == id));
+        take_condition(&id);
+    }
+
+    #[test]
+    fn own_agent_record_answers_exactly_one_record() {
+        let mut entry = vault::entry::Entry::empty_for_test("library/scout.md");
+        entry.entry_type = Some("Agent".into());
+        entry.properties.insert("slug".into(), json!("scout"));
+        let entries = vec![entry.clone()];
+        assert!(own_agent_record(&entries, "process:scout").is_some());
+        assert!(own_agent_record(&entries, "process:missing").is_none());
+        assert!(own_agent_record(&entries, "client:scout").is_none());
+        assert!(own_agent_record(&[entry.clone(), entry], "process:scout").is_none());
+    }
+}
+
+#[cfg(test)]
+mod followup_tests {
+    use super::*;
+    use crate::{runtime, vault::testutil};
+
+    fn at() -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::parse_from_rfc3339("2026-10-15T12:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc)
+    }
+
+    fn record() -> vault::entry::Entry {
+        let mut entry = vault::entry::Entry::empty_for_test("agents/scout.md");
+        entry.entry_type = Some("Agent".into());
+        entry.properties.insert("slug".into(), json!("scout"));
+        entry
+    }
+
+    #[test]
+    fn schedule_followup_books_for_the_caller_alone() {
+        let dir = testutil::temp_vault("mcp-followup-own");
+        let conn = runtime::open(&dir).unwrap();
+        let vault = runtime::scope::register(&conn, &dir).unwrap();
+        let mut grant = RunGrant::unrestricted("process:scout");
+        grant.run_id = "own-run".into();
+        let args = json!({"at":"2026-10-15T14:00:00+02:00","note":"Check the reply","agent":"someone-else"});
+        let mut args = args.as_object().unwrap().clone();
+        args.insert("at".into(), json!("2026-10-15T14:05:00+02:00"));
+        let answer =
+            schedule_followup_for(&conn, &vault, &[record()], &args, &grant, at()).unwrap();
+        let text = answer["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("2026-10-15T12:05:00.000Z (UTC)"), "{text}");
+        assert!(text.contains("Learn on its own is on. Waiting now: 1 of 3."));
+        let rows = runtime::followups::list(&runtime::ReadOnly::open(&dir).unwrap(), &vault, at())
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].actor, "process:scout");
+        assert_eq!(rows[0].requested_by_run, "own-run");
+        assert_eq!(rows[0].note, "Check the reply");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn only_an_agents_own_run_can_book() {
+        let dir = testutil::temp_vault("mcp-followup-refused");
+        let conn = runtime::open(&dir).unwrap();
+        let vault = runtime::scope::register(&conn, &dir).unwrap();
+        let args = json!({"at":"2026-10-15T12:05:00Z","note":"Check the reply"});
+        let entry = record();
+        for (actor, entries) in [
+            ("human:me", vec![entry.clone()]),
+            ("client:scout", vec![entry.clone()]),
+            ("agent:ingest", vec![entry.clone()]),
+            ("process:missing", vec![entry.clone()]),
+            ("process:scout", vec![]),
+            ("process:scout", vec![entry.clone(), entry]),
+        ] {
+            let grant = RunGrant::unrestricted(actor);
+            assert_eq!(
+                schedule_followup_for(
+                    &conn,
+                    &vault,
+                    &entries,
+                    args.as_object().unwrap(),
+                    &grant,
+                    at()
+                ),
+                Err(runtime::followups::OWN_RUN.into()),
+                "{actor}"
+            );
+        }
+        assert!(
+            runtime::followups::list(&runtime::ReadOnly::open(&dir).unwrap(), &vault, at())
+                .unwrap()
+                .is_empty()
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn schedule_followup_is_listed_only_to_process_actors() {
+        for actor in ["human:me", "client:scout", "agent:ingest", "process:scout"] {
+            let mut grant = RunGrant::unrestricted(actor);
+            grant.tools = Some(vec![FOLLOWUP_TOOL.into()]);
+            let tools = listed_tools(&grant, false);
+            assert_eq!(
+                tools.len(),
+                usize::from(actor.starts_with("process:")),
+                "{actor}"
+            );
+        }
+        let mut grant = RunGrant::unrestricted("process:scout");
+        grant.tools = Some(vec![]);
+        assert!(
+            listed_tools(&grant, false).is_empty(),
+            "an actor cannot widen its declared tools"
+        );
+        assert!(crate::policy::tools::row(FOLLOWUP_TOOL).is_some());
+    }
+
+    #[test]
+    fn schedule_followup_says_when_the_runtime_is_unavailable() {
+        let _guard = runtime::sink::test_lock();
+        runtime::sink::disarm();
+        let dir = testutil::temp_vault("mcp-followup-no-runtime");
+        testutil::write(
+            &dir,
+            "agents/scout.md",
+            "---\ntype: Agent\nslug: scout\n---\n# Scout\n",
+        );
+        let args = json!({"at":"2026-10-15T12:05:00Z","note":"Check the reply"});
+        assert_eq!(
+            tool_schedule_followup(
+                &dir,
+                args.as_object().unwrap(),
+                &RunGrant::unrestricted("process:scout")
+            ),
+            Err(runtime::followups::RUNTIME_NEEDED.into())
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn schedule_followup_refusals_are_readable_and_no_arguments_can_name_another_actor() {
+        let dir = testutil::temp_vault("mcp-followup-words");
+        let conn = runtime::open(&dir).unwrap();
+        let vault = runtime::scope::register(&conn, &dir).unwrap();
+        let grant = RunGrant::unrestricted("process:scout");
+        let entry = record();
+        for (args, words) in [
+            (
+                json!({"at":"2026-10-15T12:05:00Z"}),
+                "A follow-up needs a note of 1 to 500 characters.",
+            ),
+            (
+                json!({"note":"Check later","at":"tomorrow"}),
+                "Use an RFC 3339 time with an offset for the follow-up.",
+            ),
+        ] {
+            assert_eq!(
+                schedule_followup_for(
+                    &conn,
+                    &vault,
+                    std::slice::from_ref(&entry),
+                    args.as_object().unwrap(),
+                    &grant,
+                    at()
+                ),
+                Err(words.into())
+            );
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod note_picture_tests {
+    use super::*;
+    use crate::files::extract::testdocs::{TempDir, PNG};
+    fn grant(folders: Option<&[&str]>) -> RunGrant {
+        RunGrant {
+            chain: vec!["pictures".into()],
+            actor: "process:pictures".into(),
+            run_id: "pictures".into(),
+            scope: None,
+            read_scope: folders.map(|f| f.iter().map(|s| s.to_string()).collect()),
+            tools: None,
+            vault: None,
+            asks: WriteAsks::UNASKED,
+        }
+    }
+    fn note(body: &str) -> TempDir {
+        let dir = TempDir::new();
+        std::fs::create_dir_all(dir.path().join("pages")).unwrap();
+        std::fs::create_dir_all(dir.path().join("attachments")).unwrap();
+        std::fs::write(
+            dir.path().join("pages/page.md"),
+            format!("---\ntitle: Pictures\n---\n{body}"),
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("attachments/a.png"), PNG).unwrap();
+        dir
+    }
+    fn read(dir: &TempDir, folders: Option<&[&str]>) -> Value {
+        tool_get_note_scoped(
+            dir.path(),
+            json!({"path":"pages/page.md"}).as_object().unwrap(),
+            true,
+            Some(&grant(folders)),
+        )
+        .unwrap()
+    }
+    fn text(answer: &Value) -> &str {
+        answer["content"][0]["text"].as_str().unwrap()
+    }
+    fn count(answer: &Value) -> usize {
+        answer["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|v| v["type"] == "image")
+            .count()
+    }
+    #[test]
+    fn a_read_scoped_get_note_attaches_the_pictures_it_shows() {
+        let dir = note("![Plan](/attachments/a.png)\n");
+        let answer = read(&dir, Some(&["pages", "attachments"]));
+        assert_eq!(count(&answer), 1);
+        assert!(text(&answer).contains("Images: 1 of 1 attached"));
+        assert!(text(&answer).contains("- Image 1: attachments/a.png, \"Plan\", 1×1"));
+        assert!(text(&answer).ends_with("\n---\n![Plan](/attachments/a.png)\n"));
+        assert_eq!(answer["content"][1]["mimeType"], "image/png");
+    }
+    #[test]
+    fn a_picture_outside_the_read_scope_is_counted_not_attached() {
+        let dir = note("![](/attachments/a.png)\n");
+        let answer = read(&dir, Some(&["pages"]));
+        assert_eq!(count(&answer), 0);
+        assert!(text(&answer).contains("1 outside this run's read scope"));
+    }
+    #[test]
+    fn an_unscoped_get_note_is_byte_identical() {
+        let dir = note("![](/attachments/a.png)\n");
+        let old = tool_get_note(
+            dir.path(),
+            json!({"path":"pages/page.md"}).as_object().unwrap(),
+            true,
+        )
+        .unwrap();
+        assert_eq!(read(&dir, None), old);
+        assert!(!text(&old).contains("Images:"));
+        assert_eq!(count(&old), 0);
+    }
+    #[test]
+    fn remote_and_inline_pictures_are_never_fetched() {
+        let dir = note("![](https://127.0.0.1:1/a.png)\n![](data:image/png;base64,AA)\n![](file:///private/a.png)\n![](%68%74%74%70%73://127.0.0.1:1/a.png)\n![](%2f%2fhost/a.png)\n");
+        let answer = read(&dir, Some(&["pages", "attachments"]));
+        assert!(text(&answer).contains("5 remote (never fetched)"));
+        assert_eq!(count(&answer), 0);
+    }
+    #[test]
+    fn at_most_eight_pictures_come_back_and_the_rest_are_counted() {
+        let body = (0..10)
+            .map(|i| format!("![](/attachments/{i}.png)\n"))
+            .collect::<String>();
+        let dir = note(&body);
+        for i in 0..10 {
+            std::fs::write(dir.path().join(format!("attachments/{i}.png")), PNG).unwrap();
+        }
+        let answer = read(&dir, Some(&["pages", "attachments"]));
+        assert_eq!(count(&answer), 8);
+        assert!(text(&answer).contains("Images: 8 of 10 attached"));
+        assert!(text(&answer).contains("2 over the limit of 8"));
+    }
+    #[test]
+    fn a_long_note_attaches_none_and_says_why() {
+        let dir = note(&format!(
+            "{}\n![](/attachments/a.png)\n",
+            "é".repeat(40_000)
+        ));
+        let answer = read(&dir, Some(&["pages", "attachments"]));
+        assert_eq!(count(&answer), 0);
+        assert!(text(&answer)
+            .contains("Images: 1 in this note, none attached: the note is over 40,000 characters"));
+    }
+    #[test]
+    fn one_picture_shown_twice_is_attached_once() {
+        let dir = note("![one](/attachments/a.png)\n![two](../attachments/a.png)\n");
+        let answer = read(&dir, Some(&["pages", "attachments"]));
+        assert_eq!(count(&answer), 1);
+        assert!(text(&answer).contains("Images: 1 of 1 attached"));
+    }
+    #[test]
+    fn a_picture_in_a_dot_folder_is_refused() {
+        let dir = note("![](/attachments/.hidden/a.png)\n");
+        std::fs::create_dir(dir.path().join("attachments/.hidden")).unwrap();
+        std::fs::write(dir.path().join("attachments/.hidden/a.png"), PNG).unwrap();
+        let answer = read(&dir, Some(&["pages", "attachments"]));
+        assert!(text(&answer).contains("1 in a dot-folder"));
+        assert_eq!(count(&answer), 0);
+    }
+    #[test]
+    fn an_svg_or_heic_is_named_not_attached() {
+        let dir = note("![](/attachments/a.svg)\n![](/attachments/a.heic)\n");
+        for ext in ["svg", "heic"] {
+            std::fs::write(dir.path().join(format!("attachments/a.{ext}")), PNG).unwrap();
+        }
+        let answer = read(&dir, Some(&["pages", "attachments"]));
+        assert!(text(&answer).contains("not a picture Cerebro reads (svg)"));
+        assert!(text(&answer).contains("not a picture Cerebro reads (heic)"));
+        assert_eq!(count(&answer), 0);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_picture_leaving_the_vault_is_refused() {
+        let dir = note("![](/attachments/out.png)\n");
+        let outside = TempDir::new();
+        std::fs::write(outside.path().join("a.png"), PNG).unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("a.png"),
+            dir.path().join("attachments/out.png"),
+        )
+        .unwrap();
+        let answer = read(&dir, Some(&["pages", "attachments"]));
+        assert_eq!(count(&answer), 0);
+        assert!(text(&answer).contains("1 outside the vault"));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_picture_cannot_lend_read_scope_to_its_target() {
+        let dir = note("![](alias.png)\n");
+        std::os::unix::fs::symlink(
+            dir.path().join("attachments/a.png"),
+            dir.path().join("pages/alias.png"),
+        )
+        .unwrap();
+        let answer = read(&dir, Some(&["pages"]));
+        assert_eq!(count(&answer), 0);
+        assert!(text(&answer).contains("1 outside this run's read scope"));
     }
 }

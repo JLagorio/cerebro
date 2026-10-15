@@ -1,6 +1,14 @@
 import { agentRef, isAgentEntry, isPaused } from './agents';
+import { followupDue, type Followup } from './followups';
+import { localStamp } from './whenText';
 import { recordIdentity } from './identity';
-import { fireKeyDate, isSkillEntry, lastFireKey, parseSchedule } from './skills';
+import {
+  fireKeyDate,
+  isSkillEntry,
+  lastSetFireKey,
+  parseScheduleSet,
+  scheduleText,
+} from './skills';
 import { parseTriggers, type Trigger } from './triggers';
 import { triggerDigest, WAKE_COALESCE_MAX, type PendingWake } from './wakes';
 import { resolveTarget } from './wikilink';
@@ -29,7 +37,8 @@ import type { Entry } from './types';
  * remembered to say so.
  *
  * What is left here is not distillation: scheduled skills, scheduled agent
- * runs and the runs their durable wakes ask for (M63.1), and the concept
+ * runs, the runs their durable wakes ask for (M63.1), their booked follow-ups
+ * (M63.8), and the concept
  * recheck lanes (`stale`,
  * `schema`) that M26.6's maintenance pass will take over. Cached-source
  * refresh derives no job since M54.9 (see `jobQueue`).
@@ -68,7 +77,8 @@ export const KNOWLEDGE_JOB_KINDS: ReadonlySet<JobKind> = new Set<JobKind>(['stal
  * which is why the job carries it (`AgentJob.cooldownKey`). Only a WOKEN run
  * stamps it. A scheduled run does not, so what it writes into the folder its
  * agent watches can wake one run, and that run starts the clock. Attended
- * @agent chat turns and `hand_to` runs never stamp it.
+ * @agent chat turns and `hand_to` runs never stamp it. Recorded assignments
+ * neither wait on nor stamp it; unrecorded assignments keep this bound.
  *
  * The cooldown DELAYS, and drops nothing (M63.1): a change made inside the
  * window waits as a durable wake, and runs, with the other changes that
@@ -105,7 +115,8 @@ export interface AgentJob {
    * - `schema` — `schema:<hash of the anchoring Type docs>`, plus
    *   `|stale:<stale_after>` when the concept is also stale;
    * - `scheduled` / `agent` — the schedule's fire key; a woken `agent` run —
-   *   `wake:<wake id>`, the wake it claims.
+   *   `wake:<wake id>`, the wake it claims. A manual start with no due fire
+   *   uses `manual:<ISO>` without claiming a ledger.
    */
   runKey: string;
   /**
@@ -115,9 +126,14 @@ export interface AgentJob {
    * skillRuns but recorded in attempts, which re-ran a scheduled agent
    * back-to-back forever. `wakes` is a woken run's (M63.1): Rust's durable
    * wake is its record, claimed with its lease, and the job ledger never
-   * hears of it.
+   * hears of it. A `followup` similarly claims its own durable row. A manual
+   * start without a due fire uses null.
    */
-  ledger: 'attempts' | 'skillRuns' | 'wakes';
+  ledger: 'attempts' | 'skillRuns' | 'wakes' | 'followup' | null;
+  /** A booked later run claims its own durable row, never a job ledger. */
+  followup?: Followup;
+  /** A human start takes a due fire when possible, otherwise no ledger. */
+  manual?: true;
   /**
    * The `triggerRuns` key this job's run stamps when it spawns — the event
    * cooldown's clock — or null for every job but a woken agent run, the one
@@ -133,7 +149,7 @@ export interface AgentJob {
   /**
    * What a woken run claims (M63.1): the head wake, the due wakes of the same
    * trigger it takes with it (oldest first, at most 19), the trigger that
-   * matched (its `ask:` and `do:` go to the prompt, its words to the log),
+   * matched (its `ask:` is checked first, `do:` goes to the prompt, its words to the log),
    * when the head was admitted, and the reasons it was last deferred, null
    * when it never was.
    */
@@ -143,6 +159,7 @@ export interface AgentJob {
     trigger: Trigger;
     admittedAt: string;
     deferredBefore: string | null;
+    assignment?: { subject: string; field: string; agent: string; trigger: string };
   };
 }
 
@@ -154,7 +171,7 @@ export interface JobQueueInput {
    * would pick it up again on the next tick, forever.
    */
   attempts: Readonly<Record<string, string>>;
-  /** Ledger key → run key last answered: a schedule's fire key under the
+  /** Ledger key → newest fire the record owes nothing for, under the
    * record's identity. The OPEN VAULT's slice of uiStore.skillRuns, which is
    * vault-scoped (PR #5 review). */
   skillRuns: Readonly<Record<string, string>>;
@@ -165,6 +182,8 @@ export interface JobQueueInput {
   /** Agent identity → when it last ran from a trigger, ISO. The bare
    * identity, never the job's `#wake` key — see TRIGGER_COOLDOWN_MS. */
   triggerRuns?: Readonly<Record<string, string>>;
+  /** Read rows only: an unavailable follow-up store supplies none. */
+  followups?: readonly Followup[];
   /** The wall clock — passed in so the queue stays a pure derivation. */
   now: Date;
 }
@@ -198,7 +217,7 @@ function schemaKey(docs: readonly Entry[]): string {
 export function jobQueue(
   entries: readonly Entry[],
   concepts: readonly Concept[],
-  { attempts, skillRuns, now, wakes = [], triggerRuns = {} }: JobQueueInput,
+  { attempts, skillRuns, now, wakes = [], triggerRuns = {}, followups = [] }: JobQueueInput,
 ): AgentJob[] {
   // A cached source past its refresh date (cache_source's stale_after) is
   // NOT a job (M54.9). Re-fetching needs the connector the source came from,
@@ -288,11 +307,11 @@ export function jobQueue(
         ? 'agent'
         : null;
     if (kind === null || isPaused(entry)) continue;
-    const schedule = parseSchedule(entry.properties.schedule);
+    const schedule = parseScheduleSet(entry.properties.schedule);
     if (schedule === null) continue;
-    const key = lastFireKey(schedule, now);
+    const key = lastSetFireKey(schedule, now);
     const ledgerKey = recordIdentity(entry);
-    if (skillRuns[ledgerKey] === key) continue;
+    if (key === null || skillRuns[ledgerKey] === key) continue;
     scheduled.push({
       kind,
       path: entry.path,
@@ -318,23 +337,36 @@ export function jobQueue(
     const identity = recordIdentity(entry);
     // ONE variable is both the key this check reads and the key the run
     // stamps (`cooldownKey` below) — see AgentJob.cooldownKey.
-    const cooldownKey = identity;
-    const last = triggerRuns[cooldownKey];
-    if (last !== undefined && now.getTime() - Date.parse(last) < TRIGGER_COOLDOWN_MS) continue;
+    const last = triggerRuns[identity];
+    const cooling = last !== undefined && now.getTime() - Date.parse(last) < TRIGGER_COOLDOWN_MS;
     const actor = agentRef(entry).actor;
     const due = wakes.filter(
       (w) =>
-        w.agent === actor && (w.notBefore === null || Date.parse(w.notBefore) <= now.getTime()),
+        w.agent === actor &&
+        (w.notBefore === null || Date.parse(w.notBefore) <= now.getTime()) &&
+        (!cooling ||
+          (w.cause.kind === 'assigned' && (w.author === 'person' || w.author === 'run'))),
     );
     // The head is the oldest due wake whose trigger is still on the record;
     // one whose trigger was edited away waits for its cancel, never runs.
     const byDigest = new Map(triggers.map((t) => [triggerDigest(t), t]));
     const head = due.find((w) => byDigest.has(w.trigger));
     if (head === undefined) continue;
+    const cooldownKey =
+      head.cause.kind === 'assigned' && (head.author === 'person' || head.author === 'run')
+        ? null
+        : identity;
+    const matched = byDigest.get(head.trigger)!;
     const coalesce =
       head.cause.kind === 'event'
         ? due
-            .filter((w) => w !== head && w.trigger === head.trigger && w.cause.kind === 'event')
+            .filter(
+              (w) =>
+                w !== head &&
+                w.trigger === head.trigger &&
+                w.cause.kind === 'event' &&
+                (w.parentRunId ?? null) === (head.parentRunId ?? null),
+            )
             .slice(0, WAKE_COALESCE_MAX - 1)
             .map((w) => w.wakeId)
         : [];
@@ -349,10 +381,43 @@ export function jobQueue(
       wake: {
         claim: head.wakeId,
         coalesce,
-        trigger: byDigest.get(head.trigger)!,
+        trigger: matched,
+        ...(head.cause.kind === 'assigned' &&
+        head.cause.subject !== undefined &&
+        matched.field !== undefined
+          ? {
+              assignment: {
+                subject: head.cause.subject,
+                field: matched.field,
+                agent: actor,
+                trigger: head.trigger,
+              },
+            }
+          : {}),
         admittedAt: head.admittedAt,
         deferredBefore: head.deferred,
       },
+    });
+  }
+
+  // Even a paused or missing agent derives a due follow-up: claiming its
+  // row is what durably cancels it, so filtering here would leave it waiting.
+  for (const row of followups) {
+    if (!followupDue(row, now)) continue;
+    const owners = entries.filter(
+      (entry) => isAgentEntry(entry) && agentRef(entry).actor === row.actor,
+    );
+    const owner = owners.length === 1 ? owners[0] : undefined;
+    const key = `followup:${row.followupId}`;
+    scheduled.push({
+      kind: 'agent',
+      path: owner?.path ?? '',
+      key,
+      runKey: key,
+      title: owner?.title ?? row.actor,
+      ledger: 'followup',
+      cooldownKey: null,
+      followup: row,
     });
   }
 
@@ -386,8 +451,18 @@ export function jobQueue(
         : b.wake !== undefined
           ? 1
           : 0;
+  const later = (a: AgentJob, b: AgentJob): number =>
+    a.followup !== undefined && b.followup !== undefined
+      ? a.followup.dueAt.localeCompare(b.followup.dueAt) ||
+        a.followup.followupId.localeCompare(b.followup.followupId)
+      : a.followup !== undefined
+        ? -1
+        : b.followup !== undefined
+          ? 1
+          : 0;
   return [...scheduled, ...recheck].sort(
     (a, b) =>
+      later(a, b) ||
       RANK[a.kind] - RANK[b.kind] ||
       woken(a, b) ||
       (a.wake !== undefined ? 0 : b.runKey.localeCompare(a.runKey)) ||
@@ -430,11 +505,21 @@ const MAINTENANCE_DETAIL: Partial<Record<JobKind, string>> = {
  * - The recheck lanes: `maintenance`, the concept as subject, the lane's
  *   reason as detail.
  */
-export function causeOfJob(job: AgentJob, schedule: string | null): RunCauseRequest | null {
+export function causeOfJob(job: AgentJob, schedule: unknown): RunCauseRequest | null {
+  if (job.manual) {
+    const due = job.ledger === 'skillRuns' ? fireKeyDate(job.runKey) : null;
+    return {
+      kind: 'manual',
+      subject: job.path,
+      ...(due === null ? {} : { detail: `in place of its run due ${localStamp(due)}` }),
+    };
+  }
+  if (job.followup !== undefined)
+    return { kind: 'followup', subject: job.followup.note, due_at: job.followup.dueAt };
   if (job.wake !== undefined) return null;
   if (job.kind === 'scheduled' || job.kind === 'agent') {
     const due = fireKeyDate(job.runKey);
-    const said = schedule?.trim() ?? '';
+    const said = scheduleText(schedule).trim();
     return {
       kind: 'schedule',
       ...(said === '' ? {} : { detail: said }),
@@ -446,5 +531,33 @@ export function causeOfJob(job: AgentJob, schedule: string | null): RunCauseRequ
     kind: 'maintenance',
     subject: job.path,
     ...(detail === undefined ? {} : { detail }),
+  };
+}
+
+/** The last unconsumed schedule firing, read exactly like the queue. */
+export function dueFireKey(
+  entry: Entry,
+  skillRuns: Readonly<Record<string, string>>,
+  now: Date,
+): string | null {
+  const schedule = parseScheduleSet(entry.properties.schedule);
+  if (schedule === null) return null;
+  const key = lastSetFireKey(schedule, now);
+  return skillRuns[recordIdentity(entry)] === key ? null : key;
+}
+export function runNowJob(
+  entry: Entry,
+  { skillRuns, now }: { skillRuns: Readonly<Record<string, string>>; now: Date },
+): AgentJob {
+  const due = dueFireKey(entry, skillRuns, now);
+  return {
+    kind: 'agent',
+    path: entry.path,
+    title: entry.title,
+    key: recordIdentity(entry),
+    runKey: due ?? `manual:${now.toISOString()}`,
+    ledger: due === null ? null : 'skillRuns',
+    cooldownKey: null,
+    manual: true,
   };
 }

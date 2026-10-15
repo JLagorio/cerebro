@@ -8,6 +8,7 @@ import AGENT_LINKS from '../../shared/policy/agent-links.v1.json';
 
 const ipc = vi.hoisted(() => ({
   canOpenOutside: vi.fn(() => true),
+  appLink: vi.fn(async (_vault: string, _path: string) => 'cerebro://open?path=plan.md'),
   readNote: vi.fn(async () => ''),
   writeClipboard: vi.fn(async (_text: string) => undefined),
   revealInFinder: vi.fn(async (_vault: string, _path: string) => undefined),
@@ -62,6 +63,7 @@ beforeEach(() => {
   // Reset, not clear: a once-value a failed test left queued must not leak.
   for (const fn of [...Object.values(ipc), ...Object.values(pages)]) fn.mockReset();
   ipc.canOpenOutside.mockReturnValue(true);
+  ipc.appLink.mockResolvedValue('cerebro://open?path=plan.md');
   ipc.readNote.mockResolvedValue(RAW);
   ipc.writeClipboard.mockResolvedValue(undefined);
   ipc.revealInFinder.mockResolvedValue(undefined);
@@ -227,5 +229,32 @@ describe('Hand off to', () => {
     await waitFor(() =>
       expect(toasts()).toEqual(["Couldn't open Claude Code on the web or copy the prompt."]),
     );
+  });
+});
+
+describe('Copy Cerebro link', () => {
+  it('builds through Rust and toasts only after the clipboard write', async () => {
+    const pending = deferred<undefined>();
+    ipc.writeClipboard.mockReturnValueOnce(pending.promise);
+    openMenu();
+    pick('open-with-copy-link');
+    await waitFor(() =>
+      expect(ipc.writeClipboard).toHaveBeenCalledWith('cerebro://open?path=plan.md'),
+    );
+    expect(ipc.appLink).toHaveBeenCalledWith(VAULT, ENTRY.path);
+    expect(toasts()).toEqual([]);
+    await act(async () => pending.resolve(undefined));
+    expect(toasts()).toEqual(['Link copied']);
+  });
+  it('requires the desktop and reports a failed copy without success', async () => {
+    ipc.canOpenOutside.mockReturnValue(false);
+    openMenu();
+    expect(screen.getByTestId('open-with-copy-link').getAttribute('disabled')).not.toBeNull();
+    expect(screen.getByTestId('open-with-copy-link').textContent).toContain('Desktop app only');
+    ipc.canOpenOutside.mockReturnValue(true);
+    ipc.appLink.mockRejectedValueOnce('Link unavailable');
+    openMenu();
+    pick('open-with-copy-link');
+    await waitFor(() => expect(toasts()).toEqual(['Link unavailable']));
   });
 });

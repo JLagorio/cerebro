@@ -138,8 +138,10 @@ export function looksAutoNamed(filename: string): boolean {
 }
 
 /**
- * Whether the note carries a real H1 rather than the humanized-filename
- * fallback. Entry has no "had an H1" flag, so this compares against what the
+ * Whether the note carries a declared title or a real H1 rather than the
+ * humanized-filename fallback. An explicit frontmatter title is evidence,
+ * including a one-word document name. Entry has no "had an H1" flag, so
+ * otherwise this compares against what the
  * fallback would have produced — but the comparison alone is wrong in the
  * common direction: captures and ingested docs get their FILENAME from their
  * title (`captureSlug` slugifies it), so a pasted "Standup notes for tuesday"
@@ -152,6 +154,8 @@ export function looksAutoNamed(filename: string): boolean {
  */
 export function hasRealTitle(entry: Entry): boolean {
   if (entry.title.trim() === '') return false;
+  if (typeof entry.properties.title === 'string' && entry.properties.title.trim() !== '')
+    return true;
   if (entry.title !== humanizeStem(entry.filename)) return true;
   return !looksAutoNamed(entry.filename);
 }

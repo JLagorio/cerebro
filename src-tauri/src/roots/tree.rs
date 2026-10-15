@@ -27,15 +27,32 @@ pub struct DirEntry {
 /// Canonicalizing BOTH sides is what defeats `../` and symlinks pointing out
 /// of the tree; comparing the unresolved strings would not.
 pub(super) fn resolve_within(root: &Path, rel: &str) -> Result<std::path::PathBuf, String> {
-    let root = std::fs::canonicalize(root).map_err(|e| format!("root unavailable: {e}"))?;
+    locate_within(root, rel).map_err(|error| match error {
+        LocateRefusal::RootUnavailable(message) => format!("root unavailable: {message}"),
+        LocateRefusal::Missing => format!("no such path: {rel}"),
+        LocateRefusal::Outside => format!("path escapes the root: {rel}"),
+    })
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum LocateRefusal {
+    RootUnavailable(String),
+    Missing,
+    Outside,
+}
+
+/// Typed containment result shared by text, media and raw-byte readers.
+pub(crate) fn locate_within(root: &Path, rel: &str) -> Result<std::path::PathBuf, LocateRefusal> {
+    let root =
+        std::fs::canonicalize(root).map_err(|e| LocateRefusal::RootUnavailable(e.to_string()))?;
     let joined = if rel.is_empty() {
         root.clone()
     } else {
         root.join(rel)
     };
-    let resolved = std::fs::canonicalize(&joined).map_err(|_| format!("no such path: {rel}"))?;
+    let resolved = std::fs::canonicalize(&joined).map_err(|_| LocateRefusal::Missing)?;
     if !resolved.starts_with(&root) {
-        return Err(format!("path escapes the root: {rel}"));
+        return Err(LocateRefusal::Outside);
     }
     Ok(resolved)
 }
@@ -127,6 +144,28 @@ pub fn list_dir(root: &Path, rel: &str) -> Result<Vec<DirEntry>, String> {
 mod tests {
     use super::*;
     use crate::vault::testutil;
+
+    #[test]
+    fn locate_within_types_its_refusals() {
+        let root = testutil::temp_vault("tree-typed");
+        assert_eq!(locate_within(&root, "missing"), Err(LocateRefusal::Missing));
+        assert!(matches!(
+            locate_within(&root.join("absent-root"), "a"),
+            Err(LocateRefusal::RootUnavailable(_))
+        ));
+        let outside = testutil::temp_vault("tree-typed-outside");
+        assert_eq!(
+            locate_within(&root, &outside.to_string_lossy()),
+            Err(LocateRefusal::Outside)
+        );
+        testutil::write(&root, "a.txt", "inside");
+        assert_eq!(
+            locate_within(&root, "a.txt").unwrap(),
+            std::fs::canonicalize(root.join("a.txt")).unwrap()
+        );
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(outside);
+    }
 
     #[test]
     fn lists_one_level_only() {

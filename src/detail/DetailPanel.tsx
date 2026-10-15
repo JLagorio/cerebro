@@ -1,3 +1,5 @@
+import { PageRunsTab } from '@/detail/PageRunsTab';
+import { PageAgentsTab } from '@/detail/PageAgentsTab';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CerebroEditor } from '@/editor/MarkdownEditor';
 import { Icon } from '@/components/ui/Icon';
@@ -7,6 +9,7 @@ import { DetailHeaderActions } from '@/detail/DetailHeaderActions';
 import { PageCoverBand, PageIconHeader } from '@/detail/PageChrome';
 import { HeadingProperties, stripCells } from '@/detail/HeadingProperties';
 import { RecordProperties } from '@/detail/RecordProperties';
+import { ImportProvenance } from '@/detail/ImportProvenance';
 import { RecordTabs, recordTabSet } from '@/detail/RecordTabs';
 import { TabSections } from '@/detail/TabSections';
 import { setTypeTabs } from '@/app/typeActions';
@@ -29,7 +32,7 @@ import { setNoteTitle } from '@/lib/ipc';
 import { todayIso } from '@/lib/templates';
 import { useNavStore } from '@/stores/navStore';
 import { ownsEscape, useLayer } from '@/components/ui/layers';
-import { useKeyScope } from '@/lib/keys/useKeys';
+import { useCommands, useKeyScope } from '@/lib/keys/useKeys';
 import { useEntry, useSchema, useVaultStore } from '@/stores/vaultStore';
 import { dragCeiling, fitWidth } from '@/app/shellLayout';
 import {
@@ -269,6 +272,26 @@ export function DetailPanel({
   // M65.1: the record peek is its own key scope, under app; what it holds
   // binds its peek commands here.
   const peekScope = useKeyScope('peek');
+  const hasNeighbour = (delta: number) => {
+    const { detailPath, detailSiblings } = useUiStore.getState();
+    const at = detailPath === null ? -1 : detailSiblings.indexOf(detailPath);
+    return at >= 0 && detailSiblings[at + delta] !== undefined;
+  };
+  useCommands(
+    [
+      {
+        id: 'peek.next',
+        run: () => useNavStore.getState().stepPeek(1),
+        when: () => hasNeighbour(1),
+      },
+      {
+        id: 'peek.prev',
+        run: () => useNavStore.getState().stepPeek(-1),
+        when: () => hasNeighbour(-1),
+      },
+    ],
+    { scope: peekScope },
+  );
 
   if (!detailPath || !entry) return null;
 
@@ -508,6 +531,7 @@ export function DetailPanel({
           {/* M34.5.3 — a cached copy says its own freshness. Null for every
             record without fetch bookkeeping. */}
           <SourceFreshnessLine entry={entry} />
+          <ImportProvenance entry={entry} />
           {/* M12: records lost the doc side panel when display:doc died, and
             the knowledge loop must not die with it — the same commit state
             and related-concepts view, collapsed until asked (M8.3's rule:
@@ -559,6 +583,7 @@ export function DetailPanel({
               <NoteBodyEditor
                 key={entry.path}
                 path={entry.path}
+                owner="peek"
                 compact
                 onReady={({ editor }) => {
                   editorRef.current = editor;
@@ -568,6 +593,12 @@ export function DetailPanel({
           )}
           {/* M45.6 — the free-text arm: the tab's own sections, keyed by tab
             because `_sections` is stored per tab id on the record itself. */}
+          {activeTab?.content === 'agents' && (
+            <PageAgentsTab entry={entry} entries={entries} schema={schema} />
+          )}
+          {activeTab?.content === 'runs' && (
+            <PageRunsTab entry={entry} entries={entries} schema={schema} />
+          )}
           {activeTab?.content === 'sections' && (
             <TabSections key={`${entry.path}#${activeTab.id}`} entry={entry} tabId={activeTab.id} />
           )}

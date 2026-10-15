@@ -1,5 +1,5 @@
 import type { AggregateCalc } from './aggregate';
-import type { DateDisplayFormat, TimeDisplayFormat } from './dates';
+import type { DateDisplayFormat, RemindOffset, TimeDisplayFormat } from './dates';
 import type { RelationIndex } from './relations';
 
 export type Scalar = string | number | boolean | null;
@@ -61,11 +61,14 @@ export const FIELD_KINDS = [
   'rollup',
   'created_time',
   'last_edited_time',
+  'formula',
+  'repeat',
 ] as const;
 
 export type FieldKind = (typeof FIELD_KINDS)[number];
 
-export type RollupCalc = 'count' | 'sum' | 'avg' | 'min' | 'max' | 'earliest' | 'latest' | 'show';
+export type RollupCalc =
+  'count' | 'sum' | 'avg' | 'min' | 'max' | 'percent_done' | 'earliest' | 'latest' | 'show';
 
 export interface FieldOption {
   id: string;
@@ -81,6 +84,8 @@ export interface StatusDef extends FieldOption {
 export type FieldFormat = 'plain' | 'percent' | 'progress' | 'currency';
 
 export interface FieldDef {
+  /** Canonical field arithmetic; evaluated only by the renderer. */
+  formula?: string;
   name: string;
   kind: FieldKind;
   options?: FieldOption[];
@@ -115,6 +120,8 @@ export interface FieldDef {
   dateFormat?: DateDisplayFormat;
   /** 12h / 24h / hidden for the time half of a date value; absent = '12'. */
   timeFormat?: TimeDisplayFormat;
+  /** A date/daterange reminds every unfinished record of this type. */
+  remind?: RemindOffset;
   /**
    * Whether the detail panel shows this property (M16.10). PER-PROPERTY, on
    * the type — not per view. `ColumnSpec.hidden` answers a different
@@ -179,8 +186,11 @@ export const LAYOUT_DEFAULTS: LayoutConfig = { heading: [], groups: [] };
 /** What a record tab renders (M44.5). A closed vocabulary on purpose: an
  * unrecognised kind from hand-edited YAML must not reach the renderer.
  * `'view'` (M45.4) embeds a database view by reference.
+ * `'agents'` lists the page's declared Agent relations and filing inheritance.
+ * `'runs'` lists runs whose recorded subjects name this page or its filed work.
  *
- * A tab holds the page BODY or a data source, never the property stack —
+ * A tab holds the page body, a data source or a focused page surface, never
+ * the property stack —
  * `'properties'` was a fourth kind between M44.5 and M46.1 and retired with
  * the per-tab sections model: a tab that IS the stack is the shape the
  * ruling forbids, because the stack now stands above the strip on every
@@ -189,7 +199,7 @@ export const LAYOUT_DEFAULTS: LayoutConfig = { heading: [], groups: [] };
  * empty free-text tab, which is the safe outcome — mapping it to
  * `'overview'` would give a type that had both an Overview and a Properties
  * tab two body tabs. */
-export const TAB_CONTENTS = ['overview', 'sections', 'view'] as const;
+export const TAB_CONTENTS = ['overview', 'sections', 'agents', 'runs', 'view'] as const;
 export type TabContent = (typeof TAB_CONTENTS)[number];
 
 /** Where a `content: 'view'` tab's rows come from (M45.4) — a reference,
@@ -222,6 +232,8 @@ export interface TabDef {
 }
 
 export interface TypeDef {
+  /** Declared stored date/range field used for deadline sections (M61.3b). */
+  deadline?: string | null;
   name: string;
   icon: string | null;
   color: string | null;
@@ -317,10 +329,11 @@ export type Selection =
        * back button returns to. A lens, like `tab`: `placeOf` drops it. */
       thread?: string;
     }
-  // M29.21 — a standalone .mmd file. Raw diagram source has no frontmatter
-  // and no record shape, so it gets its own full-page editor surface rather
-  // than being forced through the doc canvas.
+  // Standalone .mmd diagrams and .canvas whiteboards use their own file
+  // editors. Neither has markdown frontmatter or a record shape.
   | { kind: 'diagram'; path: string }
+  /** Unscanned vault attachment; the byte door establishes its liveness. */
+  | { kind: 'file'; path: string }
   // M10 — a Collection is a container (a folder holding collection.yml); a List
   // is a database inside one. These were a single `view` kind that was both.
   | { kind: 'collection'; folder: string }
@@ -369,6 +382,9 @@ export type Selection =
  * Splitting them meant a table could not nest, a hierarchy could not band,
  * and the user had to learn two controls to say one thing.
  */
+export const DATE_BUCKETINGS = ['day', 'week', 'month', 'year'] as const;
+export type DateBucketing = (typeof DATE_BUCKETINGS)[number];
+
 export interface GroupSpec {
   /** Property to band by, or the name of the relation to descend. */
   field: string;
@@ -382,6 +398,8 @@ export interface GroupSpec {
   dir?: 'asc' | 'desc';
   /** Drop groups with no entries. Boards want them (they are the columns). */
   hideEmpty?: boolean;
+  /** Absent uses relative date bands. */
+  dateBucket?: DateBucketing;
 }
 
 /** Levels that band by a property value. */
@@ -436,9 +454,8 @@ export interface ColumnSpec {
  * And the kind that draws a FILE — `canvas: true` in viewKinds.ts, which is
  * what gates it everywhere rather than its name:
  *
- * - `whiteboard` — a `.mmd` the tab owns, edited through the shared diagram
- *   editor. Its records are not laid out FOR the user; they appear where the
- *   user puts them, as nodes bound by a mermaid `click` line (M29.45, D8).
+ * - `whiteboard` — a `.canvas` the tab owns, with records placed as file cards.
+ *   Existing `.mmd` pointers retain the Mermaid editor and record bindings.
  *
  * The roster is deliberately grouped rather than counted: this docstring said
  * "the six views" in three other files for four milestones while the catalog
@@ -455,11 +472,9 @@ export interface ColumnSpec {
  *
  * Saved files naming either one migrate to `table` on read (engine/views.ts).
  *
- * The array is the source and the union is derived from it (M16.3), so adding
- * a kind is one edit. It used to be the other way round — a hand-written union
- * beside a hand-written `LAYOUTS` set in views.ts, and forgetting the set made
- * `parseViewType` silently downgrade every saved file of the new kind to
- * `list`, losing the layout with no error anywhere.
+ * The union stays a literal for TypeScript. shared/schema/views.v1.json owns
+ * the vocabulary and its capabilities; viewVocabulary.test.ts holds this
+ * list to the artifact so an added kind cannot silently downgrade on read.
  */
 export const VIEW_TYPES = [
   'table',
@@ -759,7 +774,7 @@ export interface Presentation {
   /** Dashboard rows of widgets (M44.4). Absent = an empty dashboard. */
   dashboard?: DashboardSpec;
   /**
-   * The whiteboard's canvas (M29.45): a vault-relative `.mmd` path, created
+   * The whiteboard's file: a vault-relative `.canvas` path (`.mmd` for legacy tabs), created
    * on first open (spec D8). `file: null` is representable in memory — the
    * "not created yet" state the view acts on — but never written: the
    * serializer drops it, so a fresh tab's YAML carries no key about a file
@@ -1014,13 +1029,15 @@ export interface CollectionNode {
 }
 
 export interface Group {
+  /** This band cannot name a date to create or move a record onto. */
+  seedable?: false;
   key: string;
   label: string;
   color: string | null;
   ghost: boolean;
   entries: Entry[];
 }
-// groupEntries emits empty declared option/status groups (boards need the columns) and a trailing
+// groupEntries emits empty declared option/status and relative date groups, and a trailing
 // no-value group with key '__none__' (label 'No <field>') — pinned; BoardView/ListView rely on it.
 
 /**

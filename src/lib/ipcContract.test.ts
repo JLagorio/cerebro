@@ -65,6 +65,7 @@ const UNCALLED: Readonly<Record<string, string>> = {
 /** What Rust emits, and exactly what the adapters listen to. */
 const EVENTS: readonly string[] = [
   'cerebro://agent',
+  'cerebro://deep-link',
   'cerebro://quit-requested',
   'cerebro://ui-action',
   'comments-changed',

@@ -1,11 +1,15 @@
 import { create } from 'zustand';
 import { restoreItem } from '@/app/trashActions';
+import { undoRename } from '@/app/renameActions';
 import type { PageAttribution } from '@/engine/attribution';
 import { stalePath, type FileResult } from '@/engine/batch';
 import type { TrashedItem } from '@/engine/trash';
 import { isKnowledgePath } from '@/engine/okf';
 import {
   entryBytes,
+  renameBytes,
+  undoableRename,
+  type RenameChange,
   EVICTED,
   keptItem,
   keptWords,
@@ -24,8 +28,9 @@ import { useVaultStore } from '@/stores/vaultStore';
 
 /**
  * Undo and redo of the person's own changes (M60.7, CV-39): the batches a
- * labelled `applyBatch` lands and the pages `trashPath` moves to the Trash,
- * from this session only. Never knowledge/ (CV-07), never a proposal
+ * labelled `applyBatch` lands, link-keeping renames, and the pages
+ * `trashPath` moves to the Trash, from this session only. Never knowledge/
+ * file restoration (CV-07), never a proposal
  * decision, never an agent's write: nothing else pushes here.
  *
  * `past` holds what undo takes, newest last; `future` what redo takes. A
@@ -60,7 +65,8 @@ interface EntryBase {
  * restores the item; redo moves its path to the Trash again). */
 export type UndoEntry =
   | (EntryBase & { kind: 'batch'; files: FileResult[] })
-  | (EntryBase & { kind: 'trash'; item: TrashedItem });
+  | (EntryBase & { kind: 'trash'; item: TrashedItem })
+  | (EntryBase & { kind: 'rename'; change: RenameChange });
 
 type Side = 'past' | 'future';
 
@@ -72,6 +78,8 @@ interface UndoState {
   pushBatch(label: string, vault: string, files: FileResult[]): number | null;
   /** Push a Trash move; null for a knowledge/ path. */
   pushTrash(label: string, vault: string, item: TrashedItem): number | null;
+  /** Push a human link-keeping rename; knowledge file writes never enter. */
+  pushRename(label: string, vault: string, change: RenameChange): number | null;
   /** Undo the newest change. False when the stack is empty or it failed. */
   undo(): Promise<boolean>;
   /** Redo the newest undone change. */
@@ -89,7 +97,12 @@ const reasonOf = (err: unknown): string => (err instanceof Error ? err.message :
 
 /** Drop the oldest entries until both caps hold, `past` first. */
 function capped(past: UndoEntry[], future: UndoEntry[]): Pick<UndoState, 'past' | 'future'> {
-  const bytes = (entry: UndoEntry) => (entry.kind === 'batch' ? entryBytes(entry.files) : 0);
+  const bytes = (entry: UndoEntry) =>
+    entry.kind === 'batch'
+      ? entryBytes(entry.files)
+      : entry.kind === 'rename'
+        ? renameBytes(entry.change)
+        : 0;
   let total = [...past, ...future].reduce((sum, entry) => sum + bytes(entry), 0);
   const p = [...past];
   const f = [...future];
@@ -210,6 +223,25 @@ async function runTrash(entry: UndoEntry & { kind: 'trash' }, from: Side): Promi
   }
 }
 
+/** Moves reverse as one checked batch; edited pages stay and are named. */
+async function runRename(entry: UndoEntry & { kind: 'rename' }, from: Side): Promise<Outcome> {
+  const result = await undoRename(entry.vault, entry.change, entry.at);
+  if (result.kind !== 'done') return result;
+  const inverse: UndoEntry | null = undoableRename(result.inverse)
+    ? { ...entry, at: Date.now(), change: result.inverse }
+    : null;
+  const words =
+    from === 'past'
+      ? result.kept.length > 0
+        ? keptWords(entry.label, result.kept)
+        : undidWords(entry.label)
+      : result.kept.length > 0
+        ? `${entry.label}. Kept changes made since: ${result.kept.join(', ')}`
+        : entry.label;
+  useUiStore.getState().toast(words, from === 'past' ? redoAction(inverse) : undoAction(inverse));
+  return inverse === null ? { kind: 'dropped' } : { kind: 'done', inverse };
+}
+
 function undoAction(entry: UndoEntry | null) {
   if (entry === null) return undefined;
   return { action: { label: UNDO, run: () => void useUndoStore.getState().undoEntry(entry.id) } };
@@ -236,12 +268,19 @@ export const useUndoStore = create<UndoState>()((set, get) => {
         outcome = { kind: 'dropped' };
       } else {
         outcome =
-          entry.kind === 'batch' ? await runBatch(entry, from) : await runTrash(entry, from);
+          entry.kind === 'batch'
+            ? await runBatch(entry, from)
+            : entry.kind === 'rename'
+              ? await runRename(entry, from)
+              : await runTrash(entry, from);
       }
     } catch (err) {
       useUiStore.getState().toast(reasonOf(err));
       outcome = { kind: 'retry' };
     }
+    // The vault switch clears history even when an earlier request was
+    // already in flight. Never repopulate either stack with its old entry.
+    if (entry.vault !== useVaultStore.getState().vaultPath) return false;
     if (outcome.kind === 'retry') {
       const now = [...get()[from]];
       now.splice(Math.min(at, now.length), 0, entry);
@@ -283,6 +322,20 @@ export const useUndoStore = create<UndoState>()((set, get) => {
     pushTrash(label, vault, item) {
       if (isKnowledgePath(item.path)) return null;
       const entry: UndoEntry = { id: nextId++, label, vault, at: Date.now(), kind: 'trash', item };
+      set(capped([...get().past, entry], []));
+      return entry.id;
+    },
+
+    pushRename(label, vault, change) {
+      if (!undoableRename(change)) return null;
+      const entry: UndoEntry = {
+        id: nextId++,
+        label,
+        vault,
+        at: Date.now(),
+        kind: 'rename',
+        change,
+      };
       set(capped([...get().past, entry], []));
       return entry.id;
     },

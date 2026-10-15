@@ -1,6 +1,7 @@
 ---
 type: Work item
 key: FLD-1
+project: "[[guided-onboarding-ga]]"
 status: progress
 priority: high
 assignee: "[[ana-rios]]"

@@ -32,6 +32,7 @@ export interface DialogAction {
   label: string;
   onClick?: () => void;
   disabled?: boolean;
+  testId?: string;
 }
 
 /** Modal dialog: flat scrim, radius-14 card, footer actions right-aligned. */
@@ -45,7 +46,7 @@ export interface DialogProps {
   primaryAction?: DialogAction;
   secondaryAction?: DialogAction;
   /** muted left-aligned footer text */
-  footerNote?: string;
+  footerNote?: React.ReactNode;
   style?: React.CSSProperties;
   /**
    * Fill the viewport: no scrim padding, full-height card, radius 0, and the
@@ -186,12 +187,19 @@ function DialogCard({
               <span className="cb-dlg-note"></span>
             )}
             {secondaryAction ? (
-              <Button onClick={secondaryAction.onClick}>{secondaryAction.label}</Button>
+              <Button
+                disabled={secondaryAction.disabled}
+                testId={secondaryAction.testId}
+                onClick={secondaryAction.onClick}
+              >
+                {secondaryAction.label}
+              </Button>
             ) : null}
             {primaryAction ? (
               <Button
                 variant="primary"
                 disabled={primaryAction.disabled}
+                testId={primaryAction.testId}
                 onClick={primaryAction.onClick}
               >
                 {primaryAction.label}

@@ -7,6 +7,38 @@
   },
   "cases": [
     {
+      "name": "create into a missing folder",
+      "seed": {},
+      "ops": [
+        {
+          "op": "create",
+          "path": "types/books.md",
+          "content": "---\ntype: Type\nfolder: records/books\n---\n\n# Books\n"
+        },
+        {
+          "op": "create",
+          "path": "records/books/dune.md",
+          "content": "---\ntype: Books\n---\n\n# Dune\n"
+        }
+      ],
+      "written": ["types/books.md", "records/books/dune.md"],
+      "after": {
+        "types/books.md": {
+          "frontmatter": {
+            "type": "Type",
+            "folder": "records/books"
+          },
+          "body": "\n# Books\n"
+        },
+        "records/books/dune.md": {
+          "frontmatter": {
+            "type": "Books"
+          },
+          "body": "\n# Dune\n"
+        }
+      }
+    },
+    {
       "name": "patches on two pages land both",
       "seed": {
         "records/a.md": "---\nstatus: todo\n---\n\n# A\n",
@@ -310,7 +342,7 @@
           "path": "records/a.md"
         }
       ],
-      "refused": "Step 2 can't be read: its op must be patch, create, body, delete, restore or revert."
+      "refused": "Step 2 can't be read: its op must be patch, create, body, delete, restore, revert, rename, replace_file or import."
     },
     {
       "name": "a key no step takes",
@@ -610,6 +642,958 @@
         }
       ],
       "refused": "Step 1 can't be read: afterHash must be a 64-character hash."
+    },
+    {
+      "name": "a byte-exact replacement precedes a rename",
+      "seed": {
+        "notes/a.md": "# A\n",
+        "notes/citer.md": "[[a]]\n"
+      },
+      "ops": [
+        {
+          "op": "replace_file",
+          "path": "notes/citer.md",
+          "content": "[[b]]\n",
+          "expectHash": "HASH:notes/citer.md"
+        },
+        {
+          "op": "rename",
+          "from": "notes/a.md",
+          "to": "notes/b.md"
+        }
+      ],
+      "written": ["notes/citer.md", "notes/b.md"],
+      "after": {
+        "notes/a.md": null,
+        "notes/b.md": {
+          "frontmatter": null,
+          "body": "# A\n"
+        },
+        "notes/citer.md": {
+          "frontmatter": null,
+          "body": "[[b]]\n"
+        }
+      }
+    },
+    {
+      "name": "a folder then its main page follow the names earlier renames leave",
+      "seed": {
+        "old/old.md": "# A\n",
+        "old/child.md": "# B\n"
+      },
+      "ops": [
+        {
+          "op": "rename",
+          "from": "old",
+          "to": "new"
+        },
+        {
+          "op": "rename",
+          "from": "new/old.md",
+          "to": "new/new.md"
+        }
+      ],
+      "written": ["new", "new/new.md"],
+      "after": {
+        "old/old.md": null,
+        "new/old.md": null,
+        "new/new.md": {
+          "frontmatter": null,
+          "body": "# A\n"
+        },
+        "new/child.md": {
+          "frontmatter": null,
+          "body": "# B\n"
+        }
+      }
+    },
+    {
+      "name": "a rename destination already present refuses before writes",
+      "seed": {
+        "notes/a.md": "# A\n",
+        "notes/b.md": "# B\n"
+      },
+      "ops": [
+        {
+          "op": "replace_file",
+          "path": "notes/a.md",
+          "content": "# New\n",
+          "expectHash": "HASH:notes/a.md"
+        },
+        {
+          "op": "rename",
+          "from": "notes/a.md",
+          "to": "notes/b.md"
+        }
+      ],
+      "refused": "target already exists: notes/b.md"
+    },
+    {
+      "name": "a replacement whose hash moved refuses the whole rename",
+      "seed": {
+        "notes/a.md": "# A\n"
+      },
+      "ops": [
+        {
+          "op": "replace_file",
+          "path": "notes/a.md",
+          "content": "# New\n",
+          "expectHash": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        {
+          "op": "rename",
+          "from": "notes/a.md",
+          "to": "notes/b.md"
+        }
+      ],
+      "refused": "stale_content: notes/a.md"
+    },
+    {
+      "name": "a replacement must precede every rename",
+      "seed": {
+        "notes/a.md": "# A\n",
+        "notes/c.md": "# B\n"
+      },
+      "ops": [
+        {
+          "op": "rename",
+          "from": "notes/a.md",
+          "to": "notes/b.md"
+        },
+        {
+          "op": "replace_file",
+          "path": "notes/c.md",
+          "content": "# New\n",
+          "expectHash": "HASH:notes/c.md"
+        }
+      ],
+      "refused": "Every write must precede every rename, so nothing was written."
+    },
+    {
+      "name": "a patch cannot follow a rename either",
+      "seed": {
+        "notes/a.md": "# A\n",
+        "notes/c.md": "# B\n"
+      },
+      "ops": [
+        {
+          "op": "rename",
+          "from": "notes/a.md",
+          "to": "notes/b.md"
+        },
+        {
+          "op": "patch",
+          "path": "notes/c.md",
+          "set": {
+            "status": "done"
+          }
+        }
+      ],
+      "refused": "Every write must precede every rename, so nothing was written."
+    },
+    {
+      "name": "a replacement stands alone on its page",
+      "seed": {
+        "notes/a.md": "# A\n"
+      },
+      "ops": [
+        {
+          "op": "replace_file",
+          "path": "notes/a.md",
+          "content": "# New\n",
+          "expectHash": "HASH:notes/a.md"
+        },
+        {
+          "op": "body",
+          "path": "notes/a.md",
+          "body": "# B\n"
+        }
+      ],
+      "refused": "a replace_file must be the only write step on its page"
+    },
+    {
+      "name": "a replacement requires its read hash",
+      "seed": {
+        "notes/a.md": "# A\n"
+      },
+      "ops": [
+        {
+          "op": "replace_file",
+          "path": "notes/a.md",
+          "content": "# B\n"
+        }
+      ],
+      "refused": "Step 1 can't be read: expectHash must be a 64-character hash."
+    },
+    {
+      "name": "a folder cannot move beneath itself",
+      "seed": {
+        "old/a.md": "# A\n"
+      },
+      "ops": [
+        {
+          "op": "rename",
+          "from": "old",
+          "to": "old/child"
+        }
+      ],
+      "refused": "old can't be moved inside itself, so nothing was written."
+    },
+    {
+      "name": "a destination parent must be a folder",
+      "seed": {
+        "a.md": "# A\n",
+        "blocker": "# B\n"
+      },
+      "ops": [
+        {
+          "op": "rename",
+          "from": "a.md",
+          "to": "blocker/a.md"
+        }
+      ],
+      "refused": "blocker is not a folder, so nothing was written."
+    },
+    {
+      "name": "a batch preserves an orphan destination sidecar",
+      "seed": {
+        "notes/a.md": "# A\n",
+        ".comments/notes/b.md.json": "orphan"
+      },
+      "ops": [
+        {
+          "op": "rename",
+          "from": "notes/a.md",
+          "to": "notes/b.md"
+        }
+      ],
+      "refused": "target comments already exist: notes/b.md"
+    },
+    {
+      "name": "a create can be moved later in the batch",
+      "seed": {},
+      "ops": [
+        {
+          "op": "create",
+          "path": "new/a.md",
+          "content": "# A\n"
+        },
+        {
+          "op": "rename",
+          "from": "new",
+          "to": "renamed"
+        }
+      ],
+      "written": ["new/a.md", "renamed"],
+      "after": {
+        "new/a.md": null,
+        "renamed/a.md": {
+          "frontmatter": null,
+          "body": "# A\n"
+        }
+      }
+    },
+    {
+      "name": "a deleted page cannot be renamed",
+      "seed": {
+        "notes/a.md": "# A\n"
+      },
+      "ops": [
+        {
+          "op": "delete",
+          "path": "notes/a.md"
+        },
+        {
+          "op": "rename",
+          "from": "notes/a.md",
+          "to": "notes/b.md"
+        }
+      ],
+      "refused": "notes/a.md doesn't exist, so nothing was written."
+    },
+    {
+      "name": "a rename refuses into knowledge",
+      "seed": {
+        "notes/a.md": "# A\n"
+      },
+      "ops": [
+        {
+          "op": "rename",
+          "from": "notes/a.md",
+          "to": "knowledge/a.md"
+        }
+      ],
+      "refused": "read-only"
+    },
+    {
+      "name": "a rename refuses out of knowledge",
+      "seed": {
+        "knowledge/a.md": "# A\n"
+      },
+      "ops": [
+        {
+          "op": "rename",
+          "from": "knowledge/a.md",
+          "to": "notes/a.md"
+        }
+      ],
+      "refused": "read-only"
+    },
+    {
+      "name": "a rename refuses into \u212anowledge",
+      "seed": {
+        "notes/a.md": "# A\n"
+      },
+      "ops": [
+        {
+          "op": "rename",
+          "from": "notes/a.md",
+          "to": "\u212anowledge/a.md"
+        }
+      ],
+      "refused": "read-only"
+    },
+    {
+      "name": "a rename refuses out of \u212anowledge",
+      "seed": {
+        "\u212anowledge/a.md": "# A\n"
+      },
+      "ops": [
+        {
+          "op": "rename",
+          "from": "\u212anowledge/a.md",
+          "to": "notes/a.md"
+        }
+      ],
+      "refused": "read-only"
+    },
+    {
+      "name": "a later rename can move a parent a prior move created",
+      "seed": {
+        "a.md": "# A\n"
+      },
+      "ops": [
+        {
+          "op": "rename",
+          "from": "a.md",
+          "to": "new/a.md"
+        },
+        {
+          "op": "rename",
+          "from": "new",
+          "to": "final"
+        }
+      ],
+      "written": ["new/a.md", "final"],
+      "after": {
+        "a.md": null,
+        "final/a.md": {
+          "frontmatter": null,
+          "body": "# A\n"
+        }
+      }
+    },
+    {
+      "name": "import: a new record is stamped by its writer",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {},
+      "ops": [
+        {
+          "op": "import",
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "path": "records/imported.md",
+          "content": "---\ntype: Work item\n---\n# Imported\n"
+        }
+      ],
+      "imports": [
+        {
+          "index": 0,
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "outcome": "created",
+          "path": "records/imported.md",
+          "alsoAt": [],
+          "reason": null,
+          "first": null
+        }
+      ],
+      "written": ["records/imported.md"],
+      "afterRaw": {
+        "records/imported.md": "---\ntype: Work item\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: \"human:me\"\nimport_hash: \"9ac617a0b8cfdbe41d9258378fcb415de545dfca7297928db5efad6ad01d8c32\"\n---\n# Imported\n"
+      }
+    },
+    {
+      "name": "import: same bytes write nothing even without a journal",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {
+        "records/imported.md": "---\ntype: Work item\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: \"human:me\"\nimport_hash: \"9ac617a0b8cfdbe41d9258378fcb415de545dfca7297928db5efad6ad01d8c32\"\n---\n# Imported\n"
+      },
+      "ops": [
+        {
+          "op": "import",
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "path": "records/imported.md",
+          "content": "---\ntype: Work item\n---\n# Imported\n"
+        }
+      ],
+      "journal": false,
+      "imports": [
+        {
+          "index": 0,
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "outcome": "unchanged",
+          "path": "records/imported.md",
+          "alsoAt": [],
+          "reason": null,
+          "first": null
+        }
+      ],
+      "written": [],
+      "afterRaw": {
+        "records/imported.md": "---\ntype: Work item\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: \"human:me\"\nimport_hash: \"9ac617a0b8cfdbe41d9258378fcb415de545dfca7297928db5efad6ad01d8c32\"\n---\n# Imported\n"
+      }
+    },
+    {
+      "name": "import: new source bytes replace in place",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {
+        "records/imported.md": "---\ntype: Work item\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: \"human:me\"\nimport_hash: \"9ac617a0b8cfdbe41d9258378fcb415de545dfca7297928db5efad6ad01d8c32\"\n---\n# Imported\n"
+      },
+      "ops": [
+        {
+          "op": "import",
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "path": "records/imported.md",
+          "content": "---\ntype: Work item\n---\n# Imported\nNew source text.\n"
+        }
+      ],
+      "imports": [
+        {
+          "index": 0,
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "outcome": "replaced",
+          "path": "records/imported.md",
+          "alsoAt": [],
+          "reason": null,
+          "first": null
+        }
+      ],
+      "written": ["records/imported.md"],
+      "afterRaw": {
+        "records/imported.md": "---\ntype: Work item\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: \"human:me\"\nimport_hash: \"3533fb551fcd3db7acc8e0dd7a34aa787ec58bb1b6cb6a72d97486cd388ad3fc\"\n---\n# Imported\nNew source text.\n"
+      }
+    },
+    {
+      "name": "import: a person edit is kept",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {
+        "records/imported.md": "---\ntype: Work item\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: \"human:me\"\nimport_hash: \"9ac617a0b8cfdbe41d9258378fcb415de545dfca7297928db5efad6ad01d8c32\"\n---\n# Imported\nMy edit.\n"
+      },
+      "ops": [
+        {
+          "op": "import",
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "path": "records/imported.md",
+          "content": "---\ntype: Work item\n---\n# Imported\n"
+        }
+      ],
+      "imports": [
+        {
+          "index": 0,
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "outcome": "kept",
+          "path": "records/imported.md",
+          "alsoAt": [],
+          "reason": "changed_since_import",
+          "first": null
+        }
+      ],
+      "written": [],
+      "afterRaw": {
+        "records/imported.md": "---\ntype: Work item\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: \"human:me\"\nimport_hash: \"9ac617a0b8cfdbe41d9258378fcb415de545dfca7297928db5efad6ad01d8c32\"\n---\n# Imported\nMy edit.\n"
+      }
+    },
+    {
+      "name": "import: reformatted stamp is kept",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {
+        "records/imported.md": "---\ntype: Work item\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: 'human:me'\nimport_hash: \"9ac617a0b8cfdbe41d9258378fcb415de545dfca7297928db5efad6ad01d8c32\"\n---\n# Imported\n"
+      },
+      "ops": [
+        {
+          "op": "import",
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "path": "records/imported.md",
+          "content": "---\ntype: Work item\n---\n# Imported\n"
+        }
+      ],
+      "imports": [
+        {
+          "index": 0,
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "outcome": "kept",
+          "path": "records/imported.md",
+          "alsoAt": [],
+          "reason": "stamp_unreadable",
+          "first": null
+        }
+      ],
+      "written": [],
+      "afterRaw": {
+        "records/imported.md": "---\ntype: Work item\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: 'human:me'\nimport_hash: \"9ac617a0b8cfdbe41d9258378fcb415de545dfca7297928db5efad6ad01d8c32\"\n---\n# Imported\n"
+      }
+    },
+    {
+      "name": "import: CRLF stamp is kept",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {
+        "records/imported.md": "---\r\ntype: Work item\r\nsource_system: \"linear\"\r\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\r\nimported_at: \"2026-10-13T10:00:00Z\"\r\nimported_by: \"human:me\"\r\nimport_hash: \"9ac617a0b8cfdbe41d9258378fcb415de545dfca7297928db5efad6ad01d8c32\"\r\n---\r\n# Imported\r\n"
+      },
+      "ops": [
+        {
+          "op": "import",
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "path": "records/imported.md",
+          "content": "---\ntype: Work item\n---\n# Imported\n"
+        }
+      ],
+      "imports": [
+        {
+          "index": 0,
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "outcome": "kept",
+          "path": "records/imported.md",
+          "alsoAt": [],
+          "reason": "stamp_unreadable",
+          "first": null
+        }
+      ],
+      "written": [],
+      "afterRaw": {
+        "records/imported.md": "---\r\ntype: Work item\r\nsource_system: \"linear\"\r\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\r\nimported_at: \"2026-10-13T10:00:00Z\"\r\nimported_by: \"human:me\"\r\nimport_hash: \"9ac617a0b8cfdbe41d9258378fcb415de545dfca7297928db5efad6ad01d8c32\"\r\n---\r\n# Imported\r\n"
+      }
+    },
+    {
+      "name": "import: a moved page stays where it lives",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {
+        "moved/a.md": "---\ntype: Work item\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: \"human:me\"\nimport_hash: \"9ac617a0b8cfdbe41d9258378fcb415de545dfca7297928db5efad6ad01d8c32\"\n---\n# Imported\n"
+      },
+      "ops": [
+        {
+          "op": "import",
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "path": "records/imported.md",
+          "content": "---\ntype: Work item\n---\n# Imported\nNew source text.\n"
+        }
+      ],
+      "imports": [
+        {
+          "index": 0,
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "outcome": "replaced",
+          "path": "moved/a.md",
+          "alsoAt": [],
+          "reason": null,
+          "first": null
+        }
+      ],
+      "written": ["moved/a.md"],
+      "afterRaw": {
+        "moved/a.md": "---\ntype: Work item\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: \"human:me\"\nimport_hash: \"3533fb551fcd3db7acc8e0dd7a34aa787ec58bb1b6cb6a72d97486cd388ad3fc\"\n---\n# Imported\nNew source text.\n"
+      }
+    },
+    {
+      "name": "import: a second request for one identity is a duplicate",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {},
+      "ops": [
+        {
+          "op": "import",
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "path": "records/imported.md",
+          "content": "---\ntype: Work item\n---\n# Imported\n"
+        },
+        {
+          "op": "import",
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "path": "records/other.md",
+          "content": "---\ntype: Work item\n---\n# Imported\n"
+        }
+      ],
+      "imports": [
+        {
+          "index": 0,
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "outcome": "created",
+          "path": "records/imported.md",
+          "alsoAt": [],
+          "reason": null,
+          "first": null
+        },
+        {
+          "index": 1,
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "outcome": "duplicate",
+          "path": "records/imported.md",
+          "alsoAt": [],
+          "reason": null,
+          "first": 0
+        }
+      ],
+      "written": ["records/imported.md"],
+      "afterRaw": {
+        "records/imported.md": "---\ntype: Work item\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: \"human:me\"\nimport_hash: \"9ac617a0b8cfdbe41d9258378fcb415de545dfca7297928db5efad6ad01d8c32\"\n---\n# Imported\n"
+      }
+    },
+    {
+      "name": "import: case-only occupied names walk forward",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {
+        "RECORDS/IMPORTED.MD": "existing\n"
+      },
+      "ops": [
+        {
+          "op": "import",
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "path": "records/imported.md",
+          "content": "---\ntype: Work item\n---\n# Imported\n"
+        }
+      ],
+      "imports": [
+        {
+          "index": 0,
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "outcome": "created",
+          "path": "records/imported-2.md",
+          "alsoAt": [],
+          "reason": null,
+          "first": null
+        }
+      ],
+      "written": ["records/imported-2.md"],
+      "afterRaw": {
+        "records/imported-2.md": "---\ntype: Work item\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: \"human:me\"\nimport_hash: \"9ac617a0b8cfdbe41d9258378fcb415de545dfca7297928db5efad6ad01d8c32\"\n---\n# Imported\n"
+      }
+    },
+    {
+      "name": "import: two copies pick the first and name the rest",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {
+        "z.md": "---\ntype: Work item\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: \"human:me\"\nimport_hash: \"9ac617a0b8cfdbe41d9258378fcb415de545dfca7297928db5efad6ad01d8c32\"\n---\n# Imported\n",
+        "a.md": "---\ntype: Work item\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: \"human:me\"\nimport_hash: \"9ac617a0b8cfdbe41d9258378fcb415de545dfca7297928db5efad6ad01d8c32\"\n---\n# Imported\n"
+      },
+      "ops": [
+        {
+          "op": "import",
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "path": "records/imported.md",
+          "content": "---\ntype: Work item\n---\n# Imported\n"
+        }
+      ],
+      "imports": [
+        {
+          "index": 0,
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "outcome": "unchanged",
+          "path": "a.md",
+          "alsoAt": ["z.md"],
+          "reason": null,
+          "first": null
+        }
+      ],
+      "written": [],
+      "afterRaw": {}
+    },
+    {
+      "name": "import: two Notion spellings are one record",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {},
+      "ops": [
+        {
+          "op": "import",
+          "system": "notion",
+          "recordId": "0123456789abcdef0123456789abcdef",
+          "path": "records/imported.md",
+          "content": "---\ntype: Work item\n---\n# Imported\n"
+        },
+        {
+          "op": "import",
+          "system": "notion",
+          "recordId": "https://www.notion.so/Page-01234567-89ab-cdef-0123-456789abcdef",
+          "path": "records/imported.md",
+          "content": "---\ntype: Work item\n---\n# Imported\n"
+        }
+      ],
+      "imports": [
+        {
+          "index": 0,
+          "system": "notion",
+          "recordId": "0123456789abcdef0123456789abcdef",
+          "outcome": "created",
+          "path": "records/imported.md",
+          "alsoAt": [],
+          "reason": null,
+          "first": null
+        },
+        {
+          "index": 1,
+          "system": "notion",
+          "recordId": "0123456789abcdef0123456789abcdef",
+          "outcome": "duplicate",
+          "path": "records/imported.md",
+          "alsoAt": [],
+          "reason": null,
+          "first": 0
+        }
+      ],
+      "written": ["records/imported.md"],
+      "afterRaw": {
+        "records/imported.md": "---\ntype: Work item\nsource_system: \"notion\"\nsource_record_id: \"0123456789abcdef0123456789abcdef\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: \"human:me\"\nimport_hash: \"33dd2bdb12d6ea62be1c072dc1466e9c4321099298481a14830f88c7e236ec48\"\n---\n# Imported\n"
+      }
+    },
+    {
+      "name": "import: stamps cannot be supplied",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {},
+      "ops": [
+        {
+          "op": "import",
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "path": "records/imported.md",
+          "content": "---\nimport_hash: forged\n---\n"
+        }
+      ],
+      "refused": "Cerebro stamps"
+    },
+    {
+      "name": "import: agents cannot be imported",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {},
+      "ops": [
+        {
+          "op": "import",
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "path": "records/imported.md",
+          "content": "---\ntype: Agent\n---\n"
+        }
+      ],
+      "refused": "never writes a type"
+    },
+    {
+      "name": "import: unknown system",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {},
+      "ops": [
+        {
+          "op": "import",
+          "system": "unknown",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "path": "records/imported.md",
+          "content": "---\ntype: Work item\n---\n# Imported\n"
+        }
+      ],
+      "refused": "unknown is not an import source Cerebro knows"
+    },
+    {
+      "name": "import: Linear identifiers are not UUIDs",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {},
+      "ops": [
+        {
+          "op": "import",
+          "system": "linear",
+          "recordId": "ENG-1",
+          "path": "records/imported.md",
+          "content": "---\ntype: Work item\n---\n# Imported\n"
+        }
+      ],
+      "refused": "is not a Linear id"
+    },
+    {
+      "name": "import: unsafe URL",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {},
+      "ops": [
+        {
+          "op": "import",
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "path": "records/imported.md",
+          "content": "---\ntype: Work item\n---\n# Imported\n",
+          "url": "javascript:alert(1)"
+        }
+      ],
+      "refused": "not an http or https"
+    },
+    {
+      "name": "import: knowledge is guarded",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {},
+      "ops": [
+        {
+          "op": "import",
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "path": "knowledge/a.md",
+          "content": "---\ntype: Work item\n---\n# Imported\n"
+        }
+      ],
+      "refused": "outside knowledge/"
+    },
+    {
+      "name": "import: a second write to the planned page refuses everything",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {},
+      "ops": [
+        {
+          "op": "import",
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "path": "records/imported.md",
+          "content": "---\ntype: Work item\n---\n# Imported\n"
+        },
+        {
+          "op": "patch",
+          "path": "records/imported.md",
+          "set": {
+            "status": "done"
+          }
+        }
+      ],
+      "refused": "planned twice"
+    },
+    {
+      "name": "import: a scalar null document refuses before stamps land",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {},
+      "ops": [
+        {
+          "op": "import",
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "path": "records/imported.md",
+          "content": "---\nnull\n---\nbody"
+        }
+      ],
+      "refused": "frontmatter"
+    },
+    {
+      "name": "import: a scalar tilde document refuses before stamps land",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {},
+      "ops": [
+        {
+          "op": "import",
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "path": "records/imported.md",
+          "content": "---\n~\n---\nbody"
+        }
+      ],
+      "refused": "frontmatter"
+    },
+    {
+      "name": "import: an explicit document end refuses before stamps land",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {},
+      "ops": [
+        {
+          "op": "import",
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "path": "records/imported.md",
+          "content": "---\ntype: Work item\n...\n---\nbody"
+        }
+      ],
+      "refused": "frontmatter"
+    },
+    {
+      "name": "import: a folding-disk knowledge alias is refused",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {},
+      "ops": [
+        {
+          "op": "import",
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "path": "\u212anowledge/a.md",
+          "content": "---\ntype: Work item\n---\n# Imported\n"
+        }
+      ],
+      "refused": "outside knowledge/"
+    },
+    {
+      "name": "import: a folding-disk source alias is refused",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {},
+      "ops": [
+        {
+          "op": "import",
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "path": "sou\u200crces/a.md",
+          "content": "---\ntype: Work item\n---\n# Imported\n"
+        }
+      ],
+      "refused": "outside knowledge/"
+    },
+    {
+      "name": "import: nested views and attachments hold no copies",
+      "now": "2026-10-13T10:00:00Z",
+      "seed": {
+        "projects/a/attachments/copy.md": "---\ntype: Work item\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: \"human:me\"\nimport_hash: \"9ac617a0b8cfdbe41d9258378fcb415de545dfca7297928db5efad6ad01d8c32\"\n---\n# Imported\n",
+        "projects/a/views/copy.md": "---\ntype: Work item\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: \"human:me\"\nimport_hash: \"9ac617a0b8cfdbe41d9258378fcb415de545dfca7297928db5efad6ad01d8c32\"\n---\n# Imported\n",
+        "notes/UPPER.MD": "---\ntype: Work item\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: \"human:me\"\nimport_hash: \"9ac617a0b8cfdbe41d9258378fcb415de545dfca7297928db5efad6ad01d8c32\"\n---\n# Imported\n"
+      },
+      "ops": [
+        {
+          "op": "import",
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "path": "records/imported.md",
+          "content": "---\ntype: Work item\n---\n# Imported\n"
+        }
+      ],
+      "imports": [
+        {
+          "index": 0,
+          "system": "linear",
+          "recordId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "outcome": "created",
+          "path": "records/imported.md",
+          "alsoAt": [],
+          "reason": null,
+          "first": null
+        }
+      ],
+      "written": ["records/imported.md"],
+      "afterRaw": {
+        "records/imported.md": "---\ntype: Work item\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: \"human:me\"\nimport_hash: \"9ac617a0b8cfdbe41d9258378fcb415de545dfca7297928db5efad6ad01d8c32\"\n---\n# Imported\n"
+      }
     }
   ],
   "reverts": [

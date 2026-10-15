@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   copySvg,
+  rasterScale,
   inlineForeignObjects,
   savePng,
   svgToPngBytes,
@@ -147,4 +148,26 @@ describe('savePng', () => {
     await expect(savePng('<svg/>', 'diagram.png')).rejects.toThrow('SVG failed to rasterise');
     vi.unstubAllGlobals();
   });
+});
+
+it('raster dimensions stay within8192px while keeping the requested scale for small images', () => {
+  expect(rasterScale(10000, 6000, 2)).toBe(0.8192);
+  expect(rasterScale(200, 400, 2)).toBe(2);
+  expect(rasterScale(400, 10000, 1)).toBe(0.8192);
+});
+it('classless markdown labels retain each block line and their inline colour and font size', () => {
+  const out = inlineForeignObjects(
+    '<svg xmlns="http://www.w3.org/2000/svg"><foreignObject width="200" height="200"><div xmlns="http://www.w3.org/1999/xhtml" style="color: rgb(12, 34, 56); font-size: 14px"><h1>Title</h1><ul><li>First</li><li>Second</li></ul><pre>Code</pre><blockquote>Quote</blockquote><table><tr><td>Row</td></tr></table></div></foreignObject></svg>',
+  );
+  const doc = new DOMParser().parseFromString(out, 'image/svg+xml');
+  expect([...doc.querySelectorAll('tspan')].map((el) => el.textContent)).toEqual([
+    'Title',
+    'First',
+    'Second',
+    'Code',
+    'Quote',
+    'Row',
+  ]);
+  expect(doc.querySelector('text')?.getAttribute('fill')).toBe('rgb(12, 34, 56)');
+  expect(doc.querySelector('text')?.getAttribute('font-size')).toBe('14px');
 });

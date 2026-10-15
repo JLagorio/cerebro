@@ -10,6 +10,9 @@ updates:
       interval: 'weekly'
     cooldown:
       default-days: 7
+    # Both engines move together by hand, to releases sharing one gitHead.
+    ignore:
+      - dependency-name: '@ironcalc/wasm'
     groups:
       blocknote:
         patterns: ['@blocknote/*'] # pinned lockstep — must move together
@@ -24,6 +27,10 @@ updates:
       interval: 'weekly'
     cooldown:
       default-days: 7
+    # Paired with the browser wasm; never bump one engine independently.
+    ignore:
+      - dependency-name: 'ironcalc'
+      - dependency-name: 'ironcalc_base'
     groups:
       tauri:
         patterns: ['tauri*']

@@ -1,8 +1,11 @@
 import { useRef, useState, type ReactElement } from 'react';
+import { SideMenuExtension } from '@blocknote/core/extensions';
 import {
   BlockColorsItem,
   DragHandleMenu,
   FormattingToolbar,
+  FileDownloadButton,
+  useSelectedBlocks,
   FormattingToolbarController,
   getFormattingToolbarItems,
   RemoveBlockItem,
@@ -10,6 +13,8 @@ import {
   TableRowHeaderItem,
   useComponentsContext,
   useDictionary,
+  useBlockNoteEditor,
+  useExtensionState,
 } from '@blocknote/react';
 import { Icon } from '@/components/ui/Icon';
 import { MenuItem, MenuSurface } from '@/components/ui/Menu';
@@ -40,6 +45,7 @@ import { usePageCommentsContext } from './PageCommentsContext';
  * and, more usefully, TEACHES the feature: someone who has never opened the
  * popover can see what it is for without composing an instruction first.
  *
+ * Comment and Promote are non-AI actions on the same selected text.
  * Every preset lands in the same per-hunk decision surface — a preset is a
  * pre-written instruction, never a different path with fewer safeguards.
  */
@@ -116,7 +122,23 @@ const offered = (item: ReactElement): boolean =>
 
 /** BlockNote's formatting toolbar items, less the ones a save would drop. */
 export function formattingToolbarItems(): ReactElement[] {
-  return getFormattingToolbarItems().filter(offered);
+  return getFormattingToolbarItems()
+    .filter(offered)
+    .map((item) =>
+      item.key === 'fileDownloadButton' ? <RemoteFileDownload key="fileDownloadButton" /> : item,
+    );
+}
+
+/** The navigation guard cannot download a vault scheme URL. */
+export function canDownloadFile(url: unknown): boolean {
+  return typeof url === 'string' && /^https?:\/\//i.test(url);
+}
+function RemoteFileDownload() {
+  const blocks = useSelectedBlocks();
+  const block = blocks.length === 1 ? blocks[0] : undefined;
+  return block !== undefined && 'url' in block.props && canDownloadFile(block.props.url) ? (
+    <FileDownloadButton />
+  ) : null;
 }
 
 type Dictionary = ReturnType<typeof useDictionary>;
@@ -139,9 +161,25 @@ export function blockMenuItems(dict: Dictionary): ReactElement[] {
 }
 
 /** The menu the block grip opens, holding only what a save keeps. */
-export function CarriedBlockMenu() {
+export function CarriedBlockMenu({ onPromote }: { onPromote?: (id: string) => void } = {}) {
   const dict = useDictionary();
-  return <DragHandleMenu>{blockMenuItems(dict)}</DragHandleMenu>;
+  const Components = useComponentsContext();
+  const editor = useBlockNoteEditor();
+  const block = useExtensionState(SideMenuExtension, { editor, selector: (state) => state?.block });
+  return (
+    <DragHandleMenu>
+      {blockMenuItems(dict)}
+      {Components !== undefined && onPromote !== undefined && block?.type === 'checkListItem' && (
+        <Components.Generic.Menu.Item
+          className="bn-menu-item"
+          data-testid="promote-line-item"
+          onClick={() => onPromote(block.id)}
+        >
+          Promote to record…
+        </Components.Generic.Menu.Item>
+      )}
+    </DragHandleMenu>
+  );
 }
 
 /**
@@ -152,12 +190,18 @@ export function CarriedBlockMenu() {
  * it, because by the time a click handler runs the range still exists but the
  * moment focus moves it will not.
  */
-export function AiFormattingToolbar({ onAsk }: { onAsk: (preset?: Preset) => void }) {
+export function AiFormattingToolbar({
+  onAsk,
+  onPromote,
+}: {
+  onAsk: (preset?: Preset) => void;
+  onPromote?: () => void;
+}) {
   return (
     <FormattingToolbarController
       formattingToolbar={() => (
         <FormattingToolbar>
-          <AiToolbarButtons key="cerebro-ai" onAsk={onAsk} />
+          <AiToolbarButtons key="cerebro-ai" onAsk={onAsk} onPromote={onPromote} />
           {/* What BlockNote would have rendered on its own, less what a save
               would drop (`formattingToolbarItems`). Listed after the AI group
               rather than replaced: this is an addition to the editor's
@@ -170,7 +214,13 @@ export function AiFormattingToolbar({ onAsk }: { onAsk: (preset?: Preset) => voi
 }
 
 /** The AI group, then Comment where a page provides it. Exported for its test. */
-export function AiToolbarButtons({ onAsk }: { onAsk: (preset?: Preset) => void }) {
+export function AiToolbarButtons({
+  onAsk,
+  onPromote,
+}: {
+  onAsk: (preset?: Preset) => void;
+  onPromote?: () => void;
+}) {
   const Components = useComponentsContext();
   const comments = usePageCommentsContext();
   const [more, setMore] = useState(false);
@@ -270,6 +320,22 @@ export function AiToolbarButtons({ onAsk }: { onAsk: (preset?: Preset) => void }
           </span>
           <span className="mx-1 h-4 w-px flex-none self-center bg-n-200" aria-hidden="true" />
         </>
+      )}
+      {onPromote !== undefined && (
+        <span className="inline-flex" onMouseDown={(event) => event.preventDefault()}>
+          <Button
+            className="bn-button"
+            data-testid="selection-promote"
+            label="Promote to records"
+            mainTooltip="Promote checklist lines to records"
+            onClick={onPromote}
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <Icon name="square-arrow-out-up-right" size={14} />
+              Promote
+            </span>
+          </Button>
+        </span>
       )}
     </>
   );

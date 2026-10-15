@@ -1,3 +1,5 @@
+import { useNavStore } from '@/stores/navStore';
+import { formatWikilink, linkTargetOf } from '@/engine/wikilink';
 import { useRef, useState } from 'react';
 import { Dialog } from '@/components/ui/Dialog';
 import { IconButton } from '@/components/ui/IconButton';
@@ -28,7 +30,7 @@ export function RecordRowMenu({ entry, onOpen }: { entry: Entry; onOpen: () => v
   const entries = useVaultStore((s) => s.entries);
   const rescan = useVaultStore((s) => s.rescan);
   const toast = useUiStore((s) => s.toast);
-  const openDetail = useUiStore((s) => s.openDetail);
+  const openDetail = useNavStore((s) => s.openPeek);
   const detailPath = useUiStore((s) => s.detailPath);
   const closeDetail = useUiStore((s) => s.closeDetail);
 
@@ -81,7 +83,7 @@ export function RecordRowMenu({ entry, onOpen }: { entry: Entry; onOpen: () => v
               testId="row-copy-link"
               onSelect={() => {
                 setOpen(false);
-                void copyText(`[[${entry.title}]]`, 'Link', toast);
+                void copyText(formatWikilink(linkTargetOf(entry)), 'Link', toast);
               }}
             />
             <MenuItem

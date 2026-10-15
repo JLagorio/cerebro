@@ -43,6 +43,21 @@ describe('the mermaid block as it leaves the app', () => {
   });
 });
 
+describe('the sheet block as it leaves the app', () => {
+  it.each(['', '---\nformat: 1\nname: Budget\n---\nTotal,=SUM(B1:B2)', '"a\n```\nb",3'])(
+    'copies source with a safe fence, never computed cells or captions: %s',
+    async (source) => {
+      const editor = BlockNoteEditor.create({ schema: cerebroSchema });
+      const html = await editor.blocksToHTMLLossy([{ type: 'sheet', props: { source } }] as never);
+      const text = new DOMParser().parseFromString(html, 'text/html').body.textContent;
+      const marker = source.includes('```') ? '````' : '```';
+      expect(text).toBe(`${marker}cerebro-sheet\n${source}${source ? '\n' : ''}${marker}`);
+      expect(html).not.toContain('sheet-grid');
+      expect(html).not.toContain('Calculating');
+    },
+  );
+});
+
 /**
  * The child-page list (M55.13) leaves the app as the empty fence the disk
  * holds, never the titles it renders: those are derived, and pasting them
@@ -320,4 +335,21 @@ describe('leaveAiAnswer', () => {
     expect(leaveAiAnswer(atEndOfAnswer(under([{ type: 'bulletListItem' }])), enter)).toBe(false);
     expect(leaveAiAnswer(atEndOfAnswer(NESTED), { ...enter, shiftKey: true })).toBe(false);
   });
+});
+
+describe('the whiteboard block as it leaves the app', () => {
+  it.each(['', 'board: boards/plan.canvas', 'board: boards/plan.canvas\nextra: "```"'])(
+    'copies a raw pointer with a safe fence: %s',
+    async (source) => {
+      const editor = BlockNoteEditor.create({ schema: cerebroSchema });
+      const html = await editor.blocksToHTMLLossy([
+        { type: 'whiteboard', props: { source } },
+      ] as never);
+      const text = new DOMParser().parseFromString(html, 'text/html').body.textContent;
+      const marker = source.includes('```') ? '````' : '```';
+      expect(text).toBe(`${marker}cerebro-whiteboard\n${source}${source ? '\n' : ''}${marker}`);
+      expect(html).not.toContain('Open');
+      expect(html).not.toContain('whiteboard-embed');
+    },
+  );
 });

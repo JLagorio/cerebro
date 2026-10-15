@@ -11,6 +11,7 @@ import {
   axisTicks,
   axisWidth,
   barGeometry,
+  canReschedule,
   dateKindOf,
   resolveDateField,
   spanBounds,
@@ -118,12 +119,17 @@ export function TimelineView({
   );
 
   const axis: Span = useMemo(() => {
-    const spans = entries.map((e) => spanOf(e, dateField)).filter((s): s is Span => s !== null);
+    const spans = entries
+      .map((e) => spanOf(e, dateField, schema))
+      .filter((s): s is Span => s !== null);
     return axisSpan(spanBounds(spans), zoom, today);
-  }, [entries, dateField, zoom, today]);
+  }, [entries, dateField, zoom, today, schema]);
 
   const ticks = useMemo(() => axisTicks(axis, zoom), [axis, zoom]);
-  const undated = useMemo(() => unscheduled(entries, dateField), [entries, dateField]);
+  const undated = useMemo(
+    () => unscheduled(entries, dateField, schema),
+    [entries, dateField, schema],
+  );
   // Undated records used to render as full-height rows containing nothing —
   // this view has no name gutter, so they were literally invisible dead space
   // and the only signal was a count that did not explain the gaps. They are
@@ -233,7 +239,7 @@ export function TimelineView({
                   );
                 }
 
-                const stored = spanOf(row.entry, dateField);
+                const stored = spanOf(row.entry, dateField, schema);
                 if (stored === null) {
                   // With a table half the row EXISTS on the left, so the chart
                   // side must keep its slot or the two halves shear apart.
@@ -262,30 +268,33 @@ export function TimelineView({
                       data-path={row.entry.path}
                       data-start={span.start}
                       data-end={span.end}
-                      {...drag.handle.handleProps(row.key)}
+                      {...(canReschedule(row.entry, dateField, schema)
+                        ? drag.handle.handleProps(row.key)
+                        : {})}
                       onClick={() => {
                         if (drag.handle.consumeClick()) return;
                         openPath(row.entry.path);
                       }}
                       title={`${row.entry.title} · ${span.start}${span.end === span.start ? '' : ` → ${span.end}`}`}
-                      aria-label={`${row.entry.title}, ${span.start} to ${span.end}. Arrow keys move it; hold Shift to change its end.`}
+                      aria-label={`${row.entry.title}, ${span.start} to ${span.end}${canReschedule(row.entry, dateField, schema) ? '. Arrow keys move it; hold Shift to change its end.' : ''}`}
                       className="absolute top-1 flex touch-none select-none items-center gap-1 overflow-hidden rounded-sm border border-cortex-500 bg-cortex-50 px-1.5 text-left text-xs text-n-900 hover:bg-cortex-100"
                       style={{ ...geo, height: ROW_H - 9 }}
                     >
                       <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-500)'} />
                       <span className="truncate">{row.entry.title}</span>
                     </button>
-                    {dateKindOf(row.entry, dateField, schema) === 'daterange' && (
-                      <ResizeGrips
-                        id={row.key}
-                        title={row.entry.title}
-                        left={geo.left}
-                        width={geo.width}
-                        top={4}
-                        height={ROW_H - 9}
-                        drag={drag.handle}
-                      />
-                    )}
+                    {canReschedule(row.entry, dateField, schema) &&
+                      dateKindOf(row.entry, dateField, schema) === 'daterange' && (
+                        <ResizeGrips
+                          id={row.key}
+                          title={row.entry.title}
+                          left={geo.left}
+                          width={geo.width}
+                          top={4}
+                          height={ROW_H - 9}
+                          drag={drag.handle}
+                        />
+                      )}
                   </div>
                 );
               })}

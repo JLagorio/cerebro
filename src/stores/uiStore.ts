@@ -1,3 +1,4 @@
+import type { PaneId } from '@/engine/panes';
 import { create } from 'zustand';
 import type { RunRecord } from '@/agent/runs';
 import type { OrganizeProposal } from '@/agent/types';
@@ -89,21 +90,16 @@ interface UiState {
    * longer stops its turn either: it detaches, and reopening re-attaches.
    */
   detailPath: string | null;
-  openDetail(path: string): void;
+  detailPane: PaneId | null;
+  openDetail(path: string, owner?: PaneId | null): void;
   closeDetail(): void;
-  /**
-   * The records the open canvas is showing, in its order (M16.11) — what the
-   * panel's previous/next step through.
-   *
-   * It lives here rather than being threaded through `openDetail` because a
-   * row does not know its neighbours: every surface opens a record through
-   * one `useOpenPath(path)` call, and only the canvas knows the filtered,
-   * sorted list that call came out of.
-   */
+  /** Each pane publishes its own ordered records. The legacy '*' list is
+   * used by standalone hosts; the peek reads its owner's list. */
   detailSiblings: string[];
-  setDetailSiblings(paths: string[]): void;
-  /** Move the open record along `detailSiblings`. No-op at either end. */
-  stepDetail(delta: number): void;
+  siblingsByPane: Partial<Record<PaneId | '*', string[]>>;
+  setDetailSiblings(paths: string[], pane?: PaneId | '*'): void;
+  /** Skip files already held by a page pane, without changing the list. */
+  stepDetail(delta: number, skip?: (path: string) => boolean): void;
   /**
    * Width of the record side panel, in px (M11). Persisted.
    *
@@ -158,7 +154,8 @@ interface UiState {
   isCollapsed(scope: string, key: string): boolean;
   /**
    * The diff currently being read, shown INLINE in place of the editor
-   * rather than in a dialog (M9.7).
+   * rather than in a dialog (M9.7). It remains while a pane shows its page;
+   * another pane leaving does not close that page’s diff (M65.8).
    *
    * A diff is a way of looking at the note you are already on, not a
    * separate thing that interrupts it — a modal makes it impossible to
@@ -236,6 +233,8 @@ interface UiState {
    * the survivors would be the wrong rows.
    */
   favorites: Record<string, string[]>;
+  /** A landed rename must move pointers before a rescan may prune them. */
+  pendingRenames: Record<string, number>;
   toggleFavorite(vault: string, path: string): void;
   pruneFavorites(vault: string, existing: Set<string>): void;
   /**
@@ -243,7 +242,7 @@ interface UiState {
    * it, now names the same page at `to`. Growing a page into a folder of its
    * own renames it, and a prune would otherwise drop the pin as dead.
    */
-  replaceFavoritePath(vault: string, from: string, to: string): void;
+  remapFavorites(vault: string, from: string, to: string): void;
 
   /**
    * Per-filetype icons and colour in the workspace tree (M30.22); persisted.
@@ -430,7 +429,8 @@ interface UiState {
   learnAttempts: Record<string, string>;
   recordLearnAttempt(path: string, modifiedAt: string): void;
   /**
-   * Vault path → record identity → the schedule fire key last run (M13.2).
+   * Vault path → record identity → the newest schedule fire it owes nothing for.
+   * A run, resume or schedule edit may answer it (M63.6b).
    * A woken run keeps no key here: its wake in `runtime.db` is its record
    * (M63.1; the `#event` rows M53.7 wrote stay inert). Persisted; the same
    * loop-stopper discipline as learnAttempts. Scoped by vault like
@@ -442,7 +442,7 @@ interface UiState {
   recordSkillRun(vault: string, path: string, fireKey: string): void;
   /**
    * Take back the record a job's claim made, for a run that never happened:
-   * the budget gate deferred it (M53.27). Only while the slot still holds
+   * the budget gate deferred it or Rust refused to start it. Only while the slot still holds
    * `runKey`, so a slot re-recorded since is kept. The localStorage mirror is
    * rewritten too. The next launch starts from it, and a record left there
    * comes back as answered, through the one-time import into an empty table
@@ -463,9 +463,8 @@ interface UiState {
    * cooldown's clock, read there (engine/jobs.ts TRIGGER_COOLDOWN_MS).
    * Separate from skillRuns because it answers a different question:
    * skillRuns says "has this exact fire been answered", this says "how long
-   * ago did an event last wake this agent". Only the second can break the
-   * loop an agent creates by writing into the folder it watches, because
-   * every such write mints a genuinely new fire key.
+   * ago did an event last wake this agent". Recorded agent writes are bounded
+   * by their run chain; this clock also limits unrecorded external changes.
    */
   triggerRuns: Record<string, Record<string, string>>;
   recordTriggerRun(vault: string, agent: string, at: string): void;
@@ -508,11 +507,12 @@ interface UiState {
   endRun(id: string): void;
   /**
    * Home insight cards the user has waved away (M8.3), by concept path.
-   * Persisted, because a card you dismissed and that came back tomorrow is
-   * the definition of the nagging this surface is not allowed to do.
+   * Browser mirror and legacy import source. Durable ownership is now in
+   * doneMarksStore; these mirror actions never write the old global key.
    */
   dismissedInsights: string[];
   dismissInsight(path: string): void;
+  restoreInsight(path: string): void;
   /** Filings the agent has suggested but not applied (M7), keyed by path. */
   proposals: Record<string, OrganizeProposal>;
   addProposal(p: OrganizeProposal): void;
@@ -602,8 +602,8 @@ export const SIDEBAR_WIDTH_MAX = 460;
 /**
  * Layout floors (M15).
  *
- * The canvas is the thing every other column annotates, so it is the one
- * column that never yields: the sidebar shrinks to SIDEBAR_WIDTH_MIN and the
+ * The focused pane is the thing every other column annotates, so it is the
+ * one column that never yields: the sidebar shrinks to SIDEBAR_WIDTH_MIN and the
  * right-hand panel is capped at `100% - CANVAS_MIN_WIDTH` before the canvas
  * gives up a pixel. Before this, every flanking column was `flex-none` and the
  * canvas carried `min-w-0`, so content absorbed 100% of any shortfall — at
@@ -841,25 +841,42 @@ export const useUiStore = create<UiState>((set, get) => ({
   // and it landed here, where closing the panel unmounted it and killed the
   // run that was mid-answer. Showing you something must never end the sentence
   // that referred to it.
-  openDetail: (path) => set({ detailPath: path }),
-  closeDetail: () => set({ detailPath: null }),
-
+  detailPane: null,
+  openDetail: (path, owner = null) =>
+    set((state) => ({
+      detailPath: path,
+      detailPane: owner,
+      detailSiblings:
+        state.siblingsByPane[owner ?? '*'] ??
+        (owner === null ? state.detailSiblings : (state.siblingsByPane['*'] ?? [])),
+    })),
+  closeDetail: () => set({ detailPath: null, detailPane: null }),
   detailSiblings: [],
-  setDetailSiblings: (paths) => {
-    // Reference-stable when nothing changed: this is set from a render-time
-    // effect on every canvas render, and a fresh array each time would
-    // re-render the panel continuously.
-    const current = get().detailSiblings;
-    if (current.length === paths.length && current.every((p, i) => p === paths[i])) return;
-    set({ detailSiblings: paths });
+  siblingsByPane: {},
+  setDetailSiblings: (paths, pane = '*') => {
+    const state = get();
+    const current = state.siblingsByPane[pane];
+    if (current?.length === paths.length && current.every((path, i) => path === paths[i])) return;
+    set({
+      siblingsByPane: { ...state.siblingsByPane, [pane]: paths },
+      ...(pane === '*' ||
+      pane === state.detailPane ||
+      (state.detailPane === null && (paths.length > 0 || state.detailSiblings === current))
+        ? { detailSiblings: paths }
+        : {}),
+    });
   },
-  stepDetail: (delta) => {
-    const { detailPath, detailSiblings } = get();
-    if (detailPath === null) return;
+  stepDetail: (delta, skip = () => false) => {
+    const { detailPath, detailSiblings, detailPane } = get();
+    if (detailPath === null || delta === 0) return;
     const at = detailSiblings.indexOf(detailPath);
-    const next = detailSiblings[at + delta];
-    if (at === -1 || next === undefined) return;
-    get().openDetail(next);
+    if (at < 0) return;
+    const direction = Math.sign(delta);
+    let index = at + direction;
+    while (index >= 0 && index < detailSiblings.length && skip(detailSiblings[index]))
+      index += direction;
+    const next = detailSiblings[index];
+    if (next !== undefined) get().openDetail(next, detailPane);
   },
 
   detailWidth: loadNumber(
@@ -1013,6 +1030,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
 
   favorites: loadStringListMap(FAVORITES_KEY),
+  pendingRenames: {},
   toggleFavorite: (vault, path) => {
     const current = get().favorites[vault] ?? [];
     const pinned = current.includes(path) ? current.filter((p) => p !== path) : [...current, path];
@@ -1028,12 +1046,16 @@ export const useUiStore = create<UiState>((set, get) => ({
     storeString(FAVORITES_KEY, JSON.stringify(next));
     set({ favorites: next });
   },
-  replaceFavoritePath: (vault, from, to) => {
+  remapFavorites: (vault, from, to) => {
     const current = get().favorites[vault] ?? [];
     const swap = (p: string): string =>
       p === from ? to : p.startsWith(`${from}/`) ? `${to}${p.slice(from.length)}` : p;
-    const pinned = current.map(swap);
-    if (from === to || pinned.every((p, i) => p === current[i])) return;
+    const pinned = [...new Set(current.map(swap))];
+    if (
+      from === to ||
+      (pinned.length === current.length && pinned.every((p, i) => p === current[i]))
+    )
+      return;
     const next = { ...get().favorites, [vault]: pinned };
     storeString(FAVORITES_KEY, JSON.stringify(next));
     set({ favorites: next });
@@ -1277,9 +1299,11 @@ export const useUiStore = create<UiState>((set, get) => ({
     set((s) => {
       if (s.dismissedInsights.includes(path)) return s;
       const next = [...s.dismissedInsights, path];
-      storeString(DISMISSED_INSIGHTS_KEY, JSON.stringify(next));
       return { dismissedInsights: next };
     }),
+
+  restoreInsight: (path) =>
+    set((s) => ({ dismissedInsights: s.dismissedInsights.filter((p) => p !== path) })),
 
   proposals: {},
   addProposal: (p) => set((s) => ({ proposals: { ...s.proposals, [p.path]: p } })),

@@ -1,0 +1,420 @@
+{
+  "format": 1,
+  "artifact_version": 2,
+  "rule_version": "sources/2026-10-15",
+  "about": "Import identity, writer-owned stamps and byte-exact replacement. Vault files are the authority.",
+  "agent_guard": [
+    "source_system",
+    "source_record_id",
+    "source_url",
+    "imported_at",
+    "imported_by",
+    "import_method",
+    "import_hash",
+    "source_id",
+    "source_kind",
+    "fetched_at",
+    "generated"
+  ],
+  "cache": {
+    "stamped_by": "cache_source",
+    "keys": [
+      "source_id",
+      "source_kind",
+      "source_url",
+      "fetched_at",
+      "stale_after",
+      "generated"
+    ],
+    "kinds": [
+      "issue",
+      "web"
+    ]
+  },
+  "import": {
+    "stamped_by": "the import writer",
+    "keys": [
+      "source_system",
+      "source_record_id",
+      "source_url",
+      "imported_at",
+      "imported_by",
+      "import_method",
+      "import_hash"
+    ],
+    "methods": [
+      "captured",
+      "agent_composed"
+    ]
+  },
+  "systems": [
+    {
+      "id": "ics",
+      "label": "Calendar file",
+      "record": "a digest of the event UID and its RECURRENCE-ID",
+      "id_steps": [
+        {
+          "op": "trim"
+        },
+        {
+          "op": "require_printable",
+          "max": 1100
+        },
+        {
+          "op": "sha256_hex",
+          "domain": "cerebro-ics-v1"
+        }
+      ]
+    },
+    {
+      "id": "linear",
+      "label": "Linear",
+      "record": "the issue UUID, never its identifier",
+      "id_steps": [
+        {
+          "op": "trim"
+        },
+        {
+          "op": "ascii_lower"
+        },
+        {
+          "op": "require_uuid"
+        }
+      ]
+    },
+    {
+      "id": "notion",
+      "label": "Notion",
+      "record": "the page id, from an id or a link",
+      "id_steps": [
+        {
+          "op": "trim"
+        },
+        {
+          "op": "drop_query_and_fragment"
+        },
+        {
+          "op": "trim_trailing_slashes"
+        },
+        {
+          "op": "last_segment"
+        },
+        {
+          "op": "remove",
+          "chars": "-"
+        },
+        {
+          "op": "ascii_lower"
+        },
+        {
+          "op": "take_last",
+          "count": 32
+        },
+        {
+          "op": "require_hex",
+          "length": 32
+        }
+      ]
+    }
+  ],
+  "stamp": {
+    "order": [
+      "source_system",
+      "source_record_id",
+      "source_url",
+      "imported_at",
+      "imported_by",
+      "import_method",
+      "import_hash"
+    ],
+    "value": "json_string",
+    "volatile": [
+      "imported_at",
+      "imported_by",
+      "import_hash"
+    ],
+    "optional": [
+      "source_url",
+      "import_method"
+    ]
+  },
+  "import_hash": {
+    "domain": "cerebro-import-v1"
+  },
+  "refused": {
+    "types": [
+      "Agent",
+      "Collection",
+      "Skill",
+      "Type"
+    ],
+    "roots": [
+      "knowledge/",
+      "sources/"
+    ]
+  },
+  "outcomes": {
+    "created": "new page",
+    "replaced": "updated in place",
+    "unchanged": "already imported, nothing new",
+    "kept": "left as it is",
+    "duplicate": "listed twice in this import"
+  },
+  "kept_reasons": {
+    "changed_since_import": "changed since it was imported",
+    "stamp_unreadable": "its import stamp no longer reads as written"
+  },
+  "messages": {
+    "unknown_system": "{system} is not an import source Cerebro knows ({systems}).",
+    "bad_record_id": "{input} is not a {label} id ({record}).",
+    "bad_url": "{input} is not an http or https address.",
+    "bad_shape": "An import's content opens with its frontmatter between --- lines and uses LF line endings.",
+    "stamped_key": "An import's content may not set {keys}: Cerebro stamps where a page came from.",
+    "refused_type": "An import never writes a type: {type} page.",
+    "bad_path": "{path} is not a .md page outside knowledge/ and sources/, so no import lands there.",
+    "path_twice": "{path} is planned twice in one batch.",
+    "stamp_refusal": "Agent writes may not add, change or remove {keys}: they record where a page came from, and only Cerebro's import and fetch writers set them. Ask the person to re-import or re-fetch instead."
+  },
+  "cases": {
+    "record_ids": [
+      {
+        "system": "linear",
+        "input": " AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE ",
+        "expected": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+      },
+      {
+        "system": "linear",
+        "input": "ENG-42",
+        "expected": null
+      },
+      {
+        "system": "linear",
+        "input": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeee",
+        "expected": null
+      },
+      {
+        "system": "notion",
+        "input": "https://www.notion.so/A-page-01234567-89AB-CDEF-0123-456789ABCDEF/?x=1#y",
+        "expected": "0123456789abcdef0123456789abcdef"
+      },
+      {
+        "system": "notion",
+        "input": "0123456789abcdef0123456789abcdef",
+        "expected": "0123456789abcdef0123456789abcdef"
+      },
+      {
+        "system": "notion",
+        "input": "a-page",
+        "expected": null
+      },
+      {
+        "system": "ics",
+        "input": "  event-1 -\n",
+        "expected": "d3ac8eebbc3d424ec17ce83b558c3a71f0632ea482712f0e484c0ede26496acc"
+      },
+      {
+        "system": "ics",
+        "input": "",
+        "expected": null
+      },
+      {
+        "system": "ics",
+        "input": "a\u0000b",
+        "expected": null
+      },
+      {
+        "system": "unknown",
+        "input": "id",
+        "expected": null
+      }
+    ],
+    "import_hashes": [
+      {
+        "name": "empty",
+        "system": "linear",
+        "record_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "url": null,
+        "method": null,
+        "content": "---\n---\n# Imported\n",
+        "now": "2026-10-13T10:00:00Z",
+        "actor": "human:me",
+        "hash": "4b9f829856ed568000b9ae732b887eb09d9bd9aab371dbaa04b5ba9fe6b72b02",
+        "composed": "---\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: \"human:me\"\nimport_hash: \"4b9f829856ed568000b9ae732b887eb09d9bd9aab371dbaa04b5ba9fe6b72b02\"\n---\n# Imported\n"
+      },
+      {
+        "name": "record",
+        "system": "linear",
+        "record_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "url": "https://example.test/issue/1",
+        "method": null,
+        "content": "---\ntype: Work item\nstatus: Todo\n---\n# Fix a thing\n\nOriginal text.\n",
+        "now": "2026-10-13T10:00:00Z",
+        "actor": "human:me",
+        "hash": "21a4f57b1c1916acc62e883c15c8e2d0412c7e3e29b32a7685f92f999fb6b299",
+        "composed": "---\ntype: Work item\nstatus: Todo\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nsource_url: \"https://example.test/issue/1\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: \"human:me\"\nimport_hash: \"21a4f57b1c1916acc62e883c15c8e2d0412c7e3e29b32a7685f92f999fb6b299\"\n---\n# Fix a thing\n\nOriginal text.\n"
+      },
+      {
+        "name": "composed",
+        "system": "linear",
+        "record_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "url": null,
+        "method": "agent_composed",
+        "content": "---\ntitle: \"Caf\u00e9\"\n---\n\u0394\n",
+        "now": "2026-10-13T10:00:00Z",
+        "actor": "human:me",
+        "hash": "e22e4ce3ecaaab1d8e8b4791022f6b3216abf3d26768e6d302719ad4f600fb00",
+        "composed": "---\ntitle: \"Caf\u00e9\"\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: \"human:me\"\nimport_method: \"agent_composed\"\nimport_hash: \"e22e4ce3ecaaab1d8e8b4791022f6b3216abf3d26768e6d302719ad4f600fb00\"\n---\n\u0394\n"
+      }
+    ],
+    "stamps": [
+      {
+        "content": "---\ntype: Work item\nstatus: Todo\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nsource_url: \"https://example.test/issue/1\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: \"human:me\"\nimport_hash: \"21a4f57b1c1916acc62e883c15c8e2d0412c7e3e29b32a7685f92f999fb6b299\"\n---\n# Fix a thing\n\nOriginal text.\n",
+        "expected": "21a4f57b1c1916acc62e883c15c8e2d0412c7e3e29b32a7685f92f999fb6b299"
+      },
+      {
+        "content": "---\ntype: Work item\nstatus: Todo\nsource_system: \"linear\"\nsource_record_id: \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"\nsource_url: \"https://example.test/issue/1\"\nimported_at: \"2026-10-13T10:00:00Z\"\nimported_by: 'human:me'\nimport_hash: \"21a4f57b1c1916acc62e883c15c8e2d0412c7e3e29b32a7685f92f999fb6b299\"\n---\n# Fix a thing\n\nOriginal text.\n",
+        "expected": null
+      }
+    ],
+    "stamp_guard": [
+      {"name": "alias key resolves", "before": "---\nother: &key generated\n*key : value\n---\nBody", "after": "---\nother: generated\ngenerated: different\n---\nBody", "refusal": "Agent writes may not add, change or remove generated: they record where a page came from, and only Cerebro's import and fetch writers set them. Ask the person to re-import or re-fetch instead."},
+      {"name": "alias duplicate mapping key is unreadable", "before": "---\nother: &key generated\ngenerated: value\n*key : value\n---\nBody", "after": "Body", "refusal": null},
+      {"name": "custom tag change", "before": "---\ngenerated: !a value\n---\nBody", "after": "---\ngenerated: !b value\n---\nBody", "refusal": "Agent writes may not add, change or remove generated: they record where a page came from, and only Cerebro's import and fetch writers set them. Ask the person to re-import or re-fetch instead."},
+      {"name": "mapping key type matters", "before": "---\ngenerated: {1: value}\n---\nBody", "after": "---\ngenerated: {\"1\": value}\n---\nBody", "refusal": "Agent writes may not add, change or remove generated: they record where a page came from, and only Cerebro's import and fetch writers set them. Ask the person to re-import or re-fetch instead."},
+      {"name": "NaN reformat", "before": "---\ngenerated: .nan\n---\nBody", "after": "---\ngenerated: .NaN\n---\nBody", "refusal": null},
+      {"name": "integer is not float", "before": "---\ngenerated: 1\n---\nBody", "after": "---\ngenerated: 1.0\n---\nBody", "refusal": "Agent writes may not add, change or remove generated: they record where a page came from, and only Cerebro's import and fetch writers set them. Ask the person to re-import or re-fetch instead."},
+      {"name": "large integer exact", "before": "---\ngenerated: 9007199254740992\n---\nBody", "after": "---\ngenerated: 9007199254740993\n---\nBody", "refusal": "Agent writes may not add, change or remove generated: they record where a page came from, and only Cerebro's import and fetch writers set them. Ask the person to re-import or re-fetch instead."},
+      {"name": "recursive aliases are unreadable", "before": "---\ngenerated: &a [*a]\n---\nBody", "after": "---\nother: body\n---\nBody", "refusal": null},
+      {"name": "finite aliases compare by value", "before": "---\ngenerated: &a [one, two]\nother: *a\n---\nBody", "after": "---\ngenerated: [one, two]\n---\nBody", "refusal": null},
+      {"name": "null spelling equal", "before": "---\ngenerated: null\n---\nBody", "after": "---\ngenerated: ~\n---\nBody", "refusal": null},
+      {"name": "map order does not matter", "before": "---\ngenerated: {one: 1, two: 2}\n---\nBody", "after": "---\ngenerated: {two: 2, one: 1}\n---\nBody", "refusal": null},
+      {
+        "name": "stripping a stamp",
+        "before": "---\nimport_hash: old\n---\nBody\n",
+        "after": "---\ntitle: Page\n---\nBody\n",
+        "refusal": "Agent writes may not add, change or remove import_hash: they record where a page came from, and only Cerebro's import and fetch writers set them. Ask the person to re-import or re-fetch instead."
+      },
+      {
+        "name": "changing record identity",
+        "before": "---\nsource_record_id: old\n---\nBody\n",
+        "after": "---\nsource_record_id: new\n---\nBody\n",
+        "refusal": "Agent writes may not add, change or remove source_record_id: they record where a page came from, and only Cerebro's import and fetch writers set them. Ask the person to re-import or re-fetch instead."
+      },
+      {
+        "name": "adding source identity",
+        "before": "---\ntitle: Page\n---\nBody\n",
+        "after": "---\ntitle: Page\nsource_system: linear\n---\nBody\n",
+        "refusal": "Agent writes may not add, change or remove source_system: they record where a page came from, and only Cerebro's import and fetch writers set them. Ask the person to re-import or re-fetch instead."
+      },
+      {
+        "name": "a create carrying generated",
+        "before": "",
+        "after": "---\ngenerated:\n  by: \"process:other\"\n---\nBody\n",
+        "refusal": "Agent writes may not add, change or remove generated: they record where a page came from, and only Cerebro's import and fetch writers set them. Ask the person to re-import or re-fetch instead."
+      },
+      {
+        "name": "breaking a stamped frontmatter block",
+        "before": "---\nsource_system: notion\n---\nBody\n",
+        "after": "---\nsource_system: [broken\n---\nBody\n",
+        "refusal": "Agent writes may not add, change or remove source_system: they record where a page came from, and only Cerebro's import and fetch writers set them. Ask the person to re-import or re-fetch instead."
+      },
+      {
+        "name": "requote and reorder",
+        "before": "---\nsource_system: notion\nsource_record_id: \"abc\"\n---\nBody\n",
+        "after": "---\nsource_record_id: 'abc'\nsource_system: \"notion\"\n---\nBody\n",
+        "refusal": null
+      },
+      {
+        "name": "body only",
+        "before": "---\nsource_system: notion\n---\nBody\n",
+        "after": "---\nsource_system: notion\n---\nNew body\n",
+        "refusal": null
+      },
+      {
+        "name": "both blocks malformed",
+        "before": "---\nsource_system: [broken\n---\nBody\n",
+        "after": "---\nsource_system: [stillbroken\n---\nBody\n",
+        "refusal": null
+      },
+      {
+        "name": "stale_after remains writable",
+        "before": "---\nsource_kind: web\nstale_after: \"2026-10-13\"\n---\nBody\n",
+        "after": "---\nsource_kind: web\nstale_after: \"2026-10-14\"\n---\nBody\n",
+        "refusal": null
+      },
+      {
+        "name": "null is present",
+        "before": "---\nimported_at: null\n---\nBody\n",
+        "after": "---\ntitle: Page\n---\nBody\n",
+        "refusal": "Agent writes may not add, change or remove imported_at: they record where a page came from, and only Cerebro's import and fetch writers set them. Ask the person to re-import or re-fetch instead."
+      },
+      {
+        "name": "generated mapping order has no effect",
+        "before": "---\ngenerated: {by: worker, at: yesterday}\n---\nBody\n",
+        "after": "---\ngenerated: {at: yesterday, by: worker}\n---\nBody\n",
+        "refusal": null
+      },
+      {
+        "name": "refusal keys use the artifact order",
+        "before": "---\nsource_system: notion\nimport_hash: old\n---\nBody\n",
+        "after": "---\nsource_system: linear\nimport_hash: new\n---\nBody\n",
+        "refusal": "Agent writes may not add, change or remove source_system, import_hash: they record where a page came from, and only Cerebro's import and fetch writers set them. Ask the person to re-import or re-fetch instead."
+      }
+    ],
+    "urls": [
+      {
+        "input": "https://example.test",
+        "accepted": true
+      },
+      {
+        "input": "HTTP://example.test:65535/a?x=y#z",
+        "accepted": true
+      },
+      {
+        "input": "https://example.test/\u65e5\u672c",
+        "accepted": true
+      },
+      {
+        "input": "https://?x",
+        "accepted": false
+      },
+      {
+        "input": "https://[",
+        "accepted": false
+      },
+      {
+        "input": "https://example.test:65536",
+        "accepted": false
+      },
+      {
+        "input": "https://example.test:99999",
+        "accepted": false
+      },
+      {
+        "input": "https://example.test/\u0085",
+        "accepted": false
+      },
+      {
+        "input": "https://example.test/\ufeff",
+        "accepted": false
+      },
+      {
+        "input": "https://example.test/\n",
+        "accepted": false
+      },
+      {
+        "input": "https://example.test\\outside",
+        "accepted": false
+      },
+      {
+        "input": "https://user:password@example.test",
+        "accepted": false
+      },
+      {
+        "input": "https://[::1]/a",
+        "accepted": false
+      }
+    ]
+  },
+  "url_pattern": "^[Hh][Tt][Tt][Pp][Ss]?://[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\\.?(?::(?:[0-5]?[0-9]{1,4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(?:[/?#][^\u0000- \u007f-\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff\\\\]*)?$"
+}

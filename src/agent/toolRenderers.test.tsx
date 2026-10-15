@@ -41,7 +41,7 @@ describe('RENDERERS', () => {
     ]);
     for (const renderer of used) expect(RENDERERS, renderer).toHaveProperty(renderer);
     expect(Object.keys(RENDERERS).sort()).toEqual(
-      ['change', 'commit', 'concept', 'handoff', 'step'].sort(),
+      ['change', 'commit', 'concept', 'handoff', 'step', 'view'].sort(),
     );
   });
 });

@@ -15,6 +15,7 @@ const nodeKey = (rootId: string, path: string): string => `${rootId} ${path}`;
 
 interface RootsState {
   roots: Root[];
+  rootsLoaded: boolean;
   /** nodeKey → expanded. */
   expanded: Record<string, boolean>;
   /** nodeKey → its listing, once fetched. */
@@ -108,6 +109,7 @@ export const selectActiveTab = (s: RootsState): OpenTab | null => groups.activeT
 export const initialRootsState = (): Pick<
   RootsState,
   | 'roots'
+  | 'rootsLoaded'
   | 'expanded'
   | 'children'
   | 'layout'
@@ -119,6 +121,7 @@ export const initialRootsState = (): Pick<
   | 'gitSync'
 > => ({
   roots: [],
+  rootsLoaded: false,
   expanded: {},
   children: {},
   layout: groups.emptyLayout(),
@@ -134,7 +137,7 @@ export const useRootsStore = create<RootsState>((set, get) => ({
   ...initialRootsState(),
 
   async loadRoots() {
-    set({ roots: await ipc.listRoots() });
+    set({ roots: await ipc.listRoots(), rootsLoaded: true });
   },
 
   /**

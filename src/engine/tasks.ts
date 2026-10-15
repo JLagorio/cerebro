@@ -1,3 +1,4 @@
+import { dateBandFor } from './dateBuckets';
 /**
  * Doc-task parsing (M2.x docs polish). Tasks live in note bodies as plain
  * markdown checklist items — the file stays readable everywhere:
@@ -12,6 +13,8 @@
 
 export interface DocTask {
   sourcePath: string;
+  /** Whole-file hash behind these line offsets; null for an unversioned parse. */
+  version: string | null;
   /** Index into body.split('\n') — used to toggle the checkbox in place. */
   line: number;
   /** Display text with due/assignee tokens stripped and wikilinks unwrapped. */
@@ -31,7 +34,11 @@ const ASSIGNEE_TOKEN = /@\[\[([^\]|[]+)(?:\|[^\][]*)?\]\]/g;
 const WIKILINK_TOKEN = /\[\[([^\]|[]+)(?:\|([^\][]*))?\]\]/g;
 
 /** Parse every checklist item in a note body. Fenced code is skipped. */
-export function parseTasks(sourcePath: string, body: string): DocTask[] {
+export function parseTasks(
+  sourcePath: string,
+  body: string,
+  version: string | null = null,
+): DocTask[] {
   const tasks: DocTask[] = [];
   let inFence = false;
   const lines = body.split('\n');
@@ -59,6 +66,7 @@ export function parseTasks(sourcePath: string, body: string): DocTask[] {
 
     tasks.push({
       sourcePath,
+      version,
       line: i,
       text,
       done: match[2] !== ' ',
@@ -89,8 +97,9 @@ export type DueBucket = 'overdue' | 'today' | 'upcoming' | 'none';
 /** Bucket a due date against `today` (YYYY-MM-DD). */
 export function dueBucket(due: string | null, today: string): DueBucket {
   if (due === null) return 'none';
-  if (due < today) return 'overdue';
-  if (due === today) return 'today';
+  const band = dateBandFor(due, 'date', undefined, { today, weekStart: 0 });
+  if (band.key === 'rel:earlier') return 'overdue';
+  if (band.key === today) return 'today';
   return 'upcoming';
 }
 

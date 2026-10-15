@@ -1,3 +1,4 @@
+import { PaneContext, useNavStore } from '@/stores/navStore';
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,7 +12,12 @@ import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import type { EditorReadyInfo } from './MarkdownEditor';
 import { NoteBodyEditor, type SaveState } from './NoteBodyEditor';
-import { __resetOpenPages, announceExternalWrites, flushOpenPages } from './openPages';
+import {
+  __resetOpenPages,
+  announceExternalWrites,
+  flushOpenPages,
+  editorHoldersOf,
+} from './openPages';
 
 const PAGE = 'inbox/test-page.md';
 const LOSSY_BODY = '# Page\n\n<div align="center">raw html island</div>\n';
@@ -473,4 +479,20 @@ describe('NoteBodyEditor when the file changes underneath it', () => {
     // Landed by the time the flush resolves, not ten seconds out.
     expect(fs().get(PAGE)).toContain('typed just before asking');
   });
+});
+
+it('holds the edited file under its pane or peek owner and releases on unmount (M65.8)', () => {
+  const pane = useNavStore.getState().active;
+  const mounted = render(
+    <PaneContext value={pane}>
+      <NoteBodyEditor path="a.md" />
+    </PaneContext>,
+  );
+  expect(editorHoldersOf('a.md')).toEqual([pane]);
+  mounted.unmount();
+  expect(editorHoldersOf('a.md')).toEqual([]);
+  const peek = render(<NoteBodyEditor path="a.md" owner="peek" />);
+  expect(editorHoldersOf('a.md')).toEqual(['peek']);
+  peek.unmount();
+  expect(editorHoldersOf('a.md')).toEqual([]);
 });

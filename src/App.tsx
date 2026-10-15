@@ -1,3 +1,7 @@
+import { PaneRow } from '@/app/PaneRow';
+import { retainOsDropRouter } from '@/lib/osDrop';
+import { usePageAsideOpen } from '@/pages/DocPage';
+import { PaneLayoutHost } from '@/app/LastPlaceHost';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AgentActions } from '@/agent/AgentActions';
 import { AiPanel } from '@/agent/AiPanel';
@@ -24,38 +28,25 @@ import {
 import { Sidebar } from '@/app/Sidebar';
 import { StatusBar } from '@/app/StatusBar';
 import { QuickOpen } from '@/app/QuickOpen';
+import { CreateLauncher } from '@/app/CreateLauncher';
 import { useQuitHost, useQuitting } from '@/app/quit';
 import { WindowTitle } from '@/app/WindowTitle';
 import { QuitScreen } from '@/app/QuitScreen';
+import { ChordHint } from '@/app/ChordHint';
 import { ToastHost } from '@/app/ToastHost';
+import { RenameLinksHost } from '@/app/RenameLinksHost';
 import { useAppCommands } from '@/app/useAppCommands';
 import { useUndoShortcuts } from '@/app/useUndoShortcuts';
 import { DetailPanel } from '@/detail/DetailPanel';
 import { LayoutEditorDialog } from '@/detail/LayoutEditorDialog';
-import { AgentsPage } from '@/pages/AgentsPage';
-import { ChangesPage } from '@/pages/ChangesPage';
-import { CollectionPage } from '@/pages/CollectionPage';
-import { ListPage } from '@/pages/ListPage';
-import { DiagramPage } from '@/pages/DiagramPage';
-import { DocPage, usePageAsideOpen } from '@/pages/DocPage';
-import { HomePage } from '@/pages/HomePage';
-import { InboxPage } from '@/pages/InboxPage';
-import { KnowledgePage } from '@/pages/KnowledgePage';
-import { MyWorkPage } from '@/pages/MyWorkPage';
-import { PulsePage } from '@/pages/PulsePage';
-import { LibraryPage } from '@/library/LibraryPage';
-import { SettingsPage } from '@/pages/SettingsPage';
-import { StudioPage } from '@/pages/StudioPage';
-import { TypePage } from '@/pages/TypePage';
-import { WorkspacePage } from '@/pages/WorkspacePage';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { useMeasuredWidth } from '@/hooks/useMeasuredWidth';
 import { RemindersHost } from '@/hooks/useReminders';
 import { useTheme } from '@/hooks/useTheme';
 import { getLastVault, openDemoVault, pickVault } from '@/lib/ipc';
-import { useKeyRoot, useKeyScope } from '@/lib/keys/useKeys';
-import { useNavStore } from '@/stores/navStore';
+import { useKeyRoot } from '@/lib/keys/useKeys';
+import { PaneContext, useNavStore } from '@/stores/navStore';
 import { CANVAS_MIN_WIDTH, RIGHT_PANEL_MIN_WIDTH, useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -100,59 +91,6 @@ const SHELL_NARROW_MAX = 1048;
  * the parked tab (M52).
  */
 export { SHELL_TWO_PANEL_MIN };
-
-function CanvasOutlet() {
-  const selection = useNavStore((s) => s.selection);
-  switch (selection.kind) {
-    case 'home':
-      return <HomePage />;
-    case 'inbox':
-      return <InboxPage />;
-    // M43 — open work across every database, grouped by type.
-    case 'mywork':
-      return <MyWorkPage />;
-    case 'knowledge':
-      return <KnowledgePage selection={selection} />;
-    // M12.5: `project` retired — a project is a folder, and a folder on
-    // screen is a Collection.
-    case 'doc':
-      return <DocPage selection={selection} />;
-    // M29.21: a standalone .mmd opens as a full-page diagram editor. KEYED on
-    // the path so navigating diagram→diagram is a true unmount/remount: the
-    // page's debounced-save flush runs as an unmount cleanup, and an unkeyed
-    // path change re-pointed the save at the NEW file before the OLD page's
-    // pending edit had flushed — writing A's bytes into B and losing A's edit.
-    case 'diagram':
-      return <DiagramPage key={selection.path} selection={selection} />;
-    // M10: a Collection is the container's page; a List is the record canvas.
-    case 'collection':
-      return <CollectionPage selection={selection} />;
-    case 'list':
-      return <ListPage selection={selection} />;
-    case 'type':
-      return <TypePage selection={selection} />;
-    case 'changes':
-      return <ChangesPage />;
-    case 'pulse':
-      return <PulsePage />;
-    case 'library':
-      return <LibraryPage />;
-    // M30 — mounted repositories: file tree, viewer, and the cross-root docs
-    // index. Takes the selection so the open file survives Back.
-    case 'workspace':
-      return <WorkspacePage selection={selection} />;
-    // M40 — the prototype surface. Takes the selection so the open
-    // prototype survives Back.
-    case 'studio':
-      return <StudioPage selection={selection} />;
-    // M41 — the agents' front door. Same contract: the open agent survives
-    // Back.
-    case 'agents':
-      return <AgentsPage selection={selection} />;
-    case 'settings':
-      return <SettingsPage />;
-  }
-}
 
 function VaultChooser() {
   const openVault = useVaultStore((s) => s.openVault);
@@ -223,9 +161,8 @@ function App() {
   // M60.7: ⌘Z and ⇧⌘Z undo and redo the person's own changes, outside text
   // editors and layers; a diagram's own binding shadows them.
   useUndoShortcuts();
-  // The canvas is the page key scope (M65.1): the scope a key falls back to
-  // when focus and the last click are nowhere scoped.
-  const pageScope = useKeyScope('page', { page: true });
+  const paneCount = useNavStore((state) => state.paneIds.length);
+  const detailPane = useUiStore((state) => state.detailPane);
   const quitting = useQuitting();
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const openVault = useVaultStore((s) => s.openVault);
@@ -302,6 +239,7 @@ function App() {
     assistant: aiPanelOpen,
     assistantWidth: aiWidth,
     pageAside,
+    panes: paneCount,
   };
   const parkedFloor = { ...drawnFloor, assistant: false, parked: true };
   // M52: the sidebar's drag stops at what can be drawn beside that floor.
@@ -311,6 +249,7 @@ function App() {
     mainColumnFloorPx(parked ? parkedFloor : drawnFloor),
   );
 
+  useEffect(retainOsDropRouter, []);
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -390,8 +329,8 @@ function App() {
             M15: the assistant moved in here too. As a sibling of the whole main
             column it stole width from the StatusBar as well as
             the canvas. `overflow-hidden` is the box nothing may paint outside,
-            and `@container/canvas` lets a page respond to the width it actually
-            has rather than the viewport's. */}
+            and `@container/canvas` gives the single pane its full row width.
+            With multiple panes each frame supplies its own canvas container. */}
         <div
           ref={canvasRowRef}
           className="@container/canvas flex min-h-0 min-w-0 flex-1 overflow-hidden bg-n-0"
@@ -405,11 +344,8 @@ function App() {
             // The floor itself. NOT `min-w-0` — that is exactly what made
             // content absorb 100% of any shortfall.
             style={{ minWidth: CANVAS_MIN_WIDTH }}
-            {...pageScope.props}
           >
-            <pageScope.Provider>
-              <CanvasOutlet />
-            </pageScope.Provider>
+            <PaneRow />
           </main>
           {/* Capped against the CANVAS ROW rather than the viewport — a vw cap
               resolves against a box the panel does not live in, so it never
@@ -427,7 +363,9 @@ function App() {
               style={{ maxWidth: `calc(100% - ${CANVAS_MIN_WIDTH}px)` }}
             >
               {detailOpen && (
-                <DetailPanel room={rooms?.detail ?? null} besideAssistant={showAssistant} />
+                <PaneContext value={detailPane}>
+                  <DetailPanel room={rooms?.detail ?? null} besideAssistant={showAssistant} />
+                </PaneContext>
               )}
               {/* One mount, drawn or parked, so crossing the width it parks
                   at never remounts it (M17.2): a remount detaches the
@@ -483,10 +421,13 @@ function App() {
         <StatusBar />
       </div>
       <QuickOpen />
+      <CreateLauncher />
       {/* M45.2 — one mount, one signal: three menus raise uiStore.layoutEditor
           and this single App-level dialog is the only reader. */}
       <LayoutEditorDialog />
       <ToastHost />
+      <ChordHint />
+      <RenameLinksHost />
       <RemindersHost />
       <CheckpointHost />
       {/* M8.6/M13.2 — the base reads filed captures and edited notes on its
@@ -496,6 +437,7 @@ function App() {
           is not one), and as a HOST so its minute tick re-renders nothing. */}
       <JobRunnerHost />
       <AgentActions />
+      <PaneLayoutHost />
       {/* M59.1 — the window title names the place; the chooser keeps
           index.html's own title, since this branch is the vault's. */}
       <WindowTitle />

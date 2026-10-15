@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import tools from '../../shared/policy/tools.v1.json';
 import {
   DESTINATIONS,
+  GO_KEYS,
   destination,
   isDestinationKind,
   NAVIGATE_PLACES,
@@ -30,6 +31,7 @@ const SIDE: { [K in Selection['kind']]: 'destination' | 'subject' } = {
   settings: 'destination',
   doc: 'subject',
   diagram: 'subject',
+  file: 'subject',
   collection: 'subject',
   list: 'subject',
   type: 'subject',
@@ -202,4 +204,27 @@ describe('navigateTarget', () => {
     const target = navigateTarget({ to: 'view', database: 'risk' }, twins, buildSchema(twins));
     expect('refused' in target).toBe(true);
   });
+});
+
+it('every destination has one unique go key, never the list leader', () => {
+  const letters = DESTINATIONS.map((place) => place.go);
+  expect(new Set(letters).size).toBe(DESTINATIONS.length);
+  expect(letters.every((letter) => letter.length === 1 && letter !== 'g')).toBe(true);
+  expect(GO_KEYS).toEqual({
+    inbox: 'g i',
+    home: 'g h',
+    my_work: 'g m',
+    studio: 'g s',
+    history: 'g y',
+    library: 'g l',
+    work: 'g w',
+    knowledge: 'g k',
+    agents: 'g a',
+    changes: 'g c',
+    settings: 'g ,',
+  });
+});
+
+it('exactly Inbox and Work are single places (M65.8)', () => {
+  expect(DESTINATIONS.filter((row) => row.single).map((row) => row.id)).toEqual(['inbox', 'work']);
 });

@@ -158,3 +158,57 @@ describe('post-plan parity: snippets and links', () => {
     expect(e.outgoingLinks).toEqual(['b', 'a']);
   });
 });
+
+describe('whiteboard scan entries', () => {
+  const board = JSON.stringify({
+    nodes: [
+      {
+        id: 'text',
+        type: 'text',
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 100,
+        text: 'Hello [[Target|world]]',
+      },
+      {
+        id: 'file',
+        type: 'file',
+        x: 100,
+        y: 0,
+        width: 100,
+        height: 100,
+        file: 'projects/atlas/project.md',
+        subpath: '#Notes',
+      },
+      { id: 'group', type: 'group', x: 0, y: 0, width: 300, height: 300, label: 'Release' },
+    ],
+    edges: [],
+  });
+  it('reads only card text and file references, never frontmatter-like JSON values', () => {
+    const entry = parseNote('boards/team-plan.canvas', board, T, T);
+    expect(entry).toMatchObject({
+      title: 'Team plan',
+      type: null,
+      properties: {},
+      relationships: {},
+      snippet: 'Hello world Release',
+      outgoingLinks: ['Target', 'atlas#Notes'],
+      parseError: null,
+    });
+    expect(entry.hash).toMatch(/^[0-9a-f]{64}$/);
+  });
+  it('keeps malformed text as a parse-error entry with its hash', () => {
+    const entry = parseNote('boards/broken.canvas', '{"nodes":', T, T);
+    expect(entry.title).toBe('Broken');
+    expect(entry.parseError).toBeTruthy();
+    expect(entry.hash).not.toBeNull();
+    expect(entry.snippet).toBe('');
+    expect(entry.outgoingLinks).toEqual([]);
+  });
+  it('a byte-capped board is unreadable and does not claim a content hash', () => {
+    const entry = parseNote('boards/large.canvas', ' '.repeat(8_388_609), T, T);
+    expect(entry.hash).toBeNull();
+    expect(entry.parseError).toBe('unreadable: This whiteboard is over the 8388608 byte limit.');
+  });
+});

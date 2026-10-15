@@ -6,7 +6,7 @@ import { FieldChip } from '@/views/FieldChip';
 import { buildSchema } from '@/engine/schema';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
-import { fixtureVault } from '@/test/factories';
+import { fixtureVault, makeEntry } from '@/test/factories';
 import type { Presentation } from '@/engine/types';
 
 const presentation: Presentation = {
@@ -16,14 +16,15 @@ const presentation: Presentation = {
   columns: [{ field: 'status' }, { field: 'priority' }, { field: 'assignee' }],
 };
 
-function setup(overrides: Partial<ReturnType<typeof useVaultStore.getState>> = {}) {
+function setup(
+  onCreate?: (title: string, band: { groupBy: string; groupValue: string }) => Promise<boolean>,
+) {
   const entries = fixtureVault();
-  useVaultStore.setState({ entries, ...overrides });
+  useVaultStore.setState({ entries });
   const schema = buildSchema(entries);
   const items = entries.filter((e) => e.path.startsWith('projects/onboarding/items/'));
-  const project = entries.find((e) => e.path === 'projects/onboarding/project.md')!;
   render(
-    <ListView entries={items} presentation={presentation} schema={schema} project={project} />,
+    <ListView entries={items} presentation={presentation} schema={schema} onCreate={onCreate} />,
   );
 }
 
@@ -42,120 +43,111 @@ describe('ListView', () => {
     expect(labels[2]).toContain('Done'); // empty group still renders, proving schema order
   });
 
+  it('draws a multi-value record once in each of its bands', () => {
+    const type = makeEntry({
+      path: 'types/note.md',
+      type: 'Type',
+      title: 'Note',
+      properties: { fields: { labels: { kind: 'multiselect', options: ['one', 'two'] } } } as never,
+    });
+    const record = makeEntry({
+      path: 'notes/both.md',
+      type: 'Note',
+      title: 'In both bands',
+      properties: { labels: ['one', 'two'] },
+    });
+    const entries = [type, record];
+    render(
+      <ListView
+        entries={[record]}
+        presentation={{ ...presentation, group: [{ field: 'labels' }] }}
+        schema={buildSchema(entries)}
+      />,
+    );
+    expect(screen.getAllByRole('button', { name: 'Open In both bands' })).toHaveLength(2);
+    expect(screen.getAllByTestId('list-group-header').map((row) => row.textContent)).toEqual(
+      expect.arrayContaining([expect.stringContaining('One'), expect.stringContaining('Two')]),
+    );
+  });
+
   it('renders a warning row for entries with a parse error', () => {
     setup();
     expect(screen.getByText('Cannot parse')).toBeTruthy();
     expect(screen.getByText('broken.md')).toBeTruthy();
   });
 
-  it('quick-add creates an item with the group field value pre-set', async () => {
+  it('offers add rows only when its caller supplies onCreate', () => {
+    setup();
+    expect(screen.queryAllByTestId('quick-add')).toHaveLength(0);
+    cleanup();
+    setup(vi.fn().mockResolvedValue(true));
+    expect(screen.getAllByTestId('quick-add').length).toBeGreaterThan(0);
+  });
+
+  it('passes the authored title and band to its caller', async () => {
     const user = userEvent.setup();
-    const createItem = vi.fn().mockResolvedValue('items/ship-the-fix.md');
-    setup({ createItem });
-    const add = `New item in Doing`;
-    await user.click(screen.getByRole('button', { name: add }));
-    await user.type(screen.getByRole('textbox', { name: add }), 'Ship the fix{Enter}');
-    // v2: containment membership — no `project:` wikilink in the frontmatter.
-    expect(createItem).toHaveBeenCalledWith({
-      folder: 'projects/onboarding/items',
-      slug: 'ship-the-fix',
-      frontmatter: {
-        type: 'Work item',
-        key: 'FLD-3',
-        status: 'doing',
-      },
-      // The typed title becomes the H1 verbatim (M1.x capitalization fix).
-      body: '# Ship the fix\n',
+    const onCreate = vi.fn().mockResolvedValue(true);
+    setup(onCreate);
+    await user.click(screen.getByRole('button', { name: 'New item in Doing' }));
+    await user.type(
+      screen.getByRole('textbox', { name: 'New item in Doing' }),
+      'Ship the fix{Enter}',
+    );
+    expect(onCreate).toHaveBeenCalledWith('Ship the fix', {
+      groupBy: 'status',
+      groupValue: 'doing',
     });
   });
 
-  // M1.x guard: double-Enter while the write is pending must not create two
-  // items with identical keys (same guard as the CreateMenu dialogs).
-  it('quick-add ignores a second Enter while the first create is pending', async () => {
+  it('ignores a second Enter while the first create is pending', async () => {
     const user = userEvent.setup();
-    const createItem = vi.fn(() => new Promise<string>(() => {}));
-    setup({ createItem });
-    const add = `New item in Todo`;
-    await user.click(screen.getByRole('button', { name: add }));
-    await user.type(screen.getByRole('textbox', { name: add }), 'Once only{Enter}{Enter}');
-    expect(createItem).toHaveBeenCalledTimes(1);
+    const onCreate = vi.fn(() => new Promise<boolean>(() => {}));
+    setup(onCreate);
+    await user.click(screen.getByRole('button', { name: 'New item in Todo' }));
+    await user.type(
+      screen.getByRole('textbox', { name: 'New item in Todo' }),
+      'Once only{Enter}{Enter}',
+    );
+    expect(onCreate).toHaveBeenCalledTimes(1);
   });
 
-  // M1.x fallback: slugify('???') === '' and create_note rejects empty slugs —
-  // fall back to the generated key.
-  it('quick-add falls back to the item key as slug for all-symbol titles', async () => {
+  it('keeps the draft when its caller refuses the create', async () => {
     const user = userEvent.setup();
-    const createItem = vi.fn().mockResolvedValue('items/fld-3.md');
-    setup({ createItem });
-    const add = `New item in Todo`;
-    await user.click(screen.getByRole('button', { name: add }));
-    await user.type(screen.getByRole('textbox', { name: add }), '!!!{Enter}');
-    expect(createItem.mock.calls[0][0].slug).toBe('fld-3');
-    expect(createItem.mock.calls[0][0].body).toBe('# !!!\n');
-  });
-
-  // Deviation test (execution-log binding note 16a): createItem throws to
-  // callers by design — the quick-add handler must surface the failure via a
-  // toast instead of leaving an unhandled rejection, keeping the draft open.
-  it('quick-add surfaces a createItem failure via toast and keeps the draft', async () => {
-    const user = userEvent.setup();
-    const createItem = vi.fn().mockRejectedValue(new Error('disk full'));
-    useUiStore.setState({ toasts: [] });
-    setup({ createItem });
-    const add = `New item in Todo`;
-    await user.click(screen.getByRole('button', { name: add }));
-    await user.type(screen.getByRole('textbox', { name: add }), 'Doomed item{Enter}');
-    await vi.waitFor(() => {
-      expect(useUiStore.getState().toasts.map((t) => t.message)).toContain(
-        'Couldn\'t create "Doomed item"',
-      );
-    });
-    expect(screen.getByRole('textbox', { name: add })).toBeTruthy();
+    setup(vi.fn().mockResolvedValue(false));
+    await user.click(screen.getByRole('button', { name: 'New item in Todo' }));
+    await user.type(screen.getByRole('textbox', { name: 'New item in Todo' }), 'Keep this{Enter}');
+    expect(screen.getByRole('textbox', { name: 'New item in Todo' })).toHaveProperty(
+      'value',
+      'Keep this',
+    );
   });
 
   it('quick-add cancels on Escape', async () => {
     const user = userEvent.setup();
-    const createItem = vi.fn();
-    setup({ createItem });
-    const add = `New item in Todo`;
-    await user.click(screen.getByRole('button', { name: add }));
-    await user.type(screen.getByRole('textbox', { name: add }), 'never{Escape}');
-    expect(screen.queryByRole('textbox', { name: add })).toBeNull();
-    expect(createItem).not.toHaveBeenCalled();
+    const onCreate = vi.fn();
+    setup(onCreate);
+    await user.click(screen.getByRole('button', { name: 'New item in Todo' }));
+    await user.type(screen.getByRole('textbox', { name: 'New item in Todo' }), 'never{Escape}');
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(onCreate).not.toHaveBeenCalled();
   });
 
-  // Fix tests (execution-log note 17a): an empty project rendered a blank
-  // canvas — groupEntries([], …) returns [] so there were no headers, no
-  // Add-item row, and no empty state, leaving quick-add unreachable the
-  // moment CreateMenu can create fresh projects.
-  it('falls back to the flat all-items group when grouping yields no groups', () => {
-    const entries = fixtureVault();
-    const schema = buildSchema(entries);
-    const project = entries.find((e) => e.path === 'projects/onboarding/project.md')!;
-    render(<ListView entries={[]} presentation={presentation} schema={schema} project={project} />);
-    const headers = screen.getAllByTestId('list-group-header');
-    expect(headers).toHaveLength(1);
-    expect(headers[0].textContent).toContain('All items');
-    expect(screen.getByText('Add item')).toBeTruthy();
-  });
-
-  it('quick-add via the empty-project fallback group does not preset the group field', async () => {
+  it('an empty list still offers the caller a first record with no band seed', async () => {
     const user = userEvent.setup();
-    const createItem = vi.fn().mockResolvedValue('items/first-item.md');
+    const onCreate = vi.fn().mockResolvedValue(true);
     const entries = fixtureVault();
-    useVaultStore.setState({ entries, createItem });
-    const schema = buildSchema(entries);
-    const project = entries.find((e) => e.path === 'projects/onboarding/project.md')!;
-    render(<ListView entries={[]} presentation={presentation} schema={schema} project={project} />);
+    render(
+      <ListView
+        entries={[]}
+        presentation={presentation}
+        schema={buildSchema(entries)}
+        onCreate={onCreate}
+      />,
+    );
+    expect(screen.getByTestId('list-group-header').textContent).toContain('All items');
     await user.click(screen.getByText('Add item'));
     await user.type(screen.getByRole('textbox'), 'First item{Enter}');
-    // No `status: ''` leak from the fallback group's empty key.
-    expect(createItem).toHaveBeenCalledWith({
-      folder: 'projects/onboarding/items',
-      slug: 'first-item',
-      frontmatter: { type: 'Work item', key: 'FLD-3' },
-      body: '# First item\n',
-    });
+    expect(onCreate).toHaveBeenCalledWith('First item', { groupBy: '', groupValue: '' });
   });
 });
 
@@ -199,13 +191,7 @@ describe('ListView keyboard and empty state (M15)', () => {
     const schema = buildSchema(entries);
     const items = entries.filter((e) => e.path.startsWith('projects/onboarding/items/'));
     render(
-      <ListView
-        entries={items}
-        presentation={presentation}
-        schema={schema}
-        project={null}
-        onCreate={onCreate}
-      />,
+      <ListView entries={items} presentation={presentation} schema={schema} onCreate={onCreate} />,
     );
     await user.click(screen.getByRole('button', { name: 'New item in Doing' }));
     await user.type(screen.getByRole('textbox', { name: 'New item in Doing' }), 'Ship it{Enter}');
@@ -215,9 +201,7 @@ describe('ListView keyboard and empty state (M15)', () => {
   it('says why a filtered view is empty instead of showing a bare count strip', () => {
     const entries = fixtureVault();
     const schema = buildSchema(entries);
-    render(
-      <ListView entries={[]} presentation={presentation} schema={schema} project={null} filtered />,
-    );
+    render(<ListView entries={[]} presentation={presentation} schema={schema} filtered />);
     expect(screen.getByText('Nothing matches these filters')).toBeTruthy();
   });
 });
@@ -261,6 +245,14 @@ describe('ListView row affordances (M16.21)', () => {
     // Opening the menu is not opening the row — the click must not fall
     // through to the row's own handler.
     expect(useUiStore.getState().detailPath).toBeNull();
+  });
+
+  it('copies a filename-stem link from a row', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole('button', { name: 'Actions for Design first-run flow' }));
+    await user.click(screen.getByTestId('row-copy-link'));
+    expect(await navigator.clipboard.readText()).toBe('[[fld-1]]');
   });
 
   it('confirms before deleting, naming what links to the record', async () => {

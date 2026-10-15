@@ -1,0 +1,219 @@
+[
+  {
+    "id": "text",
+    "name": "note.md",
+    "absolute": true,
+    "seed": {
+      "text": "Hello\n"
+    },
+    "inspect": {
+      "kind": "file",
+      "size": 6,
+      "hidden": false
+    },
+    "read": {
+      "kind": "text",
+      "content": "Hello\n"
+    }
+  },
+  {
+    "id": "folder",
+    "name": "folder",
+    "absolute": true,
+    "seed": {
+      "folder": true
+    },
+    "inspect": {
+      "kind": "folder",
+      "size": null,
+      "hidden": false
+    },
+    "read": {
+      "kind": "folder"
+    }
+  },
+  {
+    "id": "missing",
+    "name": "missing.md",
+    "absolute": true,
+    "seed": null,
+    "inspect": {
+      "kind": "missing",
+      "size": null,
+      "hidden": false
+    },
+    "read": {
+      "kind": "notFound"
+    }
+  },
+  {
+    "id": "relative",
+    "name": "relative.md",
+    "absolute": false,
+    "seed": {
+      "text": "No"
+    },
+    "inspect": {
+      "kind": "missing",
+      "size": null,
+      "hidden": false
+    },
+    "read": {
+      "kind": "notFound"
+    }
+  },
+  {
+    "id": "hidden",
+    "name": ".hidden.md",
+    "absolute": true,
+    "seed": {
+      "text": "Hidden"
+    },
+    "inspect": {
+      "kind": "file",
+      "size": 6,
+      "hidden": true
+    },
+    "read": {
+      "kind": "text",
+      "content": "Hidden"
+    }
+  },
+  {
+    "id": "hfs-hidden",
+    "name": "\u200c.hidden.md",
+    "absolute": true,
+    "seed": {
+      "text": "Hidden"
+    },
+    "inspect": {
+      "kind": "file",
+      "size": 6,
+      "hidden": true
+    },
+    "read": {
+      "kind": "text",
+      "content": "Hidden"
+    }
+  },
+  {
+    "id": "binary",
+    "name": "bad.txt",
+    "absolute": true,
+    "seed": {
+      "bytes": [65, 0, 66]
+    },
+    "inspect": {
+      "kind": "file",
+      "size": 3,
+      "hidden": false
+    },
+    "read": {
+      "kind": "notText"
+    }
+  },
+  {
+    "id": "invalid-utf8",
+    "name": "bad.md",
+    "absolute": true,
+    "seed": {
+      "bytes": [255, 254]
+    },
+    "inspect": {
+      "kind": "file",
+      "size": 2,
+      "hidden": false
+    },
+    "read": {
+      "kind": "notText"
+    }
+  },
+  {
+    "id": "image",
+    "name": "image.png",
+    "absolute": true,
+    "seed": {
+      "text": "PNG"
+    },
+    "inspect": {
+      "kind": "file",
+      "size": 3,
+      "hidden": false
+    },
+    "read": {
+      "kind": "notText"
+    }
+  },
+  {
+    "id": "large",
+    "name": "large.md",
+    "absolute": true,
+    "seed": {
+      "text": "a",
+      "size": 4194305
+    },
+    "inspect": {
+      "kind": "file",
+      "size": 4194305,
+      "hidden": false
+    },
+    "read": {
+      "kind": "tooLarge",
+      "size": 4194305,
+      "limit": 4194304
+    }
+  },
+  {
+    "id": "empty",
+    "name": "empty.txt",
+    "absolute": true,
+    "seed": {
+      "text": ""
+    },
+    "inspect": {
+      "kind": "file",
+      "size": 0,
+      "hidden": false
+    },
+    "read": {
+      "kind": "text",
+      "content": ""
+    }
+  },
+  {
+    "id": "calendar",
+    "name": "team.ics",
+    "absolute": true,
+    "seed": {
+      "text": "BEGIN:VCALENDAR\nEND:VCALENDAR\n"
+    },
+    "inspect": {
+      "kind": "file",
+      "size": 30,
+      "hidden": false
+    },
+    "read": {
+      "kind": "text",
+      "content": "BEGIN:VCALENDAR\nEND:VCALENDAR\n"
+    }
+  },
+  {
+    "id": "large-calendar",
+    "name": "large.ics",
+    "absolute": true,
+    "seed": {
+      "text": "a",
+      "size": 16777217
+    },
+    "inspect": {
+      "kind": "file",
+      "size": 16777217,
+      "hidden": false
+    },
+    "read": {
+      "kind": "tooLarge",
+      "size": 16777217,
+      "limit": 16777216
+    }
+  }
+]

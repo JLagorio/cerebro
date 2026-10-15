@@ -1,5 +1,8 @@
+import { stageDropped } from './mockDropped';
+import SHEET_EDIT_CASES from '../../src-tauri/fixtures/sheet-edit-cases.json';
+import VIEW_SUGGESTIONS from '../../src-tauri/fixtures/view-suggestion-cases.json';
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   onAgentEvent,
   readCliTranscript,
@@ -16,6 +19,9 @@ import THREAD_TURNS from '../../src-tauri/fixtures/thread-turns.json';
 import ACTIVITY_WINDOW_CASES from '../../src-tauri/fixtures/activity-window-cases.json';
 import TRASH_CASES from '../../src-tauri/fixtures/trash-cases.json';
 import WAKE_CASES from '../../src-tauri/fixtures/wake-cases.json';
+import FOLLOWUP_CASES from '../../src-tauri/fixtures/followup-cases.json';
+import type { Followup } from '@/engine/followups';
+import CONDITION_CASES from '../../src-tauri/fixtures/condition-cases.json';
 import APP_CONFIG_RS from '../../src-tauri/src/app_config.rs?raw';
 import CAUSE_RS from '../../src-tauri/src/runtime/cause.rs?raw';
 import LIB_RS from '../../src-tauri/src/lib.rs?raw';
@@ -39,6 +45,10 @@ import * as mock from './mockIpc';
 import { splitFrontmatter } from '@/engine/frontmatter';
 import { sha256Hex } from './sha256';
 
+vi.mock('./mockSheet', () => ({
+  sheetEditReport: vi.fn(async () => SHEET_EDIT_CASES.reports[0].report),
+}));
+
 beforeEach(() => {
   mock.resetMockFs();
 });
@@ -51,6 +61,43 @@ const mockWrites = (): mock.MockWrite[] =>
   (window as unknown as { __cerebroMockWrites: mock.MockWrite[] }).__cerebroMockWrites;
 
 describe('mockIpc', () => {
+  it('exports a CSV Blob as UTF-8 with its suggested filename and releases the download URL', async () => {
+    const csv = '\uFEFFName,Text\r\nDune,"two\nlines"\r\n';
+    const create = vi.fn<(object: Blob | MediaSource) => string>(() => 'blob:csv-export');
+    const revoke = vi.fn();
+    const NativeURL = URL;
+    vi.stubGlobal(
+      'URL',
+      class extends NativeURL {
+        static createObjectURL = create;
+        static revokeObjectURL = revoke;
+      },
+    );
+    let filename = '';
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      filename = this.download;
+    });
+    try {
+      expect(await mock.exportCsv('books-all.csv', csv)).toBe('books-all.csv');
+      expect(filename).toBe('books-all.csv');
+      const blob = create.mock.calls[0][0] as Blob;
+      expect(blob.type).toBe('text/csv;charset=utf-8');
+      const bytes = await new Promise<ArrayBuffer>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as ArrayBuffer);
+        reader.onerror = reject;
+        reader.readAsArrayBuffer(blob);
+      });
+      expect([...new Uint8Array(bytes).slice(0, 3)]).toEqual([239, 187, 191]);
+      expect(new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes)).toBe(csv);
+      expect(revoke).toHaveBeenCalledWith('blob:csv-export');
+    } finally {
+      click.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
   it('pickVault and getLastVault return the demo vault path', async () => {
     expect(await mock.pickVault()).toBe('/demo-vault');
     expect(await mock.getLastVault()).toBe('/demo-vault');
@@ -81,6 +128,37 @@ describe('mockIpc', () => {
     const body = await mock.readNote('/demo-vault', 'projects/guided-onboarding-ga/items/fld-1.md');
     expect(body.startsWith('# First-run walkthrough GA')).toBe(true);
     expect(body).not.toContain('---');
+  });
+
+  it('a guarded save returns the whole-file hash and rejects malformed or stale versions without writing', async () => {
+    const path = 'projects/guided-onboarding-ga/items/fld-1.md';
+    const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+    const before = fs.get(path)!;
+    await expect(mock.saveNote('/demo-vault', path, 'New', 'bad')).rejects.toThrow(
+      'expectHash must be a 64-character hex hash',
+    );
+    expect(fs.get(path)).toBe(before);
+    await expect(mock.saveNote('/demo-vault', path, 'New', '0'.repeat(64))).rejects.toThrow(
+      `stale_content: ${path} changed since it was read, so nothing was saved.`,
+    );
+    expect(fs.get(path)).toBe(before);
+    const loaded = await mock.readNoteSource('/demo-vault', path);
+    const saved = await mock.saveNote('/demo-vault', path, '# New\n', loaded.hash.toUpperCase());
+    expect(saved).toBe((await mock.readNoteSource('/demo-vault', path)).hash);
+    expect(saved).not.toBe(loaded.hash);
+    expect(fs.get(path)).toContain('type: Work item');
+  });
+
+  it('compares a knowledge save before the capture valve', async () => {
+    const path = 'knowledge/metrics/onboarding-completion.md';
+    const loaded = await mock.readNoteSource('/demo-vault', path);
+    await expect(mock.saveNote('/demo-vault', path, '# Capture\n', '0'.repeat(64))).rejects.toThrow(
+      'stale_content:',
+    );
+    expect(await mock.readNoteSource('/demo-vault', path)).toEqual(loaded);
+    await expect(
+      mock.saveNote('/demo-vault', path, '# Capture\n', loaded.hash),
+    ).resolves.toBeNull();
   });
 
   it('updateFrontmatter patches values, deletes nulls, preserves order and unknown keys', async () => {
@@ -413,7 +491,7 @@ describe('mockIpc', () => {
       // ledger-recorded in Tauri; the mock applies the same edit).
       await expect(
         mock.saveNote('/demo-vault', CONCEPT, '# Rewritten by a human\n'),
-      ).resolves.toBeUndefined();
+      ).resolves.toBeNull();
       // A captured write answers no hash, as Rust's valve answers None: the
       // projection is the ledger's (M55.2).
       await expect(
@@ -1148,23 +1226,33 @@ describe('mockIpc', () => {
    */
   describe('importAttachment', () => {
     it('copies into attachments/ and returns a vault-relative path', async () => {
-      expect(await mock.importAttachment('/demo-vault', '/Users/me/report.pdf')).toBe(
-        'attachments/report.pdf',
-      );
+      stageDropped([{ path: '/Users/me/report.pdf', content: '%PDF' }]);
+      expect(await mock.importAttachment('/demo-vault', '/Users/me/report.pdf')).toEqual({
+        path: 'attachments/report.pdf',
+        reused: false,
+      });
     });
 
     it('dedupes the stem, not the extension', async () => {
+      stageDropped([
+        { path: '/a/report.pdf', content: 'first' },
+        { path: '/b/report.pdf', content: 'second' },
+      ]);
       await mock.importAttachment('/demo-vault', '/a/report.pdf');
-      expect(await mock.importAttachment('/demo-vault', '/b/report.pdf')).toBe(
-        'attachments/report-2.pdf',
-      );
+      expect(await mock.importAttachment('/demo-vault', '/b/report.pdf')).toEqual({
+        path: 'attachments/report-2.pdf',
+        reused: false,
+      });
     });
 
-    it('treats a leading dot as the whole name', async () => {
-      await mock.importAttachment('/demo-vault', '/a/.gitignore');
-      expect(await mock.importAttachment('/demo-vault', '/b/.gitignore')).toBe(
-        'attachments/.gitignore-2',
+    it('refuses a hidden file in both attachment doors', async () => {
+      stageDropped([{ path: '/a/.gitignore', content: 'secret' }]);
+      await expect(mock.importAttachment('/demo-vault', '/a/.gitignore')).rejects.toThrow(
+        '.gitignore is hidden',
       );
+      await expect(
+        mock.importAttachmentBytes('/demo-vault', '.gitignore', 'c2VjcmV0'),
+      ).rejects.toThrow('.gitignore is hidden');
     });
 
     it('refuses a relative source, the way the backend does', async () => {
@@ -1176,7 +1264,8 @@ describe('mockIpc', () => {
     // attachments/ is skipped by the scanner on both sides, so an imported
     // markdown file can never be adopted as a record.
     it('lands where the scanner will not adopt it', async () => {
-      const rel = await mock.importAttachment('/demo-vault', '/a/notes.md');
+      stageDropped([{ path: '/a/notes.md', content: '# Attachment' }]);
+      const { path: rel } = await mock.importAttachment('/demo-vault', '/a/notes.md');
       const entries = await mock.scanVault('/demo-vault');
       expect(entries.some((e) => e.path === rel)).toBe(false);
     });
@@ -1316,15 +1405,26 @@ describe('mockIpc', () => {
       'update_frontmatter',
       'set_note_title',
       'edit_note',
+      'edit_sheet',
       'set_fields',
       'restore_version',
       'batch_patch',
       'batch_body',
+      'batch_replace_file',
+      'batch_rename_from',
     ];
 
     const call = (c: NoteTargetCase): Promise<string> => {
       const path = c.path ?? '';
       switch (c.door) {
+        case 'save_canvas':
+          return mock
+            .saveCanvasFile('/demo-vault', path, '{"nodes":[],"edges":[]}\n')
+            .then(() => path);
+        case 'create_canvas':
+          return mock
+            .createCanvasFile('/demo-vault', path, '{"nodes":[],"edges":[]}\n', 'commit')
+            .then((result) => result.path);
         case 'save_note':
           return mock.saveNote('/demo-vault', path, '\n# Landed\n').then(() => path);
         case 'update_frontmatter':
@@ -1335,6 +1435,15 @@ describe('mockIpc', () => {
           return mock.createNote('/demo-vault', c.folder ?? '', c.slug ?? '', {}, '# Landed\n');
         case 'write_text_file':
           return mock.writeTextFile('/demo-vault', path, 'flowchart TD\n');
+        case 'edit_sheet':
+          return mock
+            .agentEditSheet(
+              '/demo-vault',
+              path,
+              { ops: [{ op: 'add_sheet', name: 'Budget' }] },
+              STAMP,
+            )
+            .then(() => path);
         case 'edit_note':
           return mock
             .agentEdit('/demo-vault', path, [{ old: 'Seed', new: 'Landed' }], undefined, STAMP)
@@ -1360,6 +1469,25 @@ describe('mockIpc', () => {
           return mock
             .applyBatch('/demo-vault', [{ op: 'create', path, content: '# Landed\n' }])
             .then(() => path);
+        case 'batch_replace_file':
+          return mock
+            .applyBatch('/demo-vault', [
+              {
+                op: 'replace_file',
+                path,
+                content: '# Landed\n',
+                expectHash: sha256Hex(fs().get(path) ?? ''),
+              },
+            ])
+            .then(() => path);
+        case 'batch_rename_from':
+          return mock
+            .applyBatch('/demo-vault', [{ op: 'rename', from: path, to: 'records/moved.md' }])
+            .then(() => 'records/moved.md');
+        case 'batch_rename_to':
+          return mock
+            .applyBatch('/demo-vault', [{ op: 'rename', from: 'records/source.md', to: path }])
+            .then(() => path);
         default:
           throw new Error(`no door called ${c.door}`);
       }
@@ -1368,7 +1496,9 @@ describe('mockIpc', () => {
     for (const c of NOTE_TARGETS.cases as NoteTargetCase[]) {
       const target = c.path ?? `${c.folder}/${c.slug}`;
       it(`${c.door} ${target} ${c.refused === undefined ? 'lands' : 'refuses'}`, async () => {
+        if (c.door === 'save_canvas' && c.seed !== false) fs().set(c.path ?? '', '{}');
         if (EDITS.includes(c.door) && c.seed !== false) fs().set(c.path ?? '', NOTE_TARGETS.seed);
+        if (c.door === 'batch_rename_to') fs().set('records/source.md', NOTE_TARGETS.seed);
         const before = new Map(fs());
         if (c.refused !== undefined) {
           await expect(call(c)).rejects.toThrow(c.refused);
@@ -1387,9 +1517,15 @@ describe('mockIpc', () => {
         'batch_body',
         'batch_create',
         'batch_patch',
+        'batch_rename_from',
+        'batch_rename_to',
+        'batch_replace_file',
+        'create_canvas',
         'create_note',
         'edit_note',
+        'edit_sheet',
         'restore_version',
+        'save_canvas',
         'save_note',
         'set_fields',
         'set_note_title',
@@ -1766,7 +1902,7 @@ describe('the deferral gates (M28.1)', () => {
         (m) => [m[1], m[2]] as const,
       ),
     );
-    expect(words.size).toBe(10);
+    expect(words.size).toBe(11);
     const runs = demoFleetRuns();
     for (const run of runs) {
       expect(run, run.run_id).toHaveProperty('cause');
@@ -1777,6 +1913,73 @@ describe('the deferral gates (M28.1)', () => {
     const scout = runs.find((r) => r.run_id === 'run-scout-1');
     expect(scout?.cause?.kind).toBe('schedule');
     expect(scout?.cli_session_id).toMatch(/^[0-9A-Za-z][0-9A-Za-z-]{7,63}$/);
+  });
+
+  it('page runs match subjects, include two hop levels, stay in their vault, and leave old causes unplaced', async () => {
+    const cause = {
+      kind: 'assigned',
+      why: 'work was assigned to it',
+      subject: 'project.md',
+      detail: 'via agent',
+      due_at: null,
+    };
+    mock.__seedFleet([
+      fleetRun({ run_id: 'root', cause }),
+      fleetRun({ run_id: 'child', parent_run_id: 'root' }),
+      fleetRun({ run_id: 'grandchild', parent_run_id: 'child' }),
+      fleetRun({ run_id: 'too-deep', parent_run_id: 'grandchild' }),
+      fleetRun({ run_id: 'other', vault_id: 'other-vault', cause, parent_run_id: 'root' }),
+      fleetRun({ run_id: 'back', parent_run_id: 'other' }),
+      fleetRun({ run_id: 'old' }),
+    ]);
+    expect((await mock.fleetSubjectRuns('v1', ['project.md'])).map((run) => run.run_id)).toEqual([
+      'root',
+      'grandchild',
+      'child',
+    ]);
+    expect(await mock.fleetSubjectRuns('v1', [])).toEqual([]);
+    expect(await mock.fleetSubjectRuns('v1', ['project.md'], 0)).toEqual([]);
+    mock.__seedFleet(null);
+    await expect(mock.fleetSubjectRuns('v1', ['project.md'])).rejects.toThrow(/runtime database/);
+    mock.__seedFleet([]);
+  });
+
+  it('page runs bound the subject count, UTF-8 path bytes and returned rows', async () => {
+    mock.__seedFleet(
+      Array.from({ length: 205 }, (_, index) =>
+        fleetRun({
+          run_id: `r${index}`,
+          cause: {
+            kind: 'assigned',
+            why: 'work was assigned to it',
+            subject: 'p',
+            detail: null,
+            due_at: null,
+          },
+        }),
+      ),
+    );
+    expect(await mock.fleetSubjectRuns('v1', ['p'], 100000)).toHaveLength(200);
+    expect(await mock.fleetSubjectRuns('v1', ['p'], 2)).toHaveLength(2);
+    await expect(
+      mock.fleetSubjectRuns(
+        'v1',
+        Array.from({ length: 1001 }, () => 'p'),
+      ),
+    ).rejects.toThrow('1000');
+    await expect(mock.fleetSubjectRuns('v1', ['é'.repeat(513)])).rejects.toThrow('1024 bytes');
+    expect(await mock.fleetSubjectRuns('v1', ['é'.repeat(512)])).toEqual([]);
+    mock.__seedFleet([]);
+  });
+
+  it('a manual live-run refusal names the actor and matches only its vault', () => {
+    const owners = [{ vault: '/one', actor: 'process:scout' }];
+    expect(() => mock.refuseIfAgentRunning('/one', 'process:scout', owners)).toThrow(
+      'process:scout is already running, so Run now did not start another. Let that run finish, or stop it first.',
+    );
+    expect(() => mock.refuseIfAgentRunning('/two', 'process:scout', owners)).not.toThrow();
+    expect(() => mock.refuseIfAgentRunning('/one', 'process:other', owners)).not.toThrow();
+    expect(() => mock.refuseIfAgentRunning('/one', null, owners)).not.toThrow();
   });
 
   it('fleet runs filter by actor and come back newest first', async () => {
@@ -2834,8 +3037,22 @@ describe('every write carries its stamp (M58.1)', () => {
   /** One IPC door of write-doors.json, called as the webview calls it. */
   function callIpc(door: string, args: Record<string, unknown>): Promise<unknown> {
     switch (door) {
+      case 'save_canvas_file':
+        return mock.saveCanvasFile(VAULT, text(args, 'path'), text(args, 'content'));
+      case 'create_canvas_file':
+        return mock.createCanvasFile(
+          VAULT,
+          text(args, 'path'),
+          text(args, 'content'),
+          args.mode === 'preview' ? 'preview' : 'commit',
+        );
       case 'save_note':
-        return mock.saveNote(VAULT, text(args, 'path'), text(args, 'body'));
+        return mock.saveNote(
+          VAULT,
+          text(args, 'path'),
+          text(args, 'body'),
+          args.expect_hash as string | undefined,
+        );
       case 'update_frontmatter':
         return mock.updateFrontmatter(VAULT, text(args, 'path'), map(args, 'patch'));
       case 'set_note_title':
@@ -2862,12 +3079,17 @@ describe('every write carries its stamp (M58.1)', () => {
         return mock.deleteNote(VAULT, text(args, 'path'));
       case 'restore_from_trash':
         return mock.restoreFromTrash(VAULT, text(args, 'stamp'));
+      case 'install_starter_kit':
+        return mock.installStarterKit(VAULT);
       case 'apply_batch':
         return mock.applyBatch(VAULT, args.ops as unknown[]);
       case 'write_text_file':
         return mock.writeTextFile(VAULT, text(args, 'path'), text(args, 'content'));
       case 'import_attachment':
+        stageDropped([{ path: text(args, 'source'), content: 'attachment bytes' }]);
         return mock.importAttachment(VAULT, text(args, 'source'));
+      case 'import_attachment_bytes':
+        return mock.importAttachmentBytes(VAULT, text(args, 'name'), text(args, 'bytes_base64'));
       case 'verify_concept':
         return mock.verifyConcept(
           VAULT,
@@ -2904,6 +3126,8 @@ describe('every write carries its stamp (M58.1)', () => {
           undefined,
           stamp,
         );
+      case 'edit_sheet':
+        return mock.agentEditSheet(VAULT, text(c.args, 'path'), c.args, stamp);
       case 'set_fields':
         return mock.agentSetFields(VAULT, text(c.args, 'path'), c.args, stamp);
       case 'create_note':
@@ -2923,7 +3147,8 @@ describe('every write carries its stamp (M58.1)', () => {
   }
 
   async function replay(c: DoorCase, call: () => Promise<unknown>, who: mock.WriteStamp | null) {
-    mock.resetMockFs();
+    if (c.door === 'install_starter_kit') mock.emptyMockVault();
+    else mock.resetMockFs();
     for (const [path, raw] of Object.entries(c.seed ?? {})) fsMap().set(path, raw);
     if (c.refused !== undefined) {
       await expect(call(), JSON.stringify(c)).rejects.toThrow(c.refused);
@@ -3717,6 +3942,19 @@ describe('durable wakes (M63.1)', () => {
             expect(got, here).toEqual(expected);
             break;
           }
+          case 'release': {
+            const result = mock.releaseAssignedWakes(
+              VAULT_W,
+              step.agent as string,
+              step.subject as string,
+              step.keyPrefix as string,
+              at,
+            );
+            if ((expected as { error?: boolean }).error === true)
+              await expect(result, here).rejects.toThrow('Nothing was released');
+            else expect(await result, here).toBe((expected as { released: number }).released);
+            break;
+          }
           case 'pause':
             vi.useFakeTimers({ toFake: ['Date'] });
             vi.setSystemTime(at);
@@ -3809,12 +4047,121 @@ describe('durable wakes (M63.1)', () => {
     }
   });
 
+  it('replays wake-cases.json attribution through recorded writes and run ancestry', async () => {
+    for (const scenario of WAKE_CASES.attribution_cases) {
+      if ('rustOnly' in scenario && scenario.rustOnly) continue; // The mock books no spend.
+      mock.resetMockFs();
+      mock.__seedWakeAttribution(scenario as Parameters<typeof mock.__seedWakeAttribution>[0]);
+      const seenAt = 'seenAt' in scenario ? scenario.seenAt : undefined;
+      const got = await mock.admitWakes(
+        VAULT_W,
+        scenario.offers as never,
+        new Date(scenario.at),
+        seenAt,
+      );
+      expect(got, scenario.name).toEqual(scenario.expect);
+      if ('repeat' in scenario && scenario.repeat) {
+        expect(
+          await mock.admitWakes(VAULT_W, scenario.offers as never, new Date(scenario.at), seenAt),
+          scenario.name,
+        ).toEqual(scenario.expect);
+      }
+      expect(
+        snapshot().map(({ author, authorActor, parentRunId, state, outcome, reason }) => ({
+          author,
+          authorActor,
+          parentRunId,
+          state,
+          outcome,
+          reason,
+        })),
+        scenario.name,
+      ).toEqual(scenario.rows);
+    }
+  });
+
+  it('claims only wakes with the same recorded parent and retains that parent for the next write', async () => {
+    mock.__seedWakeAttribution({
+      runs: [
+        { runId: 'a', actor: 'claude-code' },
+        { runId: 'b', actor: 'client:calendar' },
+      ],
+    });
+    mock.__seedWakes([
+      {
+        vault: VAULT_W,
+        agent: 'process:scout',
+        admittedAt: new Date().toISOString(),
+        wakeId: 'head',
+        author: 'run',
+        authorActor: 'claude-code',
+        parentRunId: 'a',
+      },
+      {
+        vault: VAULT_W,
+        agent: 'process:scout',
+        admittedAt: new Date().toISOString(),
+        wakeId: 'same',
+        author: 'run',
+        authorActor: 'claude-code',
+        parentRunId: 'a',
+      },
+      {
+        vault: VAULT_W,
+        agent: 'process:scout',
+        admittedAt: new Date().toISOString(),
+        wakeId: 'other',
+        author: 'run',
+        authorActor: 'client:calendar',
+        parentRunId: 'b',
+      },
+    ]);
+    mock.claimMockWake(
+      VAULT_W,
+      'process:scout',
+      { claim: 'head', coalesce: ['same', 'other'] },
+      'child',
+    );
+    expect(snapshot().map((row) => [row.wakeId, row.state, row.outcome])).toEqual([
+      ['head', 'started', null],
+      ['same', 'finished', 'coalesced'],
+      ['other', 'pending', null],
+    ]);
+    mock.__seedWakeAttribution({
+      writes: [
+        {
+          kind: 'vault.write',
+          path: 'records/a.md',
+          actor: 'process:scout',
+          runId: 'child',
+          hash: 'a'.repeat(64),
+          at: new Date().toISOString(),
+        },
+      ],
+    });
+    const offer = {
+      agent: 'process:scout',
+      path: 'records/a.md',
+      hash: 'a'.repeat(64),
+      event: 'changed' as const,
+      trigger: '1'.repeat(16),
+      wakeKey: 'f'.repeat(64),
+      cause: { kind: 'event' },
+    };
+    expect((await mock.admitWakes(VAULT_W, [offer])).refused).toEqual([
+      { agent: 'process:scout', reason: 'cycle' },
+    ]);
+  });
+
   it("setAgentPaused cancels the agent's pending wakes, and resuming cancels nothing", async () => {
     const offer = (agent: string, key: string) => ({
       agent,
       wakeKey: key.repeat(64),
       trigger: '1'.repeat(16),
       cause: { kind: 'event', subject: 'records/risks/a.md' },
+      path: 'records/risks/a.md',
+      hash: 'a'.repeat(64),
+      event: 'changed' as const,
     });
     await mock.admitWakes(VAULT_W, [offer('process:scout', 'a'), offer('process:other', 'b')]);
     await mock.setAgentPaused(VAULT_W, 'process:scout', true);
@@ -3832,6 +4179,9 @@ describe('durable wakes (M63.1)', () => {
         wakeKey: 'a'.repeat(64),
         trigger: '1'.repeat(16),
         cause: { kind: 'event', subject: 'records/risks/a.md' },
+        path: 'records/risks/a.md',
+        hash: 'a'.repeat(64),
+        event: 'changed' as const,
       },
     ]);
     expect(snapshot()).toHaveLength(1);
@@ -3861,12 +4211,16 @@ describe('what is waiting to wake an agent (M63.1b)', () => {
       ),
       mock.mockWakeWords('cancelled', 'expired', null),
       mock.mockWakeWords(null, null, null),
+      mock.mockWakeWords('skipped', 'condition_not_met', null),
+      mock.mockWakeWords('skipped', 'condition_unavailable', null),
     ];
     for (const words of named) expect(rustWords).toContain(`"${words}"`);
     expect(named).toContain('expired — waited more than 7 days');
     expect(named).toContain('waiting');
-    const unnamed = mock.mockWakeWords('skipped', 'cycle', null);
-    expect(unnamed).toBe('skipped (or cancelled) for a reason this version does not name (cycle)');
+    const unnamed = mock.mockWakeWords('skipped', 'future_reason', null);
+    expect(unnamed).toBe(
+      'skipped (or cancelled) for a reason this version does not name (future_reason)',
+    );
     const prefix = unnamed.slice(0, unnamed.lastIndexOf(' ('));
     expect(rustWords).toContain(`"${prefix}"`);
     expect(mock.mockWakeWords('cancelled', 'superseded', 'renamed')).toBe(
@@ -3974,7 +4328,11 @@ describe('applyBatch — parity with batch.rs (M60.6)', () => {
     after?: Record<string, { frontmatter: unknown; body: string } | null>;
     keys?: Record<string, unknown[]>;
     trashed?: string[];
+    now?: string;
+    imports?: unknown[];
+    afterRaw?: Record<string, string>;
   }
+  afterEach(() => vi.useRealTimers());
   const disk = () =>
     (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
   const parsed = (text: string) => {
@@ -3984,6 +4342,10 @@ describe('applyBatch — parity with batch.rs (M60.6)', () => {
 
   for (const c of BATCH_CASES.cases as BatchCase[]) {
     it(c.name, async () => {
+      if (c.now) {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date(c.now));
+      }
       for (const [path, raw] of Object.entries(c.seed)) disk().set(path, raw);
       if (c.journal === false) mock.__setMockJournal(false);
       const ops = c.ops.map((op) => {
@@ -4002,6 +4364,9 @@ describe('applyBatch — parity with batch.rs (M60.6)', () => {
       }
       const applied = await mock.applyBatch(VAULT_PATH, ops);
       expect(applied.files.map((f) => f.path)).toEqual(c.written);
+      if (c.imports) expect(applied.imports).toEqual(c.imports);
+      for (const [path, content] of Object.entries(c.afterRaw ?? {}))
+        expect(disk().get(path), path).toBe(content);
       for (const [path, want] of Object.entries(c.after ?? {})) {
         const text = disk().get(path);
         if (want === null) expect(text, path).toBeUndefined();
@@ -4022,7 +4387,7 @@ describe('applyBatch — parity with batch.rs (M60.6)', () => {
           .slice(writesBefore)
           .map((w) => w.batchId),
       );
-      expect([...ids]).toEqual([applied.batchId]);
+      expect([...ids]).toEqual((c.written?.length ?? 0) > 0 ? [applied.batchId] : []);
     });
   }
 
@@ -4056,6 +4421,19 @@ describe('applyBatch — parity with batch.rs (M60.6)', () => {
     await expect(mock.applyBatch(VAULT_PATH, [op])).resolves.toMatchObject({
       files: [{ path: 'records/a.md' }],
     });
+  });
+
+  it('counts the before and after bytes of each text rename, including repeated moves', async () => {
+    const path = 'records/large-move.md';
+    disk().set(path, 'x'.repeat(BATCH_CASES.limits.maxBytes / 4 + 1));
+    const before = new Map(disk());
+    await expect(
+      mock.applyBatch(VAULT_PATH, [
+        { op: 'rename', from: path, to: 'records/moved-once.md' },
+        { op: 'rename', from: 'records/moved-once.md', to: 'records/moved-twice.md' },
+      ]),
+    ).rejects.toThrow('at most 16 MiB of pages');
+    expect(new Map(disk())).toEqual(before);
   });
 
   it('logs every row of one change under one batch id', async () => {
@@ -4152,4 +4530,611 @@ describe('applyBatch revert — parity with batch.rs (M60.7)', () => {
       }
     });
   }
+});
+
+import REMINDER_CASES from '../../src-tauri/fixtures/reminder-state-cases.json';
+describe('durable reminder state — replays reminder-state-cases.json', () => {
+  const f = REMINDER_CASES,
+    vault = '/reminder-cases';
+  it('replays claims, freshness, cap, imports and every refusal word', async () => {
+    for (const bad of f.badFires) {
+      await expect(
+        mock.reminderClaim(vault, [f.fire, { ...f.fire, ...bad.patch }], f.now),
+      ).rejects.toThrow(bad.error);
+      expect((await mock.reminderState(vault)).fires).toEqual([]);
+    }
+    await expect(
+      mock.reminderClaim(
+        vault,
+        Array.from({ length: f.cap.count }, () => f.fire),
+        f.now,
+      ),
+    ).rejects.toThrow(f.cap.error);
+    expect((await mock.reminderState(vault)).fires).toEqual([]);
+    for (const [ordinal, outcome] of f.outcomes.entries())
+      for (const fresh of f.fresh) {
+        const [result] = await mock.reminderClaim(vault, [{ ...f.fire, ordinal, outcome }], f.now);
+        expect(result).toMatchObject({ fresh, fire: { outcome, claimedAt: f.now } });
+      }
+    const imports = [f.fire, null, { ...f.fire, path: 'legacy.md' }];
+    expect(await mock.reminderImport(vault, imports, f.now)).toBe(f.importCounts.first);
+    expect(await mock.reminderImport(vault, imports, f.later)).toBe(f.importCounts.second);
+    const fires = (await mock.reminderState(vault)).fires;
+    expect(fires).toHaveLength(4);
+    expect(fires.find((r) => r.path === 'legacy.md')?.outcome).toBe(f.importOutcome);
+    expect((await mock.reminderClaim('/other', [f.fire], f.now))[0].fresh).toBe(true);
+  });
+  it('replays mark replacement, exact Undo, imports and every refusal word', async () => {
+    for (const bad of f.badMarks) {
+      await expect(mock.doneMark(vault, { ...f.mark, ...bad.patch }, f.now)).rejects.toThrow(
+        bad.error,
+      );
+      expect(await mock.doneMarksRead(vault)).toEqual([]);
+    }
+    for (const lane of f.lanes)
+      expect((await mock.doneMark(vault, { ...f.mark, lane }, f.now)).replaced).toBeNull();
+    const first = (await mock.doneMarksRead(vault)).find((m) => m.lane === 'insight')!;
+    const second = await mock.doneMark(vault, f.replacement, f.later);
+    expect(second.replaced).toEqual(first);
+    expect(await mock.doneUnmark(vault, first)).toBe(false);
+    await expect(
+      mock.doneUnmark(vault, { ...second.set, markedAt: f.badStamp.markedAt }),
+    ).rejects.toThrow(f.badStamp.error);
+    await expect(
+      mock.doneUnmark(vault, second.set, { ...first, subject: f.badRestore.subject }),
+    ).rejects.toThrow(f.badRestore.error);
+    expect(await mock.doneUnmark(vault, second.set, first)).toBe(true);
+    const imports = [f.replacement, null, f.importedMark];
+    expect(await mock.doneMarksImport(vault, imports, f.now)).toBe(f.importCounts.first);
+    expect(await mock.doneMarksImport(vault, imports, f.later)).toBe(f.importCounts.second);
+    const marks = await mock.doneMarksRead(vault);
+    expect(marks.find((m) => m.lane === 'insight')).toEqual(first);
+    expect(marks.find((m) => m.subject === 'legacy')).toMatchObject(f.importedMark);
+    await mock.doneUnmark(
+      vault,
+      marks.find((m) => m.subject === 'legacy')!,
+    );
+    expect(await mock.doneMarksImport(vault, [f.importedMark], f.later)).toBe(
+      f.importCounts.afterUndo,
+    );
+    expect((await mock.doneMarksRead(vault)).some((m) => m.subject === 'legacy')).toBe(false);
+    expect((await mock.doneMark('/other', f.mark, f.now)).replaced).toBeNull();
+  });
+  it('keeps exact marks distinct even with a frozen clock', async () => {
+    const first = await mock.doneMark(vault, f.mark, f.now),
+      second = await mock.doneMark(vault, f.mark, f.now);
+    expect(first.set.markedAt).not.toBe(second.set.markedAt);
+    expect(await mock.doneUnmark(vault, first.set)).toBe(false);
+    expect(await mock.doneUnmark(vault, second.set, first.set)).toBe(true);
+    const third = await mock.doneMark(vault, f.mark, f.now);
+    expect(third.set.markedAt).not.toBe(second.set.markedAt);
+    expect(await mock.doneUnmark(vault, second.set)).toBe(false);
+  });
+});
+
+describe('Home event reads', () => {
+  it('lists only this vault’s finished ambient non-construct runs and reports truncation', async () => {
+    const base = demoFleetRuns().find((r) => r.mode === 'ambient' && r.ended_at !== null)!;
+    const rows = Array.from({ length: 200 }, (_, i) => ({
+      ...base,
+      run_id: `r${String(i).padStart(3, '0')}`,
+      actor: 'process:scout',
+      vault_id: 'demo',
+    }));
+    mock.__seedFleet(rows);
+    expect(await mock.homeRuns('/demo-vault')).toMatchObject({
+      truncated: false,
+      runs: expect.any(Array),
+    });
+    mock.__seedFleet([
+      ...rows,
+      { ...rows[0], run_id: 'extra' },
+      { ...base, run_id: 'panel', mode: 'attended' },
+      { ...base, run_id: 'other', vault_id: 'other' },
+      { ...base, run_id: 'running', outcome: 'running', ended_at: null },
+      ...HOME_CONSTRUCT_ACTORS.map(({ actor }, i) => ({ ...base, actor, run_id: `construct${i}` })),
+    ]);
+    const result = await mock.homeRuns('/demo-vault', 999);
+    expect(result.runs).toHaveLength(200);
+    expect(result.truncated).toBe(true);
+    expect(
+      result.runs.every(
+        (r) => r.vault_id === 'demo' && r.mode === 'ambient' && r.actor === 'process:scout',
+      ),
+    ).toBe(true);
+    mock.__seedFleet(null);
+    await expect(mock.homeRuns('/demo-vault')).rejects.toThrow();
+  });
+  it('returns not recorded with no ledger and quiet at or past a Done mark', async () => {
+    const seed = await mock.converge('/demo-vault');
+    expect(seed).not.toHaveProperty('changed_at');
+    expect((await mock.homeChanges('/demo-vault'))?.changed_at).toBeDefined();
+    const quiet = await mock.homeChanges('/demo-vault', seed.window.to_seq + 1);
+    expect(quiet).toMatchObject({
+      quiet: true,
+      window: { from_seq: seed.window.to_seq, to_seq: seed.window.to_seq },
+    });
+    expect(quiet?.sections.every((s) => s.lines.length === 0)).toBe(true);
+    expect(quiet?.changed_at).toBeUndefined();
+    mock.__seedChanges(null);
+    expect(await mock.homeChanges('/demo-vault')).toBeNull();
+  });
+});
+import { CONSTRUCT_ACTORS as HOME_CONSTRUCT_ACTORS } from '@/engine/authors';
+
+describe('replays the shared view suggestion cases without writing', () => {
+  for (const row of VIEW_SUGGESTIONS.cases)
+    it(row.name, async () => {
+      const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+      fs.clear();
+      for (const file of VIEW_SUGGESTIONS.corpus) fs.set(file.path, file.content);
+      const before = [...fs.entries()];
+      const entries = await mock.scanVault('suggestions');
+      const answer = await mock.agentSuggestView('suggestions', row.args);
+      expect(answer).toBe(Object.values(row.expect)[0]);
+      expect([...fs.entries()]).toEqual(before);
+      expect(await mock.scanVault('suggestions')).toEqual(entries);
+      expect(mockWrites()).toEqual([]);
+    });
+});
+
+describe('native notification mock', () => {
+  it('is unbundled by default and logs a refused post without claiming permission', async () => {
+    const m = await import('./mockIpc');
+    m.resetMockFs();
+    expect(await m.notificationPermission()).toBe('unknown');
+    expect(await m.requestNotificationPermission()).toBe('unknown');
+    expect(await m.postNotification('id', 'Reminder', 'Due')).toBe('unknown');
+    expect(m.__mockNotifications()).toEqual({
+      state: 'unknown',
+      requests: 0,
+      posts: [{ id: 'id', title: 'Reminder', body: 'Due' }],
+    });
+  });
+  it('the permission seam allows one request and caps logged Unicode posts', async () => {
+    const m = await import('./mockIpc');
+    m.resetMockFs();
+    m.__seedNotifications('not-asked');
+    expect(await m.requestNotificationPermission()).toBe('allowed');
+    expect(await m.requestNotificationPermission()).toBe('allowed');
+    expect(m.__mockNotifications().requests).toBe(1);
+    m.__seedNotifications('quiet');
+    expect(await m.postNotification('id', '🦀'.repeat(130), 'é'.repeat(500))).toBe('posted');
+    expect([...m.__mockNotifications().posts[0].title]).toHaveLength(120);
+    expect([...m.__mockNotifications().posts[0].body]).toHaveLength(400);
+  });
+  it('the adapter normalizes unknown permission and delivery words', async () => {
+    const m = await import('./mockIpc');
+    const ipc = await import('./ipc');
+    m.resetMockFs();
+    m.__seedNotifications('granted');
+    expect(await ipc.notificationPermission()).toBe('unknown');
+    expect(await ipc.requestNotificationPermission()).toBe('unknown');
+    expect(await ipc.postNotification('id', '', '')).toBe('unknown');
+  });
+});
+
+describe('personal client tokens (M62.5)', () => {
+  it('replays the shared client-tokens cases through the mock', async () => {
+    const { default: cases } = await import('../../src-tauri/fixtures/client-tokens.json');
+    for (const row of cases.names) {
+      mock.__seedClientTokens(0);
+      const call = mock.createClientToken('/demo-vault', {
+        name: row.name,
+        toolsets: ['read'],
+        writeScope: [],
+        readScope: null,
+      });
+      if ('refusal' in row.expect) await expect(call).rejects.toThrow(row.expect.refusal);
+      else expect((await call).token).toMatchObject(row.expect);
+    }
+    for (const row of cases.grants) {
+      mock.__seedClientTokens(0);
+      const call = mock.createClientToken('/demo-vault', { name: 'Client', ...row.request });
+      if ('refusal' in row.expect) await expect(call).rejects.toThrow(row.expect.refusal);
+      else expect((await call).token).toMatchObject(row.expect.grant);
+    }
+  });
+  it('lists metadata without a secret, rejects duplicate before cap, and revokes', async () => {
+    const request = { name: 'Client', toolsets: ['read'], writeScope: [], readScope: null };
+    const created = await mock.createClientToken('/demo-vault', request);
+    expect(created.secret).toMatch(/^cbr_[0-9a-f]{64}$/);
+    expect(created.token.tokenId).toMatch(/^[0-9a-f]{32}$/);
+    const other = await mock.createClientToken('/other-vault', request);
+    const listed = await mock.clientTokens('/demo-vault');
+    expect(listed.map((token) => token.currentVault)).toEqual([true, false]);
+    expect(JSON.stringify(listed)).not.toContain(created.secret);
+    expect(JSON.stringify(listed)).not.toContain('secret');
+    expect(await mock.revokeClientToken(other.token.tokenId)).toBe(true);
+    mock.__seedClientTokens(20);
+    await expect(
+      mock.createClientToken('/demo-vault', { ...request, name: 'App 1' }),
+    ).rejects.toThrow('This vault already has a token with that name. Choose another name.');
+    await expect(mock.createClientToken('/other-vault', request)).rejects.toThrow(
+      'You have 20 tokens. Revoke one to make another.',
+    );
+  });
+  it('allows only one concurrent create into the last global slot', async () => {
+    mock.__seedClientTokens(19);
+    const results = await Promise.allSettled(
+      ['One', 'Two'].map((name) =>
+        mock.createClientToken('/demo-vault', {
+          name,
+          toolsets: ['read'],
+          writeScope: [],
+          readScope: null,
+        }),
+      ),
+    );
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(await mock.clientTokens('/demo-vault')).toHaveLength(20);
+  });
+  it('starts off and validates the client port in words', async () => {
+    expect(await mock.clientAccessStatus()).toEqual({
+      enabled: false,
+      port: 37421,
+      url: null,
+      error: null,
+    });
+    for (const port of [80, 65536, 37421.5, NaN])
+      await expect(mock.setClientAccess(true, port)).rejects.toThrow(
+        'Choose a port from 1024 to 65535.',
+      );
+    expect(await mock.setClientAccess(true, 37500)).toEqual({
+      enabled: true,
+      port: 37500,
+      url: 'http://127.0.0.1:37500/mcp',
+      error: null,
+    });
+    expect(await mock.setClientAccess(false, 37500)).toEqual({
+      enabled: false,
+      port: 37500,
+      url: null,
+      error: null,
+    });
+  });
+});
+
+describe('pre-run condition checks (M63.7)', () => {
+  const { vault, actor, admitted_at } = CONDITION_CASES.defaults;
+  const id = '00000000000000000000000000000001';
+  const now = new Date(admitted_at);
+  const seed = (over: Partial<mock.SeedWake> = {}) => {
+    mock.__seedFleet([]);
+    mock.__seedWakes([{ vault, agent: actor, wakeId: id, admittedAt: admitted_at, ...over }]);
+  };
+  it('replays the shared condition eligibility cases', async () => {
+    for (const fixture of CONDITION_CASES.eligibility) {
+      mock.__seedFleet([]);
+      mock.__seedCondition('no');
+      mock.__seedWakes(
+        fixture.rows.map((input) => {
+          const row = input as {
+            id: string;
+            vault?: string;
+            actor?: string;
+            trigger?: string;
+            parent?: string;
+            kind?: string;
+            state?: string;
+          };
+          return {
+            vault: row.vault ?? vault,
+            agent: row.actor ?? actor,
+            wakeId: row.id,
+            admittedAt: admitted_at,
+            trigger: row.trigger ?? '0123456789abcdef',
+            parentRunId: row.parent ?? null,
+            cause: { kind: row.kind === 'assigned' ? 'assigned' : 'event' },
+            state: (row.state ?? 'pending') as mock.MockWake['state'],
+          };
+        }),
+      );
+      const result = await mock.checkMockWake(vault, actor, fixture.ids, 'Is work needed?', now);
+      expect(result, fixture.name).toEqual({
+        state: fixture.expect.length === 0 ? 'gone' : 'not_met',
+        wakes: fixture.expect,
+      });
+      const runs = await mock.fleetRunsPage({ actor });
+      expect(runs, fixture.name).toHaveLength(fixture.expect.length === 0 ? 0 : 1);
+      const skipped = (await mock.fleetWakes(vault, actor, now)).filter(
+        (wake) => wake.reason === 'condition_not_met',
+      );
+      expect(skipped.map((wake) => wake.wakeId).sort(), fixture.name).toEqual(
+        [...fixture.expect].sort(),
+      );
+      for (const wake of skipped)
+        expect(wake.note).toEqual({
+          question: 'Is work needed?',
+          reason: 'The check answered no.',
+          check_run_id: runs[0].run_id,
+        });
+    }
+  });
+  it('replays the shared condition retry windows', async () => {
+    for (const fixture of CONDITION_CASES.retry) {
+      seed();
+      mock.__seedCondition('unavailable');
+      const result = await mock.checkMockWake(
+        vault,
+        actor,
+        [id],
+        'Is work needed?',
+        new Date(fixture.finished_at),
+      );
+      expect(result, fixture.name).toEqual({
+        state: 'unavailable',
+        wakes: [id],
+        retry_at: fixture.retry_at,
+        skipped: fixture.skipped,
+      });
+      const [wake] = await mock.fleetWakes(vault, actor, new Date(fixture.finished_at));
+      expect(wake.notBefore, fixture.name).toBe(fixture.retry_at);
+      expect(wake.note?.reason ?? null, fixture.name).toBe(
+        fixture.skipped ? 'no answer within 10 minutes' : null,
+      );
+      expect(await mock.fleetRunsPage({ actor })).toHaveLength(1);
+    }
+  });
+  it('a yes books one row and leaves the wake pending without a cooldown', async () => {
+    seed();
+    expect(await mock.checkMockWake(vault, actor, [id], 'Need work?', now)).toEqual({
+      state: 'met',
+      wakes: [id],
+    });
+    expect(await mock.wakesPending(vault, now)).toHaveLength(1);
+    const [run] = await mock.fleetRunsPage({ actor });
+    expect(run).toMatchObject({
+      actor,
+      lane: 'agent',
+      cause: { detail: 'checking first: Need work?' },
+      usage_state: 'unknown',
+    });
+    const detail = await mock.fleetRunDetail(run.run_id);
+    expect(detail.cost_components).toBeNull();
+    expect(detail.model_id).toBeNull();
+    expect(detail.refusals).toEqual([]);
+    expect(detail.wrote).toEqual({ state: 'recorded', writes: [] });
+    expect((await mock.jobLedgerRead(vault)).triggerRuns).toEqual({});
+  });
+  it.each(['', ' '.repeat(3), 'x'.repeat(501)])(
+    'an invalid question skips without a run: %s',
+    async (question) => {
+      seed();
+      expect(await mock.checkMockWake(vault, actor, [id], question, now)).toEqual({
+        state: 'unavailable',
+        wakes: [id],
+        retry_at: null,
+        skipped: true,
+      });
+      expect(await mock.fleetRunsPage({ actor })).toEqual([]);
+      expect((await mock.fleetWakes(vault, actor, now))[0].note).toEqual({
+        question: question.trim() === '' ? '' : 'x'.repeat(499) + '…',
+        reason: 'its question is empty or longer than 500 characters',
+      });
+    },
+  );
+  it('counts question code points and resets the seeded answer with the mock', async () => {
+    seed();
+    mock.__seedCondition('no');
+    mock.resetMockFs();
+    seed();
+    expect((await mock.checkMockWake(vault, actor, [id], '😀'.repeat(500), now)).state).toBe('met');
+  });
+  it('a fleet pause refuses before booking and an absent own record is gone', async () => {
+    seed();
+    await mock.setAgentPaused(vault, actor, true);
+    await expect(mock.checkMockWake(vault, actor, [id], 'Need work?', now)).rejects.toThrow(
+      'is paused',
+    );
+    expect(await mock.fleetRunsPage({ actor })).toEqual([]);
+    await mock.setAgentPaused(vault, actor, false);
+    seed({ agent: 'process:missing' });
+    expect(await mock.checkMockWake(vault, 'process:missing', [id], 'Need work?', now)).toEqual({
+      state: 'gone',
+      wakes: [id],
+    });
+  });
+  it('a persisted retry survives another call and does not book another check', async () => {
+    seed();
+    mock.__seedCondition('unavailable');
+    await mock.checkMockWake(vault, actor, [id], 'Need work?', now);
+    const later = new Date(now.getTime() + 60_000);
+    expect(await mock.checkMockWake(vault, actor, [id], 'Need work?', later)).toEqual({
+      state: 'unavailable',
+      wakes: [id],
+      retry_at: new Date(now.getTime() + 180_000).toISOString(),
+      skipped: false,
+    });
+    expect(await mock.fleetRunsPage({ actor })).toHaveLength(1);
+  });
+  it('a live actor defers with no check run and a paused record refuses before booking', async () => {
+    seed();
+    mock.__seedFleet([{ ...demoFleetRuns()[0], vault_id: vault, actor, outcome: 'running' }]);
+    expect(await mock.checkMockWake(vault, actor, [id], 'Need work?', now)).toEqual({
+      state: 'deferred',
+      wakes: [id],
+      reasons: ['agent_running'],
+      words: ['this agent is already running'],
+    });
+    expect(await mock.fleetRunsPage({ actor })).toHaveLength(1);
+    seed();
+    const path = 'records/agents/release-scout.md';
+    await mock.updateFrontmatter(vault, path, { paused: true });
+    await expect(mock.checkMockWake(vault, actor, [id], 'Need work?', now)).rejects.toThrow(
+      'Resume it before starting a pre-run check',
+    );
+    expect(await mock.fleetRunsPage({ actor })).toEqual([]);
+  });
+  it('cleans its question and limits Fleet detail as Rust RunCause does', async () => {
+    seed();
+    mock.__seedCondition('no');
+    await mock.checkMockWake(vault, actor, [id], '  Hello\n' + 'x'.repeat(210) + '  ', now);
+    const [wake] = await mock.fleetWakes(vault, actor, now);
+    expect(wake.note?.question).toBe('Hello ' + 'x'.repeat(210));
+    const [run] = await mock.fleetRunsPage({ actor });
+    expect([...run.cause!.detail!]).toHaveLength(200);
+    expect(run.cause?.detail?.endsWith('…')).toBe(true);
+  });
+  it('refuses duplicate or oversized requests without a row', async () => {
+    seed();
+    for (const ids of [
+      [id, id],
+      Array.from({ length: 21 }, (_, i) => i.toString(16).padStart(32, '0')),
+    ])
+      await expect(mock.checkMockWake(vault, actor, ids, 'Need work?', now)).rejects.toThrow(
+        'a pre-run check',
+      );
+    expect(await mock.fleetRunsPage({ actor })).toEqual([]);
+  });
+});
+
+describe('follow-ups replay the shared cases', () => {
+  const vault = '/demo-vault';
+  const { actor, run } = FOLLOWUP_CASES.defaults;
+  const now = new Date(FOLLOWUP_CASES.defaults.now);
+  const path = 'records/agents/release-scout.md';
+  beforeEach(() => {
+    mock.resetMockFs();
+    mock.resetOperational();
+  });
+  for (const sample of FOLLOWUP_CASES.schedule)
+    it(sample.name, async () => {
+      const result = mock.scheduleMockFollowup(vault, actor, run, sample.at, sample.note, now);
+      if ('error' in sample.expect) await expect(result).rejects.toThrow(sample.expect.error);
+      else expect((await result).row).toMatchObject(sample.expect);
+    });
+  for (const sample of FOLLOWUP_CASES.claims)
+    it(sample.name, async () => {
+      const owner = sample.standing === 'gone' ? 'process:missing' : actor;
+      if (sample.standing === 'paused') await mock.updateFrontmatter(vault, path, { paused: true });
+      mock.__seedFollowups([
+        {
+          vault,
+          actor: owner,
+          followupId: 'id',
+          state: sample.state as Followup['state'],
+          dueAt: sample.dueAt,
+          claimedAt: sample.claimedAt,
+        },
+      ]);
+      const answer = await mock.claimFollowup(vault, 'id', now);
+      expect(answer.state === 'cancelled' ? answer.reason : answer.state).toBe(sample.expect);
+    });
+  it('caps waiting rows in the shared words and allows another after cancellation', async () => {
+    const { at, note, expected } = FOLLOWUP_CASES.cap;
+    const first = await mock.scheduleMockFollowup(vault, actor, run, at, note, now);
+    await mock.scheduleMockFollowup(vault, actor, run, at, note, now);
+    await mock.scheduleMockFollowup(vault, actor, run, at, note, now);
+    await expect(mock.scheduleMockFollowup(vault, actor, run, at, note, now)).rejects.toThrow(
+      expected,
+    );
+    expect(await mock.cancelFollowup(vault, first.row.followupId, now)).toBe(true);
+    expect((await mock.scheduleMockFollowup(vault, actor, run, at, note, now)).waiting).toBe(3);
+  });
+  it('is self-only, and an unreadable database is not an empty queue', async () => {
+    for (const owner of ['human:me', 'process:missing'])
+      await expect(
+        mock.scheduleMockFollowup(vault, owner, run, FOLLOWUP_CASES.cap.at, 'note', now),
+      ).rejects.toThrow("Only an agent's own run");
+    mock.__seedFollowups(null);
+    await expect(mock.listFollowups(vault, now)).rejects.toThrow('runtime database');
+    await expect(
+      mock.scheduleMockFollowup(vault, actor, run, FOLLOWUP_CASES.cap.at, 'note', now),
+    ).rejects.toThrow('Follow-ups need the runtime database');
+  });
+  it('one of two claimants wins, firing is bound once, and exact unfire restores it', async () => {
+    mock.__seedFollowups([{ vault, actor, followupId: 'id', dueAt: now.toISOString() }]);
+    const claims = await Promise.all([
+      mock.claimFollowup(vault, 'id', now),
+      mock.claimFollowup(vault, 'id', now),
+    ]);
+    expect(claims.map((c) => c.state).sort()).toEqual(['claimed', 'not_waiting']);
+    expect(await mock.cancelFollowup(vault, 'id', now)).toBe(false);
+    expect(mock.fireMockFollowup(vault, 'process:other', 'id', 'run', now)).toBe(false);
+    expect(mock.fireMockFollowup(vault, actor, 'id', 'run', now)).toBe(true);
+    expect(mock.fireMockFollowup(vault, actor, 'id', 'run', now)).toBe(false);
+    expect(mock.unfireMockFollowup(vault, 'id', 'wrong')).toBe(false);
+    expect(mock.unfireMockFollowup(vault, 'id', 'run')).toBe(true);
+    expect((await mock.listFollowups(vault, now))[0]).toMatchObject({
+      state: 'pending',
+      claimedAt: null,
+      runId: null,
+      endedAt: null,
+    });
+  });
+  it('retains exactly seven days of Cerebro cancellations and no person cancellations', async () => {
+    const edge = now.getTime() - 7 * 86_400_000;
+    mock.__seedFollowups([
+      {
+        vault,
+        actor,
+        followupId: 'edge',
+        dueAt: now.toISOString(),
+        state: 'cancelled',
+        cancelReason: 'paused',
+        endedAt: new Date(edge).toISOString(),
+      },
+      {
+        vault,
+        actor,
+        followupId: 'old',
+        dueAt: now.toISOString(),
+        state: 'cancelled',
+        cancelReason: 'agent_gone',
+        endedAt: new Date(edge - 1).toISOString(),
+      },
+      {
+        vault,
+        actor,
+        followupId: 'person',
+        dueAt: now.toISOString(),
+        state: 'cancelled',
+        cancelReason: 'person',
+        endedAt: now.toISOString(),
+      },
+    ]);
+    expect((await mock.listFollowups(vault, now)).map((row) => row.followupId)).toEqual(['edge']);
+  });
+});
+
+describe('whiteboard scan and search', () => {
+  it('indexes card text and links while keeping raw JSON keys out of search', async () => {
+    const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+    const path = 'boards/aurora-plan.canvas';
+    fs.set(
+      path,
+      JSON.stringify({
+        nodes: [
+          {
+            id: 'a',
+            type: 'text',
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+            text: 'Aurora lantern [[systems-map]]',
+          },
+          { id: 'b', type: 'file', x: 0, y: 0, width: 10, height: 10, file: 'strategy/vision.md' },
+        ],
+        edges: [],
+        secretUnknown: 'not searchable phrase',
+      }),
+    );
+    const entry = (await mock.scanVault('/demo-vault')).find((entry) => entry.path === path);
+    expect(entry).toMatchObject({
+      title: 'Aurora plan',
+      type: null,
+      outgoingLinks: ['systems-map', 'vision'],
+      snippet: 'Aurora lantern systems-map',
+    });
+    expect(
+      (await mock.searchVault('/demo-vault', 'Aurora lantern')).hits.map((hit) => hit.path),
+    ).toContain(path);
+    for (const query of ['nodes', 'secretUnknown', 'not searchable phrase'])
+      expect(
+        (await mock.searchVault('/demo-vault', query)).hits.map((hit) => hit.path),
+      ).not.toContain(path);
+    fs.delete(path);
+  });
 });

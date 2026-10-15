@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { agentRef, isAgentEntry } from '@/engine/agents';
 import { actorLabel } from '@/engine/authors';
+import { writerWords } from '@/engine/attribution';
 import { recordIdentity } from '@/engine/identity';
 import { TRIGGER_COOLDOWN_MS } from '@/engine/jobs';
 import { instantText } from '@/engine/whenText';
@@ -66,7 +67,8 @@ export function WakesSection({ vaultPath, actor }: { vaultPath: string | null; a
     <div className="mb-1.5">
       <h2 className="m-0 text-sm font-semibold text-n-800">Waiting to wake</h2>
       <p className="m-0 text-xs leading-[17px] text-n-500">
-        Changes that arrive while an agent waits wake it once, together — up to 20 in one run.
+        Changes that arrive while an agent waits wake it once, together — up to 20 in one run. Each
+        assignment wakes its own run.
       </p>
     </div>
   );
@@ -102,10 +104,14 @@ export function WakesSection({ vaultPath, actor }: { vaultPath: string | null; a
 
   /** Why a pending wake still waits, or null when it is due now. */
   const stillWaits = (wake: FleetWake): string | null => {
-    if (wake.notBefore !== null && wake.deferred !== null && Date.parse(wake.notBefore) > now) {
+    if (wake.notBefore !== null && Date.parse(wake.notBefore) > now) {
+      if (wake.deferred === null)
+        return `its check couldn't answer · tries again ${instantText(wake.notBefore)}`;
       const reasons = wake.deferred.split(',').join(', ');
       return `deferred: ${reasons} · tries again ${instantText(wake.notBefore)}`;
     }
+    if (wake.cause?.kind === 'assigned' && (wake.author === 'person' || wake.author === 'run'))
+      return null;
     const identity = identities.get(wake.agent);
     const last = identity === undefined ? undefined : vaultClock[identity];
     if (last !== undefined) {
@@ -155,6 +161,17 @@ export function WakesSection({ vaultPath, actor }: { vaultPath: string | null; a
                     {subject}
                   </span>
                 ))}
+              {wake.cause?.kind === 'assigned' && (
+                <span data-testid="agent-wake-cause" className="text-xs text-n-500">
+                  {wake.cause.why}
+                  {wake.cause.detail === null ? '' : ` (${wake.cause.detail})`}
+                </span>
+              )}
+              <span data-testid="agent-wake-author" className="text-xs text-n-500">
+                {(wake.author === 'person' || wake.author === 'run') && wake.authorActor != null
+                  ? `by ${writerWords(wake.authorActor, entries)}`
+                  : 'author not recorded'}
+              </span>
               <span data-testid="agent-wake-words" className="text-xs text-n-500">
                 {wake.state === 'pending' ? (
                   <span title={wake.admittedAt}>waiting since {instantText(wake.admittedAt)}</span>
@@ -162,6 +179,11 @@ export function WakesSection({ vaultPath, actor }: { vaultPath: string | null; a
                   <span title={wake.finishedAt ?? undefined}>{wake.words}</span>
                 )}
               </span>
+              {wake.state === 'skipped' && wake.note != null && (
+                <span data-testid="agent-wake-check" className="basis-full text-xs text-n-500">
+                  “{wake.note.question}” — {wake.note.reason}
+                </span>
+              )}
               {waits !== null && (
                 <span data-testid="agent-wake-waits" className="text-xs text-n-500">
                   {waits}

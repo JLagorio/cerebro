@@ -29,11 +29,11 @@ sources:
 
 An account counts as **completed** when it has finished every required step of guided onboarding within 14 days of first login.[^kr-onboarding]
 
-| Term | Meaning |
-|------|---------|
-| `new account` | First successful login in the period |
-| `completed` | All required onboarding steps done |
-| `window` | 14 days from first login, not calendar month |
+| Term          | Meaning                                      |
+| ------------- | -------------------------------------------- |
+| `new account` | First successful login in the period         |
+| `completed`   | All required onboarding steps done           |
+| `window`      | 14 days from first login, not calendar month |
 
 # Why 14 days
 

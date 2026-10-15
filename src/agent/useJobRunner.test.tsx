@@ -1,3 +1,5 @@
+import { stampActivation } from './activation';
+import { sha256Hex } from '@/lib/sha256';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useLedgerStore } from '@/stores/ledgerStore';
 import type { JobLedgers, LedgerStatus } from '@/lib/ipc';
@@ -10,8 +12,28 @@ const JOB_RUN = 8;
  * filtered by, and the durable id the run's database row is keyed under. */
 const JOB_DURABLE = 'durable-job-8';
 vi.mock('./agentIpc', () => ({
+  checkWake: vi.fn(async (_vault: string, _actor: string, wakes: string[]) => ({
+    state: 'met',
+    wakes,
+  })),
   runAgent: vi.fn(async () => ({ run: JOB_RUN, durableId: JOB_DURABLE })),
   stopAgent: vi.fn(async () => true),
+  attachRun: vi.fn(
+    async (handle: { run: number }, _after: number, deliver: (event: unknown) => void) => {
+      const scoped = (event: unknown) => {
+        if ((event as { run?: number }).run === handle.run) deliver(event);
+      };
+      handlers.push(scoped);
+      return {
+        state: 'held',
+        done: false,
+        detach: () => {
+          const at = handlers.indexOf(scoped);
+          if (at >= 0) handlers.splice(at, 1);
+        },
+      };
+    },
+  ),
   // Honours the run filter, like the real fan-out (M17.3): a job hears its
   // own run and nothing else.
   onAgentEvent: vi.fn((handler: (event: unknown) => void, run?: number) => {
@@ -48,6 +70,7 @@ vi.mock('@/lib/ipc', async (importOriginal) => {
     jobLedgerImport: vi.fn(async () => 0),
     // M63.1: the real mock wake store by default; a test fails one.
     admitWakes: vi.fn(actual.admitWakes),
+    releaseAssignedWakes: vi.fn(actual.releaseAssignedWakes),
     wakesPending: vi.fn(actual.wakesPending),
     cancelWakes: vi.fn(actual.cancelWakes),
   };
@@ -134,6 +157,9 @@ const recordingStatus: LedgerStatus = {
  * table, every claim is fresh. Called from each describe's beforeEach — the
  * mocks are module-level and a verdict one test scripted must not leak. */
 function resetLedgerMocks(): void {
+  vi.mocked(agentIpc.checkWake)
+    .mockReset()
+    .mockImplementation(async (_vault, _actor, wakes) => ({ state: 'met', wakes }));
   // M49.2: the knowledge lanes run only while the vault is recording.
   useLedgerStore.setState({ vault: '/vault', read: { kind: 'read', status: recordingStatus } });
   vi.mocked(ipc.jobLedgerRead).mockReset();
@@ -153,7 +179,11 @@ function resetLedgerMocks(): void {
   // M63.1: an empty wake store, read and written through the real mock.
   mockIpc.resetOperational();
   vi.mocked(ipc.admitWakes).mockReset();
-  vi.mocked(ipc.admitWakes).mockImplementation((vault, wakes) => mockIpc.admitWakes(vault, wakes));
+  vi.mocked(ipc.admitWakes).mockImplementation((vault, seenAt, wakes) =>
+    mockIpc.admitWakes(vault, wakes, new Date(), seenAt),
+  );
+  vi.mocked(ipc.releaseAssignedWakes).mockReset();
+  vi.mocked(ipc.releaseAssignedWakes).mockImplementation(mockIpc.releaseAssignedWakes);
   vi.mocked(ipc.wakesPending).mockReset();
   vi.mocked(ipc.wakesPending).mockImplementation((vault) => mockIpc.wakesPending(vault));
   vi.mocked(ipc.cancelWakes).mockReset();
@@ -189,9 +219,11 @@ function wokenRunAgent(gate: { deferred: string[] } | null = null): void {
 
 /** The job's run says Done, and the wake its claim started finishes. */
 function jobDone(): void {
-  act(() => handlers.forEach((h) => h({ run: JOB_RUN, kind: 'Done' })));
   const last = wokenRuns.at(-1);
   if (last !== undefined) mockIpc.finishMockWake(last, 'succeeded');
+  // Rust closes its books before emitting Done; a listener can immediately
+  // read the finished wake and dispatch the next assignment.
+  act(() => handlers.forEach((h) => h({ run: JOB_RUN, kind: 'Done' })));
 }
 
 /** Every wake in the mock store: key letter, state, outcome, reason, detail. */
@@ -363,12 +395,12 @@ describe('useJobRunner stream ownership', () => {
     expect(reading()).toBeNull();
   });
 
-  it('stops listening once its job is done', async () => {
+  it('detaches its finished job and keeps only the follow-up Done observer', async () => {
     renderHook(() => useJobRunner());
     await startJob();
     expect(handlers.length).toBeGreaterThan(0);
     act(() => handlers.forEach((h) => h({ run: JOB_RUN, kind: 'Done' })));
-    expect(handlers.length).toBe(0);
+    expect(handlers.length).toBe(1);
   });
 });
 
@@ -1348,7 +1380,7 @@ describe('useJobRunner woken runs beside a schedule (AUTOMATION-2, M63.1)', () =
       folder: 'inbox',
       title: path,
       modifiedAt,
-      hash: `h:${path}:${modifiedAt}`,
+      hash: sha256Hex(`${path}:${modifiedAt}`),
     });
 
   let entries: Entry[] = [];
@@ -1405,6 +1437,32 @@ describe('useJobRunner woken runs beside a schedule (AUTOMATION-2, M63.1)', () =
     vi.useRealTimers();
   });
 
+  it('holds an unanswered check until its retry time, then checks and runs once', async () => {
+    const gated = agentWith({
+      ...watcher.properties,
+      when: [{ event: 'changed', in: 'inbox', ask: 'Need work?' }],
+    });
+    entries = [gated, noteAt('2026-07-31T08:00:00Z')];
+    useVaultStore.setState({ entries });
+    vi.mocked(agentIpc.checkWake).mockImplementationOnce(async (_v, _a, wakes) => ({
+      state: 'unavailable',
+      wakes,
+      retry_at: new Date(Date.now() + 3 * MINUTE).toISOString(),
+      skipped: false,
+    }));
+    renderHook(() => useJobRunner());
+    await startJob();
+    await wakeUp([gated, noteAt('2026-07-31T10:30:00Z')]);
+    expect(agentIpc.checkWake).toHaveBeenCalledOnce();
+    expect(agentIpc.runAgent).not.toHaveBeenCalled();
+    expect(useUiStore.getState().triggerRuns['/vault']).toEqual({});
+    await advance(2 * MINUTE);
+    expect(agentIpc.checkWake).toHaveBeenCalledOnce();
+    await advance(2 * MINUTE);
+    expect(agentIpc.checkWake).toHaveBeenCalledTimes(2);
+    expect(agentIpc.runAgent).toHaveBeenCalledOnce();
+  });
+
   it('a change wakes the agent once: one offer, one wake, one run that claims it', async () => {
     renderHook(() => useJobRunner());
     await startJob();
@@ -1452,10 +1510,28 @@ describe('useJobRunner woken runs beside a schedule (AUTOMATION-2, M63.1)', () =
       noteAt('2026-07-31T10:30:00Z'),
       noteAt('2026-07-31T10:31:00Z', 'inbox/b.md'),
     ]);
-    const batch = vi.mocked(ipc.admitWakes).mock.calls[1][1];
+    expect(vi.mocked(ipc.admitWakes).mock.calls[1][1]).toBe(
+      vi.mocked(ipc.admitWakes).mock.calls[0][1],
+    );
+    expect(Date.parse(vi.mocked(ipc.admitWakes).mock.calls[0][1])).toBeLessThan(Date.now());
+    const batch = vi.mocked(ipc.admitWakes).mock.calls[1][2];
     expect(batch.map((o) => o.cause.subject)).toEqual(['inbox/a.md']);
     // b.md was created, which this trigger does not watch: only a.md wakes.
     expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps each scan time when an older failed batch is retried beside a newer change', async () => {
+    renderHook(() => useJobRunner());
+    await startJob();
+    vi.mocked(ipc.admitWakes).mockRejectedValueOnce(new Error('busy'));
+    await wakeUp([watcher, noteAt('2026-07-31T10:30:00Z')]);
+    const first = vi.mocked(ipc.admitWakes).mock.calls[0];
+    await wakeUp([watcher, noteAt('2026-07-31T10:31:00Z')]);
+    const calls = vi.mocked(ipc.admitWakes).mock.calls;
+    expect(calls).toHaveLength(3);
+    expect(calls[1]).toEqual(first);
+    expect(Date.parse(calls[2][1])).toBeGreaterThan(Date.parse(first[1]));
+    expect(calls[2][2][0].hash).not.toBe(first[2][0].hash);
   });
 
   it('stamps the cooldown where the derivation reads it; changes in the window wait, then run together', async () => {
@@ -1682,7 +1758,7 @@ describe('useJobRunner in a trigger-only vault (AUTOMATION-2)', () => {
       folder: 'inbox',
       title: 'A',
       modifiedAt,
-      hash: `h:${modifiedAt}`,
+      hash: sha256Hex(modifiedAt),
     });
 
   /** A scan that finds inbox/a.md at a new version — a new change. */
@@ -1792,7 +1868,7 @@ describe('useJobRunner across a vault switch (AUTOMATION-2b)', () => {
       title: path,
       createdAt,
       modifiedAt,
-      hash: `h:${modifiedAt}`,
+      hash: sha256Hex(modifiedAt),
     });
   const aWatcher = watcherIn('a-watcher');
   const vaultA = [aWatcher, note('inbox/a1.md', '2026-07-01T09:00:00Z')];
@@ -1892,8 +1968,8 @@ describe('useJobRunner across a vault switch (AUTOMATION-2b)', () => {
     await startJob();
     expect(vi.mocked(ipc.admitWakes)).toHaveBeenCalledTimes(1);
 
-    vi.mocked(ipc.admitWakes).mockImplementation((vault, wakes) =>
-      mockIpc.admitWakes(vault, wakes),
+    vi.mocked(ipc.admitWakes).mockImplementation((vault, seenAt, wakes) =>
+      mockIpc.admitWakes(vault, wakes, new Date(), seenAt),
     );
     await open('/b', vaultB);
     await advance(5 * MINUTE);
@@ -2024,8 +2100,376 @@ describe('useJobRunner across a vault switch (AUTOMATION-2b)', () => {
     );
     expect(useUiStore.getState().skillRuns['/a']).toEqual({});
     expect(useUiStore.getState().runs).toEqual([]);
-    // No cooldown and no subscription: the run is not this window's to follow.
+    // No cooldown or run subscription; the global follow-up Done observer remains.
+    // The run is not this window's to follow.
     expect(vi.mocked(ipc.jobLedgerStamp)).not.toHaveBeenCalled();
-    expect(handlers).toHaveLength(0);
+    expect(handlers).toHaveLength(1);
+  });
+});
+
+describe('assigned work drains one page at a time (M63.3b)', () => {
+  const watcher = makeEntry({
+    path: 'records/agents/worker.md',
+    filename: 'worker.md',
+    folder: 'records/agents',
+    title: 'Worker',
+    type: 'Agent',
+    properties: {
+      slug: 'worker',
+      when: [
+        {
+          event: 'assigned',
+          field: 'agent',
+          ask: 'Can this be done?',
+          do: 'Keep the task current',
+        },
+      ],
+    },
+  });
+  const type = makeEntry({
+    path: 'types/task.md',
+    title: 'Task',
+    type: 'Type',
+    properties: { fields: { agent: { kind: 'relation', target: 'Agent' } } },
+  });
+  const work = (key: string, linked: boolean) =>
+    makeEntry({
+      path: `tasks/${key}.md`,
+      filename: `${key}.md`,
+      folder: 'tasks',
+      title: key,
+      type: 'Task',
+      relationships: { agent: linked ? ['worker'] : [] },
+      hash: sha256Hex(`${key}:${linked}`),
+    });
+  const entries = (linked: boolean) => [
+    watcher,
+    type,
+    ...['a', 'b', 'c'].map((key) => work(key, linked)),
+  ];
+  const scan = async (next: Entry[], recorded = true) => {
+    if (recorded)
+      mockIpc.__seedWakeAttribution({
+        writes: next
+          .filter((entry) => entry.type === 'Task')
+          .map((entry) => ({
+            kind: 'vault.write',
+            path: entry.path,
+            actor: 'human:me',
+            hash: entry.hash!,
+            at: new Date().toISOString(),
+          })),
+      });
+    act(() => useVaultStore.setState({ entries: next }));
+    await startJob();
+    await startJob();
+  };
+  beforeEach(() => {
+    handlers.length = 0;
+    wokenRuns.length = 0;
+    mockIpc.resetMockFs();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-31T10:00:00Z'));
+    vi.mocked(agentIpc.runAgent).mockClear();
+    wokenRunAgent();
+    resetLedgerMocks();
+    vi.mocked(ipc.readNote).mockImplementation(async () => '# Worker');
+    useVaultStore.setState({
+      vaultPath: '/vault',
+      entriesVault: '/vault',
+      entries: entries(false),
+      rescan: vi.fn(async () => undefined),
+    });
+    useUiStore.setState({
+      autoLearn: true,
+      learnAttempts: {},
+      skillRuns: {},
+      triggerRuns: {},
+      runs: [],
+      agentShell: 'off',
+      agentConnectors: false,
+      stdioApprovals: {},
+    });
+    useRunLogStore.getState().clear();
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it('three recorded assignments ignore the event cooldown and drain independently with the brief', async () => {
+    vi.mocked(ipc.jobLedgerRead).mockResolvedValue({
+      attempts: {},
+      skillRuns: {},
+      triggerRuns: { 'slug:worker': new Date().toISOString() },
+    });
+    renderHook(() => useJobRunner());
+    await startJob();
+    await scan(entries(true));
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
+    for (let count = 1; count <= 3; count++) {
+      expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(count);
+      const options = vi.mocked(agentIpc.runAgent).mock.calls[count - 1][1];
+      expect(options.wake?.coalesce).toEqual([]);
+      expect(options.cause).toBeNull();
+      expect(options.message).toContain('assigned to you through its "agent" field');
+      expect(options.message).toContain('Can this be done?');
+      jobDone();
+      await startJob();
+      await startJob();
+    }
+    expect(wakeRows().every((row) => row.includes('finished succeeded'))).toBe(true);
+    expect(vi.mocked(ipc.jobLedgerStamp)).not.toHaveBeenCalled();
+    expect(useRunLogStore.getState().entries[0].trigger).toBe('assigned via agent');
+  });
+
+  it('an unrecorded assignment waits on the cooldown and stamps it when it starts', async () => {
+    vi.mocked(ipc.jobLedgerRead).mockResolvedValue({
+      attempts: {},
+      skillRuns: {},
+      triggerRuns: { 'slug:worker': new Date().toISOString() },
+    });
+    renderHook(() => useJobRunner());
+    await startJob();
+    await scan([watcher, type, work('a', true)], false);
+    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+    await advance(16 * MINUTE);
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(ipc.jobLedgerStamp)).toHaveBeenCalledWith(
+      '/vault',
+      'slug:worker',
+      expect.any(String),
+    );
+  });
+
+  it('retries a removal before admitting its later re-add', async () => {
+    wokenRunAgent({ deferred: ['daily_runs'] });
+    renderHook(() => useJobRunner());
+    await startJob();
+    await scan([watcher, type, work('a', true)]);
+    vi.mocked(ipc.releaseAssignedWakes).mockRejectedValueOnce(new Error('busy'));
+    await scan([watcher, type, work('a', false)]);
+    const before = vi.mocked(ipc.admitWakes).mock.calls.length;
+    await scan([watcher, type, work('a', true)]);
+    expect(vi.mocked(ipc.releaseAssignedWakes)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(ipc.admitWakes).mock.calls.length).toBe(before + 1);
+    expect(vi.mocked(ipc.releaseAssignedWakes).mock.invocationCallOrder[1]).toBeLessThan(
+      vi.mocked(ipc.admitWakes).mock.invocationCallOrder.at(-1)!,
+    );
+    expect(wakeRows()).toEqual(['tasks/a.md finished cancelled superseded', 'tasks/a.md pending']);
+  });
+
+  it('rechecks a removed link after reading instructions and spends no run', async () => {
+    let resolve!: (body: string) => void;
+    vi.mocked(ipc.readNote).mockImplementation(
+      () =>
+        new Promise<string>((done) => {
+          resolve = done;
+        }),
+    );
+    renderHook(() => useJobRunner());
+    await startJob();
+    await scan([watcher, type, work('a', true)]);
+    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+    act(() => useVaultStore.setState({ entries: [watcher, type, work('a', false)] }));
+    await act(async () => resolve('# Worker'));
+    await startJob();
+    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+    expect(wakeRows()[0]).toContain('finished cancelled superseded');
+  });
+
+  it('an out-of-scope page gets the read-only brief', async () => {
+    const limited = { ...watcher, properties: { ...watcher.properties, scope: ['elsewhere'] } };
+    useVaultStore.setState({ entries: [limited, type, work('a', false)] });
+    renderHook(() => useJobRunner());
+    await startJob();
+    await scan([limited, type, work('a', true)]);
+    expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1].message).toContain(
+      "Your scope doesn't reach it",
+    );
+    expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1].message).not.toContain(
+      'page assigned to you is yours to keep current',
+    );
+  });
+});
+
+describe('schedule lists and activation boundaries (M63.6)', () => {
+  beforeEach(() => {
+    handlers.length = 0;
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 28, 14));
+    resetLedgerMocks();
+    vi.mocked(agentIpc.runAgent).mockReset();
+    vi.mocked(agentIpc.runAgent).mockResolvedValue({ run: JOB_RUN, durableId: JOB_DURABLE });
+    vi.mocked(ipc.readNote).mockResolvedValue('---\ntype: Skill\n---\nplaybook');
+    useVaultStore.setState({
+      vaultPath: '/vault',
+      entriesVault: '/vault',
+      entries: [note],
+      rescan: vi.fn(async () => undefined),
+    });
+    useUiStore.setState({
+      autoLearn: true,
+      learnAttempts: {},
+      skillRuns: {},
+      triggerRuns: {},
+      runs: [],
+      agentShell: 'off',
+      agentConnectors: false,
+      stdioApprovals: {},
+    });
+    useRunLogStore.getState().clear();
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+  it('a second list item fires after the first was answered', async () => {
+    vi.setSystemTime(new Date(2026, 6, 28, 8, 59));
+    useVaultStore.setState({
+      entries: [{ ...note, properties: { schedule: ['daily 08:00', 'daily 09:00'] } }],
+    });
+    vi.mocked(ipc.jobLedgerRead).mockResolvedValue({
+      attempts: {},
+      triggerRuns: {},
+      skillRuns: { [note.path]: '2026-07-28 08:00' },
+    });
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(agentIpc.runAgent).not.toHaveBeenCalled();
+    await advance(2 * MINUTE);
+    expect(agentIpc.runAgent).toHaveBeenCalledTimes(1);
+    expect(ipc.jobLedgerClaim).toHaveBeenCalledWith(
+      '/vault',
+      'skillRuns',
+      note.path,
+      '2026-07-28 09:00',
+    );
+  });
+  it('a resumed 09:00 at 14:00 waits for the next 09:00', async () => {
+    useVaultStore.setState({
+      entries: [{ ...note, properties: { schedule: 'daily 09:00', paused: true } }],
+    });
+    renderHook(() => useJobRunner());
+    await startJob();
+    await act(async () => {
+      await stampActivation('/vault', note.path, 'daily 09:00', new Date());
+      useVaultStore.setState({ entries: [note] });
+    });
+    await startJob();
+    expect(agentIpc.runAgent).not.toHaveBeenCalled();
+    vi.setSystemTime(new Date(2026, 6, 29, 8, 59));
+    await advance(2 * MINUTE);
+    expect(agentIpc.runAgent).toHaveBeenCalledTimes(1);
+  });
+  it('editing after a prior fire waits, while an unstamped outside edit catches up', async () => {
+    vi.mocked(ipc.jobLedgerRead).mockResolvedValue({
+      attempts: {},
+      triggerRuns: {},
+      skillRuns: { [note.path]: '2026-07-28 09:00' },
+    });
+    renderHook(() => useJobRunner());
+    await startJob();
+    await act(async () => {
+      useVaultStore.setState({ entries: [{ ...note, properties: { schedule: 'daily 10:00' } }] });
+      await stampActivation('/vault', note.path, 'daily 10:00', new Date());
+    });
+    await startJob();
+    expect(agentIpc.runAgent).not.toHaveBeenCalled();
+    act(() =>
+      useVaultStore.setState({ entries: [{ ...note, properties: { schedule: 'daily 11:00' } }] }),
+    );
+    await startJob();
+    expect(agentIpc.runAgent).toHaveBeenCalledTimes(1);
+  });
+  it('a schedule first seen at launch still owes its one catch-up', async () => {
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(agentIpc.runAgent).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('durable follow-ups', () => {
+  const vault = '/demo-vault';
+  const actor = 'process:release-scout';
+  const now = new Date('2026-10-15T12:00:00Z');
+  beforeEach(async () => {
+    handlers.length = 0;
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    mockIpc.resetMockFs();
+    resetLedgerMocks();
+    useVaultStore.setState({
+      vaultPath: vault,
+      entriesVault: vault,
+      entries: (await mockIpc.scanVault(vault)).filter(
+        (entry) => entry.path === 'records/agents/release-scout.md',
+      ),
+      rescan: vi.fn(async () => {}),
+    });
+    useUiStore.setState({
+      autoLearn: false,
+      runs: [],
+      learnAttempts: {},
+      skillRuns: {},
+      triggerRuns: {},
+      agentShell: 'off',
+      agentConnectors: false,
+      stdioApprovals: {},
+    });
+    vi.mocked(agentIpc.runAgent)
+      .mockReset()
+      .mockImplementation(async (vault, options) => {
+        if (options.followup != null)
+          mockIpc.fireMockFollowup(vault, options.actor!, options.followup, JOB_DURABLE);
+        return { run: JOB_RUN, durableId: JOB_DURABLE };
+      });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+  it('Learn off leaves a due row waiting; on fires once and Done reloads it', async () => {
+    mockIpc.__seedFollowups([{ vault, actor, followupId: 'later', dueAt: now.toISOString() }]);
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(agentIpc.runAgent).not.toHaveBeenCalled();
+    expect((await mockIpc.listFollowups(vault))[0].state).toBe('pending');
+    act(() => useUiStore.setState({ autoLearn: true }));
+    await startJob();
+    expect(agentIpc.runAgent).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1].followup).toBe('later');
+    jobDone();
+    await startJob();
+    await advance(2 * MINUTE);
+    expect(agentIpc.runAgent).toHaveBeenCalledTimes(1);
+    expect(await mockIpc.listFollowups(vault)).toEqual([]);
+  });
+  it('a follow-up alone keeps the minute clock until its time comes', async () => {
+    mockIpc.__seedFollowups([
+      {
+        vault,
+        actor,
+        followupId: 'future',
+        dueAt: new Date(now.getTime() + 2 * MINUTE).toISOString(),
+      },
+    ]);
+    act(() => useUiStore.setState({ autoLearn: true }));
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(agentIpc.runAgent).not.toHaveBeenCalled();
+    await advance(2 * MINUTE);
+    await startJob();
+    expect(agentIpc.runAgent).toHaveBeenCalledTimes(1);
+  });
+  it('Done from an attended run reloads a newly booked follow-up', async () => {
+    renderHook(() => useJobRunner());
+    await startJob();
+    mockIpc.__seedFollowups([{ vault, actor, followupId: 'booked', dueAt: now.toISOString() }]);
+    act(() => handlers.forEach((handler) => handler({ run: 111, kind: 'Done' })));
+    await startJob();
+    act(() => useUiStore.setState({ autoLearn: true }));
+    await startJob();
+    expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1].followup).toBe('booked');
   });
 });

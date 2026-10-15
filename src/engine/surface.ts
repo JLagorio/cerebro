@@ -12,6 +12,7 @@ import type {
   SortSpec,
   ListFile,
   ListSource,
+  ViewDefinition,
 } from './types';
 import { typeViews } from './typeCatalog';
 import { evaluateFilters } from './viewFilters';
@@ -32,6 +33,32 @@ export interface Surface {
   presentation: Presentation;
 }
 
+/** A type page and an agent's preview use exactly the same source, filters
+ * and ordering. A selection chooses a saved tab; a preview supplies its view. */
+export function resolveTypeView(
+  name: string,
+  view: ViewDefinition,
+  entries: Entry[],
+  schema: Schema,
+): Surface {
+  const { filters, presentation } = view;
+  return {
+    title: name,
+    entries: sortEntries(
+      // Templates declare a type so new pages inherit it; they are not records.
+      entries.filter(
+        (entry) =>
+          entry.type === name &&
+          !isTemplate(entry) &&
+          (filters === null || evaluateFilters(entry, filters, schema)),
+      ),
+      presentation.sort,
+      schema,
+    ),
+    presentation,
+  };
+}
+
 function defaultPresentation(): Presentation {
   return clonePresentation(DEFAULT_PRESENTATION);
 }
@@ -42,7 +69,7 @@ function emptySurface(kind: DestinationKind): Surface {
   return { title: destination(kind).label, entries: [], presentation: defaultPresentation() };
 }
 
-const stem = (path: string) => (path.split('/').pop() ?? path).replace(/\.(md|mmd)$/, '');
+const stem = (path: string) => (path.split('/').pop() ?? path).replace(/\.(md|mmd|canvas)$/, '');
 
 function isEmptyValue(v: unknown): boolean {
   return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
@@ -206,28 +233,10 @@ export function resolveSurface(
       };
     }
     case 'type': {
-      // M12.3: a type keeps saved views exactly like a List — the selection's
-      // `view` names the open tab, and filters belong to the view.
       const tabs = typeViews(sel.name, schema);
       const active =
         (sel.view != null ? tabs.find((v) => v.id === sel.view) : undefined) ?? tabs[0];
-      const { filters, presentation } = active;
-      return {
-        title: sel.name,
-        entries: sortEntries(
-          // Templates declare a type so new pages inherit it; they are not
-          // records of it (M3.1).
-          entries.filter(
-            (e) =>
-              e.type === sel.name &&
-              !isTemplate(e) &&
-              (filters === null || evaluateFilters(e, filters, schema)),
-          ),
-          presentation.sort,
-          schema,
-        ),
-        presentation,
-      };
+      return resolveTypeView(sel.name, active, entries, schema);
     }
     case 'collection':
       // A Collection contains; it does not query. Its page lists the Lists,
@@ -263,8 +272,14 @@ export function resolveSurface(
     case 'doc':
       // Docs render in the editor surface (DocPage); they have no item canvas.
       return { title: stem(sel.path), entries: [], presentation: defaultPresentation() };
+    case 'file':
+      return {
+        title: sel.path.split('/').at(-1) ?? sel.path,
+        entries: [],
+        presentation: defaultPresentation(),
+      };
     case 'diagram':
-      // A standalone .mmd renders in DiagramPage (M29.21); no item canvas.
+      // Diagrams and whiteboards own file pages, with no record canvas.
       return { title: stem(sel.path), entries: [], presentation: defaultPresentation() };
     case 'changes':
       // The git surfaces draw their own layouts; they are not collections of

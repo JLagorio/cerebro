@@ -1,3 +1,5 @@
+import { editorHoldersOf } from '@/editor/openPages';
+import { navSeed } from '@/test/navSeed';
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -28,7 +30,7 @@ describe('DiagramPage', () => {
     useUiStore.setState({ toasts: [] });
     useNavStore.setState({
       selection: { kind: 'diagram', path: PIPELINE },
-      history: [{ kind: 'diagram', path: PIPELINE }],
+      history: [navSeed({ kind: 'diagram', path: PIPELINE })],
       historyIndex: 0,
     });
     renderMock.mockResolvedValue({ ok: true, svg: '<svg data-fake="page"></svg>' });
@@ -39,11 +41,33 @@ describe('DiagramPage', () => {
   it('loads a flowchart .mmd and opens in the structural editor', async () => {
     render(<DiagramPage selection={{ kind: 'diagram', path: PIPELINE }} />);
     expect(await screen.findByTestId('structural-host')).toBeTruthy();
+    expect(editorHoldersOf(PIPELINE)).toEqual([useNavStore.getState().active]);
     // Title from the filename stem (the scanner's), type from the source.
     expect(screen.getByTestId('diagram-title').textContent).toBe('Pipeline');
     expect(screen.getByText('Flowchart')).toBeTruthy();
     expect(screen.getByTestId('canvas-plane')).toBeTruthy();
     expect(screen.queryByTestId('code-overlay')).toBeNull();
+    expect(screen.queryByTestId('diagram-convert')).toBeNull();
+  });
+
+  it('offers conversion only for a nonempty manual flowchart and leaves the source unchanged', async () => {
+    const source =
+      'flowchart LR\n%% cerebro:layout manual\n%% cerebro:pos A 100,100 B 400,100\nA[One] --> B[Two]\n';
+    fs().set(PIPELINE, source);
+    await useVaultStore.getState().rescan();
+    render(<DiagramPage selection={{ kind: 'diagram', path: PIPELINE }} />);
+    fireEvent.click(await screen.findByTestId('diagram-convert'));
+    expect(screen.getByTestId('convert-board-dialog')).toBeTruthy();
+    expect(fs().has('diagrams/pipeline.canvas')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Convert' }));
+    await waitFor(() => expect(fs().has('diagrams/pipeline.canvas')).toBe(true));
+    expect(fs().get(PIPELINE)).toBe(source);
+    await waitFor(() =>
+      expect(useNavStore.getState().selection).toEqual({
+        kind: 'diagram',
+        path: 'diagrams/pipeline.canvas',
+      }),
+    );
   });
 
   it('opens a non-flowchart .mmd in code mode with the source verbatim', async () => {

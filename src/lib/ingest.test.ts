@@ -1,18 +1,83 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { KINDS } from '@/engine/fileKinds';
 import { resetMockFs } from '@/lib/mockIpc';
 import { useVaultStore } from '@/stores/vaultStore';
+import { stageDropped, resetDropped } from './mockDropped';
+import * as ipc from './ipc';
 import {
   describeIngest,
   ingestFiles,
+  ingestDropped,
   ingestOne,
   INGESTIBLE_EXTENSIONS,
   isIngestible,
   MAX_INGEST_BYTES,
   VAULT_STILL_OPENING,
 } from './ingest';
+
+describe('native path drops', () => {
+  beforeEach(() => {
+    resetDropped();
+    resetMockFs();
+    useVaultStore.setState({ vaultPath: '/demo-vault', entriesVault: '/demo-vault', entries: [] });
+  });
+  it('files captures in order, names skipped files, and stores only the basename', async () => {
+    stageDropped([
+      { path: '/outside/one.md', content: '# First native note\nHello' },
+      { path: '/outside/folder', folder: true },
+      { path: '/outside/.hidden.md', content: 'hidden' },
+      { path: '/outside/two.txt', content: 'Second native note' },
+      { path: '/outside/empty.md', content: '' },
+    ]);
+    const read = vi.spyOn(ipc, 'readDroppedText');
+    try {
+      const result = await ingestDropped(
+        [
+          '/outside/one.md',
+          '/outside/folder',
+          '/outside/.hidden.md',
+          '/outside/two.txt',
+          '/outside/empty.md',
+        ],
+        () => true,
+      );
+      expect(result.paths).toHaveLength(2);
+      expect(result.skipped).toEqual([
+        { filename: 'folder', reason: 'a folder' },
+        { filename: '.hidden.md', reason: 'a hidden file' },
+        { filename: 'empty.md', reason: 'empty' },
+      ]);
+      expect(read.mock.calls.map(([path]) => path)).toEqual([
+        '/outside/one.md',
+        '/outside/two.txt',
+        '/outside/empty.md',
+      ]);
+      const saved = (await ipc.readNoteSource('/demo-vault', result.paths[0])).content;
+      expect(saved).toContain('source_file: one.md');
+      expect(saved).not.toContain('/outside/');
+    } finally {
+      read.mockRestore();
+    }
+  });
+  it('stops when a delayed read outlives the page or vault', async () => {
+    stageDropped([{ path: '/outside/a.md', content: 'Never written' }]);
+    let current = true;
+    const read = vi.spyOn(ipc, 'readDroppedText').mockImplementation(async () => {
+      current = false;
+      return { kind: 'text', content: 'Never written' };
+    });
+    const create = vi.spyOn(useVaultStore.getState(), 'createItem');
+    try {
+      expect((await ingestDropped(['/outside/a.md'], () => current)).paths).toEqual([]);
+      expect(create).not.toHaveBeenCalled();
+    } finally {
+      read.mockRestore();
+      create.mockRestore();
+    }
+  });
+});
 
 describe('what the Inbox takes comes from the kind table (M66.1)', () => {
   it('takes the six capture extensions, in any case', () => {
@@ -30,14 +95,18 @@ describe('what the Inbox takes comes from the kind table (M66.1)', () => {
   });
 
   it('refuses a picture, a bare filename and a dotfile', () => {
-    for (const name of ['photo.png', 'Makefile', '.env', 'report.pdf', 'notes.']) {
+    for (const name of ['photo.png', 'Makefile', '.env', 'archive.zip', 'notes.']) {
       expect(isIngestible(name), name).toBe(false);
     }
   });
 
   it("lists the table's capture rows and its cap", () => {
     expect(INGESTIBLE_EXTENSIONS).toEqual(
-      KINDS.kinds.filter((row) => row.ingest === 'capture').map((row) => row.ext),
+      KINDS.kinds
+        .filter(
+          (row) => row.ingest === 'capture' || row.ingest === 'import' || row.ingest === 'extract',
+        )
+        .map((row) => row.ext),
     );
     expect(MAX_INGEST_BYTES).toBe(KINDS.limits.capture_max_bytes);
     expect(MAX_INGEST_BYTES).toBe(4 * 1024 * 1024);
@@ -165,5 +234,54 @@ describe('a repeat drop names its filed copy (M64.7)', () => {
     expect(result.skipped).toEqual([{ filename: NAME, reason: VAULT_STILL_OPENING }]);
     expect(disk().size).toBe(size);
     await expect(ingestOne('', PASTE)).rejects.toThrow(VAULT_STILL_OPENING);
+  });
+});
+
+describe('local import previews', () => {
+  const content =
+    'BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:one\nDTSTART:20260703\nEND:VEVENT\nEND:VCALENDAR';
+  beforeEach(() => {
+    resetDropped();
+    resetMockFs();
+    useVaultStore.setState({ vaultPath: '/demo-vault', entriesVault: '/demo-vault', entries: [] });
+  });
+  it('claims calendars from native drops without writing a capture', async () => {
+    stageDropped([{ path: '/outside/team.ics', content }]);
+    const claim = vi.fn(() => true);
+    const result = await ingestDropped(['/outside/team.ics'], () => true, claim);
+    expect(result).toEqual({ paths: [], duplicates: [], skipped: [], imports: 1 });
+    expect(claim).toHaveBeenCalledWith({ kind: 'calendar', name: 'team.ics', content });
+    expect(describeIngest(result)).toBe('Opened 1 import preview');
+  });
+  it('checks content and requires a preview owner instead of filing calendar syntax as a note', async () => {
+    stageDropped([
+      { path: '/outside/not.ics', content: '# Note' },
+      { path: '/outside/team.ics', content },
+    ]);
+    const result = await ingestDropped(['/outside/not.ics', '/outside/team.ics'], () => true);
+    expect(result.paths).toEqual([]);
+    expect(result.skipped.map((row) => row.reason)).toEqual([
+      'not a calendar file',
+      'open this file from the Inbox to preview it',
+    ]);
+  });
+  it('browser reads stop before claiming or writing when the page retires', async () => {
+    let current = true;
+    const claim = vi.fn(() => true);
+    const bytes = new TextEncoder().encode(content);
+    const file = {
+      name: 'team.ics',
+      size: bytes.length,
+      arrayBuffer: async () => {
+        current = false;
+        return bytes.buffer;
+      },
+    } as File;
+    expect(await ingestFiles([file], () => current, claim)).toEqual({
+      paths: [],
+      duplicates: [],
+      skipped: [],
+    });
+    expect(claim).not.toHaveBeenCalled();
   });
 });

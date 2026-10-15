@@ -15,7 +15,8 @@ const canRedo = (): boolean => useUndoStore.getState().future.length > 0;
  * browser's and the editor's own history (its `editor` claim), an open layer
  * (a dialog, a popover, a menu, the record peek) stands them down, and a
  * diagram's own `diagram.undo` binding shadows them from its page, peek or
- * block. An empty stack says nothing and leaves the key alone.
+ * block. A sheet grid claims editor keys and forwards history to its page.
+ * An empty stack says nothing and leaves the key alone.
  */
 export function useUndoShortcuts(): void {
   useCommands([

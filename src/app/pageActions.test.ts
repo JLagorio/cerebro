@@ -1,3 +1,4 @@
+import { navSeed } from '@/test/navSeed';
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -8,6 +9,7 @@ import { docPagesFor } from '@/engine/docPages';
 import { __resetOpenPages, registerFlush, registerHold } from '@/editor/openPages';
 import * as ipc from '@/lib/ipc';
 import { resetMockFs } from '@/lib/mockIpc';
+import { useRenamePromptStore } from '@/stores/renamePromptStore';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -24,6 +26,7 @@ beforeEach(async () => {
   resetMockFs();
   vi.clearAllMocks();
   __resetOpenPages();
+  useRenamePromptStore.getState().cancel();
   window.localStorage.clear();
   useUiStore.setState({ toasts: [], favorites: {} });
   fs().set(PLAN, PLAN_BYTES);
@@ -31,7 +34,7 @@ beforeEach(async () => {
   await useVaultStore.getState().openVault(VAULT);
   useNavStore.setState({
     selection: { kind: 'doc', path: PLAN },
-    history: [{ kind: 'doc', path: PLAN }],
+    history: [navSeed({ kind: 'doc', path: PLAN })],
     historyIndex: 0,
   });
 });
@@ -58,6 +61,22 @@ describe('addSubPage', () => {
     ]);
   });
 
+  it('cancelling a source-pointer warning creates neither a folder nor a child', async () => {
+    fs().set(
+      'knowledge/systems/grow-proof.md',
+      '---\nsources:\n  - resource: /notes/plan.md\n---\n# Source proof\n',
+    );
+    await useVaultStore.getState().rescan();
+    const before = new Map(fs());
+    const promise = addSubPage(PLAN, 'Child');
+    await vi.waitFor(() => expect(useRenamePromptStore.getState().pending).not.toBeNull());
+    useRenamePromptStore.getState().cancel();
+    expect(await promise).toBeNull();
+    expect(new Map(fs())).toEqual(before);
+    expect(vi.mocked(ipc.createFolder)).not.toHaveBeenCalled();
+    expect(vi.mocked(ipc.createNote)).not.toHaveBeenCalled();
+  });
+
   it('only creates on a page that already has a folder', async () => {
     fs().set('notes/doc/doc.md', '# Doc\n');
     await useVaultStore.getState().rescan();
@@ -80,7 +99,9 @@ describe('addSubPage', () => {
       return mock.renameNote(...args);
     });
     expect(await addSubPage(PLAN, 'Child')).not.toBeNull();
-    expect(order).toEqual(['flush', 'rename']);
+    expect(order.at(-1)).toBe('rename');
+    expect(order.slice(0, -1).length).toBeGreaterThan(0);
+    expect(order.slice(0, -1).every((step) => step === 'flush')).toBe(true);
     expect(fs().get('notes/plan/plan.md')).toBe(`${PLAN_BYTES}Typed a moment ago.\n`);
   });
 
@@ -135,7 +156,7 @@ describe('addSubPage', () => {
     vi.mocked(ipc.renameNote).mockRejectedValueOnce(new Error('disk full'));
     const rescan = vi.spyOn(useVaultStore.getState(), 'rescan');
     await expect(addSubPage(PLAN, 'Child')).resolves.toBeNull();
-    expect(toasts()).toContain("Couldn't add sub-page: disk full");
+    expect(toasts()).toEqual(["Couldn't move plan: disk full"]);
     expect(rescan).toHaveBeenCalled();
     expect(fs().get(PLAN)).toBe(PLAN_BYTES);
   });
@@ -185,8 +206,8 @@ describe('nestPage', () => {
   });
 
   it('a failed move toasts and rescans, and never throws', async () => {
-    vi.mocked(ipc.renameNote).mockRejectedValueOnce(new Error('disk full'));
+    vi.mocked(ipc.applyBatch).mockRejectedValueOnce(new Error('disk full'));
     await expect(nestPage('notes/loose.md', PLAN)).resolves.toBeNull();
-    expect(toasts()).toContain("Couldn't add sub-page: disk full");
+    expect(toasts()).toEqual(["Couldn't rename notes/plan.md: disk full"]);
   });
 });

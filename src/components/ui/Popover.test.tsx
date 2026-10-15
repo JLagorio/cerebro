@@ -379,21 +379,21 @@ describe('Popover inside a Dialog (M29.27)', () => {
  * its own contents has to say so.
  */
 describe('Popover re-measures when a host says its anchors moved', () => {
-  function Anchored() {
+  function Anchored({ persist = false }: { persist?: boolean }) {
     const ref = useRef<HTMLButtonElement>(null);
     return (
       <div>
         <button type="button" ref={ref} data-testid="anchor">
           anchor
         </button>
-        <Popover anchorRef={ref} onClose={() => {}} ariaLabel="Panel">
+        <Popover anchorRef={ref} onClose={() => {}} ariaLabel="Panel" closeOnScroll={!persist}>
           <span>body</span>
         </Popover>
       </div>
     );
   }
 
-  it('places itself again on ANCHOR_MOVED_EVENT', () => {
+  it.each([false, true])('follows anchor movement, persist=%s', (persist) => {
     let top = 100;
     const original = Element.prototype.getBoundingClientRect;
     Element.prototype.getBoundingClientRect = function (this: Element) {
@@ -411,14 +411,15 @@ describe('Popover re-measures when a host says its anchors moved', () => {
       } as DOMRect;
     };
     try {
-      render(<Anchored />);
+      render(<Anchored persist={persist} />);
       // The POSITIONED element is the outer fixed wrapper; the labelled one
       // inside it carries the animation and the width.
       const panel = screen.getByLabelText('Panel').parentElement!;
       const before = parseFloat(panel.style.top);
       // The anchor moves the way a zoom moves it: no resize, no scroll.
       top = 300;
-      fireEvent(window, new Event(ANCHOR_MOVED_EVENT));
+      if (persist) fireEvent.scroll(document);
+      else fireEvent(window, new Event(ANCHOR_MOVED_EVENT));
       // It tracked the anchor's own 200px, whatever the gap happens to be.
       expect(parseFloat(panel.style.top) - before).toBe(200);
     } finally {

@@ -1,6 +1,6 @@
 {
   "format": 3,
-  "artifact_version": 11,
+  "artifact_version": 12,
   "target_classes": [
     "belief",
     "comparison",
@@ -71,6 +71,7 @@
     "human_rejected": "ledger",
     "idempotency_key_reused": "operational",
     "illegal_transition": "ledger",
+    "import_refused": "operational",
     "independence_not_confirmable": "ledger",
     "internal_cas_race": "operational",
     "invalid_reference": "ledger",
@@ -110,6 +111,7 @@
     "target_version"
   ],
   "transport_rejections": [
+    "import_refused",
     "malformed_arguments",
     "no_longer_waiting",
     "note_exists",

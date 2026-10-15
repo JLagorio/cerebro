@@ -23,7 +23,7 @@ let installed: (() => void) | null = null;
 /**
  * Forward the window's uncaught errors and unhandled rejections to the
  * diagnostic log. Idempotent: a second call returns the first one's remover
- * and adds nothing. The returned function removes both listeners.
+ * and adds nothing. The returned function removes all listeners.
  */
 export function installErrorReporting(): () => void {
   if (installed !== null) return installed;
@@ -45,10 +45,26 @@ export function installErrorReporting(): () => void {
   };
   const onError = (event: ErrorEvent): void => forward(fromError(event));
   const onRejection = (event: PromiseRejectionEvent): void => forward(fromRejection(event));
+  const onViolation = (event: SecurityPolicyViolationEvent): void => {
+    let origin = 'inline or unavailable';
+    try {
+      const url = new URL(event.blockedURI);
+      // Never record a document path, query, data payload or embedded secret.
+      origin = url.origin !== 'null' ? url.origin : url.protocol;
+    } catch {
+      /* A browser keyword such as inline carries no origin. */
+    }
+    forward({
+      level: 'error',
+      message: `Content policy blocked ${event.effectiveDirective}: ${origin}`,
+    });
+  };
+  window.addEventListener('securitypolicyviolation', onViolation);
   window.addEventListener('error', onError);
   window.addEventListener('unhandledrejection', onRejection);
 
   const remove = (): void => {
+    window.removeEventListener('securitypolicyviolation', onViolation);
     window.removeEventListener('error', onError);
     window.removeEventListener('unhandledrejection', onRejection);
     if (installed === remove) installed = null;

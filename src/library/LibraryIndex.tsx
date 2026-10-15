@@ -1,3 +1,7 @@
+import { useFollowupStore } from '@/stores/followupStore';
+import { useVaultStore } from '@/stores/vaultStore';
+import { waitingFollowup, type Followup } from '@/engine/followups';
+import { RecipesOffer } from './RecipesOffer';
 import { useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -9,7 +13,15 @@ import { listAgents } from '@/engine/agents';
 import { isPaused } from '@/engine/jobs';
 import { LIBRARY_KINDS, libraryIcon, libraryLabelPlural, type LibraryKind } from '@/engine/library';
 import { agentActive } from '@/engine/libraryDraft';
-import { argumentHint, listSkills, parseSchedule } from '@/engine/skills';
+import {
+  argumentHint,
+  listSkills,
+  parseScheduleSet,
+  scheduleText,
+  scheduleItems,
+  describeScheduleSet,
+  nextSetFire,
+} from '@/engine/skills';
 import { parseTriggers } from '@/engine/triggers';
 import { listTemplates, templateFill } from '@/lib/templates';
 import { nameMatches } from '@/lib/nameRank';
@@ -47,11 +59,21 @@ export interface LibraryCard {
  * `writes records/risks` are boundaries Rust enforces, and a library that made
  * you open a file to find them would be a directory, not a control surface.
  */
-export function libraryCards(kind: LibraryKind, entries: Entry[]): LibraryCard[] {
+export function libraryCards(
+  kind: LibraryKind,
+  entries: Entry[],
+  now = new Date(),
+  followups: readonly Followup[] = [],
+): LibraryCard[] {
   if (kind === 'skill') {
     return listSkills(entries).map((skill) => {
       const entry = entries.find((e) => e.path === skill.path);
-      const schedule = parseSchedule(entry?.properties.schedule);
+      const schedule = parseScheduleSet(entry?.properties.schedule);
+      const raw = scheduleText(entry?.properties.schedule);
+      const passed = schedule !== null && nextSetFire(schedule, now) === null;
+      const reason = passed
+        ? 'Its one time has passed — runs only when you ask'
+        : describeScheduleSet(entry?.properties.schedule);
       const args = argumentHint(skill);
       return {
         path: skill.path,
@@ -70,16 +92,14 @@ export function libraryCards(kind: LibraryKind, entries: Entry[]): LibraryCard[]
                   tone: 'warn' as const,
                 },
               ]),
-          ...(schedule === null
-            ? []
-            : [{ label: String(entry?.properties.schedule), tone: 'off' as const }]),
+          ...(raw === '' ? [] : [{ label: reason, tone: 'off' as const }]),
         ],
         duty:
-          schedule === null
+          raw === ''
             ? null
             : {
-                on: entry !== undefined && !isPaused(entry),
-                reason: String(entry?.properties.schedule),
+                on: schedule !== null && !passed && entry !== undefined && !isPaused(entry),
+                reason,
               },
       };
     });
@@ -88,10 +108,16 @@ export function libraryCards(kind: LibraryKind, entries: Entry[]): LibraryCard[]
   if (kind === 'agent') {
     return listAgents(entries).map((agent) => {
       const entry = entries.find((e) => e.path === agent.path);
-      const schedule =
-        typeof entry?.properties.schedule === 'string' ? entry.properties.schedule : '';
+      const schedule = scheduleItems(entry?.properties.schedule);
+      const said = scheduleText(schedule);
+      const parsed = parseScheduleSet(schedule);
+      const reason =
+        parsed !== null && nextSetFire(parsed, now) === null
+          ? 'Its one time has passed — runs only when you ask'
+          : describeScheduleSet(schedule);
       const triggers = parseTriggers(entry?.properties.when);
-      const configured = agentActive({ schedule, triggers });
+      const configured = agentActive({ schedule, triggers }, now);
+      const later = followups.some((row) => row.actor === agent.actor && waitingFollowup(row));
       const paused = entry !== undefined && isPaused(entry);
       return {
         path: agent.path,
@@ -99,7 +125,7 @@ export function libraryCards(kind: LibraryKind, entries: Entry[]): LibraryCard[]
         handle: agent.actor,
         description: agent.description,
         tags: [
-          ...(schedule === '' ? [] : [{ label: schedule, tone: 'off' as const }]),
+          ...(said === '' ? [] : [{ label: reason, tone: 'off' as const }]),
           ...(triggers.length === 0
             ? []
             : [
@@ -122,15 +148,19 @@ export function libraryCards(kind: LibraryKind, entries: Entry[]): LibraryCard[]
           ...(agent.shell ? [{ label: 'shell', tone: 'warn' as const }] : []),
         ],
         duty: {
-          on: configured && !paused,
+          on: (configured || later) && !paused,
           // Why it is off, rather than only that it is: "not activated" with no
           // explanation is the state people file bugs about.
           reason: !configured
-            ? 'No schedule and no trigger — nothing can fire it'
+            ? said === ''
+              ? later
+                ? 'No schedule and no trigger — a follow-up it booked will run it while Learn on its own is on'
+                : 'No schedule and no trigger — nothing can fire it'
+              : reason
             : paused
               ? 'Paused'
-              : schedule !== ''
-                ? schedule
+              : said !== ''
+                ? reason
                 : `${triggers.length} trigger${triggers.length === 1 ? '' : 's'}`,
         },
       };
@@ -177,7 +207,19 @@ export function LibraryIndex({
    * from a list, because it is the one you take in a hurry. */
   onDuty: (path: string, on: boolean) => void;
 }) {
-  const cards = useMemo(() => libraryCards(tab, entries), [tab, entries]);
+  const vault = useVaultStore((state) => state.vaultPath);
+  const followupVault = useFollowupStore((state) => state.vault);
+  const followupRead = useFollowupStore((state) => state.read);
+  const cards = useMemo(
+    () =>
+      libraryCards(
+        tab,
+        entries,
+        new Date(),
+        followupVault === vault && followupRead.state === 'ready' ? followupRead.rows : [],
+      ),
+    [tab, entries, vault, followupVault, followupRead],
+  );
   // A filter, not a ranking: the shelf keeps its order (M59.3).
   const shown = cards.filter((c) =>
     nameMatches(query, [c.title, c.description, `${c.title} ${c.description}`]),
@@ -226,6 +268,7 @@ export function LibraryIndex({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+        {tab === 'skill' && <RecipesOffer />}
         {shown.length === 0 ? (
           <EmptyState
             icon={libraryIcon(tab)}

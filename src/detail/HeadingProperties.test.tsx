@@ -178,4 +178,27 @@ describe('HeadingProperties (M45.1)', () => {
     // Nothing at all — the toggle folds away with the strip it would expand.
     expect(container.firstChild).toBeNull();
   });
+
+  it('forwards a field edit as a keyed draft patch without writing', () => {
+    const entries = fixtureVault();
+    const schema = buildSchema(entries);
+    const entry = entries.find((row) => row.type === 'Work item')!;
+    const field = schema.types.get('Work item')!.fields.find((row) => row.name === 'priority')!;
+    const patch = vi.fn();
+    const onPatch = vi.fn();
+    useVaultStore.setState({ entries, patchFrontmatter: patch });
+    render(
+      <HeadingProperties
+        entry={entry}
+        fields={[field]}
+        schema={schema}
+        showEmpty
+        onPatch={onPatch}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'High' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Low' }));
+    expect(onPatch).toHaveBeenCalledWith({ priority: 'low' });
+    expect(patch).not.toHaveBeenCalled();
+  });
 });

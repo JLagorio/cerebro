@@ -66,6 +66,25 @@ function useSystemDark(): boolean {
   return useSyncExternalStore(subscribe, getSnapshot, () => false);
 }
 
+let preview: ThemeMode | null = null;
+const previewListeners = new Set<() => void>();
+const subscribePreview = (listener: () => void) => {
+  previewListeners.add(listener);
+  return () => {
+    previewListeners.delete(listener);
+  };
+};
+const previewSnapshot = () => preview;
+
+/** Preview changes the document only; null restores the saved preference. */
+export function previewTheme(mode: ThemeMode | null): void {
+  preview = mode;
+  const systemDark =
+    typeof window.matchMedia === 'function' && window.matchMedia(DARK_QUERY).matches;
+  applyTheme(resolveTheme(mode ?? useUiStore.getState().themeMode, systemDark));
+  for (const listener of previewListeners) listener();
+}
+
 /**
  * Keep `<html data-theme>` in step with the chosen mode (M16.36). Call once,
  * at the app root.
@@ -79,7 +98,8 @@ function useSystemDark(): boolean {
 export function useTheme(): ResolvedTheme {
   const mode = useUiStore((s) => s.themeMode);
   const systemDark = useSystemDark();
-  const theme = resolveTheme(mode, systemDark);
+  const previewMode = useSyncExternalStore(subscribePreview, previewSnapshot, () => null);
+  const theme = resolveTheme(previewMode ?? mode, systemDark);
 
   // Layout effect, not a passive one: this runs on every mode change, and an
   // effect that lands after paint shows one frame of the outgoing palette.

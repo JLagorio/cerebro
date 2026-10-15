@@ -17,7 +17,8 @@
  */
 
 import { isDateText } from './dateGrammar';
-import { groupingUses, ruleAt, viewRefs } from './fieldRefs';
+import { parseRepeat } from './recurrence';
+import { formulaUses, groupingUses, ruleAt, viewRefs } from './fieldRefs';
 import {
   CREATABLE_PROPERTY_KINDS,
   GROUPABLE_KINDS,
@@ -48,31 +49,33 @@ export type Cast = 'safe' | 'checked' | 'never';
 
 /** A source row that reads its values as text: text, email, phone, and the
  * computed kinds, whose stale stored values are just text. */
-const TEXT_ROW = 'SCCCCSSCCCCSSNNNN';
+const TEXT_ROW = 'SCCCCSSCCCCSSNNNNNC';
 
 /**
  * The cast table (Appendix C of the M60 plan). Columns in `FIELD_KINDS`
  * order: text number checkbox date daterange select multiselect status
- * person relation url email phone files rollup created_time last_edited_time.
+ * person relation url email phone files rollup created_time last_edited_time formula repeat.
  */
 export const CASTS = {
   text: TEXT_ROW,
-  number: 'SSNNNSSCNNNNSNNNN',
-  checkbox: 'SNSNNNNNNNNNNNNNN',
-  date: 'SNNSSNNNNNNNNNNNN',
-  daterange: 'SNNCSNNNNNNNNNNNN',
-  select: 'SCCCNSSCCCCSSNNNN',
-  multiselect: 'SCCCNCSCCCCCCNNNN',
-  status: 'SNNNNSSSNNNNNNNNN',
-  person: 'NNNNNNNNSSNNNNNNN',
-  relation: 'NNNNNNNNSSNNNNNNN',
-  url: 'SNNNNSSCNNSSSNNNN',
+  number: 'SSNNNSSCNNNNSNNNNNN',
+  checkbox: 'SNSNNNNNNNNNNNNNNNN',
+  date: 'SNNSSNNNNNNNNNNNNNN',
+  daterange: 'SNNCSNNNNNNNNNNNNNN',
+  select: 'SCCCNSSCCCCSSNNNNNN',
+  multiselect: 'SCCCNCSCCCCCCNNNNNN',
+  status: 'SNNNNSSSNNNNNNNNNNN',
+  person: 'NNNNNNNNSSNNNNNNNNN',
+  relation: 'NNNNNNNNSSNNNNNNNNN',
+  url: 'SNNNNSSCNNSSSNNNNNN',
   email: TEXT_ROW,
   phone: TEXT_ROW,
-  files: 'SNNNNNNNNNNNNSNNN',
-  rollup: 'SCCCCSSCCCCSSNSNN',
-  created_time: 'SCCCCSSCCCCSSNNSN',
-  last_edited_time: 'SCCCCSSCCCCSSNNNS',
+  files: 'SNNNNNNNNNNNNSNNNNN',
+  rollup: 'SCCCCSSCCCCSSNSNNNC',
+  created_time: 'SCCCCSSCCCCSSNNSNNC',
+  last_edited_time: 'SCCCCSSCCCCSSNNNSNC',
+  formula: 'SCCCCSSCCCCSSNNNNSC',
+  repeat: 'SNNNNNNNNNNNNNNNNNS',
 } satisfies Record<FieldKind, string>;
 
 for (const [kind, row] of Object.entries(CASTS)) {
@@ -230,6 +233,10 @@ function convertRaw(raw: unknown, to: FieldKind, ctx: ConvertCtx): Converted {
       const t = textOf(raw, ctx);
       return t === null ? FAIL : ok(t);
     }
+    case 'repeat': {
+      const text = textOf(raw, ctx);
+      return text !== null && parseRepeat(text)?.kind === 'rule' ? ok(text) : FAIL;
+    }
     case 'email':
     case 'phone': {
       if (Array.isArray(raw) && raw.length !== 1) return FAIL;
@@ -295,6 +302,7 @@ function convertRaw(raw: unknown, to: FieldKind, ctx: ConvertCtx): Converted {
       return toLinks(raw, ctx);
     case 'files':
       return ctx.from === 'files' && Array.isArray(raw) ? ok(raw) : FAIL;
+    case 'formula':
     case 'rollup':
     case 'created_time':
     case 'last_edited_time':
@@ -450,6 +458,8 @@ export interface KindChangeWrite {
 }
 
 export interface KindChangePreview {
+  /** An input read by a formula can only be copied into a new property. */
+  copyOnly?: boolean;
   to: FieldKind;
   /** The answer after the dry run: a table N, every value failing and an
    * in-place grouping block are all `never`. */
@@ -597,6 +607,21 @@ export function dryRunKindChange(ctx: KindChangeCtx, to: FieldKind): KindChangeP
     };
   }
   const lossless = failures === 0;
+  const formula = from === to ? undefined : formulaUses(ctx.entries, ctx.typeName, ctx.field)[0];
+  if (formula !== undefined) {
+    return {
+      ...base,
+      cast: 'never',
+      copyOnly: true,
+      lossless: false,
+      reason: `The formula “${humanize(formula.field)}” reads ${humanize(ctx.field)}; change that formula first.`,
+      converts,
+      failures,
+      examples: failed,
+      writes: converted.map((value) => ({ path: value.record.path, value: value.value })),
+      options: to === 'select' || to === 'multiselect' ? seedOptions(ctx, converted) : null,
+    };
+  }
   if (
     lossless &&
     !GROUPABLE_KINDS.has(to) &&

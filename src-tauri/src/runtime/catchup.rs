@@ -120,7 +120,7 @@ impl Plan {
 }
 
 /// Read a vault into the scanned-item list catch-up consumes, plus the items
-/// it could not read.
+/// it could not read. Whiteboards are not ingest items; mail is excluded before any bytes are read.
 ///
 /// A file we cannot read is not hashed as empty: a fabricated hash would make
 /// it permanently, falsely 'unchanged'. It is also not silently skipped — the
@@ -129,10 +129,14 @@ impl Plan {
 /// `continue` that told nobody was the version of it that hid a file from
 /// its own owner.
 pub fn scan(vault: &Path) -> Result<Scan, String> {
-    let entries = crate::vault::scan::scan_vault(vault)?;
+    let entries =
+        crate::vault::scan::scan_vault_filtered(vault, |path| !crate::mail::is_mail_path(path))?;
     let mut items = Vec::with_capacity(entries.len());
     let mut unreadable = Vec::new();
     for entry in entries {
+        if crate::files::kinds::is_whiteboard(&entry.path) {
+            continue;
+        }
         let bytes = match std::fs::read(vault.join(&entry.path)) {
             Ok(bytes) => bytes,
             Err(detail) => {
@@ -356,7 +360,8 @@ pub fn open_session(
          (session_id, vault_id, store_uuid, opened_at, last_heartbeat_at, clean_closed_at, \
           close_precision) VALUES (?1, ?2, ?3, ?4, ?4, NULL, 'open') \
          ON CONFLICT (session_id, vault_id, store_uuid) DO UPDATE SET \
-           last_heartbeat_at = excluded.last_heartbeat_at",
+           opened_at = excluded.opened_at, last_heartbeat_at = excluded.last_heartbeat_at, \
+           clean_closed_at = NULL, close_precision = 'open'",
         rusqlite::params![session_id, vault_id, store_uuid, stamp],
     )
     .map_err(|e| format!("app_sessions: {e}"))?;
@@ -688,6 +693,68 @@ mod tests {
     }
 
     #[test]
+    fn a_vault_reopened_by_the_same_process_is_open_again() {
+        let (dir, conn, vault) = fixture("same-process-reopen");
+        open_session(
+            &conn,
+            "process",
+            &vault,
+            "store",
+            at("2026-07-28T09:00:00Z"),
+        )
+        .unwrap();
+        close_session(
+            &conn,
+            "process",
+            &vault,
+            "store",
+            at("2026-07-28T10:00:00Z"),
+        )
+        .unwrap();
+        let closed = open_session(
+            &conn,
+            "process",
+            &vault,
+            "store",
+            at("2026-07-28T11:00:00Z"),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(closed.app_closed_at, "2026-07-28T10:00:00.000Z");
+        let row:(String,String,Option<String>,String)=conn.query_row("SELECT opened_at,last_heartbeat_at,clean_closed_at,close_precision FROM app_sessions",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+        assert_eq!(
+            row,
+            (
+                "2026-07-28T11:00:00.000Z".into(),
+                "2026-07-28T11:00:00.000Z".into(),
+                None,
+                "open".into()
+            )
+        );
+        heartbeat(
+            &conn,
+            "process",
+            &vault,
+            "store",
+            at("2026-07-28T11:01:00Z"),
+        )
+        .unwrap();
+        let next = open_session(
+            &conn,
+            "next-process",
+            &vault,
+            "store",
+            at("2026-07-28T12:00:00Z"),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(next.app_closed_at, "2026-07-28T11:01:00.000Z");
+        assert_eq!(next.precision, "heartbeat_lower_bound");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn a_git_checkout_costs_nothing_because_content_did_not_move() {
         // THE acceptance row. Every mtime in the vault changed; not one byte
         // did. The queue must be empty.
@@ -828,6 +895,27 @@ mod tests {
     }
 
     #[test]
+    fn ambient_ingest_never_reads_mail() {
+        let dir = testutil::temp_vault("catchup-mail");
+        testutil::write(&dir, "sources/mail/a.md", "# Private\n");
+        testutil::write(&dir, "Sources/Mail/b.md", "# Private\n");
+        testutil::write(&dir, "sources/mailbox/ordinary.md", "# Ordinary\n");
+        // Invalid UTF-8 would surface as unreadable if the excluded body was opened.
+        std::fs::write(dir.join("sources/mail/a.md"), [0xff]).unwrap();
+        let result = scan(&dir).unwrap();
+        assert!(result.unreadable.is_empty());
+        assert_eq!(
+            result
+                .items
+                .iter()
+                .map(|item| item.item_key.as_str())
+                .collect::<Vec<_>>(),
+            ["sources/mailbox/ordinary.md"]
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
     fn scanning_a_real_vault_reads_bytes_not_timestamps() {
         let dir = testutil::temp_vault("catchup-scan");
         testutil::write(&dir, "a.md", "---\ntitle: A\n---\nbody\n");
@@ -840,6 +928,25 @@ mod tests {
         let second = scan(&dir).unwrap();
         assert_eq!(first, second, "a touch is not a change");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_whiteboard_is_not_an_ingest_item() {
+        let vault = testutil::temp_vault("catchup-board");
+        testutil::write(&vault, "page.md", "# A page");
+        testutil::write(&vault, "plan.canvas", "{\"nodes\":[],\"edges\":[]}");
+        testutil::write(&vault, "broken.canvas", "{");
+        let found = scan(&vault).unwrap();
+        assert_eq!(
+            found
+                .items
+                .iter()
+                .map(|i| i.item_key.as_str())
+                .collect::<Vec<_>>(),
+            ["page.md"]
+        );
+        assert!(found.unreadable.is_empty());
+        std::fs::remove_dir_all(vault).unwrap();
     }
 
     #[cfg(unix)]

@@ -1,12 +1,97 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConceptBody } from './ConceptBody';
+import { calculateSheets } from '@/lib/ipc';
+import { resetSheetCache } from '@/sheet/useSheetWorkbook';
+
+vi.mock('@/lib/ipc', async (original) => ({
+  ...(await original<typeof import('@/lib/ipc')>()),
+  calculateSheets: vi.fn(),
+}));
+vi.mock('@/whiteboard/WhiteboardEmbed', () => ({
+  WhiteboardEmbed: ({ board, height }: { board: string; height?: number }) => (
+    <div data-testid="whiteboard-embed" data-board={board} data-height={height} />
+  ),
+}));
 
 vi.mock('@/mermaid/render', () => ({
   renderMermaid: vi.fn().mockResolvedValue({ ok: true, svg: '<svg data-fake="k"></svg>' }),
 }));
 
 describe('ConceptBody', () => {
+  it('embeds a valid whiteboard pointer and leaves malformed or unclosed fences as code', () => {
+    render(
+      <ConceptBody
+        sources={[]}
+        fromPath="knowledge/maps/idea.md"
+        markdown={
+          '```cerebro-whiteboard\nboard: boards/flow.canvas\nheight: 520\n```\n\n```cerebro-whiteboard\nboard: ../bad.canvas\n```\n\n```cerebro-whiteboard\nboard: boards/unclosed.canvas'
+        }
+      />,
+    );
+    const embed = screen.getByTestId('whiteboard-embed');
+    expect(embed.getAttribute('data-board')).toBe('boards/flow.canvas');
+    expect(embed.getAttribute('data-height')).toBe('520');
+    expect(screen.getByText('board: ../bad.canvas').closest('pre')).toBeTruthy();
+    expect(screen.getByText('board: boards/unclosed.canvas').closest('pre')).toBeTruthy();
+  });
+  beforeEach(() => {
+    resetSheetCache();
+    vi.mocked(calculateSheets).mockReset();
+  });
+  it('computes two sheet fences together and leaves a database fence as code', async () => {
+    vi.mocked(calculateSheets).mockResolvedValue([
+      {
+        ok: true,
+        name: 'Budget',
+        rows: 1,
+        cols: 1,
+        cells: [{ row: 1, col: 1, kind: 'number', display: '1500' }],
+      },
+      {
+        ok: true,
+        name: 'Sheet2',
+        rows: 1,
+        cols: 1,
+        cells: [{ row: 1, col: 1, kind: 'number', display: '0.8' }],
+      },
+    ]);
+    render(
+      <ConceptBody
+        sources={[]}
+        fromPath="studio/budget/index.md"
+        markdown={
+          '```cerebro-sheet\n---\nname: Budget\n---\n=SUM(A2:A3)\n```\n\n~~~cerebro-sheet\n=Budget!B2/Budget!B4\n~~~\n\n```cerebro-database\ntype: Work item\n```'
+        }
+      />,
+    );
+    await waitFor(() => expect(screen.getAllByTestId('sheet-grid')).toHaveLength(2));
+    expect(screen.getByText('1500')).toBeTruthy();
+    expect(screen.getByText('0.8')).toBeTruthy();
+    expect(screen.getByText('type: Work item').closest('pre')).toBeTruthy();
+    expect(calculateSheets).toHaveBeenCalledOnce();
+    expect(vi.mocked(calculateSheets).mock.calls[0][0][1].cells[0].source).toBe(
+      '=Budget!B2/Budget!B4',
+    );
+  });
+  it('preserves unavailable source and does not discover sheets inside a longer code fence', () => {
+    render(
+      <ConceptBody
+        sources={[]}
+        fromPath="x.md"
+        markdown={
+          '````markdown\n```cerebro-sheet\n1\n```\n````\n\n```cerebro-sheet\n---\nformat: 2\n---\na,b\n```\n\n~~~cerebro-sheet\n2'
+        }
+      />,
+    );
+    expect(screen.getAllByTestId('sheet-unavailable')).toHaveLength(2);
+    expect(screen.getAllByTestId('sheet-source').map((element) => element.textContent)).toEqual([
+      '---\nformat: 2\n---\na,b',
+      '2',
+    ]);
+    expect(screen.getByText('This sheet block has no closing fence.')).toBeTruthy();
+    expect(calculateSheets).not.toHaveBeenCalled();
+  });
   it('renders mermaid fences as diagrams, other fences as code', async () => {
     const markdown = [
       '```mermaid',

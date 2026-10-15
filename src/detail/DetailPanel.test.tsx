@@ -22,6 +22,7 @@ import { useUiStore } from '@/stores/uiStore';
 import { fixtureVault, makeEntry } from '@/test/factories';
 
 vi.mock('@/lib/ipc', () => ({
+  listenOsFileDrop: vi.fn().mockResolvedValue(() => {}),
   readNote: vi.fn().mockResolvedValue('Existing body'),
   saveNote: vi.fn().mockResolvedValue(undefined),
   setNoteTitle: vi.fn().mockResolvedValue(undefined),
@@ -103,6 +104,29 @@ describe('DetailPanel', () => {
     useUiStore.setState({ detailPath: 'projects/onboarding/items/fld-1.md' });
   });
 
+  it('steps j/k through the supplied neighbours, clamps the ends, and leaves title typing alone', () => {
+    const next = makeEntry({ path: 'next.md', title: 'Next' });
+    useVaultStore.setState({ entries: [...fixtureVault(), next] });
+    useUiStore.setState({ detailSiblings: [FLD_1, next.path] });
+    render(<DetailPanel />);
+    const panel = screen.getByTestId('detail-panel');
+    fireEvent.pointerDown(panel);
+    fireEvent.keyDown(panel, { key: 'j' });
+    expect(useUiStore.getState().detailPath).toBe(next.path);
+    fireEvent.keyDown(panel, { key: 'j' });
+    expect(useUiStore.getState().detailPath).toBe(next.path);
+    const title = screen.getByTestId('detail-title');
+    title.focus();
+    fireEvent.keyDown(title, { key: 'k' });
+    expect(useUiStore.getState().detailPath).toBe(next.path);
+    title.blur();
+    fireEvent.pointerDown(panel);
+    fireEvent.keyDown(panel, { key: 'k' });
+    expect(useUiStore.getState().detailPath).toBe(FLD_1);
+    fireEvent.keyDown(panel, { key: 'k' });
+    expect(useUiStore.getState().detailPath).toBe(FLD_1);
+  });
+
   it('writes a frontmatter patch when a status option is picked', async () => {
     const user = userEvent.setup();
     const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
@@ -160,6 +184,26 @@ describe('DetailPanel', () => {
   // M34.5.3 — a cached copy says its own freshness. Gated on the fetch
   // bookkeeping properties, never on `type: Source`; extreme dates keep the
   // assertions clock-proof without pinning the system time.
+  it('keeps import provenance beside the record in the peek', () => {
+    const path = 'records/imported-copy.md';
+    useVaultStore.setState({
+      entries: [
+        ...fixtureVault(),
+        makeEntry({
+          path,
+          title: 'Imported copy',
+          properties: { source_system: 'linear', imported_at: '2026-10-13', import_hash: 'abc' },
+        }),
+      ],
+    });
+    useUiStore.setState({ detailPath: path });
+    render(<DetailPanel />);
+    expect(screen.getByTestId('import-provenance').textContent).toContain(
+      'Imported from Linear · 2026-10-13',
+    );
+    expect(screen.queryByText('Import hash')).toBeNull();
+  });
+
   it('a cached copy past its refresh date says stale, and when it was fetched', () => {
     useVaultStore.setState({
       entries: [
@@ -729,6 +773,24 @@ describe('DetailPanel', () => {
       useUiStore.setState({ detailPath: 'projects/onboarding/items/fld-1.md' });
       return entries;
     };
+
+    it('a Runs tab renders the page-scoped feed in the peek', () => {
+      withTabs([OVERVIEW, { id: 'runs', name: 'Runs', content: 'runs' }]);
+      render(<DetailPanel />);
+      fireEvent.click(screen.getByTestId('record-tab-runs'));
+      expect(screen.getByTestId('page-runs')).toBeTruthy();
+      expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+    });
+
+    it('an Agents tab renders the capability surface in the peek', () => {
+      withTabs([OVERVIEW, { id: 'agents', name: 'Agents', content: 'agents' }]);
+      render(<DetailPanel />);
+      fireEvent.click(screen.getByTestId('record-tab-agents'));
+      expect(screen.getByTestId('page-agents-unconfigured').textContent).toContain(
+        'Work item pages have no relation to Agent',
+      );
+      expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+    });
 
     it('a type with no saved tabs raises no strip, and the peek is what it was', () => {
       render(<DetailPanel />);

@@ -74,7 +74,7 @@ describe('field kind registration', () => {
     const computed = PROPERTY_KINDS.filter((k) => k.computed)
       .map((k) => k.kind)
       .sort();
-    expect(computed).toEqual(['created_time', 'last_edited_time', 'rollup']);
+    expect(computed).toEqual(['created_time', 'formula', 'last_edited_time', 'rollup']);
   });
 });
 
@@ -123,8 +123,8 @@ describe('kind capabilities', () => {
     );
   });
 
-  // The behaviour those Sets encoded, so the migration is provably faithful.
-  it('keeps what the hand-written sets said', () => {
+  // Capabilities include the date buckets added in M61.3.
+  it('offers the kinds whose band and ordering semantics are defined', () => {
     for (const k of [
       'status',
       'select',
@@ -132,6 +132,10 @@ describe('kind capabilities', () => {
       'person',
       'checkbox',
       'relation',
+      'date',
+      'daterange',
+      'created_time',
+      'last_edited_time',
     ] as const) {
       expect(GROUPABLE_KINDS.has(k)).toBe(true);
     }

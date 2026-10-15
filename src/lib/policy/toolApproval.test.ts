@@ -815,3 +815,24 @@ describe('ask-first (M57.4)', () => {
     );
   });
 });
+
+it('unattended mail folder rules match the mail artifact and refuse malformed paths', () => {
+  const mail = JSON.parse(readFileSync(join(REPO, 'shared/policy/mail.v1.json'), 'utf8'));
+  expect(TOOL_APPROVAL.unattended_hidden_paths).toEqual([mail.folder]);
+  for (const folder of [
+    '',
+    '.',
+    '..',
+    '/sources/mail',
+    'C:/mail',
+    'sources/../mail',
+    'sources//mail',
+    'sources/./mail',
+    'sources/mail/',
+    'sources/mail,Read',
+  ]) {
+    expect(() =>
+      parseToolApproval({ ...TOOL_APPROVAL, unattended_hidden_paths: [folder] }),
+    ).toThrow('must contain unique plain relative folders');
+  }
+});

@@ -1,0 +1,20 @@
+{
+  "docx": {
+    "markdown": "## Overview\n\n#### Details\n\n4. First\n\n5. Second\n\nKept inserted [site](https://example.test/notes)\n\n| Merged |  |\n| --- | --- |\n|  |  |\n\n*Image: A dot*\n\nText box once",
+    "not_carried": [
+      "headers",
+      "table of contents fields"
+    ],
+    "truncated": false
+  },
+  "pptx": {
+    "markdown": "## Slide 1: First in deck (hidden)\n\n  - Indented bullet\n\n*Image: Dot on slide*\n\n### Notes\n\nSpeaker says hello\n\n## Slide 2: Second in deck\n\n## Slide 3: \n\nThird slide\n\n### Notes\n\nSpeaker says hello",
+    "not_carried": [],
+    "truncated": false
+  },
+  "xlsx": {
+    "markdown": "## Sheet: Results (hidden)\n\nUsed range: A1:C2.\n\n|  | A | B | C |\n| --- | --- | --- | --- |\n| 1 | Name | 4 | true |\n| 2 | 2024-01-01 | 8 |  |\n\nFormulas show their last calculated value.",
+    "not_carried": [],
+    "truncated": false
+  }
+}

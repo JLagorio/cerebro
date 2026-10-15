@@ -39,6 +39,17 @@ describe('AgentRunHistory', () => {
   });
   afterEach(cleanup);
 
+  it('names a parent with a NULL actor as an assistant turn', async () => {
+    __seedFleet([
+      run({ run_id: 'chat', actor: null }),
+      run({ run_id: 'hop', actor: 'process:release-scout', parent_run_id: 'chat' }),
+    ]);
+    render(<AgentRunHistory actor="process:release-scout" />);
+    expect((await screen.findByTestId('agent-run-parent')).textContent).toContain(
+      'a hop from an assistant turn',
+    );
+  });
+
   it('renders a chain: hops indent under their root, and a hop names its parent', async () => {
     __seedFleet([
       run({ run_id: 'root-1', actor: 'process:release-scout', started_at: '2026-07-28T11:00:00Z' }),

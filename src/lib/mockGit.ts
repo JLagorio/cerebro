@@ -1,3 +1,4 @@
+import { isKeptOutOfGit } from '@/engine/mailPolicy';
 /**
  * In-memory git backend for the browser, vitest, and Playwright (M9.4).
  *
@@ -40,6 +41,7 @@ import {
   guardRestoreTarget,
   HUMAN_ACTOR,
   liveRunOwners,
+  liveRunPaths,
   logHumanWrite,
   mockRunChanges,
   peekFile,
@@ -214,7 +216,9 @@ export async function gitAuthorIdentity(_vault: string): Promise<GitAuthorIdenti
  * run, and every other names nobody. */
 export async function getModifiedFiles(_vault: string): Promise<ModifiedFile[]> {
   const owners = liveRunOwners();
-  return state().modified.map((f) => ({ ...f, owner: owners.get(f.path) ?? null }));
+  return state()
+    .modified.filter((f) => !isKeptOutOfGit(f.path))
+    .map((f) => ({ ...f, owner: owners.get(f.path) ?? null }));
 }
 
 /** As git_commands.rs `git_discard_file` (M58.1, Q2): a person's write, so
@@ -428,6 +432,7 @@ function pushCommit(
  * answers it, or null when there was nothing of the person's to commit. */
 export async function gitCommit(_vault: string, message: string): Promise<string | null> {
   const s = state();
+  s.modified = s.modified.filter((file) => !isKeptOutOfGit(file.path));
   const owners = liveRunOwners();
   const mine = s.modified.filter((f) => !owners.has(f.path));
   if (mine.length === 0) return null;
@@ -478,10 +483,13 @@ function runLabel(actor: string): string {
  * changed. `summary` is what a person asked, for an attended run.
  */
 export function settleMockRun(runId: string, actor: string, summary: string | null): RunChangeset {
-  const changes = mockRunChanges(runId);
-  if (changes.length === 0) return { state: 'nothing', run_id: runId, shell_unrecorded: false };
+  const kept_out_of_git = liveRunPaths(runId).filter((path) => isKeptOutOfGit(path)).length;
+  const changes = mockRunChanges(runId).filter((change) => !isKeptOutOfGit(change.path));
+  if (changes.length === 0)
+    return { kept_out_of_git, state: 'nothing', run_id: runId, shell_unrecorded: false };
   if (!state().isRepo) {
     return {
+      kept_out_of_git,
       state: 'not_a_repo',
       run_id: runId,
       files: changes.map((c) => c.path),
@@ -503,7 +511,8 @@ export function settleMockRun(runId: string, actor: string, summary: string | nu
     actor,
     alsoBy: Object.fromEntries(changes.map((c) => [c.path, c.alsoBy])),
   });
-  if (commit === null) return { state: 'nothing', run_id: runId, shell_unrecorded: false };
+  if (commit === null)
+    return { kept_out_of_git, state: 'nothing', run_id: runId, shell_unrecorded: false };
   const files: ChangedFile[] = changes.map((c) => ({
     path: c.path,
     previous_path: null,
@@ -513,6 +522,7 @@ export function settleMockRun(runId: string, actor: string, summary: string | nu
     also_by: c.alsoBy,
   }));
   return {
+    kept_out_of_git,
     state: 'committed',
     run_id: runId,
     commit,

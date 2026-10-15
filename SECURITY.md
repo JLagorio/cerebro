@@ -24,6 +24,88 @@ deliberately does not do — with your machine is most of its security story.
   diagnostic log notes the first of each kind per launch.
   `--strict-mcp-config` keeps the spawned agent from loading other MCP
   servers unless you opt in.
+- **Other apps need a personal token.** This optional second MCP endpoint is
+  off by default. It binds only `127.0.0.1`, normally port 37421; Settings
+  accepts ports 1024–65535. Each `cbr_` token has 256 bits of OS randomness,
+  appears once, and is stored only as SHA-256. At most 20 tokens exist per
+  install. Every request rereads and validates the durable grant and compares
+  every token fingerprint without an early match exit. Revocation prevents
+  subsequent dispatches; an already admitted call may finish. A database read
+  failure stops the listener. Host and Origin checks precede authentication;
+  missing or invalid tokens get 401 with a Bearer challenge, and anything but
+  POST gets 405 with `Allow: POST`. Only `/mcp` is served.
+
+  Tokens hold the manifest's read toolset and only its explicitly grantable
+  additions. Writes stay inside named folders; Agent pages, Type docs,
+  Knowledge, preferences, proposals and the private approval hooks remain
+  unavailable. Data calls work only for the open vault; initialization and
+  tool discovery for another vault return no vault data and open no session.
+  Each session has one attributed runs row before dispatch, with unknown
+  model usage. It ends after 30 idle minutes, on a new initialization,
+  revocation, a vault switch, access off, a port change or quit. A write-capable
+  session holds its paths and commits only its own recorded writes when it
+  ends; quit releases them without starting a commit. Failed durable closes
+  retain their claims and retry instead of pretending the row finished.
+
+  Any local process or user can contact this port, but needs a token. A token
+  is as safe as the other app's configuration file; someone who copies it can
+  exercise its grant until it is revoked. Cloud-hosted clients such as
+  claude.ai and ChatGPT cannot directly reach this address. Cerebro ships no
+  bridge for Claude Desktop. This reverses M6's private-only endpoint choice
+  for this opt-in listener alone (D17); the run port and its bearer remain
+  unchanged. Requests authenticate before their capped 16 MiB body is read.
+  Four workers limit concurrent dispatch, but a malicious local process can
+  still occupy sockets or contend for SQLite and serialized vault writes.
+
+  Cerebro runs never inherit this personal-token connection. When access is
+  enabled, even a failed bind pins each run's MCP config; explicit connectors
+  carrying a personal token or naming the client endpoint are excluded under
+  any alias. Unrelated approved connectors retain their ordinary grants.
+  Enabling access is refused while a live process inherited global MCP
+  configuration, including a process still stopping. A shared setup lock
+  serializes run spawning with this transition, and spawning reads the live
+  listener configuration rather than trusting a damaged config file to
+  weaken isolation.
+
+- **Recorded activity stays scoped.** `read_activity` reads operational page
+  writes and runs through SQLite's read-only connection. Paths outside the
+  run's read scope are withheld and counted, including comment sidecars and
+  a run's written pages. A run's cause contributes only its fixed reason,
+  never private subject or detail text. When Cerebro was open is vault-wide;
+  the answer names that boundary and edits the app could not have recorded.
+- **Sheet calculations are reads.** `read_sheet` and `calculate_sheet` need
+  read scope only, so read-only personal tokens can use them. Hypothetical
+  inputs and scratch formulas run on a private workbook on the capped engine
+  thread; they change no page bytes, timestamp or write receipt. Large sheet
+  blocks are shortened only in the note answer, while its hash and quote
+  matching still use the complete saved bytes.
+- **Sheet edits are checked page writes.** `edit_sheet` needs both read and
+  write scope. It refuses knowledge/, Type docs and Agent records, checks an
+  optional source hash, plans every operation on a copy, and computes the
+  report on the capped engine thread while holding the page's path lock.
+  A valid batch writes the page once with the run's actor and receipt;
+  identical source writes nothing. Ask-first runs require a person's Allow,
+  and unattended writes wait in Review. Only source formulas reach disk;
+  computed values and errors are bounded, JSON-quoted page data in the reply.
+- **Imported workbooks are untrusted files.** Only the file a person picks is
+  read; its local path never reaches the webview. The reader refuses special
+  files, caps the file at 32 MiB, and uses the shared Office archive boundary
+  to verify part counts, duplicate aliases, encryption, XML and actual inflated
+  bytes before IronCalc parses it on the capped engine thread. Preflight also
+  caps declared array expansion and materialized string text, rejects nested
+  string amplification and invalid numeric/boolean literals, and records missing
+  formula caches as unsaved rather than zero. A parser panic or deadline refuses
+  the import. Nothing is written before Import; it creates
+  one new page through the receipted human batch door. The preview names
+  unsupported features and any value differences. Workbook export computes
+  bounded live fences into bytes before opening the native save dialog; no
+  upstream path-taking export API is used. CSV guards formula-like text while
+  preserving actual numbers and booleans.
+- **Suggested views are previews.** A successful `suggest_view` answer writes
+  nothing. Add is the person's own `human:me` batch, checked again against the
+  current database. Placing a view appends one database fence to the open page
+  in that same batch. One Undo restores both files while their versions still
+  match; a preview cannot navigate, edit a record or save a layout.
 - **Ending a run ends its process group.** The CLI runs as the leader of its
   own process group. Stop, a vault switch and quit send that group TERM, wait
   2 s, then send KILL, so what the run started inside the group ends with it.
@@ -49,7 +131,8 @@ deliberately does not do — with your machine is most of its security story.
   `allowed-tools:` leaves out is denied at every ceiling. A read-scoped run
   loses the shell and is denied the built-in readers (Read, Glob, Grep) too.
   Inside the vault the readers need no approval, except in the Trash, which
-  every run's Read and Edit are denied (M60.8b, below).
+  every run's Read and Edit are denied, and mail, whose Read and Edit are
+  denied to unattended runs (M60.8b, M69.7b, below).
   The plan tool is refused, by the gate or in argv; the question tool asks
   you only in a conversation you are watching (M57.3, below) and is denied in
   argv everywhere else. Web access is a second Settings ceiling, off by
@@ -59,14 +142,17 @@ deliberately does not do — with your machine is most of its security story.
   constructs and handed-off runs never get them. A fetch can carry vault text
   in its URL, so give the web only to agents you trust with the outside
   world. Cerebro's
-  own internal runs (ingest, maintenance, synthesis) are denied every CLI
+  own internal runs (ingest, maintenance, synthesis and an agent's pre-run check) are denied every CLI
   tool, the web tools and Task included. Cerebro's MCP tools enforce the rest
   themselves: a run's write scope, its read scope, the knowledge guard, the
   note-corpus doors and an ask-first agent's Allow (next items). One write crosses a run's scope on purpose (D7): a
   run may rewrite the `recent` key, and nothing else, on its own Agent record,
   at most 30 lines and 4096 bytes, and every other byte of the record stays as
   the person wrote it, comments included. Every other key, and every other
-  Agent record, stays refused. A write that names `expect_hash` is also a read, and
+  Agent record, stays refused. An agent's run can book later runs of itself
+  only: at most 3 waiting, 5 minutes to 30 days out, under its own grant.
+  These bookings live in the runtime database and never edit its Agent record.
+  A write that names `expect_hash` is also a read, and
   is held to the read scope. The one tool that rewrites note text in place,
   `edit_note`, needs read access to the note as well as write access, because
   its refusals quote the note back, and so does `set_fields` (M60.4), whose
@@ -196,8 +282,17 @@ deliberately does not do — with your machine is most of its security story.
   than 40 characters, or Cerebro's own name in any case) are refused, and so
   are two names Claude Code would hear alike. Every entry Cerebro puts in
   argv holds only letters, digits, `_` and `-`. With no `connectors.json`, a
-  turn you watch loads your own global MCP config but Cerebro grants none of
-  its tools, and a turn that names a connector anywhere (`connectors:`,
+  turn you watch loads your own global MCP config while personal client access
+  is off, but Cerebro grants none of its tools. When client access is enabled,
+  every new Cerebro run uses only its per-run MCP config, even if the client
+  listener failed to bind. Turning access on waits until runs that inherited
+  global connectors have finished; setup and enable share one lock so a
+  starting run cannot slip between that check and the listener opening.
+  Explicit connectors carrying a personal token are
+  excluded under any name, including tokens in stdio arguments or environment
+  values. The configured client port's `/mcp` endpoint is excluded regardless
+  of its hostname, so a DNS alias cannot bypass this boundary. A turn that
+  names a connector anywhere (`connectors:`,
   `allowed-tools:` or `disallowed-tools:`) loads none of it, because a bound
   on a connector holds only against the vault's list. Your own Claude Code
   allow rules still apply to every run and can widen a record's tool-level
@@ -296,7 +391,7 @@ deliberately does not do — with your machine is most of its security story.
   under the Settings shell and web ceilings, and a paused agent's turn is refused. A
   binding no record answers to sends as the plain assistant, and the panel
   says so.
-- **Open with opens two kinds of target, and nothing else.** A markdown note
+- **Open with preserves its note and agent-link boundaries.** A markdown note
   inside the vault, judged by the note writers' own door (no dot-paths,
   non-notes, `views/`, `attachments/` or symlinks out), which Finder reveals or
   the default app opens; or a link built from one of the four agent-link bases
@@ -306,6 +401,36 @@ deliberately does not do — with your machine is most of its security story.
   `/usr/bin/pbcopy`. A prompt carries the page's vault-relative path, never
   its absolute one, so a link to claude.ai does not carry your home folder's
   name (M55.9).
+
+- **Opening files is a guarded desktop action** (M66.4). Every action opens
+  a contained file descriptor through the bytes door. Open reads the kinds
+  table against that descriptor, refuses executable-like content, and asks
+  a native confirmation for unknown kinds. It passes a transient macOS file
+  reference URL made from the descriptor as one argument, so replacing the
+  pathname cannot substitute another file. The original remains editable;
+  no snapshot is substituted. The verdict is checked again after a dialog.
+  Reveal and Quick Look recheck the canonical pathname's identity before
+  dispatch, and never execute the target. This native pathname handoff cannot
+  exclude a later rename by another application. Quick Look has one child, killed
+  on replacement or quit and reaped when it closes. Save a copy reads the
+  pinned source descriptor and stages in an anchored destination directory;
+  the chosen destination may not be inside either the initial or current vault, or the source
+  itself, including aliases. Its final rename never follows a destination
+  symlink or writes through an existing hard link. These actions do not
+  create vault write receipts or operational history. External processes can
+  still modify an inode or move a directory concurrently; pathname checks
+  are not a filesystem transaction against other applications.
+
+- **App links only navigate** (M65.6). `cerebro://open` and `cerebro://go`
+  are untrusted input: Rust bounds and parses them, rejects traversal and
+  duplicate known query keys, and resolves optional vault ids through the
+  read-only local registry. A link cannot name an arbitrary vault directory.
+  The webview waits for a ready scan, requires an exact existing page, and
+  asks before switching vaults. Missing or malformed links create nothing;
+  links never write pages, approve actions, or start agents. The latest
+  launch link waits until the listener binds and is taken once. Later links
+  arrive through the same navigation-only host. Copy Cerebro link includes
+  a local vault id and relative page path, never an absolute vault path.
 
 ## Mounted repositories (M30/M32)
 
@@ -359,3 +484,203 @@ program; there is a genuine intent to fix what you find.
 - Denial of service against your own local app.
 - Cloud coding agents, GitHub App webhooks and server-side code execution:
   Cerebro ships none of them.
+
+- Checked view suggestions (`suggest_view`, M62.4) resolve one database from
+  readable Type docs and validate against its readable ordinary records.
+  They write nothing and emit no navigation or UI event. Refusals name only
+  readable fields/options and record one operational `schema_invalid` row
+  per run, tool and database. The user alone chooses whether to add a view.
+- Structured database reads (`describe_database`, `query_records`, M62.2) and
+  `list_agenda` (M62.3) use
+  only records and Type docs inside the run's read scope. Withheld notes are
+  counted across the vault, never named or used to infer field names or options.
+  Agent memory, preferences and recent notes are absent from query values.
+  Agenda reports stored date values in the requested interval, marks repeat
+  series without expanding them, and makes no availability judgment. These
+  tools write nothing and create no operational refusal rows.
+
+The starter kit is offered explicitly, once per empty vault. Its shipped agents
+are paused and scoped; installation writes only the compiled kit paths in one
+create-only human batch and an owner-only `.cerebro/starter.json` marker. It
+refuses an existing page or previous offer, and rejects symlinks in the marker
+and its parent. A marker failure after a successful batch is reported without
+rolling back the person's new pages.
+
+A write by an agent run that wakes another agent is a chain hop: two hops, no
+cycles, the root's chain allowance and the day budget. A write Cerebro did not
+record wakes a root that only the cooldown limits.
+
+### Contained media and PDF bytes (M66.2)
+
+Native file drops reach only the webview commands `inspect_dropped` and
+`read_dropped_text`. They read the absolute paths the person supplied, with
+text restricted to capture kinds under the shared 4 MiB cap. Folders and
+nonregular files are never read as text. Attachment copies use the human
+write door. No MCP tool exposes either outside-path reader. UI continuations
+check their page and vault lifetime after each asynchronous read or copy;
+switching vaults discards the pending result.
+
+The main webview reads image/audio/video rows through `cerebro-file:` and PDF
+rows through raw `read_file_bytes` IPC. Root `0` resolves the current vault;
+other IDs resolve mounted roots. Validation and the final read share a
+contained open descriptor, so a symlink swap cannot redirect the read.
+Bodies stop at 64 MiB; a single range returns at most 1 MiB. Responses send
+no-store and nosniff, never CORS. The optional opaque cache revision changes
+only WebKit's resource identity. CSP admits the scheme to images and media
+only; the existing navigation guard refuses it. These refusals are UI values
+and are not written to either record or the diagnostic log. Text reads keep
+their 2 MiB cap.
+
+### PDF rendering (M66.5)
+
+PDF bytes enter through the contained, bounded bytes door. Only the isolated
+loader imports PDF.js; its worker starts on first use. The library, worker
+and viewer are the same exact upstream `pdfjs-dist@5.7.284` release. Its
+[legacy target is Safari 16.4](https://github.com/mozilla/pdf.js/blob/v5.7.284/gulpfile.mjs#L80-L102),
+which covers macOS 14's WebKit 17; 6.x raises the legacy floor to Safari 18.
+This supported-platform choice deliberately supersedes the plan's newest
+release rule. No patched fork or application polyfill is shipped. The browser
+proof removes the newer Promise, AbortSignal, Set and Uint8Array APIs before
+opening a PDF, exercising upstream's own compatibility code.
+
+[GHSA-hq66-cqwq-w95j / CVE-2026-16633](https://github.com/mozilla/pdf.js/security/advisories/GHSA-hq66-cqwq-w95j)
+affects this release when PDF scripting is enabled and the host lacks a script
+CSP. Both upstream mitigations are enforced here: there is no scripting
+manager or sandbox import, `PDFViewer.enableScripting` must remain false,
+and the webview's strict script policy remains in force. The older
+CVE-2024-4367 fix predates this pin. This release has removed document eval
+and the `isEvalSupported` option; no ignored option is passed. XFA, wasm,
+annotation editing and automatic link detection are disabled. The page API
+filters annotations to links before constructing widgets. External links
+carry `noopener noreferrer` and still meet the native navigation guard.
+
+The only CSP addition is `connect-src 'self'` for bundled cMaps and fonts;
+worker and decoder scripts already fall under `default-src 'self'`. The asset
+plugin serves and emits only the package's cMaps, standard fonts and decoder
+folders, by an exact URL allowlist. CSP diagnostics contain the directive
+and blocked origin, never a file path, query or data payload. Print opens the
+original file in its desktop app through the guarded file-action door.
+
+### Attachments (M66.6)
+
+The human attachment doors accept selected, pasted or dropped files up to
+50 MB. They reject hidden names and folders, copy only into the exact
+`attachments/` directory, and never follow a redirected directory or a
+candidate symlink. Unix placement uses a pinned directory descriptor and
+exclusive installation. Copies have no execute bits; macOS copies retain
+quarantine protection through the system xattr copier. Data is streamed
+under a bound even if the source grows during the copy. Identical bytes are
+reused only within the requested name family and produce no second write
+record. Reuse leaves existing metadata unchanged, including its quarantine
+attributes; only a new copy inherits the incoming protection. Importing opens
+nothing. The editor checks its page and vault owner
+again after every asynchronous read/copy before placing root-anchored links.
+
+### Office extraction (M66.7)
+
+Office readers use a contained file descriptor and never run macros, fields,
+external relationships or embedded programs. Package entry counts, actual
+inflated bytes, XML depth and node counts are bounded before workbook parsing.
+Workbook cells stay sparse. Allocation-driving shared-string counts and shared
+formula indices are checked by exact XML attribute identity before calamine
+opens the package. Repeated strings, numbering, links and picture metadata also
+consume a retained-data budget; repeating a small reference cannot expand into
+unbounded materialized content. Repeated inflation has a separate work cap.
+Unreadable, encrypted, oversized and unsupported files have distinct outcomes.
+
+Imported pages carry source identity and import time in their own frontmatter.
+They register as content-only under `vault-import-v1`, never as the owner's
+assertion and never by changing the identity of an already recorded item.
+Every ordinary agent note door preserves import and fetch stamps, comparing
+key presence and YAML value under the path lock before writing. Queued and
+person-approved calls pass the same guard. `cache_source` and `write_concept`
+are the stamping writers; people may still edit these fields. Shell tools
+and edits made outside Cerebro do not pass this note-door guard.
+
+### Document captures (M66.7c)
+
+Inbox document captures (M66.7c) first keep the selected original through the
+attachment door, then read that kept file under the Office limits above.
+PDF text uses the same bundled PDF loader as the viewer, with scripting and
+document eval absent. Extraction visits at most 300 pages, waits at most ten
+seconds per page and two minutes overall, and retains at most 1 MiB of text.
+The worker document is destroyed after success, failure or timeout. Extracted
+text is escaped so it cannot introduce live links, HTML or editor directives.
+Every outcome, including no text, encryption and corruption, keeps the original
+and records imported-content provenance. The capture door checks its vault
+after every awaited read and serializes duplicate decisions within that vault.
+
+### Document reads (M66.8)
+
+`read_document` is an optional read-toolset capability, including personal-token
+clients. Its manifest target is a contained file on the read axis with no write
+door. Scope applies before the body and again to the canonical file pinned by
+the descriptor. Hidden paths and paths outside the vault refuse before parsing.
+The selected text carries a content-derived data fence and taint signals; no
+prompt adds this capability to a narrower grant. Pictures are opt-in, selected
+with the text, and at most eight are decoded. Each input is capped at 32 MiB;
+`image::Limits` bounds each side to 10,000 pixels and allocation to 256 MiB.
+Output never exceeds 1080 pixels on its longest side or 2 MiB encoded. Alpha is
+kept in PNG; a PNG exceeding the encoded cap is flattened onto white for JPEG.
+No remote image or external relationship is fetched.
+
+### Whiteboard reads (M68.7)
+
+`read_canvas` is a read-toolset capability, available to personal read tokens.
+Its canvas target requires read scope before bytes and again on the canonical
+path of the contained descriptor. Dot paths and climbing refuse. The reader
+opens one `.canvas` file, capped at 8 MiB before allocation; its response has
+separate shared node and byte caps, and explicitly reports cuts and continuation.
+Invalid or unsupported boards refuse instead of appearing empty. File cards
+are checked for existence only within read scope; no card file is opened and
+no link is fetched. Node text, labels and links remain untrusted board content.
+Reads change no file and record no vault write.
+
+### Pictures on scoped note reads (M66.8b)
+
+A note read attaches pictures only when the run declares a read scope. Each
+picture must pass that scope on its requested path and its pinned canonical
+path, and the contained descriptor refuses hidden paths and vault escapes.
+The media-line grammar and relative/percent-decoded destination resolver replay
+shared cases with the page's TypeScript reader. Fenced code is inert. No URL
+or inline data image is fetched; schemes, network paths and encoded schemes
+are counted as remote. Duplicate destinations are attached once.
+
+At most eight allowed pictures are decoded, each through the bounded image
+reader described above; corrupt attempts consume this budget too. Each returned
+picture is at most 1080 pixels on its longest side and 2 MiB encoded. A note's
+header plus body over 40,000 characters attaches none and says why. Counts and
+captions join the header before its separator; body bytes stay unchanged.
+Unscoped reads retain their prior answer exactly. Decoder/read failures are
+counted explicitly, rather than presented as no pictures.
+
+
+## Mail storage and admission
+
+Mail pages under `sources/mail/` and their `.comments/sources/mail/` sidecars
+stay out of git. A checkpoint repairs older tracked copies by removing them
+from the index while keeping the files on disk. Case variants are also
+excluded. Run commits report how many mail files they kept out. This does
+not erase content from older commits.
+
+The shared mail artifact ships with its Gmail gate closed. The draft evidence
+pack at `docs/superpowers/evidence/triggers/R14/2026-10-15-gmail.md` describes
+header digests and explicitly requested message text. Opening the gate
+requires the owner's dated, fired pack, R14 registration and an identical
+vault-store scope; build tests check that agreement. Runtime code does not
+consult the evidence registry. Acceptance is separate from implementing the
+closed-gate features.
+
+Unattended runs and token clients cannot read `sources/mail/` through
+Cerebro's targeted readers; listings withhold the pages and report the count.
+Ambient ingest excludes the folder before opening its files. Unattended CLI
+Read and Edit are denied that folder at every ceiling. Grep and Glob follow
+those Read rules only as far as Claude Code applies them; a shell grant can
+still run commands over files (D6). Attended Cerebro conversations retain
+read access within their declared scope.
+
+On every connector server the run loads, unattended argv denies the five
+mail readers named in `mail.v1.json`. This is an exact-name boundary: a
+server spelling a reader otherwise, or legacy mode without `connectors.json`,
+is not covered. Mail URLs are refused before the ticket/web cache scans or
+writes, and external-reference discovery never asks to fetch those links.

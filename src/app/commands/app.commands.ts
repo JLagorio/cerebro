@@ -39,6 +39,7 @@ export const commands: readonly CommandDef[] = [
   {
     id: 'theme.toggle',
     label: 'Switch light and dark',
+    aliases: ['theme', 'appearance'],
     keys: ['mod+shift+l'],
     scope: 'app',
     group: 'General',

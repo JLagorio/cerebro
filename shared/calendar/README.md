@@ -16,6 +16,15 @@ Both readers refuse a malformed grammar in the same words: a format other
 than 1, an empty `rule_version`, an unknown form, no time separators, an
 unknown word in a closed key, or no cases.
 
+`relative` (M61.3c) declares filter tokens, day offsets, calendar periods,
+week starts and their words. `relative_cases` replays through Rust's
+`resolve_relative` and TS's `relativeDates.resolveRelative`; both take today
+and the week start as arguments and return inclusive day ranges. Tokens are
+case sensitive and trimmed. `today+N` and `today-N` take 1–999 without leading
+zeros. Weeks start on Sunday (0) or Monday (1); months are full calendar
+months, including leap days. Resolution outside the four-digit date grammar
+returns no date. These strings are filter values, never stored date values.
+
 ## Regenerating
 
 After a deliberate edit, bump `artifact_version`, set `rule_version` to
@@ -56,8 +65,13 @@ the bytes are hashed.
 - **Body chips are not in this file.** The `📅` token grammar
   (`parseDateToken` in `src/engine/dates.ts`) lives in note bodies and only
   TS reads it.
-- **Out of this file for now:** point events and midnight ends (M61.8,
-  M62.3), and relative dates (M61.3).
+- **Point events and midnight ends** replay
+  `src-tauri/fixtures/agenda-cases.json` in `vault/agenda.rs` and
+  `src/engine/agendaCases.test.ts` (M62.3). The grammar here still reads
+  endpoints; that case file holds their placement and window overlap.
+  Grid geometry remains TypeScript-only. Agenda bounds and display labels
+  are Rust's words; the shared point, span, conversion and repeat-pair facts
+  are checked in both languages.
 
 ## Known divergences the cases leave unpinned
 

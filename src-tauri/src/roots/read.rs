@@ -15,6 +15,20 @@ pub const MAX_BYTES: u64 = 2 * 1024 * 1024;
 /// How much of the file to sniff for NUL before deciding it is binary.
 const SNIFF_BYTES: usize = 8 * 1024;
 
+/// A bounded head tells viewers whether the bytes look like UTF-8 text.
+pub fn sniff(bytes: &[u8]) -> &'static str {
+    let bytes = &bytes[..bytes.len().min(SNIFF_BYTES)];
+    if bytes.contains(&0) {
+        return "binary";
+    }
+    match std::str::from_utf8(bytes) {
+        Ok(_) => "text",
+        // A head can stop in the middle of a valid code point.
+        Err(error) if error.error_len().is_none() => "text",
+        Err(_) => "binary",
+    }
+}
+
 /// The result of a read. Refusals are VALUES, not error strings: the viewer
 /// renders a different placeholder for each, and a string would force it to
 /// pattern-match prose.
@@ -51,7 +65,7 @@ pub fn read_file_text(root: &Path, rel: &str) -> FileText {
     let Ok(bytes) = std::fs::read(&path) else {
         return FileText::NotFound;
     };
-    if bytes.iter().take(SNIFF_BYTES).any(|b| *b == 0) {
+    if sniff(&bytes) == "binary" {
         return FileText::Binary;
     }
     match String::from_utf8(bytes) {

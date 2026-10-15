@@ -1,0 +1,2417 @@
+{
+  "format": 1,
+  "about": "View filters and sorts, replayed by src/engine/filterCases.test.ts and src-tauri/src/vault/query.rs.",
+  "zone": "America/Los_Angeles",
+  "today": "2026-07-28",
+  "week_start": 0,
+  "corpus": [
+    {
+      "path": "accounts/acme.md",
+      "title": "Acme",
+      "type": "Account",
+      "properties": {
+        "region": "west"
+      },
+      "relationships": {},
+      "createdAt": "2026-07-28T00:30:00Z",
+      "modifiedAt": "2026-07-29T16:20:00Z"
+    },
+    {
+      "path": "accounts/beta.md",
+      "title": "Beta",
+      "type": "Account",
+      "properties": {
+        "region": "east"
+      },
+      "relationships": {},
+      "createdAt": "2026-07-28T00:30:00Z",
+      "modifiedAt": "2026-07-29T16:20:00Z"
+    },
+    {
+      "path": "accounts/other.md",
+      "title": "Other",
+      "type": "Account",
+      "properties": {},
+      "relationships": {},
+      "createdAt": "2026-07-28T00:30:00Z",
+      "modifiedAt": "2026-07-29T16:20:00Z"
+    },
+    {
+      "path": "deals/01.md",
+      "title": "Abacus",
+      "type": "Deal",
+      "properties": {
+        "value": 5,
+        "stage": "lead",
+        "priority": "urgent",
+        "close": "2026-07-28",
+        "window": {
+          "start": "2026-07-27",
+          "end": "2026-07-30"
+        },
+        "tags": ["alpha", "beta"],
+        "done": false,
+        "note": "alpha",
+        "held": "alpha",
+        "title": "wrong",
+        "made": "1999-01-01",
+        "edited": "1999-01-01",
+        "site": "https://example.test",
+        "email": "a@example.test",
+        "phone": "+123",
+        "files": ["a.png"],
+        "repeat": "FREQ=WEEKLY;BYDAY=TU"
+      },
+      "relationships": {
+        "account": ["Acme"],
+        "owner": ["Ada"]
+      },
+      "createdAt": "2026-07-28T00:30:00Z",
+      "modifiedAt": "2026-07-29T16:20:00Z"
+    },
+    {
+      "path": "deals/02.md",
+      "title": "ABC",
+      "type": "Deal",
+      "properties": {
+        "value": "5",
+        "stage": "talk",
+        "priority": "normal",
+        "close": "2026-07-28 14:30",
+        "tags": ["Alpha"],
+        "done": true,
+        "account": "Acme",
+        "note": "Alpha"
+      },
+      "relationships": {},
+      "createdAt": "2026-07-28T08:00:00Z",
+      "modifiedAt": "2026-07-27T16:20:00Z"
+    },
+    {
+      "path": "deals/03.md",
+      "title": "apple",
+      "type": "Deal",
+      "properties": {
+        "value": " 5 ",
+        "stage": "won",
+        "priority": "urgent",
+        "close": "2026-07-29",
+        "tags": [5.0],
+        "done": false,
+        "note": "alphabet"
+      },
+      "relationships": {},
+      "createdAt": "2026-07-28T00:30:00Z",
+      "modifiedAt": "2026-07-29T16:20:00Z"
+    },
+    {
+      "path": "deals/04.md",
+      "title": "Banana",
+      "type": "Deal",
+      "properties": {
+        "value": "05",
+        "stage": "lost",
+        "priority": "ghost",
+        "close": "2026-07-31",
+        "tags": ["5"],
+        "note": "beta"
+      },
+      "relationships": {},
+      "createdAt": "2026-07-28T00:30:00Z",
+      "modifiedAt": "2026-07-29T16:20:00Z"
+    },
+    {
+      "path": "deals/05.md",
+      "title": "cherry",
+      "type": "Deal",
+      "properties": {
+        "value": 0,
+        "stage": "ghost",
+        "priority": "normal",
+        "close": "2026-08-01",
+        "tags": [],
+        "done": false,
+        "note": ""
+      },
+      "relationships": {},
+      "createdAt": "2026-07-28T00:30:00Z",
+      "modifiedAt": "2026-07-29T16:20:00Z"
+    },
+    {
+      "path": "deals/06.md",
+      "title": "a",
+      "type": "Deal",
+      "properties": {
+        "value": 10,
+        "stage": "lead",
+        "priority": "normal",
+        "close": "2026-06-30",
+        "tags": ["beta"],
+        "done": true,
+        "note": "ending alpha"
+      },
+      "relationships": {},
+      "createdAt": "2026-07-28T00:30:00Z",
+      "modifiedAt": "2026-07-29T16:20:00Z"
+    },
+    {
+      "path": "deals/07.md",
+      "title": "A",
+      "type": "Deal",
+      "properties": {
+        "value": "9",
+        "stage": "talk",
+        "priority": "urgent",
+        "close": "2026-08-03",
+        "tags": ["alpha"],
+        "done": true,
+        "note": "today"
+      },
+      "relationships": {},
+      "createdAt": "2026-07-28T00:30:00Z",
+      "modifiedAt": "2026-07-29T16:20:00Z"
+    },
+    {
+      "path": "deals/08.md",
+      "title": "Alpha",
+      "type": "Deal",
+      "properties": {
+        "value": null,
+        "stage": "",
+        "close": "2026-07-27",
+        "tags": null,
+        "done": null,
+        "note": null
+      },
+      "relationships": {},
+      "createdAt": "2026-07-28T00:30:00Z",
+      "modifiedAt": "2026-07-29T16:20:00Z"
+    },
+    {
+      "path": "deals/09.md",
+      "title": "alpha",
+      "type": "Deal",
+      "properties": {
+        "value": "",
+        "stage": null,
+        "close": "2026-07-28T00:30:00Z",
+        "tags": "",
+        "done": "",
+        "note": []
+      },
+      "relationships": {},
+      "createdAt": "2026-07-28T00:30:00Z",
+      "modifiedAt": "2026-07-29T16:20:00Z"
+    },
+    {
+      "path": "deals/10.md",
+      "title": "Range",
+      "type": "Deal",
+      "properties": {
+        "value": [],
+        "stage": [],
+        "close": {
+          "start": "2026-07-28",
+          "end": "2026-08-02"
+        },
+        "window": {
+          "start": "2026-07-28 09:00",
+          "end": "2026-07-28 10:00"
+        },
+        "tags": [""],
+        "done": [],
+        "note": [""]
+      },
+      "relationships": {},
+      "createdAt": "2026-07-28T00:30:00Z",
+      "modifiedAt": "2026-07-29T16:20:00Z"
+    },
+    {
+      "path": "deals/11.md",
+      "title": "Space",
+      "type": "Deal",
+      "properties": {
+        "value": " ",
+        "close": "invalid",
+        "tags": ["ghost"],
+        "note": "alphabet soup"
+      },
+      "relationships": {},
+      "createdAt": "2026-07-28T00:30:00Z",
+      "modifiedAt": "2026-07-29T16:20:00Z"
+    },
+    {
+      "path": "deals/12.md",
+      "title": "Hex",
+      "type": "Deal",
+      "properties": {
+        "value": "0x10",
+        "close": null,
+        "note": "ALPHA"
+      },
+      "relationships": {},
+      "createdAt": "2026-07-28T00:30:00Z",
+      "modifiedAt": "2026-07-29T16:20:00Z"
+    },
+    {
+      "path": "deals/13.md",
+      "title": "Missing",
+      "type": "Deal",
+      "properties": {},
+      "relationships": {},
+      "createdAt": "2026-07-28T00:30:00Z",
+      "modifiedAt": "2026-07-29T16:20:00Z"
+    },
+    {
+      "path": "deals/14.md",
+      "title": "List",
+      "type": "Deal",
+      "properties": {
+        "value": [""],
+        "close": "",
+        "note": {
+          "unexpected": "alpha"
+        }
+      },
+      "relationships": {},
+      "createdAt": "2026-07-28T00:30:00Z",
+      "modifiedAt": "2026-07-29T16:20:00Z"
+    },
+    {
+      "path": "knowledge/deal.md",
+      "title": "Knowledge deal",
+      "type": "Deal",
+      "properties": {
+        "value": 7,
+        "stage": "won",
+        "close": "2026-07-28"
+      },
+      "relationships": {},
+      "createdAt": "2026-07-28T00:30:00Z",
+      "modifiedAt": "2026-07-29T16:20:00Z"
+    },
+    {
+      "path": "plain.md",
+      "title": "Plain",
+      "type": null,
+      "properties": {
+        "held": "plain"
+      },
+      "relationships": {},
+      "createdAt": "2026-07-28T00:30:00Z",
+      "modifiedAt": "2026-07-29T16:20:00Z"
+    },
+    {
+      "path": "templates/deal.md",
+      "title": "Template",
+      "type": "Deal",
+      "properties": {
+        "value": 999,
+        "stage": "lead"
+      },
+      "relationships": {},
+      "createdAt": "2026-07-28T00:30:00Z",
+      "modifiedAt": "2026-07-29T16:20:00Z"
+    },
+    {
+      "path": "types/account.md",
+      "title": "Account",
+      "type": "Type",
+      "properties": {
+        "fields": {
+          "region": {
+            "kind": "select",
+            "options": ["west", "east"]
+          },
+          "deals": {
+            "kind": "relation",
+            "from": {
+              "type": "Deal",
+              "field": "account"
+            }
+          }
+        }
+      },
+      "relationships": {},
+      "createdAt": "2026-07-28T00:30:00Z",
+      "modifiedAt": "2026-07-29T16:20:00Z"
+    },
+    {
+      "path": "types/deal.md",
+      "title": "Deal",
+      "type": "Type",
+      "properties": {
+        "folder": "deals",
+        "deadline": "close",
+        "fields": {
+          "stage": "status",
+          "priority": {
+            "kind": "select",
+            "options": [
+              {
+                "id": "urgent",
+                "label": "Urgent attention"
+              },
+              "normal"
+            ]
+          },
+          "owner": {
+            "kind": "person",
+            "target": "Person"
+          },
+          "value": "number",
+          "close": "date",
+          "window": "daterange",
+          "tags": "multiselect",
+          "account": {
+            "kind": "relation",
+            "target": "Account"
+          },
+          "done": "checkbox",
+          "made": "created_time",
+          "edited": "last_edited_time",
+          "note": "text",
+          "site": "url",
+          "email": "email",
+          "phone": "phone",
+          "files": "files",
+          "repeat": "repeat",
+          "total": {
+            "kind": "rollup",
+            "relation": "account",
+            "property": "value",
+            "calculate": "sum"
+          },
+          "margin": {
+            "kind": "formula",
+            "formula": "value * 2"
+          },
+          "children": {
+            "kind": "relation",
+            "from": {
+              "type": "Deal",
+              "field": "parent"
+            }
+          }
+        },
+        "statuses": [
+          {
+            "id": "lead",
+            "label": "Lead",
+            "group": "active"
+          },
+          {
+            "id": "talk",
+            "label": "Talking",
+            "group": "active"
+          },
+          {
+            "id": "won",
+            "label": "Won",
+            "group": "done"
+          },
+          {
+            "id": "lost",
+            "label": "Lost",
+            "group": "closed"
+          }
+        ],
+        "views": [
+          {
+            "id": "open",
+            "name": "Open",
+            "filters": {
+              "all": [
+                {
+                  "field": "stage",
+                  "op": "any_of",
+                  "value": ["lead", "talk"]
+                }
+              ]
+            },
+            "presentation": {
+              "type": "table",
+              "sort": [
+                {
+                  "field": "close",
+                  "dir": "asc"
+                }
+              ]
+            }
+          },
+          {
+            "id": "all",
+            "name": "All",
+            "presentation": {
+              "type": "board",
+              "sort": []
+            }
+          }
+        ]
+      },
+      "relationships": {},
+      "createdAt": "2026-07-28T00:30:00Z",
+      "modifiedAt": "2026-07-29T16:20:00Z"
+    }
+  ],
+  "cases": [
+    {
+      "why": "typed source includes knowledge and excludes templates",
+      "type": "Deal",
+      "expect": [
+        "deals/01.md",
+        "deals/02.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/05.md",
+        "deals/06.md",
+        "deals/07.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "typeless includes ordinary records, never schema, templates or knowledge",
+      "expect": [
+        "accounts/acme.md",
+        "accounts/beta.md",
+        "accounts/other.md",
+        "deals/01.md",
+        "deals/02.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/05.md",
+        "deals/06.md",
+        "deals/07.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md",
+        "plain.md"
+      ]
+    },
+    {
+      "why": "number equals",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "value",
+            "op": "equals",
+            "value": 5
+          }
+        ]
+      },
+      "expect": ["deals/01.md", "deals/02.md", "deals/03.md", "deals/04.md"]
+    },
+    {
+      "why": "number not_equals",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "value",
+            "op": "not_equals",
+            "value": 5
+          }
+        ]
+      },
+      "expect": [
+        "deals/05.md",
+        "deals/06.md",
+        "deals/07.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "number gt",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "value",
+            "op": "gt",
+            "value": 5
+          }
+        ]
+      },
+      "expect": ["deals/06.md", "deals/07.md", "knowledge/deal.md"]
+    },
+    {
+      "why": "number gte",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "value",
+            "op": "gte",
+            "value": 5
+          }
+        ]
+      },
+      "expect": [
+        "deals/01.md",
+        "deals/02.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/06.md",
+        "deals/07.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "number lt",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "value",
+            "op": "lt",
+            "value": 5
+          }
+        ]
+      },
+      "expect": ["deals/05.md"]
+    },
+    {
+      "why": "number lte",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "value",
+            "op": "lte",
+            "value": 5
+          }
+        ]
+      },
+      "expect": ["deals/01.md", "deals/02.md", "deals/03.md", "deals/04.md", "deals/05.md"]
+    },
+    {
+      "why": "number is_between",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "value",
+            "op": "is_between",
+            "value": [5, 7]
+          }
+        ]
+      },
+      "expect": ["deals/01.md", "deals/02.md", "deals/03.md", "deals/04.md", "knowledge/deal.md"]
+    },
+    {
+      "why": "number is_empty",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "value",
+            "op": "is_empty"
+          }
+        ]
+      },
+      "expect": ["deals/08.md", "deals/09.md", "deals/10.md", "deals/13.md"]
+    },
+    {
+      "why": "number is_not_empty",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "value",
+            "op": "is_not_empty"
+          }
+        ]
+      },
+      "expect": [
+        "deals/01.md",
+        "deals/02.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/05.md",
+        "deals/06.md",
+        "deals/07.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/14.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "text equals",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "note",
+            "op": "equals",
+            "value": "alpha"
+          }
+        ]
+      },
+      "expect": ["deals/01.md"]
+    },
+    {
+      "why": "text not_equals",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "note",
+            "op": "not_equals",
+            "value": "alpha"
+          }
+        ]
+      },
+      "expect": [
+        "deals/02.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/05.md",
+        "deals/06.md",
+        "deals/07.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "text contains",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "note",
+            "op": "contains",
+            "value": "alpha"
+          }
+        ]
+      },
+      "expect": [
+        "deals/01.md",
+        "deals/02.md",
+        "deals/03.md",
+        "deals/06.md",
+        "deals/11.md",
+        "deals/12.md"
+      ]
+    },
+    {
+      "why": "text does_not_contain",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "note",
+            "op": "does_not_contain",
+            "value": "alpha"
+          }
+        ]
+      },
+      "expect": [
+        "deals/04.md",
+        "deals/05.md",
+        "deals/07.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/13.md",
+        "deals/14.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "text starts_with",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "note",
+            "op": "starts_with",
+            "value": "alpha"
+          }
+        ]
+      },
+      "expect": ["deals/01.md", "deals/02.md", "deals/03.md", "deals/11.md", "deals/12.md"]
+    },
+    {
+      "why": "text ends_with",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "note",
+            "op": "ends_with",
+            "value": "alpha"
+          }
+        ]
+      },
+      "expect": ["deals/01.md", "deals/02.md", "deals/06.md", "deals/12.md"]
+    },
+    {
+      "why": "text is_empty",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "note",
+            "op": "is_empty"
+          }
+        ]
+      },
+      "expect": ["deals/05.md", "deals/08.md", "deals/09.md", "deals/13.md", "knowledge/deal.md"]
+    },
+    {
+      "why": "text is_not_empty",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "note",
+            "op": "is_not_empty"
+          }
+        ]
+      },
+      "expect": [
+        "deals/01.md",
+        "deals/02.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/06.md",
+        "deals/07.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/14.md"
+      ]
+    },
+    {
+      "why": "date equals",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "close",
+            "op": "equals",
+            "value": "2026-07-28"
+          }
+        ]
+      },
+      "expect": ["deals/01.md", "deals/02.md", "deals/10.md", "knowledge/deal.md"]
+    },
+    {
+      "why": "date before",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "close",
+            "op": "before",
+            "value": "2026-07-28"
+          }
+        ]
+      },
+      "expect": ["deals/06.md", "deals/08.md", "deals/09.md"]
+    },
+    {
+      "why": "date after",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "close",
+            "op": "after",
+            "value": "2026-07-28"
+          }
+        ]
+      },
+      "expect": ["deals/03.md", "deals/04.md", "deals/05.md", "deals/07.md"]
+    },
+    {
+      "why": "date on_or_before",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "close",
+            "op": "on_or_before",
+            "value": "2026-07-28"
+          }
+        ]
+      },
+      "expect": [
+        "deals/01.md",
+        "deals/02.md",
+        "deals/06.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "date on_or_after",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "close",
+            "op": "on_or_after",
+            "value": "2026-07-28"
+          }
+        ]
+      },
+      "expect": [
+        "deals/01.md",
+        "deals/02.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/05.md",
+        "deals/07.md",
+        "deals/10.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "date is_between",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "close",
+            "op": "is_between",
+            "value": ["2026-07-28", "2026-07-29"]
+          }
+        ]
+      },
+      "expect": ["deals/01.md", "deals/02.md", "deals/03.md", "deals/10.md", "knowledge/deal.md"]
+    },
+    {
+      "why": "date is_empty",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "close",
+            "op": "is_empty"
+          }
+        ]
+      },
+      "expect": ["deals/12.md", "deals/13.md", "deals/14.md"]
+    },
+    {
+      "why": "date is_not_empty",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "close",
+            "op": "is_not_empty"
+          }
+        ]
+      },
+      "expect": [
+        "deals/01.md",
+        "deals/02.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/05.md",
+        "deals/06.md",
+        "deals/07.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "date minute comparison",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "close",
+            "op": "after",
+            "value": "2026-07-28 09:00"
+          }
+        ]
+      },
+      "expect": ["deals/02.md", "deals/03.md", "deals/04.md", "deals/05.md", "deals/07.md"]
+    },
+    {
+      "why": "instant UTC changes the day",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "close",
+            "op": "equals",
+            "value": "2026-07-28"
+          }
+        ]
+      },
+      "expect": ["deals/01.md", "deals/02.md", "deals/09.md", "deals/10.md", "knowledge/deal.md"],
+      "zone": "UTC"
+    },
+    {
+      "why": "range reads its start",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "window",
+            "op": "equals",
+            "value": "2026-07-28"
+          }
+        ]
+      },
+      "expect": ["deals/10.md"]
+    },
+    {
+      "why": "relative today",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "close",
+            "op": "equals",
+            "value": "today"
+          }
+        ]
+      },
+      "expect": ["deals/01.md", "deals/02.md", "deals/10.md", "knowledge/deal.md"]
+    },
+    {
+      "why": "relative yesterday",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "close",
+            "op": "equals",
+            "value": "yesterday"
+          }
+        ]
+      },
+      "expect": ["deals/08.md", "deals/09.md"]
+    },
+    {
+      "why": "relative tomorrow",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "close",
+            "op": "equals",
+            "value": "tomorrow"
+          }
+        ]
+      },
+      "expect": ["deals/03.md"]
+    },
+    {
+      "why": "relative today-1",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "close",
+            "op": "equals",
+            "value": "today-1"
+          }
+        ]
+      },
+      "expect": ["deals/08.md", "deals/09.md"]
+    },
+    {
+      "why": "relative today+3",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "close",
+            "op": "equals",
+            "value": "today+3"
+          }
+        ]
+      },
+      "expect": ["deals/04.md"]
+    },
+    {
+      "why": "relative this_week",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "close",
+            "op": "equals",
+            "value": "this_week"
+          }
+        ]
+      },
+      "expect": [
+        "deals/01.md",
+        "deals/02.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/05.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "relative last_week",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "close",
+            "op": "equals",
+            "value": "last_week"
+          }
+        ]
+      },
+      "expect": []
+    },
+    {
+      "why": "relative next_week",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "close",
+            "op": "equals",
+            "value": "next_week"
+          }
+        ]
+      },
+      "expect": ["deals/07.md"]
+    },
+    {
+      "why": "relative this_month",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "close",
+            "op": "equals",
+            "value": "this_month"
+          }
+        ]
+      },
+      "expect": [
+        "deals/01.md",
+        "deals/02.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "relative last_month",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "close",
+            "op": "equals",
+            "value": "last_month"
+          }
+        ]
+      },
+      "expect": ["deals/06.md"]
+    },
+    {
+      "why": "relative next_month",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "close",
+            "op": "equals",
+            "value": "next_month"
+          }
+        ]
+      },
+      "expect": ["deals/05.md", "deals/07.md"]
+    },
+    {
+      "why": "status equals",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "stage",
+            "op": "equals",
+            "value": "lead"
+          }
+        ]
+      },
+      "expect": ["deals/01.md", "deals/06.md"]
+    },
+    {
+      "why": "status not_equals",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "stage",
+            "op": "not_equals",
+            "value": "lead"
+          }
+        ]
+      },
+      "expect": [
+        "deals/02.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/05.md",
+        "deals/07.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "status any_of",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "stage",
+            "op": "any_of",
+            "value": ["lead", "talk"]
+          }
+        ]
+      },
+      "expect": ["deals/01.md", "deals/02.md", "deals/06.md", "deals/07.md"]
+    },
+    {
+      "why": "status none_of",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "stage",
+            "op": "none_of",
+            "value": ["lead", "talk"]
+          }
+        ]
+      },
+      "expect": [
+        "deals/03.md",
+        "deals/04.md",
+        "deals/05.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "status is_empty",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "stage",
+            "op": "is_empty"
+          }
+        ]
+      },
+      "expect": [
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md"
+      ]
+    },
+    {
+      "why": "status is_not_empty",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "stage",
+            "op": "is_not_empty"
+          }
+        ]
+      },
+      "expect": [
+        "deals/01.md",
+        "deals/02.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/05.md",
+        "deals/06.md",
+        "deals/07.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "ghost options still match their recorded id",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "stage",
+            "op": "equals",
+            "value": "ghost"
+          }
+        ]
+      },
+      "expect": ["deals/05.md"]
+    },
+    {
+      "why": "multiple contains",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "tags",
+            "op": "contains",
+            "value": "alpha"
+          }
+        ]
+      },
+      "expect": ["deals/01.md", "deals/02.md", "deals/07.md"]
+    },
+    {
+      "why": "multiple does_not_contain",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "tags",
+            "op": "does_not_contain",
+            "value": "alpha"
+          }
+        ]
+      },
+      "expect": [
+        "deals/03.md",
+        "deals/04.md",
+        "deals/05.md",
+        "deals/06.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "multiple any_of",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "tags",
+            "op": "any_of",
+            "value": ["5"]
+          }
+        ]
+      },
+      "expect": ["deals/04.md"]
+    },
+    {
+      "why": "multiple none_of",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "tags",
+            "op": "none_of",
+            "value": ["5"]
+          }
+        ]
+      },
+      "expect": [
+        "deals/01.md",
+        "deals/02.md",
+        "deals/03.md",
+        "deals/05.md",
+        "deals/06.md",
+        "deals/07.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "multiple is_empty",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "tags",
+            "op": "is_empty"
+          }
+        ]
+      },
+      "expect": [
+        "deals/05.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "multiple is_not_empty",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "tags",
+            "op": "is_not_empty"
+          }
+        ]
+      },
+      "expect": [
+        "deals/01.md",
+        "deals/02.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/06.md",
+        "deals/07.md",
+        "deals/10.md",
+        "deals/11.md"
+      ]
+    },
+    {
+      "why": "checkbox equals",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "done",
+            "op": "equals",
+            "value": false
+          }
+        ]
+      },
+      "expect": ["deals/01.md", "deals/03.md", "deals/05.md"]
+    },
+    {
+      "why": "checkbox not_equals",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "done",
+            "op": "not_equals",
+            "value": false
+          }
+        ]
+      },
+      "expect": [
+        "deals/02.md",
+        "deals/04.md",
+        "deals/06.md",
+        "deals/07.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "checkbox is_empty",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "done",
+            "op": "is_empty"
+          }
+        ]
+      },
+      "expect": [
+        "deals/04.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "checkbox is_not_empty",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "done",
+            "op": "is_not_empty"
+          }
+        ]
+      },
+      "expect": [
+        "deals/01.md",
+        "deals/02.md",
+        "deals/03.md",
+        "deals/05.md",
+        "deals/06.md",
+        "deals/07.md"
+      ]
+    },
+    {
+      "why": "relation target and plain text both read",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "account",
+            "op": "contains",
+            "value": "acme"
+          }
+        ]
+      },
+      "expect": ["deals/01.md", "deals/02.md"]
+    },
+    {
+      "why": "person relationship",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "owner",
+            "op": "contains",
+            "value": "ada"
+          }
+        ]
+      },
+      "expect": ["deals/01.md"]
+    },
+    {
+      "why": "site text family",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "site",
+            "op": "contains",
+            "value": "EXAMPLE"
+          }
+        ]
+      },
+      "expect": ["deals/01.md"]
+    },
+    {
+      "why": "email text family",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "email",
+            "op": "contains",
+            "value": "EXAMPLE"
+          }
+        ]
+      },
+      "expect": ["deals/01.md"]
+    },
+    {
+      "why": "phone text family",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "phone",
+            "op": "contains",
+            "value": "+1"
+          }
+        ]
+      },
+      "expect": ["deals/01.md"]
+    },
+    {
+      "why": "files text family",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "files",
+            "op": "contains",
+            "value": "a.png"
+          }
+        ]
+      },
+      "expect": ["deals/01.md"]
+    },
+    {
+      "why": "repeat text family",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "repeat",
+            "op": "contains",
+            "value": "weekly"
+          }
+        ]
+      },
+      "expect": ["deals/01.md"]
+    },
+    {
+      "why": "page title beats stored title",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "title",
+            "op": "equals",
+            "value": "Abacus"
+          }
+        ]
+      },
+      "expect": ["deals/01.md"]
+    },
+    {
+      "why": "type virtual fact",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "type",
+            "op": "equals",
+            "value": "Deal"
+          }
+        ]
+      },
+      "expect": [
+        "deals/01.md",
+        "deals/02.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/05.md",
+        "deals/06.md",
+        "deals/07.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "held undeclared key reads as text",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "held",
+            "op": "equals",
+            "value": "alpha"
+          }
+        ]
+      },
+      "expect": ["deals/01.md"]
+    },
+    {
+      "why": "made reads the file time in local zone",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "made",
+            "op": "equals",
+            "value": "2026-07-27"
+          }
+        ]
+      },
+      "expect": [
+        "deals/01.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/05.md",
+        "deals/06.md",
+        "deals/07.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "createdAt reads the file time in local zone",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "createdAt",
+            "op": "equals",
+            "value": "2026-07-27"
+          }
+        ]
+      },
+      "expect": [
+        "deals/01.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/05.md",
+        "deals/06.md",
+        "deals/07.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "edited reads the file time in local zone",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "edited",
+            "op": "equals",
+            "value": "2026-07-29"
+          }
+        ]
+      },
+      "expect": [
+        "deals/01.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/05.md",
+        "deals/06.md",
+        "deals/07.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "modifiedAt reads the file time in local zone",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "modifiedAt",
+            "op": "equals",
+            "value": "2026-07-29"
+          }
+        ]
+      },
+      "expect": [
+        "deals/01.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/05.md",
+        "deals/06.md",
+        "deals/07.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "authored empty all matches everything",
+      "type": "Deal",
+      "filters": {
+        "all": []
+      },
+      "expect": [
+        "deals/01.md",
+        "deals/02.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/05.md",
+        "deals/06.md",
+        "deals/07.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "authored empty any matches nothing",
+      "type": "Deal",
+      "filters": {
+        "any": []
+      },
+      "expect": []
+    },
+    {
+      "why": "nested all and any",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "done",
+            "op": "equals",
+            "value": true
+          },
+          {
+            "any": [
+              {
+                "field": "value",
+                "op": "equals",
+                "value": 5
+              },
+              {
+                "field": "stage",
+                "op": "equals",
+                "value": "lead"
+              }
+            ]
+          }
+        ]
+      },
+      "expect": ["deals/02.md", "deals/06.md"]
+    },
+    {
+      "why": "stage sort asc",
+      "type": "Deal",
+      "sort": [
+        {
+          "field": "stage",
+          "dir": "asc"
+        }
+      ],
+      "expect": [
+        "deals/01.md",
+        "deals/06.md",
+        "deals/02.md",
+        "deals/07.md",
+        "deals/03.md",
+        "knowledge/deal.md",
+        "deals/04.md",
+        "deals/05.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md"
+      ]
+    },
+    {
+      "why": "stage sort desc",
+      "type": "Deal",
+      "sort": [
+        {
+          "field": "stage",
+          "dir": "desc"
+        }
+      ],
+      "expect": [
+        "deals/04.md",
+        "deals/03.md",
+        "knowledge/deal.md",
+        "deals/02.md",
+        "deals/07.md",
+        "deals/01.md",
+        "deals/06.md",
+        "deals/05.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md"
+      ]
+    },
+    {
+      "why": "priority sort asc",
+      "type": "Deal",
+      "sort": [
+        {
+          "field": "priority",
+          "dir": "asc"
+        }
+      ],
+      "expect": [
+        "deals/01.md",
+        "deals/03.md",
+        "deals/07.md",
+        "deals/02.md",
+        "deals/05.md",
+        "deals/06.md",
+        "deals/04.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "priority sort desc",
+      "type": "Deal",
+      "sort": [
+        {
+          "field": "priority",
+          "dir": "desc"
+        }
+      ],
+      "expect": [
+        "deals/02.md",
+        "deals/05.md",
+        "deals/06.md",
+        "deals/01.md",
+        "deals/03.md",
+        "deals/07.md",
+        "deals/04.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md",
+        "knowledge/deal.md"
+      ]
+    },
+    {
+      "why": "made sort asc",
+      "type": "Deal",
+      "sort": [
+        {
+          "field": "made",
+          "dir": "asc"
+        }
+      ],
+      "expect": [
+        "deals/01.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/05.md",
+        "deals/06.md",
+        "deals/07.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md",
+        "knowledge/deal.md",
+        "deals/02.md"
+      ]
+    },
+    {
+      "why": "edited sort desc",
+      "type": "Deal",
+      "sort": [
+        {
+          "field": "edited",
+          "dir": "desc"
+        }
+      ],
+      "expect": [
+        "deals/01.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/05.md",
+        "deals/06.md",
+        "deals/07.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md",
+        "knowledge/deal.md",
+        "deals/02.md"
+      ]
+    },
+    {
+      "why": "number against text sorts lexically",
+      "type": "Deal",
+      "filters": {
+        "any": [
+          {
+            "field": "title",
+            "op": "equals",
+            "value": "a"
+          },
+          {
+            "field": "title",
+            "op": "equals",
+            "value": "A"
+          }
+        ]
+      },
+      "sort": [
+        {
+          "field": "value",
+          "dir": "asc"
+        }
+      ],
+      "expect": ["deals/06.md", "deals/07.md"]
+    },
+    {
+      "why": "numbers compare numerically when both JSON numbers",
+      "type": "Deal",
+      "filters": {
+        "any": [
+          {
+            "field": "title",
+            "op": "equals",
+            "value": "Abacus"
+          },
+          {
+            "field": "title",
+            "op": "equals",
+            "value": "cherry"
+          },
+          {
+            "field": "title",
+            "op": "equals",
+            "value": "a"
+          },
+          {
+            "field": "title",
+            "op": "equals",
+            "value": "Knowledge deal"
+          }
+        ]
+      },
+      "sort": [
+        {
+          "field": "value",
+          "dir": "asc"
+        }
+      ],
+      "expect": ["deals/05.md", "deals/01.md", "knowledge/deal.md", "deals/06.md"]
+    },
+    {
+      "why": "ASCII text sort and lowercase first",
+      "type": "Deal",
+      "filters": {
+        "any": [
+          {
+            "field": "title",
+            "op": "equals",
+            "value": "Abacus"
+          },
+          {
+            "field": "title",
+            "op": "equals",
+            "value": "ABC"
+          },
+          {
+            "field": "title",
+            "op": "equals",
+            "value": "apple"
+          },
+          {
+            "field": "title",
+            "op": "equals",
+            "value": "Banana"
+          },
+          {
+            "field": "title",
+            "op": "equals",
+            "value": "cherry"
+          },
+          {
+            "field": "title",
+            "op": "equals",
+            "value": "a"
+          },
+          {
+            "field": "title",
+            "op": "equals",
+            "value": "A"
+          }
+        ]
+      },
+      "sort": [
+        {
+          "field": "title",
+          "dir": "asc"
+        }
+      ],
+      "expect": [
+        "deals/06.md",
+        "deals/07.md",
+        "deals/01.md",
+        "deals/02.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/05.md"
+      ]
+    },
+    {
+      "why": "two sort keys leave empty fields last",
+      "type": "Deal",
+      "sort": [
+        {
+          "field": "stage",
+          "dir": "asc"
+        },
+        {
+          "field": "priority",
+          "dir": "asc"
+        }
+      ],
+      "expect": [
+        "deals/01.md",
+        "deals/06.md",
+        "deals/07.md",
+        "deals/02.md",
+        "deals/03.md",
+        "knowledge/deal.md",
+        "deals/04.md",
+        "deals/05.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md"
+      ]
+    },
+    {
+      "why": "typeless status ranks come from first declaring record",
+      "sort": [
+        {
+          "field": "stage",
+          "dir": "asc"
+        }
+      ],
+      "expect": [
+        "deals/01.md",
+        "deals/06.md",
+        "deals/02.md",
+        "deals/07.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/05.md",
+        "accounts/acme.md",
+        "accounts/beta.md",
+        "accounts/other.md",
+        "deals/08.md",
+        "deals/09.md",
+        "deals/10.md",
+        "deals/11.md",
+        "deals/12.md",
+        "deals/13.md",
+        "deals/14.md",
+        "plain.md"
+      ]
+    },
+    {
+      "why": "strict set membership keeps JSON numbers regardless of decimal spelling",
+      "type": "Deal",
+      "filters": {
+        "all": [
+          {
+            "field": "tags",
+            "op": "any_of",
+            "value": [5]
+          }
+        ]
+      },
+      "expect": ["deals/03.md"]
+    },
+    {
+      "why": "date sort orders days and timed endpoints",
+      "type": "Deal",
+      "filters": {
+        "any": [
+          {
+            "field": "title",
+            "op": "equals",
+            "value": "Abacus"
+          },
+          {
+            "field": "title",
+            "op": "equals",
+            "value": "ABC"
+          },
+          {
+            "field": "title",
+            "op": "equals",
+            "value": "apple"
+          },
+          {
+            "field": "title",
+            "op": "equals",
+            "value": "Banana"
+          },
+          {
+            "field": "title",
+            "op": "equals",
+            "value": "cherry"
+          },
+          {
+            "field": "title",
+            "op": "equals",
+            "value": "a"
+          },
+          {
+            "field": "title",
+            "op": "equals",
+            "value": "A"
+          },
+          {
+            "field": "title",
+            "op": "equals",
+            "value": "Alpha"
+          }
+        ]
+      },
+      "sort": [
+        {
+          "field": "close",
+          "dir": "asc"
+        }
+      ],
+      "expect": [
+        "deals/06.md",
+        "deals/08.md",
+        "deals/01.md",
+        "deals/02.md",
+        "deals/03.md",
+        "deals/04.md",
+        "deals/05.md",
+        "deals/07.md"
+      ]
+    }
+  ],
+  "numbers": [
+    {
+      "text": "0",
+      "reads": 0
+    },
+    {
+      "text": "-0",
+      "reads": 0
+    },
+    {
+      "text": "+5",
+      "reads": 5
+    },
+    {
+      "text": " 5 ",
+      "reads": 5
+    },
+    {
+      "text": "\t-1.5\r",
+      "reads": -1.5
+    },
+    {
+      "text": ".5",
+      "reads": 0.5
+    },
+    {
+      "text": "5.",
+      "reads": 5
+    },
+    {
+      "text": "05",
+      "reads": 5
+    },
+    {
+      "text": "1e2",
+      "reads": 100
+    },
+    {
+      "text": "-2E-2",
+      "reads": -0.02
+    },
+    {
+      "text": "",
+      "reads": null
+    },
+    {
+      "text": " ",
+      "reads": null
+    },
+    {
+      "text": "0x10",
+      "reads": null
+    },
+    {
+      "text": "0o7",
+      "reads": null
+    },
+    {
+      "text": "0b10",
+      "reads": null
+    },
+    {
+      "text": "Infinity",
+      "reads": null
+    },
+    {
+      "text": "NaN",
+      "reads": null
+    },
+    {
+      "text": "1e999",
+      "reads": null
+    },
+    {
+      "text": "1_000",
+      "reads": null
+    },
+    {
+      "text": "5px",
+      "reads": null
+    },
+    {
+      "text": "\u00a05\u00a0",
+      "reads": null
+    },
+    {
+      "text": "\u000b5\u000b",
+      "reads": null
+    }
+  ],
+  "acceptance": {
+    "type": "Work item",
+    "filters": {
+      "all": [
+        {
+          "field": "status",
+          "op": "any_of",
+          "value": ["backlog", "todo", "progress", "review"]
+        }
+      ]
+    },
+    "sort": [
+      {
+        "field": "due",
+        "dir": "asc"
+      }
+    ],
+    "expect": [
+      "projects/guided-onboarding-ga/items/fld-7.md",
+      "projects/guided-onboarding-ga/items/fld-2.md",
+      "projects/phoenix-warehouse-rollout/items/ops-2.md",
+      "projects/field-app-launch-campaign/items/lnc-1.md",
+      "projects/guided-onboarding-ga/items/fld-4.md",
+      "projects/offline-sync-hardening/items/syn-3.md",
+      "projects/guided-onboarding-ga/items/fld-5.md",
+      "projects/offline-sync-hardening/items/syn-1.md",
+      "projects/phoenix-warehouse-rollout/items/ops-4.md",
+      "projects/field-app-launch-campaign/items/lnc-2.md",
+      "projects/phoenix-warehouse-rollout/items/ops-3.md",
+      "projects/offline-sync-hardening/items/syn-7.md",
+      "projects/offline-sync-hardening/items/syn-2.md",
+      "projects/field-app-launch-campaign/items/lnc-8.md",
+      "projects/phoenix-warehouse-rollout/items/ops-5.md",
+      "projects/phoenix-warehouse-rollout/items/ops-9.md",
+      "projects/guided-onboarding-ga/items/fld-8.md",
+      "projects/guided-onboarding-ga/items/fld-12.md",
+      "projects/phoenix-warehouse-rollout/items/ops-10.md",
+      "projects/phoenix-warehouse-rollout/items/ops-6.md",
+      "projects/field-app-launch-campaign/items/lnc-3.md",
+      "projects/phoenix-warehouse-rollout/items/ops-11.md",
+      "projects/phoenix-warehouse-rollout/items/ops-12.md",
+      "projects/field-app-launch-campaign/items/lnc-11.md",
+      "projects/phoenix-warehouse-rollout/items/ops-7.md",
+      "projects/offline-sync-hardening/items/syn-8.md",
+      "projects/guided-onboarding-ga/items/fld-9.md",
+      "projects/field-app-launch-campaign/items/lnc-6.md",
+      "projects/guided-onboarding-ga/items/fld-10.md",
+      "projects/offline-sync-hardening/items/syn-9.md",
+      "projects/field-app-launch-campaign/items/lnc-4.md",
+      "projects/offline-sync-hardening/items/syn-4.md",
+      "projects/field-app-launch-campaign/items/lnc-9.md",
+      "projects/phoenix-warehouse-rollout/items/ops-8.md",
+      "projects/field-app-launch-campaign/items/lnc-5.md",
+      "projects/guided-onboarding-ga/items/fld-1.md",
+      "projects/offline-sync-hardening/items/syn-5.md",
+      "projects/field-app-launch-campaign/items/lnc-10.md",
+      "projects/offline-sync-hardening/items/syn-10.md"
+    ]
+  }
+}

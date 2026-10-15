@@ -167,7 +167,7 @@ impl CorpusCache {
                     continue;
                 }
                 let read_at = SystemTime::now();
-                let read = std::fs::read_to_string(&file.path);
+                let read = super::scan::read_content(file);
                 #[cfg(test)]
                 {
                     state.reads += 1;
@@ -221,10 +221,17 @@ fn reusable(cache: &VaultCache, old: &Corpus, file: &NoteFile) -> Option<usize> 
         .ok()
 }
 
-/// The body search reads, taken as `read_note` takes it: a whole `.mmd`, or
-/// a `.md` after its frontmatter, then cut at `SEARCH_BODY_CAP`.
+/// Search reads card text for boards, raw Mermaid for diagrams, or a page's
+/// body after frontmatter, then cuts at SEARCH_BODY_CAP. Unreadable boards
+/// already carry their parse_error in the corresponding Entry.
 fn text_of(rel: &str, content: &str) -> CorpusText {
-    let body = if rel.ends_with(".mmd") {
+    let canvas_text;
+    let body = if crate::files::kinds::is_whiteboard(rel) {
+        canvas_text = crate::canvas::read::read(content)
+            .map(|b| crate::canvas::read::search_text(&b))
+            .unwrap_or_default();
+        canvas_text.as_str()
+    } else if rel.ends_with(".mmd") {
         content
     } else {
         parse::split_frontmatter(content).1
@@ -295,6 +302,22 @@ mod tests {
             "an unchanged corpus is not rebuilt"
         );
         let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_board_is_searched_by_its_card_text_never_json_field_names() {
+        let vault = testutil::temp_vault("corpus-whiteboard");
+        testutil::write(
+            &vault,
+            "plan.canvas",
+            include_str!("../../../shared/canvas/goldens/obsidian-layout.canvas"),
+        );
+        let cache = CorpusCache::new(1);
+        let corpus = cache.snapshot(&vault).unwrap();
+        assert_eq!(corpus.texts[0].body, "Roadmap [[Vision]]\nRelease");
+        assert!(!corpus.texts[0].body.contains("nodes"));
+        assert_eq!(cache.reads(), 1);
+        std::fs::remove_dir_all(vault).unwrap();
     }
 
     #[test]

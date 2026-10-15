@@ -1,8 +1,13 @@
+import { DESTINATIONS } from '@/engine/destinations';
+import { flushOpenPages, hasOpenPages } from '@/editor/openPages';
+import { useVaultStore } from '@/stores/vaultStore';
 import { DARK_QUERY, resolveTheme } from '@/hooks/useTheme';
 import { captureNote } from '@/lib/capture';
 import { useCommands } from '@/lib/keys/useKeys';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
+import { CREATE_ROWS, availableRows } from './createCatalog';
+import { createContext, useLauncherStore } from '@/stores/launcherStore';
 
 /** ⌘K: the palette. */
 function openPalette(): void {
@@ -73,5 +78,39 @@ const GENERAL = [
  * vault chooser too.
  */
 export function useAppCommands(): void {
-  useCommands(GENERAL);
+  const ready = () => useVaultStore.getState().vaultPath !== null;
+  useCommands([
+    ...GENERAL,
+    {
+      id: 'shortcuts.show',
+      run: () => {
+        useNavStore.getState().navigate({ kind: 'settings' });
+        requestAnimationFrame(() =>
+          document.getElementById('keyboard-shortcuts')?.scrollIntoView(),
+        );
+      },
+    },
+    ...DESTINATIONS.map((place) => ({
+      id: `go.${place.id}`,
+      run: () => useNavStore.getState().navigate(place.selection),
+      when: () => ready() && (place.gate !== 'inbox' || useUiStore.getState().inboxEnabled),
+    })),
+    {
+      id: 'create.launcher',
+      when: () => createContext().ready,
+      run: () => useLauncherStore.getState().openLauncher(),
+    },
+    ...CREATE_ROWS.map((row) => ({
+      id: `create.${row.id}`,
+      when: () => availableRows(createContext()).some((available) => available.id === row.id),
+      run: () => useLauncherStore.getState().startCreate(row.id),
+    })),
+    {
+      id: 'page.save',
+      when: hasOpenPages,
+      run: () => {
+        void flushOpenPages();
+      },
+    },
+  ]);
 }

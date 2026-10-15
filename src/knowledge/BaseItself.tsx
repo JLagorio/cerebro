@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useFeed, type Feed } from '@/hooks/useFeed';
+import { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { recheckLine, type Concept } from '@/engine/okf';
 import { actorLabel } from '@/engine/authors';
@@ -43,47 +44,6 @@ import { useVaultStore } from '@/stores/vaultStore';
  * to drain a queue — the same rule that kept a review count off Knowledge
  * (M8.1) and a commit count off History (M9.4).
  */
-
-/** One feed's three states. `loading` is distinct from `unavailable` so a
- * slow read never renders as a refusal. */
-type Feed<T> = { kind: 'loading' } | { kind: 'unavailable' } | { kind: 'ready'; data: T };
-
-function useFeed<T>(
-  vaultPath: string | null,
-  read: (vault: string) => Promise<T>,
-  version = 0,
-): Feed<T> {
-  const [feed, setFeed] = useState<Feed<T>>({ kind: 'loading' });
-  useEffect(() => {
-    if (vaultPath === null) {
-      setFeed({ kind: 'unavailable' });
-      return;
-    }
-    let live = true;
-    setFeed({ kind: 'loading' });
-    void (async () => {
-      try {
-        const data = await read(vaultPath);
-        if (live) setFeed({ kind: 'ready', data });
-      } catch {
-        // A read behind a surface goes quiet rather than toasting (the
-        // store-layer rule in AGENTS.md), and the section says what it could
-        // not find out. Nothing is retried on a timer: these tabs speak when
-        // they are opened and never on their own.
-        if (live) setFeed({ kind: 'unavailable' });
-      }
-    })();
-    return () => {
-      live = false;
-    };
-    // `read` is in the deps rather than suppressed. Every call site passes a
-    // module-level IPC function, so it is stable; an inline lambda would
-    // re-fetch on every render, which is a defect this dependency makes loud
-    // instead of hiding. `version` is the one deliberate re-read: an action
-    // that changed what the feed would say bumps it.
-  }, [vaultPath, read, version]);
-  return feed;
-}
 
 function Section({
   id,
@@ -303,13 +263,17 @@ function Lane({ lane }: { lane: LaneView }) {
 }
 
 function Changes({ feed }: { feed: Feed<ChangesView> }) {
-  const concepts = useConcepts();
   if (feed.kind === 'loading') return <Loading />;
   if (feed.kind === 'unavailable') return <Unavailable what="What changed" />;
   const view = feed.data;
   if (view.quiet) {
-    return <Quiet text="Nothing has changed since the last time anybody looked." />;
+    return <Quiet text="Nothing has changed since the last convergence run." />;
   }
+  return <ChangeLines view={view} />;
+}
+
+export function ChangeLines({ view }: { view: ChangesView }) {
+  const concepts = useConcepts();
   return (
     <>
       {view.sections
@@ -756,11 +720,15 @@ function Lanes({ feed }: { feed: Feed<LanesView> }) {
   );
 }
 
-/** What moved since the last time anybody looked. */
+/** What moved since the last stored convergence run. */
 export function WhatChanged({ vaultPath }: { vaultPath: string | null }) {
   const changes = useFeed(vaultPath, ipc.converge);
   return (
-    <Section id="changed" title="What changed" blurb="Since the last time anybody looked at this.">
+    <Section
+      id="changed"
+      title="What changed"
+      blurb="Since the last convergence run. Cerebro runs one every few minutes while it is open."
+    >
       <Changes feed={changes} />
     </Section>
   );

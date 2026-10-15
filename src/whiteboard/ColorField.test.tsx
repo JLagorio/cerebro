@@ -1,0 +1,22 @@
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
+import { ColorField } from './ColorField';
+afterEach(cleanup);
+it('presets write digits, None clears, hex normalizes and bad input never commits', () => {
+  const commit = vi.fn();
+  render(<ColorField value={null} onCommit={commit} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Green' }));
+  expect(commit).toHaveBeenLastCalledWith('4');
+  fireEvent.click(screen.getByRole('button', { name: 'None' }));
+  expect(commit).toHaveBeenLastCalledWith(null);
+  const input = screen.getByRole('textbox', { name: 'Hex colour' });
+  fireEvent.change(input, { target: { value: '#AbC' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+  expect(commit).toHaveBeenLastCalledWith('#aabbcc');
+  fireEvent.blur(input);
+  expect(commit).toHaveBeenCalledTimes(3);
+  fireEvent.change(input, { target: { value: 'var(--n-0)' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+  expect(screen.getByRole('alert').textContent).toContain('hex');
+  expect(commit).toHaveBeenCalledTimes(3);
+});

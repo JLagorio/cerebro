@@ -39,6 +39,8 @@ const KIND_IDS: readonly string[] = [
   'rollup',
   'created_time',
   'last_edited_time',
+  'formula',
+  'repeat',
 ];
 const ATOMS = [
   'string',
@@ -50,7 +52,17 @@ const ATOMS = [
   'url_text',
 ] as const;
 const FAMILIES = ['text', 'number', 'date', 'choice', 'multi', 'boolean', 'any'] as const;
-const ROLLUP_CALC_IDS = ['count', 'sum', 'avg', 'min', 'max', 'earliest', 'latest', 'show'];
+const ROLLUP_CALC_IDS = [
+  'count',
+  'sum',
+  'avg',
+  'min',
+  'max',
+  'percent_done',
+  'earliest',
+  'latest',
+  'show',
+];
 const ROLLUP_RESULT_WORDS = ['number', 'value', 'text'];
 const STATUS_CHAIN = ['project', 'type', 'default'];
 const VIRTUAL_FIELD_IDS = ['title', 'type', 'createdAt', 'modifiedAt'];
@@ -82,6 +94,12 @@ export interface KindFacts {
 }
 
 export interface FieldKindTable {
+  deadline_cases: {
+    name: string;
+    fields: Record<string, unknown>;
+    deadline: unknown;
+    expect: string | null;
+  }[];
   format: number;
   artifact_version: number;
   rule_version: string;

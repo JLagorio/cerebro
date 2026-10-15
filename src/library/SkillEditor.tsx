@@ -214,7 +214,7 @@ export function SkillEditor({
 
       <EditorSection
         title="On a schedule"
-        hint="A skill with a schedule runs unattended, like an agent. An app that was closed all week owes one catch-up run, not seven."
+        hint="A skill with a schedule runs unattended, like an agent."
       >
         <Field label="Schedule">
           <ScheduleField value={draft.schedule} onChange={(v) => set('schedule', v)} />

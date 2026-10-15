@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   CanvasViewport,
   useCanvasOverlayHost,
@@ -369,4 +369,85 @@ describe('CanvasViewport', () => {
       }
     });
   });
+});
+
+it('a board wheel pans normally, zooms at the pointer with ctrl and reports the camera', () => {
+  const changed = vi.fn();
+  render(
+    <CanvasViewport wheel="pan" onTransformChange={changed}>
+      <Probe />
+    </CanvasViewport>,
+  );
+  const host = screen.getByTestId('canvas-viewport');
+  fireEvent.wheel(host, { deltaX: 30, deltaY: 60 });
+  expect(screen.getByTestId('probe').textContent).toBe('100:-30,-60');
+  fireEvent.wheel(host, { deltaY: -40, ctrlKey: true, clientX: 100, clientY: 80 });
+  expect(readout().textContent).toContain('110%');
+  expect(changed.mock.lastCall?.[0].scale).toBe(1.1);
+});
+it('pass mode leaves the page wheel untouched', () => {
+  render(
+    <CanvasViewport wheel="pass">
+      <Probe />
+    </CanvasViewport>,
+  );
+  const event = new WheelEvent('wheel', { deltaY: 100, cancelable: true, bubbles: true });
+  fireEvent(screen.getByTestId('canvas-viewport'), event);
+  expect(event.defaultPrevented).toBe(false);
+  expect(screen.getByTestId('probe').textContent).toBe('100:0,0');
+});
+it('a saved transform starts exactly and initialFit never observes content', () => {
+  const observe = vi.fn();
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe = observe;
+      disconnect = vi.fn();
+    },
+  );
+  try {
+    render(
+      <CanvasViewport initialFit initialTransform={{ scale: 1.5, offset: { x: 20, y: 30 } }}>
+        <svg data-canvas-content="true" />
+        <Probe />
+      </CanvasViewport>,
+    );
+    expect(screen.getByTestId('probe').textContent).toBe('150:20,30');
+    // Only the viewport resize observer, never the content-fit observer.
+    expect(observe).toHaveBeenCalledTimes(1);
+    expect(observe.mock.calls[0][0]).toBe(screen.getByTestId('canvas-viewport'));
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+it('Fit prefers explicit canvas content over a diagram or overlay SVG', () => {
+  render(
+    <CanvasViewport>
+      <svg data-canvas-content="true" />
+      <svg id="cerebro-mermaid-old" />
+    </CanvasViewport>,
+  );
+  const host = screen.getByTestId('canvas-viewport');
+  const planeEl = plane();
+  const content = planeEl.querySelector('[data-canvas-content]')!;
+  vi.spyOn(host, 'getBoundingClientRect').mockReturnValue({
+    left: 0,
+    top: 0,
+    width: 800,
+    height: 600,
+  } as DOMRect);
+  vi.spyOn(planeEl, 'getBoundingClientRect').mockReturnValue({
+    left: 0,
+    top: 0,
+    width: 800,
+    height: 600,
+  } as DOMRect);
+  vi.spyOn(content, 'getBoundingClientRect').mockReturnValue({
+    left: -50,
+    top: -20,
+    width: 400,
+    height: 200,
+  } as DOMRect);
+  fireEvent.click(screen.getByRole('button', { name: 'Fit diagram' }));
+  expect(planeEl.style.transform).toBe('translate(112px, 146.4px) scale(1.92)');
 });

@@ -6,5 +6,14 @@
 //! icon, bytes door and open policy. TypeScript reads the same bytes through
 //! `src/engine/fileKinds.ts`; only Rust enforces the doors and the open
 //! verdict (`kinds::open_policy`).
+//! `extract` contains bounded Office packages, XML and sparse workbook readers.
 
+pub mod bytes;
+pub mod dropped;
+pub mod extract;
+pub mod images;
 pub mod kinds;
+pub mod media;
+pub mod read;
+pub mod scheme;
+pub mod thumbs;

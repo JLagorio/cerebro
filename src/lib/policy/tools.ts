@@ -65,17 +65,25 @@ export type Kind = 'read_only' | 'additive' | 'destructive';
  * whose answers quote the note back reads what it writes. */
 export type Axis = 'write' | 'read' | 'read_write' | 'none';
 /** What a tool's target argument names; the bundle takes no argument. */
-export type TargetKind = 'note' | 'folder' | 'concept' | 'source_id' | 'bundle';
+export type TargetKind = 'note' | 'file' | 'canvas' | 'folder' | 'concept' | 'source_id' | 'bundle';
 /** How a transcript shows a call (M56.8): a step in the run, a change card,
  * or one of the rows a cerebro tool owns: a concept to review, a handoff to
- * another agent, a commit of proposals. */
-export type Renderer = 'step' | 'change' | 'concept' | 'handoff' | 'commit';
+ * another agent, a commit of proposals, or a checked view suggestion. */
+export type Renderer = 'step' | 'change' | 'concept' | 'handoff' | 'commit' | 'view';
 
 const SURFACES: readonly Surface[] = ['base', 'proposals'];
 const KINDS: readonly Kind[] = ['read_only', 'additive', 'destructive'];
 const AXES: readonly Axis[] = ['write', 'read', 'read_write', 'none'];
-const TARGET_KINDS: readonly TargetKind[] = ['note', 'folder', 'concept', 'source_id', 'bundle'];
-const RENDERERS: readonly Renderer[] = ['step', 'change', 'concept', 'handoff', 'commit'];
+const TARGET_KINDS: readonly TargetKind[] = [
+  'note',
+  'file',
+  'canvas',
+  'folder',
+  'concept',
+  'source_id',
+  'bundle',
+];
+const RENDERERS: readonly Renderer[] = ['step', 'change', 'concept', 'handoff', 'commit', 'view'];
 
 /** The door the comment tools go through (M70.3): they write a page's
  * comment sidecar, never the page, so the door writes nothing, and its rows
@@ -88,6 +96,7 @@ const RENDERER_DOORS: Partial<Record<Renderer, string>> = {
   concept: 'concept',
   handoff: 'run',
   commit: 'ledger',
+  view: 'none',
 };
 
 /**
@@ -212,6 +221,7 @@ export interface ToolsManifest {
   tokens: Record<string, Token>;
   doors: Door[];
   toolsets: Toolset[];
+  clients: { default: string; grantable: string[]; why: string };
   prefix_exceptions: PrefixException[];
   /** In served order, which is meaning: nothing sorts it. */
   tools: ToolRow[];
@@ -360,6 +370,7 @@ const MANIFEST_SHAPE = struct({
     axes: listOf(oneOf(AXES)),
   }),
   toolsets: named('toolset', 'id', { id: text, label: text, hint: text }),
+  clients: struct({ default: text, grantable: listOf(text), why: text }),
   prefix_exceptions: named('prefix exception', 'name', { name: text, why: text }),
   tools: named('tool', 'name', {
     name: text,
@@ -537,6 +548,12 @@ function checkUnique(manifest: ToolsManifest): void {
 
 /** The rules a row and the generated block both answer to. */
 function checkFacts(manifest: ToolsManifest, subject: string, facts: Facts): void {
+  if (facts.target?.kind === 'canvas' && (facts.axis !== 'read' || facts.door !== 'none')) {
+    throw refusal(subject, 'target', 'canvas targets require the read axis and door none');
+  }
+  if (facts.target?.kind === 'file' && (facts.axis !== 'read' || facts.door !== 'none')) {
+    throw refusal(subject, 'target', 'file targets require the read axis and door none');
+  }
   if (facts.toolset !== null && !manifest.toolsets.some((t) => t.id === facts.toolset)) {
     throw refusal(subject, 'toolset', `names ${facts.toolset}, which no toolset declares`);
   }
@@ -571,12 +588,14 @@ function checkFacts(manifest: ToolsManifest, subject: string, facts: Facts): voi
     facts.axis === 'read' &&
     target !== null &&
     target.kind !== 'note' &&
+    target.kind !== 'file' &&
+    target.kind !== 'canvas' &&
     target.kind !== 'bundle'
   ) {
     throw refusal(
       subject,
       'target',
-      `on the read axis must be a note or the bundle, not ${target.kind}`,
+      `on the read axis must be a note, file, canvas or the bundle, not ${target.kind}`,
     );
   }
   if (facts.axis === 'none') {
@@ -688,6 +707,8 @@ function checkRow(manifest: ToolsManifest, row: ToolRow): void {
  * posts beside it and draws as a step. Judged before the door's own lists,
  * so a misplaced row hears this one sentence whatever else it breaks. */
 function checkCommentDoor(subject: string, row: ToolRow): void {
+  // File targets have one cross-loader refusal, checked by checkFacts.
+  if (row.target?.kind === 'file' || row.target?.kind === 'canvas') return;
   const shaped =
     row.axis === 'read' &&
     row.target?.kind === 'note' &&
@@ -761,6 +782,49 @@ function checkCli(tool: CliTool): void {
   }
 }
 
+function checkClients(manifest: ToolsManifest): void {
+  const clients = manifest.clients;
+  if (!clients.why.trim()) throw refusal('clients', 'why', 'is empty');
+  if (!manifest.toolsets.some((set) => set.id === clients.default)) {
+    throw refusal(
+      'clients',
+      'default',
+      `names no declared toolset: ${JSON.stringify(clients.default)}`,
+    );
+  }
+  const rows = manifest.tools.filter((row) => row.toolset === clients.default);
+  if (
+    !rows.length ||
+    rows.some(
+      (row) =>
+        row.kind !== 'read_only' ||
+        manifest.doors.find((door) => door.id === row.door)?.writes !== false,
+    ) ||
+    clients.default === manifest.generated.toolset
+  ) {
+    throw refusal(
+      'clients',
+      'default',
+      'must name a toolset of read_only rows on non-writing doors',
+    );
+  }
+  const seen = new Set<string>();
+  for (const id of clients.grantable) {
+    const quoted = JSON.stringify(id);
+    let problem: string | null = null;
+    if (!manifest.toolsets.some((set) => set.id === id))
+      problem = `names no declared toolset: ${quoted}`;
+    else if (seen.has(id)) problem = `repeats toolset ${quoted}`;
+    else if (id === clients.default) problem = `includes the default toolset ${quoted}`;
+    else if (id === manifest.generated.toolset)
+      problem = `includes the generated toolset ${quoted}`;
+    else if (manifest.tools.some((row) => row.toolset === id && row.axis === 'none'))
+      problem = `toolset ${quoted} contains a row no folder scope bounds`;
+    if (problem) throw refusal('clients', 'grantable', problem);
+    seen.add(id);
+  }
+}
+
 function validate(manifest: ToolsManifest): void {
   const MANIFEST = 'manifest';
   if (manifest.format !== TOOLS_FORMAT) {
@@ -785,6 +849,7 @@ function validate(manifest: ToolsManifest): void {
   }
   for (const row of manifest.tools) checkRow(manifest, row);
   checkGenerated(manifest);
+  checkClients(manifest);
   // Sorted, as the BTreeMap the Rust loader holds them in iterates.
   for (const token of Object.keys(manifest.tokens).sort()) {
     const marker = `{{${token}}}`;
@@ -822,6 +887,22 @@ export function parseToolsManifest(value: unknown): ToolsManifest {
 
 /** The shipped manifest, validated once at module load. */
 export const TOOLS: ToolsManifest = parseToolsManifest(rawTools);
+
+/** Personal-token grants are tool facts, never a second list in Settings. */
+export function clientToolsets(): { default: Toolset; grantable: Toolset[]; why: string } {
+  const byId = (id: string) => TOOLS.toolsets.find((set) => set.id === id)!;
+  return {
+    default: byId(TOOLS.clients.default),
+    grantable: TOOLS.clients.grantable.map(byId),
+    why: TOOLS.clients.why,
+  };
+}
+
+export function toolsetWrites(id: string): boolean {
+  return TOOLS.tools.some(
+    (row) => row.toolset === id && TOOLS.doors.some((door) => door.id === row.door && door.writes),
+  );
+}
 
 // --- What a call is ---------------------------------------------------------
 

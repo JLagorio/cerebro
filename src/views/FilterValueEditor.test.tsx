@@ -144,6 +144,7 @@ describe('a date filter speaks the field’s date format (M16.29)', () => {
       <FilterValueEditor def={def} kind="date" op="before" value="2026-08-03" onChange={vi.fn()} />,
     );
     fireEvent.click(screen.getByLabelText('Filter value'));
+    fireEvent.click(screen.getByTestId('filter-exact-date'));
   };
 
   it('labels the closed value box in the field’s format', () => {
@@ -193,8 +194,52 @@ describe('a date filter speaks the field’s date format (M16.29)', () => {
       />,
     );
     fireEvent.click(screen.getByLabelText('Filter value'));
+    fireEvent.click(screen.getByTestId('filter-exact-date'));
     fireEvent.click(screen.getByLabelText('Include time'));
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(String(onChange.mock.calls[0][0])).toMatch(/^2026-08-03 \d{2}:00$/);
+  });
+});
+
+describe('relative date choices', () => {
+  it('stores the chosen token and labels it in words', () => {
+    const onChange = vi.fn();
+    render(
+      <FilterValueEditor
+        def={{ name: 'due', kind: 'date' }}
+        kind="date"
+        op="equals"
+        value="this_week"
+        onChange={onChange}
+      />,
+    );
+    expect(screen.getByLabelText('Filter value').textContent).toContain('This week');
+    fireEvent.click(screen.getByLabelText('Filter value'));
+    fireEvent.click(screen.getByTestId('filter-relative-tomorrow'));
+    expect(onChange).toHaveBeenCalledWith('tomorrow');
+  });
+
+  it('refuses zero, leading zeros and 1000 days, then stores a bounded offset', () => {
+    const onChange = vi.fn();
+    render(
+      <FilterValueEditor
+        def={undefined}
+        kind="date"
+        op="before"
+        value="today"
+        onChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText('Filter value'));
+    for (const value of ['0', '007', '1000']) {
+      fireEvent.change(screen.getByTestId('filter-relative-days'), { target: { value } });
+      expect((screen.getByTestId('filter-relative-ago') as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByTestId('filter-relative-ahead') as HTMLButtonElement).disabled).toBe(
+        true,
+      );
+    }
+    fireEvent.change(screen.getByTestId('filter-relative-days'), { target: { value: '7' } });
+    fireEvent.click(screen.getByTestId('filter-relative-ago'));
+    expect(onChange).toHaveBeenCalledWith('today-7');
   });
 });

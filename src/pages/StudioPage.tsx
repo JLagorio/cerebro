@@ -14,6 +14,9 @@ import { slugify } from '@/lib/slug';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import { isWhiteboardPath } from '@/engine/fileKinds';
+import { WhiteboardEmbed } from '@/whiteboard/WhiteboardEmbed';
+import { useOpenPath } from '@/app/useOpenPath';
 
 export type StudioSelection = Extract<Selection, { kind: 'studio' }>;
 
@@ -22,11 +25,15 @@ export type StudioSelection = Extract<Selection, { kind: 'studio' }>;
 const stripFrontmatter = (body: string) => body.replace(/^---\n[\s\S]*?\n---\n?/, '');
 
 /**
- * The live preview: the page's rendered body, re-read whenever the scanner
+ * The live preview: the page or board, re-read whenever the scanner
  * sees a write. That re-read is the whole "live" — the assistant edits the
  * file, the watcher rescans, `modifiedAt` moves, and this refetches.
  */
 function StudioPreview({ path, modifiedAt }: { path: string; modifiedAt: string }) {
+  if (isWhiteboardPath(path)) return <WhiteboardEmbed board={path} height={520} />;
+  return <StudioPageBody key={path} path={path} modifiedAt={modifiedAt} />;
+}
+function StudioPageBody({ path, modifiedAt }: { path: string; modifiedAt: string }) {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   // null = not loaded yet; a failed read is its own state — "could not read"
   // and "empty page" are opposite sentences (the M33 rule).
@@ -60,7 +67,7 @@ function StudioPreview({ path, modifiedAt }: { path: string; modifiedAt: string 
   return <ConceptBody markdown={body} sources={[]} fromPath={path} />;
 }
 
-function NewPrototypeDialog({ onClose }: { onClose: () => void }) {
+export function NewPrototypeDialog({ onClose }: { onClose: () => void }) {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const createItem = useVaultStore((s) => s.createItem);
   const navigate = useNavStore((s) => s.navigate);
@@ -121,7 +128,7 @@ function NewPrototypeDialog({ onClose }: { onClose: () => void }) {
 }
 
 function ProjectView({ project }: { project: StudioProject }) {
-  const navigate = useNavStore((s) => s.navigate);
+  const openPath = useOpenPath('navigate', { fullPage: true });
   const askAgent = useUiStore((s) => s.askAgent);
   // The previewed page is a LENS — local state, not selection — per the
   // place doctrine: switching pages is looking at the same prototype
@@ -168,9 +175,9 @@ function ProjectView({ project }: { project: StudioProject }) {
           <Button
             variant="secondary"
             testId="studio-edit-page"
-            onClick={() => navigate({ kind: 'doc', path: shown.path })}
+            onClick={() => openPath(shown.path)}
           >
-            Edit this page
+            {isWhiteboardPath(shown.path) ? 'Open whiteboard' : 'Edit this page'}
           </Button>
         )}
       </div>

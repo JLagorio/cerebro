@@ -4,6 +4,21 @@ import { buildSchema } from './schema';
 import { makeEntry } from './testHelpers';
 import type { GroupSpec } from './types';
 
+it('renders every value band with distinct row keys and retains each add row (M61.1)', () => {
+  const entry = makeEntry({ path: 'shared.md', properties: { tags: ['a', 'b', 'a'] } });
+  const rows = buildRows({
+    entries: [entry],
+    allEntries: [entry],
+    group: [{ field: 'tags' }],
+    schema: buildSchema([entry]),
+    addRows: true,
+    isCollapsed: () => false,
+  });
+  expect(entryRows(rows).map((row) => row.entry.path)).toEqual([entry.path, entry.path]);
+  expect(new Set(rows.map((row) => row.key)).size).toBe(rows.length);
+  expect(rows.filter((row) => row.kind === 'add')).toHaveLength(2);
+});
+
 /**
  * M10: bands and nesting are ONE chain, and every record view renders from the
  * flattened result. These pin the composition — bands outside, nesting inside
@@ -408,4 +423,28 @@ describe('hasNesting', () => {
     expect(hasNesting([{ field: 'status' }])).toBe(false);
     expect(hasNesting([{ field: 'status' }, DESCEND_KR])).toBe(true);
   });
+});
+
+it('offers no add row under multi-day or ghost date bands (M61.3)', () => {
+  const doc = makeEntry({
+    path: 'types/dated.md',
+    title: 'Dated',
+    type: 'Type',
+    properties: { fields: { due: { kind: 'date' } } },
+  });
+  const entries = ['2026-07-28', 'invalid'].map((due) =>
+    makeEntry({ path: `${due}.md`, type: 'Dated', properties: { due } }),
+  );
+  const schema = buildSchema([doc, ...entries]);
+  const rowsFor = (dateBucket: 'day' | 'month') =>
+    buildRows({
+      entries,
+      allEntries: [doc, ...entries],
+      schema,
+      group: [{ field: 'due', dateBucket }],
+      isCollapsed: () => false,
+      addRows: true,
+    });
+  expect(rowsFor('month').filter((r) => r.kind === 'add')).toHaveLength(0);
+  expect(rowsFor('day').filter((r) => r.kind === 'add')).toHaveLength(1);
 });

@@ -193,3 +193,28 @@ describe('IconButton tooltip', () => {
     expect(screen.queryByRole('tooltip')).toBeNull();
   });
 });
+
+it('adds catalog keycaps without changing the accessible name', async () => {
+  const user = userEvent.setup();
+  render(
+    <Tooltip label="Search" command="palette.open" delayMs={0}>
+      <button type="button" aria-label="Search">
+        go
+      </button>
+    </Tooltip>,
+  );
+  await user.hover(screen.getByRole('button', { name: 'Search' }));
+  const tooltip = await screen.findByRole('tooltip');
+  expect(tooltip.querySelector('[data-keys]')?.getAttribute('data-keys')).toBe('mod+k');
+  expect(screen.getByRole('button', { name: 'Search' }).getAttribute('title')).toBeNull();
+});
+
+it('refuses an unknown command before showing a tooltip', () => {
+  expect(() =>
+    render(
+      <Tooltip label="Unknown" command="missing.command">
+        <button type="button">go</button>
+      </Tooltip>,
+    ),
+  ).toThrow('unknown command');
+});

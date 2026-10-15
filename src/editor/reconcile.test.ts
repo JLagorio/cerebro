@@ -58,6 +58,26 @@ const typeInto = (id: string, text: string) => editor.updateBlock(id, { content:
 
 const PAGE = '# Plan\n\nFirst paragraph.\n\nSecond paragraph.\n\nThird paragraph.\n';
 
+describe('an outside write beside or inside a sheet', () => {
+  const page = '# Budget\n\nIntro.\n\n```cerebro-sheet\nTotal,=SUM(B2:B3)\n```\n';
+  it('keeps the sheet node when another block changes', () => {
+    const base = load(page);
+    const before = editor.document.find((block) => block.type === 'sheet')!;
+    apply(page.replace('Intro.', 'Revised intro.'), base);
+    const after = editor.document.find((block) => block.type === 'sheet')!;
+    expect(after.id).toBe(before.id);
+    expect(after.props).toEqual(before.props);
+  });
+  it('updates a changed source in place without replacing its node view', () => {
+    const base = load(page);
+    const id = editor.document.find((block) => block.type === 'sheet')!.id;
+    const next = page.replace('SUM(B2:B3)', 'SUM(B2:B4)');
+    apply(next, base);
+    expect(editor.document.find((block) => block.type === 'sheet')!.id).toBe(id);
+    expect(blocksToMarkdownNow(editor)).toBe(next);
+  });
+});
+
 describe('a clean page', () => {
   it('changes only the block the write changed, and every other id stays', () => {
     const base = load(PAGE);
@@ -351,4 +371,15 @@ describe('a write that empties a level', () => {
       expect(blocksToMarkdownNow(editor)).toBe(canon(`Typed by me.\n\n${to}`));
     });
   }
+});
+
+it('an outside paragraph edit preserves the whiteboard block id and raw pointer', () => {
+  const page =
+    '# Plan\n\nIntro.\n\n```cerebro-whiteboard\nboard: "boards/plan.canvas"\nextra: kept\n```\n';
+  const base = load(page);
+  const before = editor.document.find((block) => block.type === 'whiteboard')!;
+  apply(page.replace('Intro.', 'Revised intro.'), base);
+  const after = editor.document.find((block) => block.type === 'whiteboard')!;
+  expect(after.id).toBe(before.id);
+  expect(after.props).toEqual(before.props);
 });

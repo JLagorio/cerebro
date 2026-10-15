@@ -166,12 +166,12 @@ pub fn capture_from_json(
 
 /// Run one in-app capture of `path`, and record the projection under `by`
 /// when the capture changed its bytes (M58.1).
-fn recorded(
+fn recorded<E>(
     vault: &Path,
     path: &str,
     by: &WriteReceipt<ConceptDoor>,
-    capture: impl FnOnce() -> Option<Result<(), String>>,
-) -> Option<Result<(), String>> {
+    capture: impl FnOnce() -> Option<Result<(), E>>,
+) -> Option<Result<(), E>> {
     let before = crate::vault::write::snapshot(vault, &[path]);
     let captured = capture();
     if matches!(captured, Some(Ok(()))) {
@@ -1131,17 +1131,39 @@ pub fn capture_body_edit(
     vault: &Path,
     path: &str,
     body: &str,
+    expect: Option<&str>,
     by: &WriteReceipt<ConceptDoor>,
-) -> Option<Result<(), String>> {
-    recorded(vault, path, by, || capture_body_edit_now(vault, path, body))
+) -> Option<Result<(), crate::vault::write::NoteWriteError>> {
+    let expected = match expect
+        .map(crate::vault::write::normalize_expect_hash)
+        .transpose()
+    {
+        Ok(expected) => expected,
+        Err(error) => return Some(Err(error.into())),
+    };
+    let expect = expected.as_deref();
+    if let Err(error) = crate::vault::write::check_note_expectation(vault, path, expect) {
+        return Some(Err(error));
+    }
+    recorded(vault, path, by, || {
+        capture_body_edit_now(vault, path, body, expect)
+    })
 }
 
-fn capture_body_edit_now(vault: &Path, path: &str, body: &str) -> Option<Result<(), String>> {
+fn capture_body_edit_now(
+    vault: &Path,
+    path: &str,
+    body: &str,
+    expect: Option<&str>,
+) -> Option<Result<(), crate::vault::write::NoteWriteError>> {
     shadow::with_writer(vault, |writer| {
-        let krel = path.strip_prefix("knowledge/").ok_or(NOT_A_PROJECTION)?;
+        crate::vault::write::check_note_expectation(vault, path, expect)?;
+        let krel = path
+            .strip_prefix("knowledge/")
+            .ok_or_else(|| NOT_A_PROJECTION.to_string())?;
         let state = current_state(writer, vault)?;
         if super::reconcile::global_stop(vault, &state)? {
-            return Err(RECONCILIATION_SUSPENDED.to_string());
+            return Err(RECONCILIATION_SUSPENDED.to_string().into());
         }
         let belief_id = state
             .projection_paths
@@ -1174,6 +1196,7 @@ fn capture_body_edit_now(vault: &Path, path: &str, body: &str) -> Option<Result<
             schema::OverrideOrigin::InApp,
             Capture::InApp,
         )
+        .map_err(Into::into)
     })
 }
 
@@ -1826,5 +1849,55 @@ mod tests {
                 "{code}"
             );
         }
+    }
+    #[test]
+    fn a_body_capture_rechecks_its_hash_under_the_ledger_writer() {
+        let _sink = crate::runtime::sink::test_lock();
+        crate::runtime::sink::disarm();
+        let vault = crate::vault::testutil::temp_vault("capture-hash-recheck");
+        let _shadow = super::super::shadow::testing::activated(&vault);
+        super::super::shadow::with_writer(&vault, |writer| {
+            let belief = crate::policy::commit::tests_support::seed_belief(writer, "seed");
+            let state = current_state(writer, &vault).unwrap();
+            let projection = super::super::reduce::project_belief(&state, &belief).unwrap();
+            super::super::manifest::write_projection(&vault, "knowledge/seed.md", &projection)
+                .unwrap();
+        })
+        .unwrap();
+        let before = crate::vault::write::read_note_source(&vault, "knowledge/seed.md").unwrap();
+        crate::vault::write::check_note_expectation(
+            &vault,
+            "knowledge/seed.md",
+            Some(&before.hash),
+        )
+        .unwrap();
+        let (_, body) = crate::vault::parse::split_frontmatter(&before.content);
+        let by = crate::vault::receipt::WriteReceipt::for_test("human:me", None);
+        capture_body_edit(
+            &vault,
+            "knowledge/seed.md",
+            &format!("{body}\nFirst edit.\n"),
+            None,
+            &by,
+        )
+        .unwrap()
+        .unwrap();
+        let changed = std::fs::read_to_string(vault.join("knowledge/seed.md")).unwrap();
+        let head = crate::ledger::head(&vault).unwrap().hash;
+        let refused =
+            capture_body_edit_now(&vault, "knowledge/seed.md", "# Stale\n", Some(&before.hash))
+                .unwrap()
+                .unwrap_err();
+        assert!(matches!(
+            refused,
+            crate::vault::write::NoteWriteError::Stale(_)
+        ));
+        assert_eq!(
+            std::fs::read_to_string(vault.join("knowledge/seed.md")).unwrap(),
+            changed
+        );
+        assert_eq!(crate::ledger::head(&vault).unwrap().hash, head);
+        super::super::shadow::deactivate();
+        let _ = std::fs::remove_dir_all(vault);
     }
 }

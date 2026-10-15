@@ -57,7 +57,7 @@ pub fn hold_within(lock: &Arc<Mutex<()>>, limit: Duration) -> Option<MutexGuard<
 
 /// What cerebro keeps out of a vault's git history.
 ///
-/// Deliberately short. `views/*.yml`, `types/*.md`, and — above all —
+/// `views/*.yml`, `types/*.md`, and — above all —
 /// `knowledge/` are content the user wants versioned. Ignoring the knowledge
 /// bundle would defeat the whole reason git is here: the assistant writes
 /// there unattended, and untracked writes cannot be reviewed or reverted.
@@ -78,36 +78,81 @@ const IGNORE_ENTRIES: &[&str] = &[".DS_Store", ".cerebro/", ".trash/"];
 /// older checkpoint already swept into the index.
 const UNTRACKED_DIRS: &[&str] = &[".cerebro", ".trash"];
 
+/// Gitignore is case-sensitive on some filesystems; match the policy's ASCII
+/// case-insensitive folders there too, without broadening to sibling names.
+fn case_insensitive_ignore(path: &str) -> String {
+    path.chars()
+        .map(|c| {
+            if c.is_ascii_alphabetic() {
+                format!("[{}{}]", c.to_ascii_lowercase(), c.to_ascii_uppercase())
+            } else {
+                c.to_string()
+            }
+        })
+        .collect()
+}
 pub fn ensure_gitignore(dir: &Path) -> Result<(), String> {
     let path = dir.join(".gitignore");
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
-    let missing: Vec<&str> = IGNORE_ENTRIES
+    let mail = &crate::policy::mail::table().kept_out_of_git;
+    let entries: Vec<String> = IGNORE_ENTRIES
         .iter()
-        .copied()
-        .filter(|entry| !existing.lines().any(|line| line.trim() == *entry))
+        .map(|entry| (*entry).to_owned())
+        .chain(mail.iter().cloned())
+        .chain(mail.iter().map(|entry| case_insensitive_ignore(entry)))
         .collect();
-    if missing.is_empty() {
-        return Ok(());
+    // Keep privacy rules last: an earlier matching row can be overridden by
+    // a later negation. Appending one terminal block also closes that case.
+    let suffix = entries.join("\n") + "\n";
+    if !existing.ends_with(&suffix) {
+        let next = if existing.trim().is_empty() {
+            format!("# Cerebro\n{suffix}")
+        } else {
+            format!("{}\n{suffix}", existing.trim_end())
+        };
+        std::fs::write(&path, next).map_err(|e| e.to_string())?;
     }
-    let mut next = if existing.trim().is_empty() {
-        "# Cerebro\n".to_string()
-    } else {
-        format!("{}\n", existing.trim_end())
-    };
-    for entry in missing {
-        next.push_str(entry);
-        next.push('\n');
-    }
-    std::fs::write(&path, next).map_err(|e| e.to_string())?;
-    // A config (or a Trash) already swept into the index keeps getting
-    // committed no matter what .gitignore says — untrack it so the NEXT
-    // checkpoint stops carrying it. Best-effort: not a repo yet, or nothing
-    // tracked, is fine.
+    // Previously tracked private material stays on disk but leaves the index.
+    // Run even when the ignore rows already exist: a force-add or an older
+    // checkpoint may have tracked it since. Best-effort before git init.
     for tracked in UNTRACKED_DIRS {
         let _ = command::run_str(
             dir,
-            &["rm", "-r", "--cached", "--ignore-unmatch", "-q", tracked],
+            &[
+                "rm",
+                "-r",
+                "--cached",
+                "--ignore-unmatch",
+                "-q",
+                "--",
+                tracked,
+            ],
         );
+    }
+    // Outside a repository there is no index yet. Once one exists, privacy
+    // removal must succeed before any checkpoint can continue.
+    if command::succeeds(dir, &["rev-parse", "--git-dir"]) {
+        untrack_mail(dir)?;
+    }
+    Ok(())
+}
+
+fn untrack_mail(dir: &Path) -> Result<(), String> {
+    for tracked in &crate::policy::mail::table().kept_out_of_git {
+        let pathspec = format!(":(icase,literal){}", tracked.trim_end_matches('/'));
+        command::run_str(
+            dir,
+            &[
+                "rm",
+                "-r",
+                "-f",
+                "--cached",
+                "--ignore-unmatch",
+                "-q",
+                "--",
+                &pathspec,
+            ],
+        )?;
     }
     Ok(())
 }
@@ -133,6 +178,7 @@ pub fn init_repo(vault: &Path) -> Result<(), String> {
 
 fn commit_all_in(dir: &Path, message: &str) -> Result<String, String> {
     command::run_str(dir, &["add", "-A"])?;
+    untrack_mail(dir)?;
     command::run_str(dir, &["commit", "-m", message])?;
     Ok(command::run_str(dir, &["rev-parse", "--short", "HEAD"])?
         .trim()
@@ -171,17 +217,13 @@ pub fn commit_all(ws: &GitWorkspaceInfo, message: &str) -> Result<Option<String>
     let dir = ws.dir();
     let lock = repo_lock(&dir);
     let _held = hold(&lock);
+    ensure_gitignore(Path::new(&ws.vault_root))?;
     let merging = super::conflict::mode(ws) == super::conflict::ConflictMode::Merge;
     let (unowned, _) = split_by_owner(ws)?;
     if unowned.is_empty() && !merging {
         return Ok(None);
     }
     author::ensure_identity(&dir)?;
-    // Self-healing for vaults whose repo predates an entry (M13.3: the
-    // .cerebro/ credential exclusion must reach EXISTING repos, and init is
-    // the one moment this otherwise ran). Its untrack is a staged deletion,
-    // so the list is read again after it.
-    ensure_gitignore(Path::new(&ws.vault_root))?;
     let (unowned, owned) = split_by_owner(ws)?;
     let conflicted = unowned
         .iter()
@@ -213,6 +255,8 @@ pub fn commit_all(ws: &GitWorkspaceInfo, message: &str) -> Result<Option<String>
         .flat_map(|r| std::iter::once(r.git_path.as_str()).chain(r.orig.as_deref()))
         .collect();
     pathspec_step(&dir, &["reset", "-q"], &unstage)?;
+    // Staging and ownership resets must never reintroduce private mail.
+    untrack_mail(Path::new(&ws.vault_root))?;
     let staged = !command::succeeds(&dir, &["diff", "--cached", "--quiet"]);
     if !staged && !merging {
         return Ok(None);
@@ -518,7 +562,7 @@ pub(crate) mod tests {
             .collect()
     }
 
-    const IGNORES: (&str, &str) = (".gitignore", "# Cerebro\n.DS_Store\n.cerebro/\n.trash/\n");
+    const IGNORES: (&str, &str) = (".gitignore", "# Cerebro\n.DS_Store\n.cerebro/\n.trash/\nsources/mail/\n.comments/sources/mail/\n[sS][oO][uU][rR][cC][eE][sS]/[mM][aA][iI][lL]/\n.[cC][oO][mM][mM][eE][nN][tT][sS]/[sS][oO][uU][rR][cC][eE][sS]/[mM][aA][iI][lL]/\n");
 
     /// A deletion staged outside Cerebro (`git rm`) is index-only: a
     /// checkpoint commits it from the index, and the next one still works.
@@ -715,7 +759,7 @@ pub(crate) mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         ensure_gitignore(&dir).unwrap();
         let content = std::fs::read_to_string(dir.join(".gitignore")).unwrap();
-        assert_eq!(content, "# Cerebro\n.DS_Store\n.cerebro/\n.trash/\n");
+        assert_eq!(content, IGNORES.1);
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -735,7 +779,7 @@ pub(crate) mod tests {
 
         ensure_gitignore(&dir).unwrap();
         let content = std::fs::read_to_string(dir.join(".gitignore")).unwrap();
-        assert!(content.ends_with(".trash/\n"), "{content}");
+        assert!(content.lines().any(|line| line == ".trash/"), "{content}");
         let tracked = command::run_str(&dir, &["ls-files", "--cached"]).unwrap();
         assert!(
             !tracked.contains(".trash"),
@@ -760,5 +804,130 @@ pub(crate) mod tests {
         assert!(content.contains("node_modules/"));
         assert!(content.contains(".DS_Store"));
         std::fs::remove_dir_all(&dir).ok();
+    }
+    #[test]
+    fn gitignore_keeps_mail_and_its_comments_out() {
+        let (dir, ws) = seeded("m69-mail-ignore", &[("kept.md", "# Kept\n")]);
+        command::run_str(&dir, &["config", "core.ignorecase", "false"]).unwrap();
+        for path in [
+            "sources/mail/a.md",
+            ".comments/sources/mail/a.md.json",
+            "Sources/Mail/case.md",
+        ] {
+            let target = dir.join(path);
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            std::fs::write(target, "private").unwrap();
+        }
+        commit_all(&ws, "checkpoint").unwrap();
+        let tracked = command::run_str(&dir, &["ls-files"]).unwrap();
+        assert!(!tracked.to_ascii_lowercase().contains("mail/"), "{tracked}");
+        for path in [
+            "sources/mail/a.md",
+            ".comments/sources/mail/a.md.json",
+            "Sources/Mail/case.md",
+        ] {
+            assert!(!command::run_str(&dir, &["check-ignore", "--", path])
+                .unwrap()
+                .trim()
+                .is_empty());
+            assert!(dir.join(path).is_file());
+        }
+        std::fs::remove_dir_all(dir).ok();
+    }
+    #[test]
+    fn a_tracked_digest_is_untracked_even_when_ignore_rows_exist() {
+        let (dir, ws) = seeded(
+            "m69-mail-tracked",
+            &[
+                IGNORES,
+                ("sources/mail/a.md", "private"),
+                (".comments/sources/mail/a.md.json", "comment"),
+            ],
+        );
+        // The fixture's ignore rows prevent its ordinary add; emulate an older
+        // checkpoint or an explicit force-add, then a clean working tree.
+        command::run_str(
+            &dir,
+            &[
+                "add",
+                "-f",
+                "--",
+                "sources/mail/a.md",
+                ".comments/sources/mail/a.md.json",
+            ],
+        )
+        .unwrap();
+        command::run_str(&dir, &["commit", "-q", "-m", "old tracked mail"]).unwrap();
+        assert!(commit_all(&ws, "private files leave history")
+            .unwrap()
+            .is_some());
+        let tracked = command::run_str(&dir, &["ls-files"]).unwrap();
+        assert!(!tracked.contains("sources/mail"), "{tracked}");
+        assert!(dir.join("sources/mail/a.md").is_file());
+        assert!(dir.join(".comments/sources/mail/a.md.json").is_file());
+        std::fs::remove_dir_all(dir).ok();
+    }
+    #[test]
+    fn staged_mail_with_three_versions_leaves_the_index_and_keeps_disk() {
+        let (dir, ws) = seeded("m69-mail-three-versions", &[("sources/mail/a.md", "head")]);
+        std::fs::write(dir.join("sources/mail/a.md"), "index").unwrap();
+        command::run_str(&dir, &["add", "--", "sources/mail/a.md"]).unwrap();
+        std::fs::write(dir.join("sources/mail/a.md"), "disk").unwrap();
+        commit_all(&ws, "keep mail private").unwrap();
+        assert!(!command::run_str(&dir, &["ls-files"])
+            .unwrap()
+            .contains("sources/mail"));
+        assert_eq!(
+            std::fs::read_to_string(dir.join("sources/mail/a.md")).unwrap(),
+            "disk"
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+    #[test]
+    fn later_ignore_negations_cannot_put_mail_in_a_checkpoint() {
+        let (dir, ws) = seeded("m69-mail-negation", &[IGNORES]);
+        let prior = std::fs::read_to_string(dir.join(".gitignore")).unwrap();
+        std::fs::write(
+            dir.join(".gitignore"),
+            format!("{prior}!sources/mail/\n!sources/mail/**\n"),
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.join("sources/mail")).unwrap();
+        std::fs::write(dir.join("sources/mail/a.md"), "private").unwrap();
+        commit_all(&ws, "keep exclusions last").unwrap();
+        assert!(!command::run_str(&dir, &["ls-files"])
+            .unwrap()
+            .contains("sources/mail"));
+        assert!(command::succeeds(
+            &dir,
+            &["check-ignore", "sources/mail/a.md"]
+        ));
+        assert_eq!(
+            std::fs::read_to_string(dir.join("sources/mail/a.md")).unwrap(),
+            "private"
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+    #[test]
+    fn a_nested_vault_keeps_mail_out() {
+        let (dir, _) = seeded(
+            "m69-mail-nested",
+            &[("vault/kept.md", "kept"), ("outside.md", "outside")],
+        );
+        let vault = dir.join("vault");
+        let ws = super::super::workspace::resolve(&vault);
+        std::fs::create_dir_all(vault.join("sources/mail")).unwrap();
+        std::fs::write(vault.join("sources/mail/a.md"), "private").unwrap();
+        commit_all(&ws, "nested checkpoint").unwrap();
+        assert!(!command::run_str(&dir, &["ls-files"])
+            .unwrap()
+            .contains("sources/mail"));
+        assert!(
+            !command::run_str(&vault, &["check-ignore", "sources/mail/a.md"])
+                .unwrap()
+                .trim()
+                .is_empty()
+        );
+        std::fs::remove_dir_all(dir).ok();
     }
 }

@@ -12,6 +12,8 @@ import {
   parseDateToken,
   parseEndpoint,
   remindAt,
+  remindLabel,
+  REMIND_OPTIONS,
   serializeDateProperty,
   serializeDateValue,
 } from './dates';
@@ -86,6 +88,29 @@ describe('formatting', () => {
 });
 
 describe('reminder computation', () => {
+  it('keeps the offset labels independent of any firing time', () => {
+    expect(REMIND_OPTIONS.map((option) => option.label)).toEqual([
+      'None',
+      'On day of event',
+      '1 day before',
+      '2 days before',
+      '1 week before',
+    ]);
+  });
+
+  it('labels the actual firing time, including 24-hour and hidden-time values', () => {
+    const value = makeDateValue('2026-07-30');
+    expect(remindLabel('none', value)).toBe('None');
+    expect(remindLabel('1d', value)).toBe('1 day before, 9:00 AM');
+    expect(remindLabel('1d', { ...value, startTime: '16:00' })).toBe('1 day before, 4:00 PM');
+    expect(remindLabel('1d', { ...value, startTime: '16:00', timeFormat: '24' })).toBe(
+      '1 day before, 16:00',
+    );
+    expect(remindLabel('1d', { ...value, startTime: '16:00', timeFormat: 'hidden' })).toBe(
+      '1 day before, 4:00 PM',
+    );
+  });
+
   it('date-only events remind at 9:00 on the offset day', () => {
     const v = { ...makeDateValue('2026-07-30'), remind: '1d' as const };
     expect(remindAt(v)).toBe('2026-07-29T09:00');

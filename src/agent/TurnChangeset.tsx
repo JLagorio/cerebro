@@ -6,6 +6,7 @@ import {
   changesetHeadline,
   CHANGESET_WORDS,
   fileCounts,
+  keptOutOfGitWords,
   shortHash,
   type ChangedFile,
   type RunChangeset,
@@ -61,7 +62,8 @@ function OneChangeset({
   const entries = useVaultStore((s) => s.entries);
   const headline = changesetHeadline(changeset);
   const shell = 'shell_unrecorded' in changeset && changeset.shell_unrecorded;
-  if (headline === null && !shell) return null;
+  const keptOut = keptOutOfGitWords(changeset);
+  if (headline === null && !shell && keptOut === null) return null;
   const commit = changeset.state === 'committed' ? changeset.commit : null;
   const label = (actor: string) => actorLabel(actor, entries).text;
 
@@ -119,6 +121,11 @@ function OneChangeset({
         ))}
       {changeset.state === 'not_a_repo' && (
         <p className="m-0 pl-5 text-2xs text-n-500">{CHANGESET_WORDS.notARepo}</p>
+      )}
+      {keptOut !== null && (
+        <p data-testid="turn-changeset-kept-out" className="m-0 pl-5 text-2xs text-n-500">
+          {keptOut}
+        </p>
       )}
       {shell && <p className="m-0 pl-5 text-2xs text-n-500">{CHANGESET_WORDS.shell}</p>}
     </div>

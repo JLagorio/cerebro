@@ -390,6 +390,8 @@ pub struct ToolApproval {
     pub read_scope: BTreeMap<String, Decision>,
     /// The folders the CLI's own tools may not open (M60.8b).
     pub hidden_paths: HiddenPaths,
+    /// Additional relative folders closed only while nobody watches.
+    pub unattended_hidden_paths: Vec<String>,
     /// In the tool manifest's order: each family where its first tool sits.
     pub families: Vec<Family>,
     pub unlisted: Unlisted,
@@ -567,6 +569,7 @@ impl ToolApproval {
             return Err(refusal("unlisted", "decision", "must be cli or refuse"));
         }
         self.check_hidden_paths(manifest)?;
+        self.check_unattended_hidden_paths()?;
         for family in &self.families {
             self.check_family(family, manifest)?;
         }
@@ -634,6 +637,36 @@ impl ToolApproval {
             }
         }
         Ok(())
+    }
+
+    fn check_unattended_hidden_paths(&self) -> Result<(), String> {
+        for (at, folder) in self.unattended_hidden_paths.iter().enumerate() {
+            if folder.split('/').any(|part| {
+                matches!(part, "" | "." | "..")
+                    || !part
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
+            }) || self.unattended_hidden_paths[..at].contains(folder)
+            {
+                return Err(refusal(
+                    "unattended_hidden_paths",
+                    "folders",
+                    "must contain unique plain relative folders",
+                ));
+            }
+        }
+        Ok(())
+    }
+    pub fn unattended_path_rules(&self) -> Vec<String> {
+        self.unattended_hidden_paths
+            .iter()
+            .flat_map(|folder| {
+                self.hidden_paths
+                    .tools
+                    .iter()
+                    .map(move |tool| format!("{tool}(./{folder}/**)"))
+            })
+            .collect()
     }
 
     /// The path rules every attended and unattended run denies (M60.8b):
@@ -1075,6 +1108,9 @@ fn plan_in(table: &ToolApproval, manifest: &ToolsManifest, input: &ApprovalInput
             family: family.id.clone(),
             decision,
         });
+    }
+    if input.kind == RunKind::Unattended {
+        approval.disallowed.extend(table.unattended_path_rules());
     }
     if input.kind != RunKind::Internal {
         approval.disallowed.extend(table.hidden_path_rules());
@@ -2346,6 +2382,80 @@ mod tests {
             .collect();
         files.sort_by(|a, b| a.0.cmp(&b.0));
         files
+    }
+
+    #[test]
+    #[ignore = "rewrite only after a deliberate tool-approval artifact change"]
+    fn write_tool_approval_goldens() {
+        for (name, mut golden) in golden_files() {
+            if golden.get("input").is_none() {
+                continue;
+            }
+            let approval = golden_input(&golden["input"]).plan();
+            let decisions: serde_json::Map<String, Value> = approval
+                .decisions
+                .iter()
+                .map(|row| (row.tool.clone(), json!(row.decision.as_str())))
+                .collect();
+            golden["expected"] = json!({
+                "permission_mode": approval.permission_mode, "allowed": approval.allowed,
+                "disallowed": approval.disallowed, "matcher": approval.matcher(),
+                "withheld": approval.withheld, "decisions": decisions,
+            });
+            std::fs::write(
+                golden_dir().join(name),
+                format!("{}\n", serde_json::to_string_pretty(&golden).unwrap()),
+            )
+            .unwrap();
+        }
+    }
+    #[test]
+    fn unattended_runs_are_denied_the_mail_folder() {
+        assert_eq!(
+            table().unattended_hidden_paths,
+            [crate::policy::mail::table().folder.clone()]
+        );
+        let rules = table().unattended_path_rules();
+        assert_eq!(
+            rules,
+            ["Read(./sources/mail/**)", "Edit(./sources/mail/**)"]
+        );
+        for kind in [RunKind::Attended, RunKind::Unattended, RunKind::Internal] {
+            for shell in ShellCeiling::ALL {
+                let approval = plan(&input(kind, shell));
+                for rule in &rules {
+                    assert_eq!(
+                        approval.disallowed.contains(rule),
+                        kind == RunKind::Unattended
+                    );
+                }
+            }
+        }
+    }
+    #[test]
+    fn unattended_hidden_paths_refuse_non_plain_folders() {
+        for path in [
+            "",
+            ".",
+            "..",
+            "/sources/mail",
+            "C:/mail",
+            "sources/../mail",
+            "sources//mail",
+            "sources/./mail",
+            "sources/mail/",
+            "sources/mail,Read",
+        ] {
+            let error = refused(|v| v["unattended_hidden_paths"] = json!([path]));
+            assert!(
+                error.ends_with("`folders` must contain unique plain relative folders"),
+                "{error}"
+            );
+        }
+        assert!(
+            refused(|v| v["unattended_hidden_paths"] = json!(["sources/mail", "sources/mail"]))
+                .contains("unique plain relative folders")
+        );
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! The `Entry` record produced for every markdown file in the vault.
+//! The Entry produced for each page, Mermaid diagram or JSON Canvas board.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -100,6 +100,36 @@ pub fn build_entry(
         .unwrap_or("")
         .to_string();
     let hash = Some(crate::ledger::sha256_hex(content.as_bytes()));
+    if crate::files::kinds::is_whiteboard(rel_path) {
+        let title = parse::humanize_stem(
+            filename
+                .rsplit_once('.')
+                .map_or(filename.as_str(), |(stem, _)| stem),
+        );
+        let (snippet, outgoing_links, parse_error) = match crate::canvas::read::read(content) {
+            Ok(board) => {
+                let facts = crate::canvas::read::entry_facts(&board);
+                (facts.snippet, facts.links, None)
+            }
+            Err(problem) => (String::new(), Vec::new(), Some(problem.message)),
+        };
+        return Entry {
+            path: rel_path.to_string(),
+            filename,
+            folder,
+            project: None,
+            title,
+            entry_type: None,
+            properties: serde_json::Map::new(),
+            relationships: BTreeMap::new(),
+            outgoing_links,
+            snippet,
+            created_at,
+            modified_at,
+            parse_error,
+            hash,
+        };
+    }
     // M29.20: a `.mmd` file is RAW mermaid source, end to end. Mermaid's own
     // `---\ntitle:…\nconfig:…\n---` header is valid diagram syntax, so it
     // must NEVER go through the note frontmatter split — the title comes from

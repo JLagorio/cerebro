@@ -45,6 +45,10 @@ export interface WakeOffer {
   /** The matched trigger's digest (`triggerDigest`). */
   trigger: string;
   cause: WakeCause;
+  /** Bytes and event the backend uses to find the recorded writer. */
+  path: string;
+  hash: string;
+  event: VaultEvent['kind'];
 }
 
 /** A wake waiting for its run, as `wakes_pending` reads it. */
@@ -55,6 +59,9 @@ export interface PendingWake {
   trigger: string;
   /** The cause Rust cleaned and stored at admission. */
   cause: WakeCause;
+  author?: 'person' | 'run' | 'not_recorded' | null;
+  authorActor?: string | null;
+  parentRunId?: string | null;
   admittedAt: string;
   /** When a deferred wake may be tried again; null is now. */
   notBefore: string | null;
@@ -139,6 +146,9 @@ export function wakeOffers(entries: readonly Entry[], events: readonly VaultEven
         wakeKey,
         trigger: triggerDigest(trigger),
         cause: { kind: 'event', subject: event.path, detail: triggerWords(trigger) },
+        path: event.path,
+        hash: event.entry.hash!,
+        event: event.kind,
       });
     }
   }

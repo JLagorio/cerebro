@@ -1,8 +1,25 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { kindFor } from '@/engine/fileKinds';
+import { openBesideIntent, withOpenBesideIntent } from '@/app/openIntent';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useContentSearch } from '@/app/useContentSearch';
 import { useOpenPath } from '@/app/useOpenPath';
 import { Dialog } from '@/components/ui/Dialog';
 import { PageIconGlyph } from '@/components/PageIcon';
+import { Keycaps } from '@/components/ui/Keycaps';
+import { activeChain } from '@/lib/keys/root';
+import { availableCommands, runCommand } from '@/lib/keys/registry';
+import { previewTheme } from '@/hooks/useTheme';
+import {
+  CATEGORIES,
+  cycle,
+  defaultActive,
+  filterRows,
+  type Category,
+  type Level,
+  type RowCategory,
+} from './palette/model';
+import { commandRows } from './palette/commandRows';
+import { chooserRows, CHOOSER_TITLES } from './palette/choosers';
 import { Input } from '@/components/ui/Input';
 import { UNTYPED_LABEL, visibleDestinations } from '@/engine/destinations';
 import { libraryIcon, libraryKind, libraryLabel } from '@/engine/library';
@@ -22,9 +39,12 @@ import type { Entry, Selection } from '@/engine/types';
  *
  * QuickOpen found notes and nothing else, so reaching a list or a type
  * screen meant leaving the keyboard for the sidebar. Everything navigable is
- * findable here now, under one ranking.
+ * findable here now, alongside live commands and nested choosers.
  */
 interface Target {
+  category: RowCategory;
+  command?: string;
+  mode?: import('@/stores/uiStore').ThemeMode;
   id: string;
   label: string;
   icon: string;
@@ -60,13 +80,26 @@ const CONTENT_ROWS = 5;
 interface Row {
   key: string;
   target: Target;
-  group: 'recent' | 'go' | 'match' | 'pages' | 'all';
+  group: 'recent' | 'go' | 'match' | 'commands' | 'pages' | 'all';
   /** A page-text hit (M59.4), drawn with its excerpt. */
   hit?: VaultHit;
 }
 
 export function QuickOpen() {
   const visible = useUiStore((s) => s.quickOpenVisible);
+  return visible ? <QuickOpenBody /> : null;
+}
+
+function QuickOpenBody() {
+  // Capture the live page scope before autofocus and the modal layer mount.
+  const [snapshot] = useState(() => {
+    const chain = activeChain();
+    return { chain, commands: availableCommands(chain) };
+  });
+  const listId = useId();
+  const [category, setCategory] = useState<Category>('all');
+  const [level, setLevel] = useState<Level>({ kind: 'root' });
+  const moved = useRef(false);
   const setQuickOpen = useUiStore((s) => s.setQuickOpen);
   const askAgent = useUiStore((s) => s.askAgent);
   const inboxEnabled = useUiStore((s) => s.inboxEnabled);
@@ -80,22 +113,32 @@ export function QuickOpen() {
   const [activeIndex, setActiveIndex] = useState(0);
   // The query the highlight was last reset for (M59.4): it resets when the
   // query changes, never when rows arrive.
-  const [highlightedFor, setHighlightedFor] = useState(query);
+  const highlightKey = `${level.kind}:${category}:${query}`;
+  const [highlightedFor, setHighlightedFor] = useState(highlightKey);
   // The query "All N matches" was chosen for: the expansion lasts until the
   // query changes.
   const [expandedFor, setExpandedFor] = useState<string | null>(null);
   // Page text under the names (M59.4), once typing pauses.
-  const content = useContentSearch(vaultPath, query, visible);
+  const content = useContentSearch(
+    vaultPath,
+    query,
+    level.kind === 'root' && (category === 'all' || category === 'pages'),
+  );
   // The moment the palette opened: one clock for the whole visit, so the
   // order does not shift under the keyboard while you type.
-  const [openedAt, setOpenedAt] = useState(() => Date.now());
+  const [openedAt] = useState(() => Date.now());
+  const favorites = useUiStore((s) => s.favorites);
   const recency = useRecency(openedAt);
 
   // useCallback because `close` sits in the results memo's deps (M42.5).
-  const close = useCallback(() => setQuickOpen(false), [setQuickOpen]);
+  const close = useCallback(() => {
+    previewTheme(null);
+    setQuickOpen(false);
+  }, [setQuickOpen]);
   const go = (selection: Selection) => {
     close();
-    navigate(selection);
+    if (openBesideIntent()) useNavStore.getState().openPane(selection);
+    else navigate(selection);
   };
 
   // One routing rule for the whole app (M12.1): records panel over a backdrop,
@@ -115,22 +158,31 @@ export function QuickOpen() {
       // it would fall back to the generic page glyph and read as an ordinary
       // note in the one list where telling them apart matters most.
       const kind = libraryKind(e);
-      // M29.21: a .mmd entry is a standalone diagram — the generic page glyph
-      // and "Page" would hide the one thing worth knowing about it here.
-      const diagram = e.path.endsWith('.mmd');
+      const fileKind = kindFor(e.path);
+      const diagram = fileKind.kind === 'diagram';
+      const board = fileKind.kind === 'whiteboard';
       return {
         id: `note:${e.path}`,
+        category: 'pages',
         label: e.title,
-        icon: diagram ? 'waypoints' : kind === null ? style.icon : libraryIcon(kind),
+        icon: board
+          ? fileKind.icon
+          : diagram
+            ? 'waypoints'
+            : kind === null
+              ? style.icon
+              : libraryIcon(kind),
         color: kind === null ? style.color : 'var(--synapse-500)',
-        pageIcon: diagram ? null : pageIconOf(e),
+        pageIcon: diagram || board ? null : pageIconOf(e),
         hint: key,
         meta: '',
-        kindLabel: diagram
-          ? 'Diagram'
-          : kind === null
-            ? (e.type ?? UNTYPED_LABEL)
-            : libraryLabel(kind),
+        kindLabel: board
+          ? 'Whiteboard'
+          : diagram
+            ? 'Diagram'
+            : kind === null
+              ? (e.type ?? UNTYPED_LABEL)
+              : libraryLabel(kind),
         alias: key,
         path: e.path,
         run: () => openEntry(e),
@@ -142,6 +194,7 @@ export function QuickOpen() {
       // identity AND of where it navigates — otherwise two collections'
       // "roadmap" lists collapse into one entry that opens the wrong one.
       id: `list:${v.collection ?? ''}:${v.id}`,
+      category: 'databases',
       label: v.definition.name,
       icon: v.definition.icon ?? 'layout-list',
       color: v.definition.color,
@@ -154,6 +207,7 @@ export function QuickOpen() {
 
     const typeTargets: Target[] = listTypes(entries, schema).map((t) => ({
       id: `type:${t.name}`,
+      category: 'databases',
       label: t.name,
       icon: t.icon,
       color: t.color,
@@ -170,6 +224,8 @@ export function QuickOpen() {
     // by name here, and by their text under In pages (M59.4).
     const surfaces: Target[] = visibleDestinations({ inboxEnabled }).map((d) => ({
       id: `go:${d.id}`,
+      category: 'places',
+      command: `go.${d.id}`,
       label: d.label,
       icon: d.icon,
       color: null,
@@ -201,9 +257,46 @@ export function QuickOpen() {
     return rows;
   }, [targets, openLog]);
 
-  const results = useMemo<Row[]>(() => {
+  const rootResults = useMemo<Row[]>(() => {
+    const commands: Row[] = commandRows(snapshot.commands, query, category).map((row) => ({
+      key: row.id,
+      group: 'commands',
+      target: {
+        id: row.id,
+        category: 'commands',
+        label: row.label,
+        command: row.command,
+        icon:
+          row.chooser === 'theme'
+            ? 'sun'
+            : row.chooser === 'favorites'
+              ? 'star'
+              : row.chooser === 'agents'
+                ? 'zap'
+                : 'command',
+        color: null,
+        hint: '',
+        meta: '',
+        kindLabel: row.chooser ? 'Choose' : 'Command',
+        alias: '',
+        run: () => {
+          if (row.chooser) {
+            setLevel({ kind: row.chooser, query, active: activeIndex, category });
+            setQuery('');
+          } else if (row.command) {
+            close();
+            queueMicrotask(() => runCommand(row.command!, snapshot.chain));
+          }
+        },
+      },
+    }));
     const q = query.trim();
     if (q === '') {
+      if (category === 'commands') return commands;
+      if (category === 'databases')
+        return targets
+          .filter((target) => target.category === 'databases')
+          .map((target) => ({ key: target.id, target, group: 'match' as const }));
       return [
         ...recent.map((target) => ({
           key: `recent:${target.id}`,
@@ -221,6 +314,7 @@ export function QuickOpen() {
       group: 'match',
       target: {
         id: 'ask:assistant',
+        category: 'ask',
         label: askAssistantLabel(q),
         icon: 'sparkles',
         color: 'var(--synapse-500)',
@@ -238,7 +332,7 @@ export function QuickOpen() {
     // your own recent opens within it.
     const matches = rankNames({
       query: q,
-      items: targets,
+      items: targets.filter((target) => category === 'all' || target.category === category),
       texts: (t) => [t.label, t.alias],
       path: (t) => t.path,
       recency,
@@ -247,6 +341,7 @@ export function QuickOpen() {
     const names: Row[] = [
       ask,
       ...matches.map((target) => ({ key: target.id, target, group: 'match' as const })),
+      ...commands,
     ];
     // In pages (M59.4): page text below the names, from the content search.
     // Five hits, then "All N matches", which expands in place to every hit
@@ -261,6 +356,7 @@ export function QuickOpen() {
       hit,
       target: {
         id: `page:${hit.path}`,
+        category: 'pages',
         label: hit.title,
         icon: 'file-text',
         color: null,
@@ -282,6 +378,7 @@ export function QuickOpen() {
         group: 'all',
         target: {
           id: 'all-matches',
+          category: 'pages',
           label: `All ${total} matches${part}`,
           icon: 'list',
           color: null,
@@ -296,64 +393,141 @@ export function QuickOpen() {
     return [...names, ...pages];
     // `openPath` is a navigation closure reborn each render, as `go` is above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targets, places, recent, recency, query, askAgent, close, content, expandedFor]);
+  }, [
+    targets,
+    places,
+    recent,
+    recency,
+    query,
+    askAgent,
+    close,
+    content,
+    expandedFor,
+    category,
+    snapshot,
+    activeIndex,
+  ]);
 
-  // The highlight resets when the query changes, and only then (M59.4): set
-  // here during render, so rows that arrive later (the page text) never move
-  // a highlight the person set. The ask row is pinned, not preferred: with
-  // matches on screen the default highlight is the best MATCH, so Enter keeps
-  // meaning "open the thing I named" and asking is one ↑ away. With nothing
-  // else to offer, the ask row takes the highlight — Enter on a query nothing
-  // matches is exactly the moment to hand the words to the assistant.
-  if (highlightedFor !== query) {
-    setHighlightedFor(query);
-    setActiveIndex(query.trim() === '' ? 0 : Math.min(1, results.length - 1));
+  const results: Row[] =
+    level.kind === 'root'
+      ? filterRows(
+          rootResults.map((row) => ({ ...row, category: row.target.category })),
+          category,
+        )
+      : chooserRows(level.kind, entries, favorites[vaultPath ?? ''] ?? [], query).map((choice) => ({
+          key: choice.id,
+          group: 'match',
+          target: {
+            id: choice.id,
+            category: 'commands',
+            label: choice.label,
+            mode: choice.mode,
+            icon: choice.mode ? 'sun' : level.kind === 'agents' ? 'zap' : 'star',
+            color: null,
+            hint: '',
+            meta: choice.hint,
+            alias: '',
+            kindLabel: '',
+            run: () => {
+              if (choice.mode) useUiStore.getState().setThemeMode(choice.mode);
+              close();
+              if (choice.path) openPath(choice.path);
+            },
+          },
+        }));
+  // Ask is pinned, not preferred. A late first match may take an untouched
+  // empty highlight; a highlight the person moved never moves on arrival.
+  const preferred = defaultActive(results.map((row) => ({ category: row.target.category })));
+  if (highlightedFor !== highlightKey) {
+    setHighlightedFor(highlightKey);
+    moved.current = false;
+    setActiveIndex(preferred);
+  } else if (activeIndex === -1 && !moved.current && preferred >= 0) {
+    setActiveIndex(preferred);
   }
-  // Rows can shrink under the highlight; it clamps to the last one.
-  const active = Math.min(activeIndex, Math.max(results.length - 1, 0));
-
-  useEffect(() => {
-    if (!visible) {
-      setQuery('');
-      setActiveIndex(0);
+  const active = Math.min(activeIndex, results.length - 1);
+  const mark = (index: number) => {
+    moved.current = true;
+    setActiveIndex(index);
+  };
+  const back = () => {
+    if (level.kind === 'root') {
+      close();
       return;
     }
-    setOpenedAt(Date.now());
-    // A deleted page leaves the log here, and only on a ready snapshot of
-    // this vault: FileTree's moves rescan before they remap, so pruning on
-    // every scan would drop the history the remap still needs.
+    previewTheme(null);
+    setQuery(level.query);
+    setCategory(level.category);
+    setActiveIndex(level.active);
+    setHighlightedFor(`root:${level.category}:${level.query}`);
+    moved.current = true;
+    setLevel({ kind: 'root' });
+  };
+  const preview = level.kind === 'theme' ? results[active]?.target.mode : undefined;
+  useEffect(() => {
+    previewTheme(preview ?? null);
+  }, [preview]);
+  useEffect(() => () => previewTheme(null), []);
+  useEffect(() => {
     pruneOpenLogToSnapshot();
-  }, [visible]);
-
-  if (!visible) return null;
+  }, []);
 
   return (
     <Dialog
       open
       onClose={close}
-      title="Quick open"
+      title={level.kind === 'root' ? 'Quick open' : CHOOSER_TITLES[level.kind]}
       width={580}
-      footerNote="↑↓ navigate · ↵ open · esc close"
+      footerNote={
+        <span className="inline-flex items-center gap-2">
+          <Keycaps keys="arrowdown" /> Navigate · <Keycaps keys="enter" /> Open ·{' '}
+          <Keycaps command="list.openBeside" /> Open beside ·{' '}
+          <kbd className="font-mono text-xs">Esc</kbd> Close
+        </span>
+      }
     >
       <Input
         autoFocus
+        role="combobox"
+        ariaLabel={level.kind === 'root' ? 'Quick open' : CHOOSER_TITLES[level.kind]}
+        ariaExpanded
+        ariaAutocomplete="list"
+        ariaControls={listId}
+        ariaActivedescendant={active < 0 ? undefined : `${listId}-${active}`}
         testId="quick-open-input"
         icon="search"
-        placeholder="Search pages, databases, and places…"
+        placeholder={
+          level.kind === 'root'
+            ? 'Search pages, databases, and places…'
+            : `Search ${CHOOSER_TITLES[level.kind].toLowerCase()}…`
+        }
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => {
+          if (e.key === 'Tab') {
+            e.preventDefault();
+            e.stopPropagation();
+            if (level.kind === 'root') setCategory(cycle(category, e.shiftKey));
+          }
+          if (e.key === 'Backspace' && query === '' && level.kind !== 'root') {
+            e.preventDefault();
+            back();
+          }
           if (e.key === 'ArrowDown') {
             e.preventDefault();
-            setActiveIndex(Math.min(active + 1, Math.max(results.length - 1, 0)));
+            mark(Math.min(active + 1, results.length - 1));
           }
           if (e.key === 'ArrowUp') {
             e.preventDefault();
-            setActiveIndex(Math.max(active - 1, 0));
+            mark(Math.max(active - 1, 0));
           }
-          if (e.key === 'Enter' && results[active]) results[active].target.run();
+          if (e.key === 'Enter' && results[active]) {
+            e.preventDefault();
+            const target = results[active].target;
+            withOpenBesideIntent(e.shiftKey && target.category !== 'commands', () => target.run());
+          }
           if (e.key === 'Escape') {
-            // stopPropagation, or this closes TWO layers (M29.53). React
+            // Step back from a chooser; stopPropagation avoids closing TWO layers (M29.53). React
             // flushes a discrete-event state update synchronously, so this
             // Dialog unmounts and pops its layer BEFORE the same native
             // keydown reaches the document-level listeners — by which point
@@ -362,17 +536,40 @@ export function QuickOpen() {
             // was covering it. MEASURED 3/3 runs: scrims 2 -> 0 on one press,
             // while dismissing with the mouse correctly left one standing.
             e.stopPropagation();
-            close();
+            back();
           }
         }}
         width="100%"
       />
+      {level.kind === 'root' && (
+        <div role="tablist" aria-label="Search category" className="mt-3 flex gap-1">
+          {CATEGORIES.map((chip) => (
+            <button
+              key={chip.id}
+              type="button"
+              role="tab"
+              tabIndex={-1}
+              aria-selected={category === chip.id}
+              data-testid={`palette-category-${chip.id}`}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => setCategory(chip.id)}
+              className={`rounded px-2.5 py-1 text-xs ${category === chip.id ? 'bg-n-100 text-n-900' : 'text-n-500'}`}
+            >
+              {chip.label}
+            </button>
+          ))}
+        </div>
+      )}
       <div
+        id={listId}
         role="listbox"
         aria-label="Quick open results"
         className="mt-1.5 max-h-[380px] overflow-y-auto"
       >
-        {query.trim() === ''
+        {query.trim() === '' &&
+        level.kind === 'root' &&
+        category !== 'databases' &&
+        category !== 'commands'
           ? (['recent', 'go'] as const).map((group) => {
               const rows = results.flatMap((r, i) => (r.group === group ? [{ r, i }] : []));
               if (rows.length === 0) return null;
@@ -404,13 +601,31 @@ export function QuickOpen() {
     return (
       <>
         {results.map((r, i) => (r.group === 'match' ? renderRow(r, i) : null))}
-        {content.status === 'unavailable' && (
-          // A failed read is never "no matches" (CV-05): the names above
-          // were found, and the page text was not searched.
-          <p data-testid="section-unavailable" className="m-0 px-2.5 py-2 text-2xs text-n-500">
-            Page text couldn't be searched. Names above are complete.
+        {results.some((row) => row.group === 'commands') && (
+          <div role="group" aria-label="Commands" data-section="commands">
+            <div
+              aria-hidden
+              className="mt-1 px-2.5 py-1.5 text-2xs font-semibold uppercase text-[var(--text-meta)]"
+            >
+              Commands
+            </div>
+            {results.map((row, i) => (row.group === 'commands' ? renderRow(row, i) : null))}
+          </div>
+        )}
+        {level.kind !== 'root' && results.length === 0 && (
+          <p className="px-2.5 py-2 text-sm text-n-500">
+            No {level.kind === 'theme' ? 'themes' : level.kind} match.
           </p>
         )}
+        {level.kind === 'root' &&
+          (category === 'all' || category === 'pages') &&
+          content.status === 'unavailable' && (
+            // A failed read is never "no matches" (CV-05): the names above
+            // were found, and the page text was not searched.
+            <p data-testid="section-unavailable" className="m-0 px-2.5 py-2 text-2xs text-n-500">
+              Page text couldn't be searched. Names above are complete.
+            </p>
+          )}
         {ready !== null && pages.length > 0 && (
           <div role="group" aria-label="In pages" data-section="pages">
             <div
@@ -440,9 +655,12 @@ export function QuickOpen() {
         type="button"
         data-testid="quick-open-content-result"
         role="option"
+        id={`${listId}-${i}`}
+        tabIndex={-1}
         aria-selected={i === active}
+        onMouseDown={(event) => event.preventDefault()}
         onClick={() => r.target.run()}
-        onMouseEnter={() => setActiveIndex(i)}
+        onMouseEnter={() => mark(i)}
         className="flex w-full flex-col gap-0.5 rounded-md px-2.5 py-1.5 text-left"
         style={{ background: i === active ? 'var(--n-50)' : 'transparent' }}
       >
@@ -482,12 +700,17 @@ export function QuickOpen() {
             ? 'quick-open-ask'
             : r.group === 'all'
               ? 'quick-open-all-matches'
-              : 'quick-open-result'
+              : r.group === 'commands'
+                ? 'quick-open-command'
+                : 'quick-open-result'
         }
         role="option"
+        id={`${listId}-${i}`}
+        tabIndex={-1}
         aria-selected={i === active}
+        onMouseDown={(event) => event.preventDefault()}
         onClick={() => r.target.run()}
-        onMouseEnter={() => setActiveIndex(i)}
+        onMouseEnter={() => mark(i)}
         className="flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left"
         style={{ background: i === active ? 'var(--n-50)' : 'transparent' }}
       >
@@ -512,6 +735,7 @@ export function QuickOpen() {
             {r.target.meta}
           </span>
         )}
+        {r.target.command && <Keycaps command={r.target.command} />}
         {/* Fixed column so the category aligns down the whole list. */}
         <span className="w-[84px] flex-none truncate text-right text-2xs text-[var(--text-meta)]">
           {r.target.kindLabel}

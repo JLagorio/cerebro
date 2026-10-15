@@ -1,3 +1,4 @@
+import ts from 'typescript';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -37,6 +38,10 @@ const ALLOWED: Record<string, { count: number; reason: string }> = {
     count: 1,
     reason: 'gesture: Escape abandons a drag in flight',
   },
+  'src/views/CalendarTimeGrid.tsx': {
+    count: 1,
+    reason: 'Escape layer: cancels the new time-slot draft only while that layer owns Escape',
+  },
   'src/components/ui/HoverCard.tsx': {
     count: 1,
     reason: "M59.7: any key that is not the card's own dismisses the hover card",
@@ -55,10 +60,7 @@ const ALLOWED: Record<string, { count: number; reason: string }> = {
     count: 1,
     reason: "editor-internal: the canvas selection's Delete and Escape",
   },
-  'src/app/CreateMenu.tsx': {
-    count: 1,
-    reason: 'raw Escape and arrow keys of the New menu; goes with M65.5 (M65 Q2)',
-  },
+
   'src/detail/RecordTabs.tsx': {
     count: 2,
     reason: 'raw Escape cancels a tab being added or edited; awaits a layers part (M65 Q2)',
@@ -70,14 +72,6 @@ const ALLOWED: Record<string, { count: number; reason: string }> = {
   'src/git/InlineDiff.tsx': {
     count: 1,
     reason: 'raw Escape returns from the diff lens; awaits a layers part (M65 Q2)',
-  },
-  'src/editor/NoteBodyEditor.tsx': {
-    count: 1,
-    reason: '⌘S flushes the save debounce; joins the keymap as page.save in M65.1b',
-  },
-  'src/editor/FindBar.tsx': {
-    count: 1,
-    reason: 'M59.6 ⌘F, ⌥⌘F and ⌘G; join the keymap as the find rows in M65.1b',
   },
 };
 
@@ -117,4 +111,35 @@ describe('the keydown rail (M65.1)', () => {
     expect(root.match(LISTENER)).toHaveLength(1);
     expect(root).toContain("window.addEventListener('keydown', onKeyDown, true)");
   });
+});
+
+it('shortcut glyphs in labels come from Keycaps, never a hard-coded string', () => {
+  const REPO = join(__dirname, '../../..');
+  const found: string[] = [];
+  for (const path of sources(join(REPO, 'src'))) {
+    const rel = relative(REPO, path).split(sep).join('/');
+    if (rel.startsWith('src/lib/keys/') || rel === 'src/components/ui/Keycaps.tsx') continue;
+    const file = ts.createSourceFile(
+      path,
+      readFileSync(path, 'utf8'),
+      ts.ScriptTarget.Latest,
+      true,
+      path.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    const visit = (node: ts.Node) => {
+      if (
+        (ts.isStringLiteralLike(node) ||
+          ts.isJsxText(node) ||
+          ts.isTemplateHead(node) ||
+          ts.isTemplateMiddle(node) ||
+          ts.isTemplateTail(node)) &&
+        /[⌘⇧⌥⌃]/.test(node.text)
+      ) {
+        found.push(`${rel}:${file.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(file);
+  }
+  expect(found).toEqual([]);
 });

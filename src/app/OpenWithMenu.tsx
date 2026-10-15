@@ -7,6 +7,7 @@ import { splitFrontmatter } from '@/engine/frontmatter';
 import { pagePrompt } from '@/engine/pagePrompt';
 import type { Entry } from '@/engine/types';
 import {
+  appLink,
   canOpenOutside,
   openAgentLink,
   openInDefaultApp,
@@ -81,6 +82,15 @@ export function OpenWithMenu({ entry, knowledgeFile }: { entry: Entry; knowledge
       return;
     }
     toast('Path copied');
+  };
+
+  const copyLink = async () => {
+    try {
+      await writeClipboard(await appLink(vaultPath, entry.path));
+      toast('Link copied');
+    } catch (err) {
+      toast(refusalText(err));
+    }
   };
 
   const reveal = async () => {
@@ -162,6 +172,14 @@ export function OpenWithMenu({ entry, knowledgeFile }: { entry: Entry; knowledge
               label="Copy path"
               testId="open-with-copy-path"
               onSelect={run(copyPath)}
+            />
+            <MenuItem
+              icon="link"
+              label="Copy Cerebro link"
+              testId="open-with-copy-link"
+              disabled={!desktop}
+              hint={hint}
+              onSelect={run(copyLink)}
             />
             <MenuSeparator />
             <MenuItem

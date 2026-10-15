@@ -1,3 +1,8 @@
+import { stampActivation } from '@/agent/activation';
+vi.mock('@/agent/activation', async (original) => ({
+  ...(await original<typeof import('@/agent/activation')>()),
+  stampActivation: vi.fn(async () => true),
+}));
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -77,7 +82,45 @@ afterEach(cleanup);
 describe('AgentProperties', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(stampActivation).mockResolvedValue(true);
+    patch.mockReset();
     patch.mockResolvedValue(true);
+  });
+
+  it('an assignment trigger writes its declared Agent relation only on Done', async () => {
+    const type = makeEntry({
+      path: 'types/work.md',
+      type: 'Type',
+      title: 'Work item',
+      properties: { fields: { agent: { kind: 'relation', target: 'Agent' } } } as never,
+    });
+    setup([AGENT, RISK, type]);
+    fireEvent.click(screen.getByTestId('agent-add-trigger'));
+    const editor = screen.getByTestId('agent-editor-trigger-new');
+    fireEvent.change(within(editor).getByLabelText('Trigger 1 event'), {
+      target: { value: 'assigned' },
+    });
+    expect(within(editor).queryByLabelText('Trigger 1 value')).toBeNull();
+    done(editor);
+    expect(within(editor).getByRole('alert').textContent).toBe('Pick the field that assigns it.');
+    expect(patch).not.toHaveBeenCalled();
+    expect(within(editor).getByRole('option', { name: 'agent (Work item)' })).toBeTruthy();
+    fireEvent.change(within(editor).getByLabelText('Trigger 1 field'), {
+      target: { value: 'agent' },
+    });
+    done(editor);
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    expect(lastPatch()).toEqual({ when: [{ event: 'assigned', field: 'agent' }] });
+  });
+
+  it('an assignment picker explains when no database declares an Agent relation', () => {
+    setup();
+    fireEvent.click(screen.getByTestId('agent-add-trigger'));
+    fireEvent.change(screen.getByLabelText('Trigger 1 event'), { target: { value: 'assigned' } });
+    expect(screen.getByTestId('trigger-no-agent-field').textContent).toContain(
+      'No database has a relation to Agent yet.',
+    );
+    expect(screen.getByText('Only links made while Cerebro is open wake it.')).toBeTruthy();
   });
 
   it('a trigger built clause by clause writes nothing until Done, then exactly when:', async () => {
@@ -124,6 +167,14 @@ describe('AgentProperties', () => {
       }),
     );
     expect(patch).not.toHaveBeenCalled();
+  });
+
+  it('the schedule hint names a booked follow-up and its Learn switch', () => {
+    setup();
+    const editor = openRow('schedule');
+    expect(editor.textContent).toContain(
+      'An agent with neither runs only when you ask it, or when a follow-up it booked comes due while Learn on its own is on.',
+    );
   });
 
   it('a click elsewhere neither writes nor discards', () => {
@@ -221,7 +272,15 @@ describe('AgentProperties', () => {
         'get_vault_context',
         'search_notes',
         'list_notes',
+        'read_activity',
+        'describe_database',
+        'query_records',
+        'list_agenda',
         'get_note',
+        'read_document',
+        'read_sheet',
+        'calculate_sheet',
+        'read_canvas',
         'knowledge_about',
         'list_inbox',
       ],
@@ -245,6 +304,42 @@ describe('AgentProperties', () => {
         .getAllByTestId('picker-chip')
         .map((c) => c.textContent),
     ).toEqual(['get_note', 'delete_everything']);
+  });
+
+  it('two times write a list, and the activation boundary follows the accepted write', async () => {
+    setup();
+    const editor = openRow('schedule');
+    fireEvent.click(within(editor).getByText('Add a time'));
+    vi.mocked(stampActivation).mockImplementationOnce(async () => {
+      expect(patch).toHaveBeenCalledTimes(1);
+      return true;
+    });
+    done(editor);
+    await waitFor(() => expect(stampActivation).toHaveBeenCalled());
+    expect(lastPatch()).toEqual({ schedule: ['weekdays 08:30', 'daily 09:00'] });
+  });
+  it('a phrase writes its canonical shape and a refused save never stamps', async () => {
+    setup();
+    const editor = openRow('schedule');
+    const phrase = within(editor).getByLabelText('Type a schedule');
+    fireEvent.change(phrase, { target: { value: 'mondays and thursdays at 5pm' } });
+    fireEvent.keyDown(phrase, { key: 'Enter' });
+    patch.mockResolvedValueOnce(false);
+    done(editor);
+    await waitFor(() => expect(patch).toHaveBeenCalled());
+    expect(lastPatch()).toEqual({ schedule: 'weekly mon,thu 17:00' });
+    expect(stampActivation).not.toHaveBeenCalled();
+  });
+  it('unchanged schedule Done and a trigger write stamp nothing', async () => {
+    setup();
+    let editor = openRow('schedule');
+    done(editor);
+    await waitFor(() => expect(screen.queryByTestId('agent-editor-schedule')).toBeNull());
+    fireEvent.click(screen.getByTestId('agent-add-trigger'));
+    editor = screen.getByTestId('agent-editor-trigger-new');
+    done(editor);
+    await waitFor(() => expect(screen.queryByTestId('agent-editor-trigger-new')).toBeNull());
+    expect(stampActivation).not.toHaveBeenCalled();
   });
 
   it('builds a schedule instead of asking for its grammar, and writes it alone', async () => {
@@ -292,7 +387,7 @@ describe('AgentProperties', () => {
     expect(row('tools').textContent).toContain('unrestricted');
     expect(row('shell').textContent).toContain('off');
     expect(row('web').textContent).toContain('No web');
-    expect(row('schedule').textContent).toContain('weekdays 08:30');
+    expect(row('schedule').textContent).toContain('Every weekday at 08:30');
   });
 
   it('the Shell row words what the ceiling leaves the agent (M57.2)', () => {
@@ -367,6 +462,25 @@ describe('AgentProperties', () => {
         name: 'Remove records/risks',
       }),
     ).toBeNull();
+  });
+
+  it('names the quick check and bounds its question without writing a draft', () => {
+    setup([
+      {
+        ...AGENT,
+        properties: { ...AGENT.properties, when: [{ event: 'changed' }] },
+      } as unknown as Entry,
+      RISK,
+    ]);
+    fireEvent.click(screen.getAllByTestId('agent-trigger-line')[0]);
+    const input = screen.getByPlaceholderText(
+      '…and only if: a yes/no question a quick check answers before the run (optional)',
+    ) as HTMLInputElement;
+    expect(input.maxLength).toBe(500);
+    fireEvent.change(input, { target: { value: 'Is this urgent?' } });
+    expect(patch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(patch).not.toHaveBeenCalled();
   });
 
   describe('an open trigger editor follows its trigger, never its slot', () => {
@@ -547,6 +661,7 @@ describe('AgentProperties', () => {
 describe('AgentProperties model and effort (M56.5)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    patch.mockReset();
     patch.mockResolvedValue(true);
   });
 
@@ -673,6 +788,7 @@ describe('AgentProperties Writes in (M58.6)', () => {
 describe('AgentProperties Asks first (M57.4)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    patch.mockReset();
     patch.mockResolvedValue(true);
   });
 
@@ -743,6 +859,7 @@ describe('AgentProperties connector tools (M54.9)', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    patch.mockReset();
     patch.mockResolvedValue(true);
     // The browser backend's connector list, read by the rows on open.
     await ipc.saveConnectors(

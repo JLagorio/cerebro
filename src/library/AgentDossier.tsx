@@ -1,8 +1,14 @@
+import { useWaitingFollowup } from '@/stores/followupStore';
+import { stampActivation, RESUME_STAMP_FAILED } from '@/agent/activation';
+import { recordIdentity } from '@/engine/identity';
+import { scheduleZone } from './ScheduleField';
+import { runAgentNow, useRunNowStarting } from '@/agent/runNow';
+import { useUiStore } from '@/stores/uiStore';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { agentRef } from '@/engine/agents';
 import { agentActive, agentDraft } from '@/engine/libraryDraft';
-import { nextFire, parseSchedule } from '@/engine/skills';
+import { nextSetFire, parseScheduleSet } from '@/engine/skills';
 import type { Entry } from '@/engine/types';
 // The local-time rationale that used to live beside a private copy of this
 // went with it — see `engine/whenText`.
@@ -20,7 +26,7 @@ import { useVaultStore } from '@/stores/vaultStore';
  * second copy of agent config would be the twin-inventory defect.
  *
  * **On duty is DERIVED, never stored.** `agentActive` computes it from the
- * schedule and triggers: an agent is on duty precisely when something can fire
+ * schedule and triggers, alongside any waiting follow-up: an agent is on duty when something can fire
  * it and it is not paused, so there is no `enabled:` bit to fall out of step
  * with a `schedule:` somebody deleted. `paused:` is the one switch, written by
  * the bar's Pause and Resume.
@@ -38,9 +44,19 @@ import { useVaultStore } from '@/stores/vaultStore';
 type State =
   { kind: 'loading' } | { kind: 'unavailable' } | { kind: 'ready'; summary: FleetActorSummary };
 
-function Stat({ label, value, testId }: { label: string; value: string; testId: string }) {
+function Stat({
+  label,
+  value,
+  testId,
+  title,
+}: {
+  label: string;
+  value: string;
+  testId: string;
+  title?: string;
+}) {
   return (
-    <div className="flex flex-col" data-testid={testId}>
+    <div className="flex flex-col" data-testid={testId} title={title}>
       <span className="text-2xs uppercase tracking-[0.06em] text-n-500">{label}</span>
       <span className="text-xs text-n-800">{value}</span>
     </div>
@@ -49,19 +65,27 @@ function Stat({ label, value, testId }: { label: string; value: string; testId: 
 
 export function AgentDossier({
   entry,
-  now = new Date(),
+  now: injectedNow,
 }: {
   entry: Entry;
   /** Injected so a test's pinned clock governs the next-fire time, the same
    * `VAULT_TODAY` discipline the e2e specs follow. */
   now?: Date;
 }) {
+  const now = injectedNow ?? new Date();
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
+  const vault = useVaultStore((state) => state.vaultPath);
+  const starting = useRunNowStarting(vault, entry.path);
+  const live = useUiStore((state) =>
+    state.runs.some((run) => run.owner === 'job' && run.path === entry.path),
+  );
+  const running = starting || live;
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [busy, setBusy] = useState(false);
   const draft = agentDraft(entry, '');
   // `process:<slug>` — the same string the run's bearer token stamps.
   const actor = agentRef(entry).actor;
+  const later = useWaitingFollowup(actor);
   const paused = entry.properties.paused === true;
 
   useEffect(() => {
@@ -79,18 +103,28 @@ export function AgentDossier({
     };
   }, [actor]);
 
-  const fireable = agentActive(draft);
-  const onDuty = fireable && !paused;
-  const schedule = parseSchedule(draft.schedule);
-  const fires = schedule === null ? null : nextFire(schedule, now);
+  const fireable = agentActive(draft, now);
+  const onDuty = (fireable || later) && !paused;
+  const schedule = parseScheduleSet(draft.schedule);
+  const fires = schedule === null ? null : nextSetFire(schedule, now);
 
   const toggle = () => {
     if (busy) return;
     setBusy(true);
-    // The store toasts a refused write; the bar just stops being busy.
-    void patchFrontmatter(entry.path, { paused: paused ? null : true }).finally(() =>
-      setBusy(false),
-    );
+    void (async () => {
+      const stamped =
+        !paused ||
+        vault === null ||
+        (await stampActivation(
+          vault,
+          recordIdentity(entry),
+          draft.schedule,
+          injectedNow ?? new Date(),
+        ));
+      if (useVaultStore.getState().vaultPath !== vault) return;
+      const saved = await patchFrontmatter(entry.path, { paused: paused ? null : true });
+      if (saved && !stamped) useUiStore.getState().toast(RESUME_STAMP_FAILED);
+    })().finally(() => setBusy(false));
   };
 
   return (
@@ -103,20 +137,26 @@ export function AgentDossier({
         <div className="flex flex-col" data-testid="dossier-duty" data-on-duty={onDuty}>
           <span className="text-2xs uppercase tracking-[0.06em] text-n-500">Status</span>
           <span className="text-xs text-n-800">
-            {paused ? 'Paused' : fireable ? 'On duty' : 'Off duty — nothing can fire it'}
+            {paused
+              ? 'Paused'
+              : fireable
+                ? 'On duty'
+                : later
+                  ? 'Off duty — only a follow-up it booked will run it, while Learn on its own is on'
+                  : 'Off duty — nothing can fire it'}
           </span>
         </div>
         <Stat
           testId="dossier-next-fire"
+          title={`This computer's clock (${scheduleZone()})`}
           label="Next scheduled"
           value={
             fires === null
-              ? // A malformed or absent schedule is not a time. Triggers can
-                // still fire this agent, which is why the status beside it is
-                // computed from both.
-                draft.schedule.trim() === ''
+              ? draft.schedule.length === 0
                 ? 'no schedule'
-                : 'schedule not understood'
+                : schedule === null
+                  ? 'schedule not understood'
+                  : 'its one time has passed'
               : localStamp(fires)
           }
         />
@@ -147,6 +187,17 @@ export function AgentDossier({
           </>
         )}
         <span className="flex-1" />
+        <span title={running ? `${entry.title} is already running` : undefined}>
+          <Button
+            variant="secondary"
+            size="sm"
+            testId="agent-run-now"
+            disabled={running}
+            onClick={() => void runAgentNow(entry.path)}
+          >
+            {running ? 'Running…' : 'Run now'}
+          </Button>
+        </span>
         <Button
           variant="secondary"
           size="sm"

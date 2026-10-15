@@ -1,4 +1,6 @@
-import { useRef, useState, type ReactNode, type RefObject } from 'react';
+import { FileImage } from '@/components/FileImage';
+import { keysText } from '@/components/ui/Keycaps';
+import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { PageIconGlyph } from '@/components/PageIcon';
 import { Icon } from '@/components/ui/Icon';
 import { Popover } from '@/components/ui/Popover';
@@ -17,6 +19,7 @@ import { canPickFiles, importAttachment, pickFiles } from '@/lib/ipc';
 import { PICKABLE_OPTION_COLORS, resolveOptionColor } from '@/lib/swatch';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import { useVaultActionGuard } from '@/hooks/useVaultActionGuard';
 
 /**
  * A page's icon and cover, drawn above its title (M55.11), on the page and in
@@ -86,7 +89,7 @@ const EMOJI_GRID = [
   '\u{1F9D1}\u{200D}\u{1F4BB}',
 ];
 
-const EMOJI_HINT = '⌃⌘Space opens the macOS emoji picker.';
+const EMOJI_HINT = `${keysText('ctrl+mod+space', true)} opens the macOS emoji picker.`;
 
 /** Why a typed vault path cannot be an icon or cover, or null when it can. */
 function vaultPathProblem(raw: string): string | null {
@@ -104,8 +107,15 @@ function vaultPathProblem(raw: string): string | null {
 }
 
 /** Land pending saves, then patch one chrome key. `null` deletes it. */
-async function writeChrome(path: string, key: PageChromeKey, value: string | null) {
+async function writeChrome(
+  path: string,
+  key: PageChromeKey,
+  value: string | null,
+  current: () => boolean,
+) {
+  if (!current()) return;
   await flushOpenPages();
+  if (!current()) return;
   await useVaultStore.getState().patchFrontmatter(path, { [key]: value });
 }
 
@@ -123,25 +133,29 @@ function ImageDoors({ onPick }: { onPick: (path: string) => void }) {
   const [draft, setDraft] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const capture = useVaultActionGuard('image-picker');
 
   const choose = () => {
     const vault = useVaultStore.getState().vaultPath;
     if (vault === null) return;
+    const current = capture();
     const { toast } = useUiStore.getState();
     void (async () => {
       setBusy(true);
       try {
         const picked = await pickFiles();
-        if (picked.length === 0) return;
+        if (!current() || picked.length === 0) return;
         if (!isImagePath(picked[0])) {
           toast('Choose an image file');
           return;
         }
-        onPick(await importAttachment(vault, picked[0]));
+        const imported = await importAttachment(vault, picked[0]);
+        if (current()) onPick(imported.path);
       } catch (e) {
-        toast(`Couldn't add the image — ${e instanceof Error ? e.message : String(e)}`);
+        if (current())
+          toast(`Couldn't add the image — ${e instanceof Error ? e.message : String(e)}`);
       } finally {
-        setBusy(false);
+        if (current()) setBusy(false);
       }
     })();
   };
@@ -321,21 +335,49 @@ function CoverPicker({
 }
 
 /** Which picker is open, and what to anchor it to. */
-function usePicker() {
+function usePicker(scope: string) {
   const anchor = useRef<HTMLElement | null>(null);
-  const [open, setOpen] = useState<PageChromeKey | null>(null);
+  const [open, setOpen] = useState<{ scope: string; key: PageChromeKey } | null>(null);
+  useLayoutEffect(() => {
+    setOpen(null);
+    return useVaultStore.subscribe((next, previous) => {
+      if (next.vaultPath !== previous.vaultPath) setOpen(null);
+    });
+  }, [scope]);
   return {
     anchor,
-    open,
+    open: open?.scope === scope ? open.key : null,
     show: (key: PageChromeKey, el: HTMLElement) => {
       anchor.current = el;
-      setOpen(key);
+      setOpen({ scope, key });
     },
     close: () => setOpen(null),
   };
 }
 
 // --- The cover band ---------------------------------------------------------
+
+function FileCover({ path }: { path: string }) {
+  const vault = useVaultStore((s) => s.vaultPath);
+  const key = JSON.stringify([vault, path]);
+  const [failed, setFailed] = useState<string | null>(null);
+  if (failed === key || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(path))
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-n-500">
+        <Icon name="image" size={14} color="var(--n-500)" />
+        <span className="truncate">{path}</span>
+      </span>
+    );
+  return (
+    <FileImage
+      rootId="0"
+      path={path}
+      fit="cover"
+      className="h-full w-full"
+      onError={() => setFailed(key)}
+    />
+  );
+}
 
 export function PageCoverBand({
   entry,
@@ -346,22 +388,18 @@ export function PageCoverBand({
   editable: boolean;
   variant?: ChromeVariant;
 }) {
-  const picker = usePicker();
+  const vault = useVaultStore((s) => s.vaultPath);
+  const scope = JSON.stringify([vault, entry.path]);
+  const capture = useVaultActionGuard(scope);
+  const picker = usePicker(scope);
   const cover = pageCoverOf(entry);
   if (cover === null) return null;
   const canSet = canEdit(entry, editable);
   const height = variant === 'page' ? 'h-[168px]' : 'h-[72px]';
   const background = cover.kind === 'color' ? resolveOptionColor(cover.raw).solid : 'var(--n-100)';
-  const content =
-    cover.kind === 'file' ? (
-      // A named placeholder: the webview loads no vault bytes before M66.2.
-      <span className="inline-flex items-center gap-1.5 text-xs text-n-500">
-        <Icon name="image" size={14} color="var(--n-500)" />
-        <span className="truncate">{cover.path}</span>
-      </span>
-    ) : null;
+  const content = cover.kind === 'file' ? <FileCover path={cover.path} /> : null;
   const className = [
-    'flex w-full flex-none items-center justify-center border-0 p-0',
+    'flex w-full flex-none items-center justify-center overflow-hidden border-0 p-0',
     height,
     canSet ? 'cursor-pointer' : '',
   ].join(' ');
@@ -396,7 +434,7 @@ export function PageCoverBand({
           onClose={picker.close}
           onPick={(value) => {
             picker.close();
-            void writeChrome(entry.path, 'cover', value);
+            void writeChrome(entry.path, 'cover', value, capture());
           }}
         />
       )}
@@ -421,7 +459,10 @@ export function PageIconHeader({
   children?: ReactNode;
   className?: string;
 }) {
-  const picker = usePicker();
+  const vault = useVaultStore((s) => s.vaultPath);
+  const scope = JSON.stringify([vault, entry.path]);
+  const capture = useVaultActionGuard(scope);
+  const picker = usePicker(scope);
   const icon = pageIconOf(entry);
   const cover = pageCoverOf(entry);
   const canSet = canEdit(entry, editable);
@@ -506,7 +547,7 @@ export function PageIconHeader({
           onClose={picker.close}
           onPick={(value) => {
             picker.close();
-            void writeChrome(entry.path, 'icon', value);
+            void writeChrome(entry.path, 'icon', value, capture());
           }}
         />
       )}
@@ -517,7 +558,7 @@ export function PageIconHeader({
           onClose={picker.close}
           onPick={(value) => {
             picker.close();
-            void writeChrome(entry.path, 'cover', value);
+            void writeChrome(entry.path, 'cover', value, capture());
           }}
         />
       )}

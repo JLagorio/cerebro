@@ -203,11 +203,26 @@ export function matchSkillInvocation(text: string, skills: SkillRef[]): SkillInv
   return { skill, request: match[2].trim() };
 }
 
+/** A reproducible local wall clock, using Date.getTimezoneOffset's sign. */
+export function localTimeLine(now: Date, offsetMinutes: number): string {
+  const local = new Date(now.getTime() - offsetMinutes * 60_000);
+  const date = local.toISOString().slice(0, 16).replace('T', ' ');
+  const minutes = Math.abs(offsetMinutes);
+  const offset = `${offsetMinutes > 0 ? '-' : '+'}${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+  return `The user's local time is ${date} (UTC${offset}).`;
+}
+
 /**
  * The message actually sent for an invocation. `raw` is the note as read from
- * disk; the frontmatter is the catalog's business, not the run's.
+ * disk; the frontmatter is the catalog's business, not the run's. An optional
+ * clock states the local time and offset so relative windows are explicit.
  */
-export function skillPrompt(skill: SkillRef, raw: string, request: string): string {
+export function skillPrompt(
+  skill: SkillRef,
+  raw: string,
+  request: string,
+  clock?: { now: Date; offsetMinutes: number },
+): string {
   const body = splitFrontmatter(raw).body.trim();
   const lines = [
     `The user invoked the skill "${skill.title}" (${skill.path}). Follow its instructions:`,
@@ -227,6 +242,7 @@ export function skillPrompt(skill: SkillRef, raw: string, request: string): stri
   if (request !== '') {
     lines.push('', `The user's input for this run: ${request}`);
   }
+  if (clock) lines.push('', localTimeLine(clock.now, clock.offsetMinutes));
   return lines.join('\n');
 }
 
@@ -244,86 +260,188 @@ export function argumentHint(skill: SkillRef): string {
   return skill.arguments.map((a) => (a.required ? `<${a.name}>` : `[${a.name}]`)).join(' ');
 }
 
-// --- Schedules (M13.2) ------------------------------------------------------
-//
-// A skill with a `schedule:` runs unattended. The grammar is deliberately
-// small — `hourly`, `daily 09:00`, `weekdays 09:00`, `weekly fri 17:00` —
-// and the derivation is the same shape as the rest of the knowledge layer:
-// nothing stores a job list. The most recent fire time that has passed is
-// computed from the wall clock, and the run ledger records which fire each
-// skill has answered. An app that was closed all week owes ONE catch-up run,
-// not seven.
+// --- Schedules -------------------------------------------------------------
+// Files declare closed shapes; the queue derives their newest passed fire.
+// A launch owes one catch-up. In-app activation stamps that boundary so a
+// resume or edited schedule waits for its next time instead.
 
 export type Schedule =
   | { kind: 'hourly' }
   | { kind: 'daily'; hour: number; minute: number }
   | { kind: 'weekdays'; hour: number; minute: number }
-  | { kind: 'weekly'; day: number; hour: number; minute: number };
-
+  | { kind: 'weekly'; day: number; hour: number; minute: number }
+  | { kind: 'days'; days: number[]; hour: number; minute: number }
+  | { kind: 'monthly'; day: number | 'last'; hour: number; minute: number }
+  | { kind: 'once'; date: string; hour: number; minute: number };
+export const MAX_SCHEDULE_ITEMS = 8;
 const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-
-/** `schedule:` frontmatter → a Schedule, or null for anything malformed —
- * a skill with a schedule nobody can parse is simply not scheduled. */
+const DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const pad = (n: number): string => String(n).padStart(2, '0');
+const clockText = (schedule: Exclude<Schedule, { kind: 'hourly' }>) =>
+  `${pad(schedule.hour)}:${pad(schedule.minute)}`;
+function dateAt(year: number, month: number, day: number, hour: number, minute: number): Date {
+  const at = new Date(0);
+  at.setFullYear(year, month, day);
+  at.setHours(hour, minute, 0, 0);
+  return at;
+}
+function realDate(text: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (match === null) return false;
+  const [year, month, day] = match.slice(1).map(Number);
+  const at = dateAt(year, month - 1, day, 12, 0);
+  return at.getFullYear() === year && at.getMonth() === month - 1 && at.getDate() === day;
+}
+function onceAt(schedule: Extract<Schedule, { kind: 'once' }>): Date {
+  const [year, month, day] = schedule.date.split('-').map(Number);
+  return dateAt(year, month - 1, day, schedule.hour, schedule.minute);
+}
+/** An invalid item never partly schedules a record. */
 export function parseSchedule(raw: unknown): Schedule | null {
   if (typeof raw !== 'string') return null;
   const text = raw.trim().toLowerCase();
   if (text === 'hourly') return { kind: 'hourly' };
-
-  const time = (t: string): { hour: number; minute: number } | null => {
-    const m = /^(\d{1,2}):(\d{2})$/.exec(t);
-    if (m === null) return null;
-    const hour = Number(m[1]);
-    const minute = Number(m[2]);
-    return hour < 24 && minute < 60 ? { hour, minute } : null;
-  };
-
-  const daily = /^(daily|weekdays)\s+(\S+)$/.exec(text);
-  if (daily !== null) {
-    const at = time(daily[2]);
-    return at === null ? null : { kind: daily[1] as 'daily' | 'weekdays', ...at };
+  const match = /^(daily|weekdays|weekly|monthly|once)\s+(?:(\S+)\s+)?(\d{1,2}):(\d{2})$/.exec(
+    text,
+  );
+  if (match === null) return null;
+  const [, kind, detail, h, m] = match;
+  const hour = Number(h),
+    minute = Number(m);
+  if (hour > 23 || minute > 59) return null;
+  if (kind === 'daily' || kind === 'weekdays')
+    return detail === undefined ? { kind, hour, minute } : null;
+  if (kind === 'once')
+    return detail !== undefined && realDate(detail) ? { kind, date: detail, hour, minute } : null;
+  if (kind === 'monthly') {
+    const day = detail === 'last' ? 'last' : Number(detail);
+    return day === 'last' ||
+      (detail !== undefined && /^\d{1,2}$/.test(detail) && day >= 1 && day <= 28)
+      ? { kind, day, hour, minute }
+      : null;
   }
-
-  const weekly = /^weekly\s+(\S+)\s+(\S+)$/.exec(text);
-  if (weekly !== null) {
-    const day = DAY_NAMES.findIndex((d) => weekly[1] === d || weekly[1].startsWith(d));
-    const at = time(weekly[2]);
-    return day === -1 || at === null ? null : { kind: 'weekly', day, ...at };
-  }
-
-  return null;
+  if (detail === undefined) return null;
+  const days = detail
+    .split(',')
+    .map((name) =>
+      DAY_NAMES.findIndex(
+        (short, index) => name === short || name === DAY_LABELS[index].toLowerCase(),
+      ),
+    );
+  if (days.some((day) => day < 0) || new Set(days).size !== days.length) return null;
+  days.sort((a, b) => a - b);
+  return days.length === 1
+    ? { kind: 'weekly', day: days[0], hour, minute }
+    : { kind: 'days', days, hour, minute };
 }
-
-const pad = (n: number): string => String(n).padStart(2, '0');
-
-/**
- * The most recent fire time at or before `now`, as a key the run ledger
- * stores. A scheduled job is due exactly when the ledger holds a different
- * key than this — so the ONE property a key must have is stability: the same
- * fire must derive the same key from every tick that observes it.
- *
- * DST is where that property goes to die, so the two branches dodge it in
- * different ways. The hourly key is UTC: during fall-back the local clock
- * reads 01:xx twice and a local key would collide, silently swallowing one
- * run. Dated keys take their HH:MM from the SCHEDULE, never from the
- * walked-back Date: setHours on a spring-forward day normalizes a skipped
- * 02:30 to 03:30, and stamping that normalized time onto a previous day's
- * fire mints a phantom key no other derivation produces — one duplicate
- * unattended run per transition.
- */
-export function lastFireKey(schedule: Schedule, now: Date): string {
-  const at = new Date(now);
-  if (schedule.kind === 'hourly') {
-    return `${at.toISOString().slice(0, 13)}:00Z`;
+export function formatSchedule(schedule: Schedule): string {
+  if (schedule.kind === 'hourly') return 'hourly';
+  const at = clockText(schedule);
+  switch (schedule.kind) {
+    case 'daily':
+    case 'weekdays':
+      return `${schedule.kind} ${at}`;
+    case 'weekly':
+      return `weekly ${DAY_NAMES[schedule.day]} ${at}`;
+    case 'days':
+      return `weekly ${[...schedule.days]
+        .sort((a, b) => a - b)
+        .map((day) => DAY_NAMES[day])
+        .join(',')} ${at}`;
+    case 'monthly':
+      return `monthly ${schedule.day} ${at}`;
+    case 'once':
+      return `once ${schedule.date} ${at}`;
   }
-  at.setHours(schedule.hour, schedule.minute, 0, 0);
-  if (at.getTime() > now.getTime()) at.setDate(at.getDate() - 1);
-  if (schedule.kind === 'weekdays') {
-    while (at.getDay() === 0 || at.getDay() === 6) at.setDate(at.getDate() - 1);
+}
+/** Draft items preserve authored strings until a control explicitly changes one. */
+export function scheduleItems(raw: unknown): string[] {
+  if (typeof raw === 'string') return raw.trim() === '' ? [] : [raw];
+  return Array.isArray(raw)
+    ? raw.map((item) => (typeof item === 'string' ? item : (JSON.stringify(item) ?? String(item))))
+    : [];
+}
+export function scheduleText(raw: unknown): string {
+  return scheduleItems(raw).join('; ');
+}
+export function parseScheduleSet(raw: unknown): Schedule[] | null {
+  if (typeof raw !== 'string' && !Array.isArray(raw)) return null;
+  const items = typeof raw === 'string' ? [raw] : raw;
+  if (items.length < 1 || items.length > MAX_SCHEDULE_ITEMS) return null;
+  const parsed = items.map(parseSchedule);
+  return parsed.some((item) => item === null) ? null : (parsed as Schedule[]);
+}
+const wordsList = (words: string[]) =>
+  words.length < 3 ? words.join(' and ') : `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`;
+const ordinal = (day: number) =>
+  `${day}${day >= 11 && day <= 13 ? 'th' : day % 10 === 1 ? 'st' : day % 10 === 2 ? 'nd' : day % 10 === 3 ? 'rd' : 'th'}`;
+export function describeSchedule(schedule: Schedule): string {
+  if (schedule.kind === 'hourly') return 'Every hour';
+  const at = clockText(schedule);
+  switch (schedule.kind) {
+    case 'daily':
+      return `Every day at ${at}`;
+    case 'weekdays':
+      return `Every weekday at ${at}`;
+    case 'weekly':
+      return `Every ${DAY_LABELS[schedule.day]} at ${at}`;
+    case 'days':
+      return `Every ${wordsList(schedule.days.map((day) => DAY_LABELS[day]))} at ${at}`;
+    case 'monthly':
+      return `Monthly on the ${schedule.day === 'last' ? 'last day' : ordinal(schedule.day)} at ${at}`;
+    case 'once':
+      return `Once, on ${schedule.date} at ${at}`;
   }
-  if (schedule.kind === 'weekly') {
-    while (at.getDay() !== schedule.day) at.setDate(at.getDate() - 1);
+}
+export function describeScheduleSet(raw: unknown): string {
+  return parseScheduleSet(raw)?.map(describeSchedule).join('; ') ?? 'Schedule not understood';
+}
+function calendarKey(at: Date, schedule: Exclude<Schedule, { kind: 'hourly' }>): string {
+  return `${String(at.getFullYear()).padStart(4, '0')}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${clockText(schedule)}`;
+}
+function monthAt(
+  schedule: Extract<Schedule, { kind: 'monthly' }>,
+  year: number,
+  month: number,
+): Date {
+  const day = schedule.day === 'last' ? dateAt(year, month + 1, 0, 12, 0).getDate() : schedule.day;
+  return dateAt(year, month, day, schedule.hour, schedule.minute);
+}
+function dayMatches(schedule: Exclude<Schedule, { kind: 'hourly' }>, day: number): boolean {
+  return schedule.kind === 'weekdays'
+    ? day !== 0 && day !== 6
+    : schedule.kind === 'weekly'
+      ? day === schedule.day
+      : schedule.kind === 'days'
+        ? schedule.days.includes(day)
+        : true;
+}
+/** The newest passed fire, or none for a once still ahead. Hourly keys are
+ * UTC so a repeated fall-back hour stays distinct. Calendar keys always
+ * carry the authored HH:MM, even when spring-forward normalizes its instant. */
+export function lastFireKey(schedule: Schedule, now: Date): string | null {
+  if (schedule.kind === 'hourly') return `${now.toISOString().slice(0, 13)}:00Z`;
+  if (schedule.kind === 'once') {
+    const at = onceAt(schedule);
+    return at > now ? null : calendarKey(at, schedule);
   }
-  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(schedule.hour)}:${pad(schedule.minute)}`;
+  if (schedule.kind === 'monthly') {
+    let at = monthAt(schedule, now.getFullYear(), now.getMonth());
+    if (at > now) at = monthAt(schedule, now.getFullYear(), now.getMonth() - 1);
+    return calendarKey(at, schedule);
+  }
+  const cursor = dateAt(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0);
+  for (;;) {
+    const at = dateAt(
+      cursor.getFullYear(),
+      cursor.getMonth(),
+      cursor.getDate(),
+      schedule.hour,
+      schedule.minute,
+    );
+    if (at <= now && dayMatches(schedule, cursor.getDay())) return calendarKey(at, schedule);
+    cursor.setDate(cursor.getDate() - 1);
+  }
 }
 
 /**
@@ -337,7 +455,7 @@ export function lastFireKey(schedule: Schedule, now: Date): string {
 export function fireKeyDate(key: string): Date | null {
   const dated = key.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/);
   if (dated !== null) {
-    return new Date(
+    return dateAt(
       Number(dated[1]),
       Number(dated[2]) - 1,
       Number(dated[3]),
@@ -354,35 +472,52 @@ export function fireKeyDate(key: string): Date | null {
   return null;
 }
 
-/**
- * When this schedule fires next (M33.6). The forward twin of `lastFireKey`,
- * and it lives here for the same reason that one does: what "weekdays" or
- * "weekly thu" MEANS is schedule arithmetic, and a dossier that worked it out
- * itself would be a second place that knows — the twin-implementation defect
- * in miniature.
- *
- * Strictly future: a schedule whose moment is exactly `now` has fired, and
- * the next one is the following period. `now` is passed rather than read so
- * the caller's pinned clock governs (the `VAULT_TODAY` discipline).
- */
-export function nextFire(schedule: Schedule, now: Date): Date {
-  const at = new Date(now);
-  at.setSeconds(0, 0);
-  if (schedule.kind === 'hourly') {
-    at.setMinutes(0);
-    // Strictly after `now`, so the top of the current hour never counts.
-    while (at.getTime() <= now.getTime()) at.setHours(at.getHours() + 1);
-    return at;
+/** The next future instant; a once at or before now has no next firing. */
+export function nextFire(schedule: Schedule, now: Date): Date | null {
+  if (schedule.kind === 'hourly')
+    return new Date(Math.floor(now.getTime() / 3_600_000) * 3_600_000 + 3_600_000);
+  if (schedule.kind === 'once') {
+    const at = onceAt(schedule);
+    return at > now ? at : null;
   }
-  at.setHours(schedule.hour, schedule.minute, 0, 0);
-  if (at.getTime() <= now.getTime()) at.setDate(at.getDate() + 1);
-  if (schedule.kind === 'weekdays') {
-    while (at.getDay() === 0 || at.getDay() === 6) at.setDate(at.getDate() + 1);
+  if (schedule.kind === 'monthly') {
+    const at = monthAt(schedule, now.getFullYear(), now.getMonth());
+    return at > now ? at : monthAt(schedule, now.getFullYear(), now.getMonth() + 1);
   }
-  if (schedule.kind === 'weekly') {
-    while (at.getDay() !== schedule.day) at.setDate(at.getDate() + 1);
+  const cursor = dateAt(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0);
+  for (;;) {
+    const at = dateAt(
+      cursor.getFullYear(),
+      cursor.getMonth(),
+      cursor.getDate(),
+      schedule.hour,
+      schedule.minute,
+    );
+    if (at > now && dayMatches(schedule, cursor.getDay())) return at;
+    cursor.setDate(cursor.getDate() + 1);
   }
-  return at;
+}
+export function lastSetFireKey(schedules: readonly Schedule[], now: Date): string | null {
+  let newest: string | null = null;
+  for (const schedule of schedules) {
+    const key = lastFireKey(schedule, now);
+    if (
+      key !== null &&
+      (newest === null ||
+        fireKeyDate(key)!.getTime() > fireKeyDate(newest)!.getTime() ||
+        (fireKeyDate(key)!.getTime() === fireKeyDate(newest)!.getTime() && key > newest))
+    )
+      newest = key;
+  }
+  return newest;
+}
+export function nextSetFire(schedules: readonly Schedule[], now: Date): Date | null {
+  let next: Date | null = null;
+  for (const schedule of schedules) {
+    const at = nextFire(schedule, now);
+    if (at !== null && (next === null || at < next)) next = at;
+  }
+  return next;
 }
 
 /**

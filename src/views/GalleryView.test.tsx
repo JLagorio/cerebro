@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { seedBytes, reset as resetBytes } from '@/lib/mockBytes';
+import { beforeEach, afterEach, describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { GalleryView, coverOf } from '@/views/GalleryView';
 import { buildSchema } from '@/engine/schema';
@@ -7,6 +8,24 @@ import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { makeEntry } from '@/test/factories';
 import type { Entry, Presentation } from '@/engine/types';
+
+it('renders one gallery card in each value band (M61.1)', () => {
+  const entry = makeEntry({
+    path: 'shared.md',
+    title: 'Shared',
+    properties: { tags: ['a', 'b', 'a'] },
+  });
+  render(
+    <GalleryView
+      entries={[entry]}
+      presentation={{ type: 'gallery', group: [{ field: 'tags' }], columns: [], sort: [] }}
+      schema={buildSchema([entry])}
+      filtered={false}
+    />,
+  );
+  expect(screen.getAllByTestId('gallery-card')).toHaveLength(2);
+  expect(screen.getAllByText('Shared')).toHaveLength(2);
+});
 
 /**
  * The gallery (M16.22).
@@ -16,10 +35,6 @@ import type { Entry, Presentation } from '@/engine/types';
  * Enter (BoardView's div-with-role="button", M15), and render a blank canvas
  * when a query returns nothing (BoardView again, note 17a).
  *
- * And one it must not do YET: draw an <img> for a cover. Since M16.13c a files
- * property holds a vault-relative path, and the CSP is `img-src 'self' data:`
- * with no asset protocol — so an <img> here would be a broken image on every
- * card, which is worse than saying which file it would show.
  */
 
 const vault = (): Entry[] => [
@@ -69,6 +84,7 @@ const presentation = (over: Partial<Presentation> = {}): Presentation => ({
   ...over,
 });
 
+beforeEach(resetBytes);
 afterEach(cleanup);
 
 describe('GalleryView', () => {
@@ -105,9 +121,8 @@ describe('GalleryView', () => {
     expect(screen.queryByTestId('gallery-cover')).toBeNull();
   });
 
-  // The whole point of the deferral: a cover names its file instead of
-  // rendering an <img> the CSP would refuse to load.
-  it('names the cover file rather than rendering an image', () => {
+  it('draws image covers, keeps URL tiles and falls back without losing the card', async () => {
+    seedBytes('0', 'attachments/poster.png', { bytes: [1, 2] });
     const entries = vault();
     const schema = buildSchema(entries);
     const { container } = render(
@@ -118,11 +133,15 @@ describe('GalleryView', () => {
         schema={schema}
       />,
     );
-    const covers = screen.getAllByTestId('gallery-cover');
-    expect(covers).toHaveLength(3);
-    expect(covers[0].getAttribute('data-cover')).toBe('attachments/poster.png');
+    expect(screen.getAllByTestId('gallery-cover')).toHaveLength(3);
+    const image = await screen.findByRole('img', { name: 'poster.png' });
+    expect(image.style.objectFit).toBe('cover');
+    expect(screen.getByText('https://example.com/banner.png')).toBeTruthy();
+    expect(container.querySelectorAll('img')).toHaveLength(1);
+    fireEvent.error(image);
+    await waitFor(() => expect(screen.getByText("Couldn't show this image")).toBeTruthy());
     expect(screen.getByText('poster.png')).toBeTruthy();
-    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getAllByTestId('gallery-card')).toHaveLength(3);
   });
 
   it('reports the card size and fit it was configured with', () => {

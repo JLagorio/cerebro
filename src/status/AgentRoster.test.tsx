@@ -1,10 +1,16 @@
+import { useFollowupStore } from '@/stores/followupStore';
+import { stampActivation } from '@/agent/activation';
+vi.mock('@/agent/activation', async (original) => ({
+  ...(await original<typeof import('@/agent/activation')>()),
+  stampActivation: vi.fn(async () => true),
+}));
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeEntry } from '@/engine/testHelpers';
 import type { FleetActorSummary, PipelineOverview, ReviewCard } from '@/lib/ipc';
 import { useVaultStore } from '@/stores/vaultStore';
-import { AgentRoster, liveState } from './AgentRoster';
+import { AgentRoster, liveState, dutyText } from './AgentRoster';
 
 /**
  * Who works here (M33b.3), and what each of them is doing (M33b.4).
@@ -154,7 +160,9 @@ describe('liveState (M33b.4, two pauses since M33b.5)', () => {
 
 describe('AgentRoster', () => {
   beforeEach(() => {
+    useFollowupStore.getState().reset(VAULT);
     vi.clearAllMocks();
+    vi.mocked(stampActivation).mockResolvedValue(true);
     useVaultStore.setState({
       vaultPath: VAULT,
       entries: [agentEntry('Release scout', { slug: 'release-scout' })],
@@ -165,6 +173,42 @@ describe('AgentRoster', () => {
     pipelineOverview.mockResolvedValue({ global_pause: false } as PipelineOverview);
     pausedAgents.mockResolvedValue([]);
     setAgentPaused.mockResolvedValue(undefined);
+  });
+
+  it('a waiting follow-up makes an unscheduled agent active and unavailable falls back honestly', async () => {
+    useFollowupStore.setState({
+      vault: VAULT,
+      read: {
+        state: 'ready',
+        rows: [
+          {
+            followupId: 'id',
+            actor: 'process:release-scout',
+            note: 'check',
+            dueAt: NOW.toISOString(),
+            requestedAt: NOW.toISOString(),
+            requestedByRun: 'run',
+            state: 'pending',
+            claimedAt: null,
+            runId: null,
+            endedAt: null,
+            cancelReason: null,
+          },
+        ],
+      },
+    });
+    render(<AgentRoster vaultPath={VAULT} focus={null} onFocus={() => {}} now={NOW} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-row').getAttribute('data-state')).toBe('idle'),
+    );
+    expect(screen.getByTestId('agent-duty').textContent).toContain('Learn on its own');
+    cleanup();
+    useFollowupStore.setState({ read: { state: 'unavailable' } });
+    render(<AgentRoster vaultPath={VAULT} focus={null} onFocus={() => {}} now={NOW} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-row').getAttribute('data-state')).toBe('inactive'),
+    );
+    expect(screen.getByTestId('agent-duty').textContent).toBe('Off duty — runs only when you ask');
   });
 
   it('lists an agent that has never run, rather than only ones that are busy', async () => {
@@ -337,14 +381,17 @@ describe('AgentRoster', () => {
 
     const pause = await screen.findByTestId('agent-pause');
     expect(pause.textContent).toContain('Pause');
+    setAgentPaused.mockImplementationOnce(async () => {
+      pausedAgents.mockResolvedValue(['process:release-scout']);
+    });
     fireEvent.click(pause);
     await waitFor(() =>
       expect(setAgentPaused).toHaveBeenCalledWith(VAULT, 'process:release-scout', true),
     );
+    expect(stampActivation).not.toHaveBeenCalled();
 
     // The write is re-read rather than assumed, so the row cannot claim a
     // state the backend refused to store.
-    pausedAgents.mockResolvedValue(['process:release-scout']);
     await waitFor(() =>
       expect(screen.getByTestId('agent-state').getAttribute('data-state')).toBe('paused'),
     );
@@ -376,6 +423,10 @@ describe('AgentRoster', () => {
   });
 
   it('does not start an agent by resuming it while the background is paused', async () => {
+    vi.mocked(stampActivation).mockImplementationOnce(async () => {
+      expect(setAgentPaused).not.toHaveBeenCalled();
+      return true;
+    });
     // Task 5, on the surface: the resume lands, and the row goes on saying
     // stopped — by the other control, which is the truthful answer.
     useVaultStore.setState({
@@ -393,6 +444,7 @@ describe('AgentRoster', () => {
     await waitFor(() =>
       expect(setAgentPaused).toHaveBeenCalledWith(VAULT, 'process:release-scout', false),
     );
+    expect(stampActivation).toHaveBeenCalledWith(VAULT, 'slug:release-scout', 'daily 09:00', NOW);
     await waitFor(() =>
       expect(screen.getByTestId('agent-state').getAttribute('data-state')).toBe(
         'background-paused',
@@ -426,4 +478,14 @@ describe('AgentRoster', () => {
     render(roster());
     expect((await screen.findByTestId('roster-empty')).textContent).toContain('No agent records');
   });
+});
+
+it('describes list times, malformed sets and passed one-offs', () => {
+  expect(
+    dutyText(['monthly last 18:00', 'weekdays 08:30'], true, new Date(2026, 6, 28, 12)),
+  ).toContain('next 2026-07-29 08:30');
+  expect(dutyText(['once 2026-07-27 09:00'], false, new Date(2026, 6, 28, 12))).toBe(
+    'Its one time has passed — runs only when you ask',
+  );
+  expect(dutyText(['daily 09:00', 'bad'], false, NOW)).toBe('Schedule not understood.');
 });

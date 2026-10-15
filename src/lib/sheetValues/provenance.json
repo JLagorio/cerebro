@@ -1,0 +1,13 @@
+{
+  "format": 1,
+  "engine": "ironcalc_base@0.8.3",
+  "carrier": "bitcode@0.6.9",
+  "compiler": "rustc 1.95.0 (59807616e 2026-04-14)",
+  "target": "wasm32-unknown-unknown",
+  "files": {
+    "scripts/sheet-values/Cargo.toml": "8d5f6c23dd8fa94d2e7b4fc66a66971fac42fe97685730a6ce226c89908fe734",
+    "scripts/sheet-values/Cargo.lock": "e5068aeb213b7ffdf7149cb239100c87b84729eb1ffb81ad43258426f0a5dd0a",
+    "scripts/sheet-values/src/lib.rs": "935dd99742ae679d3b0eabc2899f8d8e0debf80ce433dbe46716b7b3ecfcc021",
+    "src/lib/sheetValues/values.wasm": "9d3b0e4ee0f5029c263390eaea75ca506f9f438132baa03ba913f6642032ae4c"
+  }
+}

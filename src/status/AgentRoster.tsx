@@ -1,11 +1,15 @@
+import { useFollowupStore } from '@/stores/followupStore';
+import { waitingFollowup } from '@/engine/followups';
 import { useEffect, useMemo, useState } from 'react';
+import { stampActivation, RESUME_STAMP_FAILED } from '@/agent/activation';
+import { recordIdentity } from '@/engine/identity';
 import { onAgentEvent } from '@/agent/agentIpc';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { agentRef, isAgentEntry } from '@/engine/agents';
 import { actorLabel } from '@/engine/authors';
 import { agentActive, agentDraft } from '@/engine/libraryDraft';
-import { nextFire, parseSchedule } from '@/engine/skills';
+import { nextSetFire, parseScheduleSet, scheduleText } from '@/engine/skills';
 import { localStamp, relativeWhen } from '@/engine/whenText';
 import * as ipc from '@/lib/ipc';
 import type { FleetActorSummary } from '@/lib/ipc';
@@ -26,7 +30,7 @@ import { useVaultStore } from '@/stores/vaultStore';
  * agents would answer "what is happening" and not "who works here", and the
  * second is the question a person actually has. So does an agent nothing can
  * fire: activation is a human act, an Agent record without a `schedule:` runs
- * only when somebody asks it to, and the row SAYS so — "off duty" — instead of
+ * when somebody asks it to or a follow-up it booked comes due, and the row says so — "off duty" — instead of
  * being quietly omitted.
  *
  * **Nothing here is stored.** Identity, brief, schedule and scope come off the
@@ -119,7 +123,7 @@ export function liveState(facts: {
   running: number | null;
   /** Proposals of this actor's awaiting a decision. `null` = queue unread. */
   waiting: number | null;
-  /** Whether anything — a schedule or a trigger — can fire it. */
+  /** Whether a schedule, trigger or waiting follow-up can fire it. */
   onDuty: boolean;
   /** This agent's own pause (M33b.5). `null` = it could not be read. */
   agentPaused: boolean | null;
@@ -190,24 +194,16 @@ function waitingText(waiting: number | null): string {
   return `${waiting} waiting on you`;
 }
 
-/**
- * What an agent is ON.
- *
- * The schedule if one fires it, the next fire time if that schedule parses,
- * and the plain fact otherwise. "Activation is a human act" is a promise the
- * roster keeps by saying, on the row, that nothing fires this one by itself —
- * in words a reader acts on (M52.3), where "a description, not a daemon"
- * explained the architecture instead.
- */
-function dutyText(schedule: string, onDuty: boolean, now: Date): string {
+/** Lists share one next time, and an invalid item invalidates the whole set. */
+export function dutyText(schedule: string[], onDuty: boolean, now: Date): string {
+  const parsed = parseScheduleSet(schedule);
+  if (schedule.length > 0 && parsed === null) return 'Schedule not understood.';
+  const next = parsed === null ? null : nextSetFire(parsed, now);
+  if (parsed !== null && next === null && !onDuty)
+    return 'Its one time has passed — runs only when you ask';
   if (!onDuty) return 'Off duty — runs only when you ask';
-  const parsed = parseSchedule(schedule);
-  if (parsed === null) {
-    // On duty with no readable schedule means a trigger fires it — or the
-    // schedule is malformed, which is a different thing and says so.
-    return schedule.trim() === '' ? 'Fired by a trigger.' : 'Schedule not understood.';
-  }
-  return `${schedule.trim()} · next ${localStamp(nextFire(parsed, now))}`;
+  if (next === null) return 'Fired by a trigger.';
+  return `${scheduleText(schedule)} · next ${localStamp(next)}`;
 }
 
 /**
@@ -263,7 +259,7 @@ export function AgentRoster({
   vaultPath,
   focus,
   onFocus,
-  now = new Date(),
+  now: injectedNow,
 }: {
   vaultPath: string | null;
   /** The actor whose history the run list below is narrowed to, if any. */
@@ -273,7 +269,10 @@ export function AgentRoster({
    * — the same `VAULT_TODAY` discipline the e2e specs follow. */
   now?: Date;
 }) {
+  const now = injectedNow ?? new Date();
   const entries = useVaultStore((s) => s.entries);
+  const followupRead = useFollowupStore((state) => state.read);
+  const followupVault = useFollowupStore((state) => state.vault);
   const pulse = useFleetPulse();
 
   // The body is the standing instructions and no row renders them, so it is
@@ -362,14 +361,23 @@ export function AgentRoster({
   const setAgentPause = (actor: string, title: string, next: boolean) => {
     if (busy || vaultPath === null) return;
     setBusy(true);
-    void ipc
-      .setAgentPaused(vaultPath, actor, next)
-      .then(
-        // By name, not by stamp (M52.3): the row the button sits on says
-        // "Release scout", so the toast does too.
-        () => toast(next ? `${title} paused` : `${title} resumed`),
-        (e: unknown) => toast(e instanceof Error ? e.message : 'That did not take'),
-      )
+    void (async () => {
+      const entry = entries.find(
+        (candidate) => isAgentEntry(candidate) && agentRef(candidate).actor === actor,
+      );
+      const stamped =
+        next ||
+        entry === undefined ||
+        (await stampActivation(
+          vaultPath,
+          recordIdentity(entry),
+          entry.properties.schedule,
+          injectedNow ?? new Date(),
+        ));
+      await ipc.setAgentPaused(vaultPath, actor, next);
+      toast(!stamped ? RESUME_STAMP_FAILED : next ? `${title} paused` : `${title} resumed`);
+    })()
+      .catch((e: unknown) => toast(e instanceof Error ? e.message : 'That did not take'))
       .finally(() => {
         setBusy(false);
         setWritten((previous) => previous + 1);
@@ -434,7 +442,12 @@ export function AgentRoster({
       {agents.map(({ ref, duty }) => {
         const facts = factsFor(ref.actor);
         const waiting = waitingFor(ref.actor);
-        const onDuty = agentActive(duty);
+        const later =
+          followupVault === vaultPath &&
+          followupRead.state === 'ready' &&
+          followupRead.rows.some((row) => row.actor === ref.actor && waitingFollowup(row));
+        const configured = agentActive(duty, now);
+        const onDuty = configured || later;
         const agentPaused = paused.kind === 'ready' ? paused.data.has(ref.actor) : null;
         const state = liveState({
           running: facts.kind === 'some' ? facts.summary.running_runs : null,
@@ -479,7 +492,9 @@ export function AgentRoster({
                   <Chip state={state} />
                 </span>
                 <span data-testid="agent-duty" className="text-2xs text-n-600">
-                  {dutyText(duty.schedule, onDuty, now)}
+                  {later && !configured
+                    ? 'A follow-up it booked waits for Learn on its own to be on'
+                    : dutyText(duty.schedule, onDuty, now)}
                 </span>
                 <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-2xs text-n-500">
                   <span

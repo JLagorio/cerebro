@@ -20,11 +20,11 @@ Each `kinds` row has these keys, in this order, on one line:
 | Key | What it says | Who reads it |
 | --- | --- | --- |
 | `ext` | The extension, lowercase letters and digits, no dot. | both |
-| `kind` | archive, audio, binary, code, data, design, diagram, document, executable, font, image, markdown, pdf, presentation, spreadsheet, text, unknown or video. | both: `isMarkdownPath` reads markdown |
+| `kind` | archive, audio, binary, code, data, design, diagram, document, executable, font, image, markdown, pdf, presentation, spreadsheet, text, unknown, video or whiteboard. | both: `isMarkdownPath` reads markdown |
 | `mime` | The IANA type, lowercase. Code is `text/plain`, and so is a text format nobody registered (`srt`, `jsonc`, `ini`); a binary nobody registered is `application/octet-stream`. Media rows carry the type browsers play them by (`audio/aiff`, `video/x-matroska`). | Rust, from M66.2's doors |
-| `viewer` | code, doc, image, media, none, pdf or table. | TS: `viewerKindFor` answers doc for a doc row and code otherwise, until M66.4's viewers read the rest |
+| `viewer` | code, doc, image, media, none, pdf or table. | TS: the viewer registry selects the document, code, image, media, PDF or table viewer |
 | `extractor` | docx, pdf, pptx, xlsx or null: the reader that turns the file into text. | Rust, from M66.7 |
-| `ingest` | capture (the Inbox takes it as text), extract (through its extractor, from M66.7c) or none. | TS: `captureExtensions`, `isCapturable`, and `src/lib/ingest.ts` from them |
+| `ingest` | capture (the Inbox takes it as text), extract (through its extractor, from M66.7c) import (a local structured file, previewed before writing) or none. | TS: `captureExtensions`, `isCapturable`, and `src/lib/ingest.ts` from them |
 | `shiki` | The Shiki language id, or null for plain text. | TS: `shikiFor`, and `languageFor` in `src/workspace/highlighter.tsx` |
 | `icon` | A lucide icon name. | TS: `fileLook`, and `lookFor` in `src/workspace/fileIcons.ts` |
 | `color` | blue, green, n-400, n-500, orange, pink, purple, red, yellow or null. `blue` draws as `var(--opt-blue)`, `n-500` as `var(--n-500)`. | TS: `lookFor` |
@@ -36,7 +36,11 @@ Each `kinds` row has these keys, in this order, on one line:
 name's override first, then its extension's row, then the unknown row, and
 Rust validates them and never reads them.
 
-`limits.capture_max_bytes` (4 MiB) is the largest file the Inbox captures.
+`limits.capture_max_bytes` (4 MiB) bounds text captures. Document captures keep
+the original through the attachment door (50 MB), then use the Office or PDF
+reader. The pdf/docx/pptx/xlsx/xlsm rows use `ingest: extract` (M66.7c).
+`limits.import_max_bytes` (16 MiB) bounds local structured imports and their
+native dropped-file reads; an `import` row must have kind `data`.
 
 ## The rules the rows follow
 
@@ -87,13 +91,9 @@ that is not a positive integer; an empty icon or shiki.
 
 ## Kept outside this table
 
-- `vault/scan.rs` keeps its own `md | mmd` match: which files are vault
-  entries is the vault format (M47). `the_scan_set_is_markdown_and_diagram`
-  pins that both rows exist.
-- `src/engine/pageMedia.ts` keeps BlockNote's own media lists (M55.4), held to
-  this table by a parity test until M66.6. Its known differences are named
-  there: BlockNote calls ogg a video, and lists flv, wmv, weba and epub, which
-  have no row here.
+- `vault/scan.rs` keeps its `md | mmd` match and asks the table for
+  whiteboards (M68.2). Which files are vault entries is the vault format.
+  `the_scan_set_is_markdown_diagram_and_whiteboard` pins those rows.
 - Folder glyphs stay in `fileIcons.ts`: a folder is not a file kind.
 
 ## Regenerating
@@ -115,3 +115,25 @@ language of a key the old maps held also edits the RETIRED snapshot in
 
 Never run a formatter over this folder: `.prettierignore` skips it because
 the bytes are hashed and the rows are one per line.
+
+## Contained byte reads (M66.2)
+
+`bytes.v1.json` holds root-address validation, refusal words, body/range and
+path limits, and cases replayed by Rust `files/bytes.rs` and TypeScript
+`engine/fileBytes.ts` plus `lib/mockBytes.ts`. It is case-pinned, without a
+digest. Root `0` means the current vault; other roots are mounted IDs. No URL
+names an absolute vault path.
+
+The custom `cerebro-file://localhost/<root>/<rel>` scheme serves only image,
+audio and video rows; raw IPC serves PDFs. Both use the same contained open
+file handle, with a 64 MiB body cap and at most 1 MiB per range.
+An optional `v` query is a 1–64 character ASCII alphanumeric, dash or underscore
+cache revision. It never chooses a root or grants access. The adapter gives
+each request a fresh revision: the packaged WebKit spike demonstrated that
+no-store alone does not invalidate decoded images when switching vaults.
+The browser twin returns data URLs and keeps byte/link fixtures separate from
+notes while reading root-0 text from the actual mock note disk.
+
+Page media uses this table for image, audio and video blocks (M66.6). Other
+vault extensions are file blocks. `limits.attachment_bytes` (50,000,000) is
+the one cap for the native path and bytes doors, mock, and Upload copy.

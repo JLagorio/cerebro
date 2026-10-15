@@ -58,9 +58,101 @@ pub fn next_window(last_to_seq: Option<u64>, head_seq: u64) -> Option<diff::Wind
     })
 }
 
+/// Home starts at the person's Done mark, or the latest stored run's start.
+pub fn home_window(
+    after_seq: Option<u64>,
+    last_run_from: Option<u64>,
+    head_seq: u64,
+) -> diff::Window {
+    diff::Window {
+        from_seq: after_seq.or(last_run_from).unwrap_or(0).min(head_seq),
+        to_seq: head_seq,
+    }
+}
+/// The newest frame in sequence order supplies the recorded display time.
+/// Wall-clock anomalies never reorder the ledger.
+pub fn changed_at(frames: &[Frame], window: diff::Window) -> Option<String> {
+    frames
+        .iter()
+        .filter(|f| f.seq > window.from_seq && f.seq <= window.to_seq)
+        .max_by_key(|f| f.seq)
+        .map(|f| f.ingested_at.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn home_starts_at_the_mark_then_the_last_run_then_the_beginning() {
+        assert_eq!(
+            home_window(Some(8), Some(4), 10),
+            diff::Window {
+                from_seq: 8,
+                to_seq: 10
+            }
+        );
+        assert_eq!(
+            home_window(None, Some(4), 10),
+            diff::Window {
+                from_seq: 4,
+                to_seq: 10
+            }
+        );
+        assert_eq!(
+            home_window(None, None, 10),
+            diff::Window {
+                from_seq: 0,
+                to_seq: 10
+            }
+        );
+        assert_eq!(
+            home_window(Some(99), Some(4), 10),
+            diff::Window {
+                from_seq: 10,
+                to_seq: 10
+            }
+        );
+    }
+    #[test]
+    fn changed_time_is_the_newest_frame_in_the_window_and_quiet_has_none() {
+        let frame = |seq: u64, at: &str| Frame {
+            v: 0,
+            seq,
+            event_id: String::new(),
+            prev: String::new(),
+            hash: String::new(),
+            ingested_at: at.into(),
+            wall_clock_anomaly: false,
+            kind: String::new(),
+            body: serde_json::Value::Null,
+        };
+        let frames = vec![
+            frame(1, "2026-07-28T12:00:00Z"),
+            frame(2, "2026-07-28T11:59:00Z"),
+            frame(3, "2026-07-29T12:00:00Z"),
+        ];
+        assert_eq!(
+            changed_at(
+                &frames,
+                diff::Window {
+                    from_seq: 0,
+                    to_seq: 2
+                }
+            ),
+            Some("2026-07-28T11:59:00Z".into())
+        );
+        assert_eq!(
+            changed_at(
+                &frames,
+                diff::Window {
+                    from_seq: 2,
+                    to_seq: 2
+                }
+            ),
+            None
+        );
+    }
 
     #[test]
     fn a_base_nobody_wrote_to_gets_no_scheduled_run() {

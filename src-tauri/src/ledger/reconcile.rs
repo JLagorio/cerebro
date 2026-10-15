@@ -2399,6 +2399,7 @@ mod tests {
             &vault,
             rel,
             &format!("{body}\nTyped here.\n"),
+            None,
             &crate::vault::receipt::WriteReceipt::for_test("human:me", None),
         )
         .unwrap()

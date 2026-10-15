@@ -1,7 +1,7 @@
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useUiStore } from '@/stores/uiStore';
-import { DARK_QUERY, resolveTheme, useTheme } from './useTheme';
+import { DARK_QUERY, resolveTheme, useTheme, previewTheme } from './useTheme';
 
 /**
  * A `prefers-color-scheme` the test can flip.
@@ -64,7 +64,20 @@ describe('useTheme', () => {
 
   afterEach(() => {
     cleanup();
+    previewTheme(null);
     vi.restoreAllMocks();
+  });
+
+  it('previews without changing the preference or storage, and null restores it', () => {
+    mockMatchMedia(false);
+    useUiStore.getState().setThemeMode('light');
+    render(<Probe />);
+    act(() => previewTheme('dark'));
+    expect(themeAttr()).toBe('dark');
+    expect(useUiStore.getState().themeMode).toBe('light');
+    expect(localStorage.getItem('cerebro.themeMode')).toBe('light');
+    act(() => previewTheme(null));
+    expect(themeAttr()).toBe('light');
   });
 
   it('writes the chosen theme onto <html>', () => {

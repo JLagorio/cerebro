@@ -17,9 +17,8 @@
 
 import { canHaveSubPages, growPlan, nestPlan, type PageMove } from '@/engine/docPages';
 import { flushOpenPages, heldOpenPages } from '@/editor/openPages';
-import { createFolder, renameNote } from '@/lib/ipc';
+import { renameKeepingLinks } from '@/app/renameActions';
 import { slugify } from '@/lib/slug';
-import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { refusedAcrossVaults, useVaultStore } from '@/stores/vaultStore';
 
@@ -43,13 +42,6 @@ function heldBy(moves: PageMove[]): string | null {
   return `"${title}" has changes waiting on you. Settle them first`;
 }
 
-/** Rename on disk, then follow the page in history and in Favorites. */
-async function move(vault: string, { from, to }: PageMove): Promise<void> {
-  await renameNote(vault, from, to);
-  useNavStore.getState().replacePath(from, to);
-  useUiStore.getState().replaceFavoritePath(vault, from, to);
-}
-
 /**
  * Add a page titled `title` inside `parentPath`, growing the parent into a
  * folder of its own first when it is a plain file. Returns the child's path,
@@ -67,13 +59,17 @@ export async function addSubPage(parentPath: string, title: string): Promise<str
   try {
     await flushOpenPages();
     const fresh = useVaultStore.getState();
+    if (fresh.vaultPath !== vault || refusedAcrossVaults(fresh)) return null;
     const plan = growPlan(parent, fresh.entries, fresh.folders);
     if ('refused' in plan) return refuse(plan.refused);
     const waiting = plan.move === null ? null : heldBy([plan.move]);
     if (waiting !== null) return refuse(waiting);
     if (plan.move !== null) {
-      await createFolder(vault, plan.folder);
-      await move(vault, plan.move);
+      const result = await renameKeepingLinks({
+        steps: [plan.move],
+        label: `Move ${parent.title}`,
+      });
+      if (result === null) return null;
     }
     // createItem rescans, so the parent's new path and the child land together.
     return await fresh.createItem({
@@ -104,14 +100,16 @@ export async function nestPage(srcPath: string, targetPath: string): Promise<Pag
   try {
     await flushOpenPages();
     const fresh = useVaultStore.getState();
+    if (fresh.vaultPath !== vault || refusedAcrossVaults(fresh)) return null;
     const plan = nestPlan(srcPath, target, fresh.entries, fresh.folders);
     if ('refused' in plan) return refuse(plan.refused);
     const waiting = heldBy(plan.moves);
     if (waiting !== null) return refuse(waiting);
-    const grows = plan.moves.length > 1;
-    if (grows) await createFolder(vault, plan.folder);
-    for (const step of plan.moves) await move(vault, step);
-    await useVaultStore.getState().rescan();
+    const result = await renameKeepingLinks({
+      steps: plan.moves,
+      label: `Move ${fresh.entries.find((entry) => entry.path === srcPath)?.title ?? srcPath}`,
+    });
+    if (result === null) return null;
     return plan.moves;
   } catch (err) {
     useUiStore.getState().toast(`${FAILED}: ${err instanceof Error ? err.message : String(err)}`);

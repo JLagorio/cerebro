@@ -1,8 +1,11 @@
-import { act, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { seedBytes, reset as resetBytes } from '@/lib/mockBytes';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 import { makeEntry } from '@/engine/testHelpers';
 import { useVaultStore } from '@/stores/vaultStore';
 import { EntryIcon, PageIconGlyph } from './PageIcon';
+
+beforeEach(resetBytes);
 
 const ROCKET = '\u{1F680}';
 const FALLBACK = { name: 'file-text' };
@@ -19,13 +22,25 @@ describe('PageIconGlyph', () => {
     expect(screen.getByRole('img', { name: ROCKET }).textContent).toBe(ROCKET);
   });
 
-  it('draws a file as the image glyph titled with its path, and loads nothing', () => {
+  it('draws a file through the byte door and falls back on decode failure', async () => {
+    seedBytes('0', 'attachments/i.png', { bytes: [1, 2] });
     const { container } = render(
       <PageIconGlyph icon={{ kind: 'file', path: 'attachments/i.png' }} fallback={FALLBACK} />,
     );
-    expect(container.querySelector('[title="attachments/i.png"] [data-icon="image"]')).not.toBe(
-      null,
+    const image = await screen.findByRole('img', { name: 'i.png' });
+    expect(image.getAttribute('src')).toBe('data:image/png;base64,AQI=');
+    fireEvent.error(image);
+    await waitFor(() => expect(container.querySelector('[data-icon="image"]')).not.toBeNull());
+    expect(container.querySelector('img')).toBeNull();
+  });
+  it('keeps a remote icon as a glyph without loading it', () => {
+    const { container } = render(
+      <PageIconGlyph
+        icon={{ kind: 'file', path: 'https://example.com/i.png' }}
+        fallback={FALLBACK}
+      />,
     );
+    expect(container.querySelector('[data-icon="image"]')).not.toBeNull();
     expect(container.querySelector('img')).toBeNull();
   });
 

@@ -1,4 +1,7 @@
 import { useState } from 'react';
+import { RepeatEditor } from './RepeatEditor';
+import { repeatAnchor, repeatFieldFor } from '@/engine/recurrence';
+import { writeReciprocal } from '@/app/relatedActions';
 import { PICKABLE_OPTION_COLORS, resolveOptionColor } from '@/lib/swatch';
 import { setFieldConfig, setFieldOptions, setTypeStatuses } from '@/app/typeActions';
 import { Avatar } from '@/components/ui/Avatar';
@@ -10,6 +13,7 @@ import { FilesField } from '@/detail/FilesField';
 import type { FieldPopoverOption } from '@/detail/FieldPopover';
 import {
   findOptionByLabel,
+  kindMeta,
   normalizeUrl,
   optionId,
   peopleTypes,
@@ -29,13 +33,11 @@ import {
   type DateValue,
 } from '@/engine/dates';
 import { typeStyle } from '@/engine/typeCatalog';
-import { formatWikilink, resolveTarget } from '@/engine/wikilink';
+import { formatWikilink, linkTargetOfPath, resolveTarget } from '@/engine/wikilink';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import type { ChipStyle, Entry, FieldDef, Schema } from '@/engine/types';
 import { TABLE_ANATOMY } from '@/views/tableAnatomy';
-
-const pathStem = (p: string) => (p.split('/').pop() ?? p).replace(/\.md$/, '');
 
 export const humanize = (s: string) => {
   const t = s.replace(/[-_]/g, ' ');
@@ -179,6 +181,8 @@ export interface FieldEditorProps {
   /** M46.2: which surface's value cell this is. Defaults to the grid's, so a
    * consumer that has not been fitted keeps exactly the box it had. */
   chrome?: FieldChrome;
+  /** Edit a caller-owned draft instead of writing this record. */
+  onPatch?: (value: unknown) => void;
 }
 
 export function FieldEditor({
@@ -189,6 +193,7 @@ export function FieldEditor({
   chips = 'plain',
   placeholder = 'ghost',
   chrome = 'cell',
+  onPatch,
 }: FieldEditorProps) {
   const wrapClass = compact ? 'flex-nowrap overflow-hidden' : 'flex-wrap';
   const [open, setOpen] = useState(false);
@@ -200,7 +205,10 @@ export function FieldEditor({
   const createItem = useVaultStore((s) => s.createItem);
   const resolved = schema.resolveField(entry, def.name);
 
-  const patch = (value: unknown) => void patchFrontmatter(entry.path, { [def.name]: value });
+  const patch = (value: unknown) => {
+    if (onPatch !== undefined) onPatch(value);
+    else void patchFrontmatter(entry.path, { [def.name]: value });
+  };
   /**
    * A multi-value field emptied back to nothing drops its KEY (M20.3).
    *
@@ -211,6 +219,18 @@ export function FieldEditor({
    * one delete spelling every backend honours (see vaultStore.patchFrontmatter).
    */
   const patchList = (next: unknown[]) => patch(next.length === 0 ? null : next);
+
+  if (onPatch !== undefined && (def.from !== undefined || def.kind === 'files')) {
+    return (
+      <span
+        title="Available after this record is created"
+        className="inline-flex items-center gap-1.5 px-2 py-[3px] text-sm text-n-500"
+      >
+        {resolved.display || '—'}
+        <Icon name="lock" size={10} color="var(--n-300)" />
+      </span>
+    );
+  }
 
   if (def.kind === 'status' || def.kind === 'select' || def.kind === 'multiselect') {
     const statuses = schema.statusSetFor(entry);
@@ -412,7 +432,7 @@ export function FieldEditor({
       // apart. The relation CHIPS already carry the target type's icon.
       const style = typeStyle(c.type, schema);
       return {
-        id: pathStem(c.path),
+        id: linkTargetOfPath(c.path),
         label: c.title,
         color: null,
         icon: style.icon,
@@ -459,7 +479,7 @@ export function FieldEditor({
         ? undefined
         : (name: string) => {
             void (async () => {
-              const target = createTarget(createType, { project: null, entries, schema });
+              const target = createTarget(createType, { entries, schema });
               try {
                 const path = await createItem({
                   folder: target.folder,
@@ -468,7 +488,7 @@ export function FieldEditor({
                   body: `# ${name}\n`,
                 });
                 // By the stem it LANDED on — create_note may deduplicate.
-                const stem = pathStem(path);
+                const stem = linkTargetOfPath(path);
                 patch(single ? [formatWikilink(stem)] : toggle(values, stem).map(formatWikilink));
               } catch {
                 useUiStore.getState().toast(`Couldn't create "${name}"`);
@@ -527,46 +547,13 @@ export function FieldEditor({
   if (def.kind === 'relation') {
     // A derived reciprocal (M12.4) points at the OWNING side: its candidates
     // are records of `from.type`, and edits patch those records' `from.field`
-    // rather than this entry's frontmatter — one link, stored once.
+    // as one batch through writeReciprocal, rather than this entry's
+    // frontmatter — one link, stored once.
     const derived = def.from !== undefined ? def.from : null;
     const targetType = derived !== null ? derived.type : (def.target ?? null);
     const values = asList(resolved.raw).map(stripWikilink);
-    const targetOf = (id: string) => entries.find((e) => pathStem(e.path) === id) ?? null;
+    const targetOf = (id: string) => resolveTarget(id, entries);
 
-    // Entry.relationships holds bracket-stripped targets; frontmatter wants
-    // them back as wikilinks, so every write re-wraps the whole list.
-    const pointsHere = (raw: string) =>
-      resolveTarget(raw, entries)?.path === entry.path ||
-      stripWikilink(raw) === pathStem(entry.path);
-    const patchReciprocal = (next: string[]) => {
-      if (derived === null) return;
-      const current = new Set(values);
-      const wanted = new Set(next);
-      const jobs: Promise<boolean>[] = [];
-      for (const id of next) {
-        if (current.has(id)) continue;
-        const other = targetOf(id);
-        if (other === null) continue;
-        const links = other.relationships[derived.field] ?? [];
-        jobs.push(
-          patchFrontmatter(other.path, {
-            [derived.field]: [...links, pathStem(entry.path)].map(formatWikilink),
-          }),
-        );
-      }
-      for (const id of values) {
-        if (wanted.has(id)) continue;
-        const other = targetOf(id);
-        if (other === null) continue;
-        const links = (other.relationships[derived.field] ?? []).filter((raw) => !pointsHere(raw));
-        jobs.push(
-          patchFrontmatter(other.path, {
-            [derived.field]: links.length === 0 ? null : links.map(formatWikilink),
-          }),
-        );
-      }
-      void Promise.all(jobs);
-    };
     const blank = placeholder === 'blank' && values.length === 0;
     return (
       <span className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''}`}>
@@ -619,9 +606,36 @@ export function FieldEditor({
             schema={schema}
             onChange={(next) =>
               derived !== null
-                ? patchReciprocal(next)
+                ? void writeReciprocal(entry, derived, next, entries, schema)
                 : patch(next.length === 0 ? null : next.map(formatWikilink))
             }
+            onClose={() => setOpen(false)}
+          />
+        )}
+      </span>
+    );
+  }
+
+  if (def.kind === 'repeat') {
+    const blank = placeholder === 'blank' && resolved.display === '';
+    return (
+      <span className={`relative inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''}`}>
+        <button
+          type="button"
+          aria-label={humanize(def.name)}
+          data-cell-primary
+          onClick={() => setOpen(true)}
+          className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''} items-center gap-1.5 truncate ${CHROME[chrome]} text-sm text-n-800`}
+        >
+          {!blank && <Icon name="repeat" size={12} color="var(--n-500)" />}
+          {resolved.display || (!blank && <span className="text-n-400">Empty</span>)}
+        </button>
+        {open && (
+          <RepeatEditor
+            value={resolved.raw}
+            anchor={repeatAnchor(entry, schema)}
+            dateField={humanize(repeatFieldFor(entry, schema)?.date.name ?? 'Date')}
+            onChange={patch}
             onClose={() => setOpen(false)}
           />
         )}
@@ -778,6 +792,7 @@ export function FieldEditor({
     // function is a chain of early returns.
     return (
       <FilesField
+        ownerKey={`${entry.path}:${def.name}`}
         values={asList(resolved.raw)}
         label={humanize(def.name)}
         onChange={(next) => patch(next.length === 0 ? null : next)}
@@ -785,7 +800,7 @@ export function FieldEditor({
     );
   }
 
-  if (def.kind === 'rollup' || def.kind === 'created_time' || def.kind === 'last_edited_time') {
+  if (kindMeta(def.kind).computed) {
     return (
       <span
         title="Computed from the vault — read only"
@@ -813,6 +828,11 @@ export function FieldEditor({
      * stay open on exactly what was typed.
      */
     const commitValue = (value: unknown) => {
+      if (onPatch !== undefined) {
+        onPatch(value);
+        setDraft(null);
+        return;
+      }
       void (async () => {
         if (await patchFrontmatter(entry.path, { [def.name]: value })) setDraft(null);
       })();
