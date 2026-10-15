@@ -84,6 +84,17 @@ describe('NoteBodyEditor', () => {
     expect(fs().get(PAGE)!.startsWith('---\ntype: Doc\n---\n')).toBe(true);
   });
 
+  it('saves an edit made as soon as the editor reports ready', async () => {
+    render(
+      <NoteBodyEditor
+        path={PAGE}
+        debounceMs={20}
+        onReady={({ editor }) => appendParagraph(editor, 'Edited when ready')}
+      />,
+    );
+    await waitFor(() => expect(fs().get(PAGE)).toContain('Edited when ready'), DISK_ROUND_TRIP);
+  });
+
   it('an H1 edit syncs the entry title through the rescan', async () => {
     const { editor } = await renderReady(PAGE);
     editor.updateBlock(editor.document[0], { content: 'Renamed page' });

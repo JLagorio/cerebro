@@ -347,7 +347,8 @@ export interface MarkdownEditorProps {
    */
   onChange: (markdown: string) => void | Promise<void>;
   /**
-   * Fires once the document is loaded. `lossyCause` says how the parse
+   * Fires once the document is loaded and its save listener is attached.
+   * `lossyCause` says how the parse
    * round trip changed the file's text (raw HTML dropped, other text dropped,
    * text added or reordered), or is null when it kept it; consumers open such
    * a page read-only and name the cause before edits overwrite the file.
@@ -485,7 +486,7 @@ export function MarkdownEditor({
     () => (noteEntry === undefined ? [] : parseSources(noteEntry)),
     [noteEntry],
   );
-  const [loaded, setLoaded] = useState(false);
+  const [loaded, setLoaded] = useState<EditorReadyInfo | null>(null);
   /**
    * Ask AI on the selection (M17.16), opened with Cmd/Ctrl-K.
    *
@@ -645,8 +646,7 @@ export function MarkdownEditor({
       const roundTripped = await blocksToMarkdown(editor);
       if (cancelled) return;
       lastSaved.current = roundTripped;
-      setLoaded(true);
-      onReadyRef.current?.({
+      setLoaded({
         editor,
         lossyCause: lossyImportCause(markdown, roundTripped),
         loadedAs: roundTripped,
@@ -667,6 +667,13 @@ export function MarkdownEditor({
     // stable for the component's lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor]);
+
+  // BlockNoteView attaches its change listener in a child effect. Announce
+  // readiness after that commit so an immediate edit cannot precede the
+  // listener and disappear from the save path.
+  useEffect(() => {
+    if (loaded !== null) onReadyRef.current?.(loaded);
+  }, [loaded]);
 
   const scheduleEmit = () => {
     // An outside write being applied is not an edit (M55.6).
