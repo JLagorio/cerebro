@@ -1,5 +1,5 @@
 import { seedBytes, reset as resetBytes } from '@/lib/mockBytes';
-import { beforeEach, afterEach, describe, expect, it } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { GalleryView, coverOf } from '@/views/GalleryView';
@@ -8,6 +8,8 @@ import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { makeEntry } from '@/test/factories';
 import type { Entry, Presentation } from '@/engine/types';
+beforeEach(() => vi.stubGlobal('IntersectionObserver', undefined));
+afterEach(() => vi.unstubAllGlobals());
 
 it('renders one gallery card in each value band (M61.1)', () => {
   const entry = makeEntry({

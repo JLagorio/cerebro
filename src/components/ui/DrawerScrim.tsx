@@ -58,6 +58,7 @@ export function DrawerScrim({
   label,
   className,
   testId,
+  modal = true,
 }: {
   onDismiss: () => void;
   /** What a press here closes, for the one who cannot see the drawer. */
@@ -65,6 +66,8 @@ export function DrawerScrim({
   /** Positions it: the box it covers, and a z-index under the drawer's. */
   className: string;
   testId?: string;
+  /** Contextual page navigation keeps its page keys while folded into a drawer. */
+  modal?: boolean;
 }) {
   // Read during the first render, before the drawer takes focus — see
   // useFocusRestore for why an effect reads the wrong element.
@@ -73,9 +76,10 @@ export function DrawerScrim({
     return active instanceof HTMLElement && active !== document.body ? active : null;
   });
   const byKey = useRef(false);
+  const dismissedFocus = useRef<HTMLElement | null>(null);
   const latest = useRef(onDismiss);
   latest.current = onDismiss;
-  const id = useLayer();
+  const id = useLayer({ modal });
   // Escape, in the BUBBLE phase on window — DetailEscapeLayer's, and for the
   // same reason: a field in the drawer has the keystroke first. As a capture
   // layer (`useEscapeLayer`) it had it before the field did, so Escape in a
@@ -101,6 +105,9 @@ export function DrawerScrim({
         return;
       }
       byKey.current = true;
+      const focused = document.activeElement;
+      dismissedFocus.current =
+        focused instanceof HTMLElement && focused.closest(DRAWER) !== null ? focused : null;
       latest.current();
     };
     window.addEventListener('keydown', onKey);
@@ -110,7 +117,13 @@ export function DrawerScrim({
     () => () => {
       if (!byKey.current || opener === null || !opener.isConnected) return;
       const now = document.activeElement;
-      if (now === null || now === document.body) opener.focus();
+      // WebKit can keep focus on a retained drawer after CSS hides it. Only
+      // reclaim that exact dismissed element; a newer focus belongs to its caller.
+      const hiddenDismissedFocus =
+        now === dismissedFocus.current &&
+        now instanceof HTMLElement &&
+        now.getClientRects().length === 0;
+      if (now === null || now === document.body || hiddenDismissedFocus) opener.focus();
     },
     [opener],
   );

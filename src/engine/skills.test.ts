@@ -1,3 +1,4 @@
+import type { Entry } from './types';
 import { localTimeLine } from './skills';
 import { describe, expect, it } from 'vitest';
 import {
@@ -502,4 +503,28 @@ it('equal instants choose the larger key and hourly fires distinguish repeated l
   const second = new Date('2026-11-01T01:30:00-08:00');
   expect(lastFireKey({ kind: 'hourly' }, first)).not.toBe(lastFireKey({ kind: 'hourly' }, second));
   expect(nextFire({ kind: 'hourly' }, first)).toEqual(new Date('2026-11-01T09:00:00Z'));
+});
+
+describe('attended skill connector narrowings', () => {
+  it('preserves undeclared, list, comma string and empty grants', () => {
+    const read = (properties: Entry['properties']) =>
+      listSkills([skill('Mail', { properties })])[0];
+    expect(read({})).toMatchObject({ connectors: null, disallowedTools: null });
+    expect(
+      read({ connectors: ['gmail'], 'disallowed-tools': ['mcp__gmail__trash_thread'] }),
+    ).toMatchObject({ connectors: ['gmail'], disallowedTools: ['mcp__gmail__trash_thread'] });
+    expect(
+      read({
+        connectors: ' gmail, drive ',
+        'disallowed-tools': 'mcp__gmail__trash_thread, mcp__drive__delete',
+      }),
+    ).toMatchObject({
+      connectors: ['gmail', 'drive'],
+      disallowedTools: ['mcp__gmail__trash_thread', 'mcp__drive__delete'],
+    });
+    expect(read({ connectors: [], 'disallowed-tools': [] })).toMatchObject({
+      connectors: [],
+      disallowedTools: [],
+    });
+  });
 });

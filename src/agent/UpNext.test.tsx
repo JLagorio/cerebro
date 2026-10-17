@@ -25,7 +25,7 @@ const entry = (id: string, over: Partial<UpNextEntry> = {}): UpNextEntry => ({
   id,
   text: `message ${id}`,
   skill: null,
-  allowedTools: null,
+  narrowing: {},
   turn: { systemPrompt: () => '', place: null, conversationId: 'c-1' },
   vault: '/vault',
   queuedAt: 0,

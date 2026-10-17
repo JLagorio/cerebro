@@ -27,15 +27,14 @@ export const section: LabSection = {
   render: () => <Stage />,
   states: {
     ready: {
-      note: 'Catch me up is present; What I did is offered.',
+      note: 'Catch me up is present; the other recipes are offered.',
       seed: () => addCopy(0),
       expect: { present: [OFFER], absent: [UNAVAILABLE], text: 'What I did' },
     },
     empty: {
-      note: 'Both recipes are present; no offer remains.',
+      note: 'All shipped recipes are present; no offer remains.',
       seed: () => {
-        addCopy(0);
-        addCopy(1);
+        SHIPPED_RECIPES.forEach((_, index) => addCopy(index));
       },
       expect: { present: [], absent: [OFFER, UNAVAILABLE] },
     },

@@ -5,7 +5,7 @@ test('the launcher explains its groups, creates a database with starter statuses
   page,
 }) => {
   await boot(page);
-  await page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByTestId('app-rail').getByRole('button', { name: 'New', exact: true }).click();
   const launcher = page.getByTestId('create-launcher');
   await expect(launcher).toBeVisible();
   await expect(launcher.getByRole('group')).toHaveCount(7);
@@ -26,7 +26,7 @@ test('the launcher explains its groups, creates a database with starter statuses
   expect(source).toContain('statuses:');
   expect(source).toContain('folder: records/recipes');
   expect(source).toContain('kind: status');
-  await page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByTestId('app-rail').getByRole('button', { name: 'New', exact: true }).click();
   await expect(
     page
       .getByRole('group', { name: 'Recent' })
@@ -67,7 +67,7 @@ test('New Whiteboard and its chord create deduped files and open them as pages',
   page,
 }) => {
   await boot(page);
-  await page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByTestId('app-rail').getByRole('button', { name: 'New', exact: true }).click();
   await page
     .getByRole('group', { name: 'Diagram', exact: true })
     .getByRole('option', { name: 'Whiteboard', exact: true })

@@ -65,6 +65,18 @@ export interface SkillRef {
    * prompt (M17.13).
    */
   allowedTools: string[] | null;
+  /** Attended invocations may narrow connector servers; scheduled skills
+   * never read this grant. Null leaves the current grant, [] withdraws it. */
+  connectors: string[] | null;
+  /** Connector denials add to an addressed agent's; they never remove one. */
+  disallowedTools: string[] | null;
+}
+
+/** One invocation's three subtractive grants, frozen with queued turns. */
+export interface SkillNarrowing {
+  allowedTools?: string[] | null;
+  connectors?: string[] | null;
+  disallowedTools?: string[] | null;
 }
 
 /**
@@ -179,6 +191,8 @@ export function listSkills(entries: Entry[]): SkillRef[] {
       description,
       arguments: parseArguments(e.properties.arguments),
       allowedTools: parseAllowedTools(e.properties['allowed-tools']),
+      connectors: parseAllowedTools(e.properties.connectors),
+      disallowedTools: parseAllowedTools(e.properties['disallowed-tools']),
     };
   });
 }

@@ -37,7 +37,7 @@ export const VIEW_TAB_STRIP = 'flex min-w-0 flex-none items-end border-b border-
 
 export function viewTabClass(active: boolean): string {
   return [
-    'inline-flex max-w-[220px] items-center gap-1.5 whitespace-nowrap border-0 border-b-2 bg-transparent px-2.5 pb-2 pt-1.5 text-sm',
+    'inline-flex max-w-[220px] items-center gap-1.5 whitespace-nowrap border-0 border-b-2 bg-transparent px-3 pb-2.5 pt-2 text-sm',
     active
       ? 'border-cortex-500 font-semibold text-n-900'
       : 'border-transparent font-normal text-n-500 hover:text-n-800',
@@ -182,7 +182,7 @@ export function ViewTabs({
   return (
     // A container of its own (M52.5): the strip answers to the column it is
     // in, which a peek and the Assistant can narrow to 400px.
-    <div className={`${VIEW_TAB_STRIP} @container/viewtabs px-5`}>
+    <div className={`${VIEW_TAB_STRIP} @container/viewtabs px-6`}>
       {deleting !== null && (
         <Dialog
           open

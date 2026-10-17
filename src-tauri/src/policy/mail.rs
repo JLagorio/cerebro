@@ -48,6 +48,45 @@ pub struct RefusalCase {
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct Kinds {
+    pub thread: String,
+    pub text: String,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Limits {
+    pub messages: usize,
+    pub addresses_per_message: usize,
+    pub participants: usize,
+    pub subject_chars: usize,
+    pub name_chars: usize,
+    pub body_chars: usize,
+    pub bodies_chars_per_call: usize,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AddressCase {
+    pub raw: String,
+    pub address: Option<String>,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MailboxCase {
+    pub raw: String,
+    pub address: Option<String>,
+    pub name: Option<String>,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Sweep {
+    pub window_days: usize,
+    pub max_threads: usize,
+    pub page_size: usize,
+    pub read_tools: Vec<String>,
+    pub denied_tools: Vec<String>,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MailPolicy {
     pub format: u64,
     pub artifact_version: u64,
@@ -55,8 +94,13 @@ pub struct MailPolicy {
     pub folder: String,
     pub kept_out_of_git: Vec<String>,
     pub gate: Gate,
+    pub kinds: Kinds,
+    pub limits: Limits,
+    pub address_cases: Vec<AddressCase>,
+    pub mailbox_cases: Vec<MailboxCase>,
     pub mail_hosts: Vec<String>,
     pub unattended_denied_tools: Vec<String>,
+    pub sweep: Sweep,
     pub host_cases: Vec<HostCase>,
     pub path_cases: Vec<PathCase>,
     pub gate_cases: Vec<GateCase>,
@@ -149,6 +193,31 @@ impl MailPolicy {
         if self.gate.registry != "R14" {
             return refuse("mail.gate.registry must be R14");
         }
+        let s = &self.sweep;
+        if [s.window_days, s.max_threads, s.page_size]
+            .iter()
+            .any(|n| !(1..=1_000_000).contains(n))
+            || s.page_size > 50
+            || s.page_size > s.max_threads
+        {
+            return refuse("mail.sweep limits must be positive integers, with page_size at most 50 and no greater than max_threads");
+        }
+        if [&s.read_tools, &s.denied_tools].iter().any(|names| {
+            names.is_empty()
+                || names.iter().collect::<BTreeSet<_>>().len() != names.len()
+                || names.iter().any(|name| {
+                    !(1..=64).contains(&name.len())
+                        || !name
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+                })
+        }) || s
+            .read_tools
+            .iter()
+            .any(|name| s.denied_tools.contains(name))
+        {
+            return refuse("mail.sweep tools must be nonempty unique tool-part names and disjoint");
+        }
         if !named(&self.gate.connector, b'-', true) {
             return refuse("mail.gate.connector must be a lowercase connector id");
         }
@@ -160,6 +229,34 @@ impl MailPolicy {
         }
         if self.gate.open && !self.gate.scope.as_deref().is_some_and(scope) {
             return refuse("an open mail gate must name one vault_store scope");
+        }
+        if !named(&self.kinds.thread, b'_', false)
+            || !named(&self.kinds.text, b'_', false)
+            || self.kinds.thread == self.kinds.text
+        {
+            return refuse("mail.kinds must name distinct lowercase thread and text kinds");
+        }
+        if self
+            .gate
+            .kinds
+            .iter()
+            .any(|kind| kind != &self.kinds.thread && kind != &self.kinds.text)
+        {
+            return refuse("mail.gate.kinds must be declared in mail.kinds");
+        }
+        if [
+            self.limits.messages,
+            self.limits.addresses_per_message,
+            self.limits.participants,
+            self.limits.subject_chars,
+            self.limits.name_chars,
+            self.limits.body_chars,
+            self.limits.bodies_chars_per_call,
+        ]
+        .into_iter()
+        .any(|limit| !(1..=1_000_000).contains(&limit))
+        {
+            return refuse("mail.limits must be positive integers at most 1000000");
         }
         if !self.gate.open && self.gate.scope.is_some() {
             return refuse("a closed mail gate must have no scope");
@@ -229,6 +326,48 @@ pub fn parse(json: &str) -> Result<MailPolicy, String> {
                 return Err(words.into());
             }
             value[key] = (number as u64).into();
+        }
+    }
+    for key in ["address_cases", "mailbox_cases"] {
+        if value
+            .get(key)
+            .and_then(Value::as_array)
+            .is_some_and(|cases| {
+                cases.iter().any(|case| {
+                    case.get("address").is_none()
+                        || (key == "mailbox_cases" && case.get("name").is_none())
+                })
+            })
+        {
+            return Err("mail: invalid shape".into());
+        }
+    }
+    if let Some(limits) = value.get_mut("limits").and_then(Value::as_object_mut) {
+        for limit in limits.values_mut() {
+            if let Some(number) = limit.as_f64() {
+                if !number.is_finite()
+                    || number.fract() != 0.0
+                    || !(1.0..=1_000_000.0).contains(&number)
+                {
+                    return Err("mail.limits must be positive integers at most 1000000".into());
+                }
+                *limit = (number as u64).into();
+            }
+        }
+    }
+    if let Some(sweep) = value.get_mut("sweep").and_then(Value::as_object_mut) {
+        for key in ["window_days", "max_threads", "page_size"] {
+            if let Some(limit) = sweep.get_mut(key) {
+                if let Some(number) = limit.as_f64() {
+                    if !number.is_finite()
+                        || number.fract() != 0.0
+                        || !(1.0..=1_000_000.0).contains(&number)
+                    {
+                        return Err("mail.sweep limits must be positive integers, with page_size at most 50 and no greater than max_threads".into());
+                    }
+                    *limit = (number as u64).into();
+                }
+            }
         }
     }
     let table: MailPolicy = serde_json::from_value(value).map_err(|_| "mail: invalid shape")?;
@@ -301,6 +440,18 @@ mod tests {
                 case.at
             );
         }
+    }
+    #[test]
+    fn numeric_json_spellings_and_unicode_whitespace_agree_with_the_ts_loader() {
+        assert_eq!(
+            parse(&JSON.replacen("\"format\": 1,", "\"format\": 1.0,", 1))
+                .unwrap()
+                .format,
+            1
+        );
+        let mut value: Value = serde_json::from_str(JSON).unwrap();
+        value["rule_version"] = "\u{feff}".into();
+        assert_eq!(parse(&value.to_string()).unwrap().rule_version, "\u{feff}");
     }
     #[test]
     fn the_loader_requires_every_field_and_refuses_unknown_ones() {

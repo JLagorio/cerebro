@@ -1,5 +1,14 @@
 import { test, expect, type Page } from '@playwright/test';
-import { boot, seedBeforeBoot } from './boot';
+import {
+  chooseSettingsSection,
+  boot,
+  seedBeforeBoot,
+  openAssistantPanel,
+  openDestination,
+  showDatabases,
+  showPages,
+  openAgents,
+} from './boot';
 
 /**
  * The panel runs against the scripted mock in browser mode (see
@@ -12,7 +21,7 @@ import { boot, seedBeforeBoot } from './boot';
 test('agent: the panel streams a reply and shows what it did', async ({ page }) => {
   await boot(page);
 
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   const panel = page.getByTestId('ai-panel');
   await expect(panel).toBeVisible();
 
@@ -40,7 +49,7 @@ test('agent: the panel streams a reply and shows what it did', async ({ page }) 
 test('agent: walking away keeps the thread, and moves the context with you', async ({ page }) => {
   await boot(page);
 
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   const panel = page.getByTestId('ai-panel');
   await panel.getByLabel('Message the assistant').fill('What is at risk right now?');
   await panel.getByRole('button', { name: 'Send' }).click();
@@ -49,10 +58,7 @@ test('agent: walking away keeps the thread, and moves the context with you', asy
   ).toBeVisible({ timeout: 10_000 });
   await expect(panel.getByTestId('context-chip').first()).toContainText('Home');
 
-  await page
-    .getByTestId('nav-surfaces')
-    .getByRole('button', { name: /^Inbox/ })
-    .click();
+  await openDestination(page, 'Inbox');
 
   // The transcript stays put — the assistant navigates you around by design,
   // so a panel that re-threaded on navigation would lose the answer you were
@@ -82,7 +88,7 @@ test('agent: context is shown as chips you can take away', async ({ page }) => {
   // parks (M52).
   await page.setViewportSize({ width: 1440, height: 900 });
   await boot(page);
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   const panel = page.getByTestId('ai-panel');
 
   // Where you are is context, and it says so rather than being folded
@@ -92,6 +98,7 @@ test('agent: context is shown as chips you can take away', async ({ page }) => {
   await expect(chips.first()).toHaveAttribute('data-kind', 'place');
   await expect(chips.first()).toContainText('Home');
 
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
   await expect(panel.getByTestId('context-chip').first()).toContainText('Work item');
 
@@ -138,7 +145,7 @@ test('agent: context is shown as chips you can take away', async ({ page }) => {
 test('agent: a turn can be addressed by name, and the thread stays put', async ({ page }) => {
   await boot(page);
 
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   const panel = page.getByTestId('ai-panel');
   const composer = panel.getByLabel('Message the assistant');
   await expect(panel.getByTestId('context-chip').first()).toContainText('Home');
@@ -196,10 +203,11 @@ test('agent: shell access is one persisted ceiling in Settings, not a per-chat m
   // M8.1: the three-mode dropdown is gone from the panel. It asked the user to
   // declare a policy before knowing what they were going to ask for; what the
   // agent may change now follows from which folder it is writing to.
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   await expect(page.getByTestId('ai-panel').getByRole('combobox')).toHaveCount(0);
 
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Settings' }).click();
+  await openDestination(page, 'Settings');
+  await chooseSettingsSection(page, 'Assistant');
   // M57.2: a ceiling of three, Off until the person picks another.
   const ceiling = page.getByRole('tablist', { name: 'Shell access' });
   await expect(ceiling.getByRole('tab')).toHaveText(['Off', 'Ask', 'On']);
@@ -208,7 +216,8 @@ test('agent: shell access is one persisted ceiling in Settings, not a per-chat m
   await expect(page.getByTestId('shell-ask')).toHaveAttribute('aria-selected', 'true');
 
   await page.reload();
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Settings' }).click();
+  await openDestination(page, 'Settings');
+  await chooseSettingsSection(page, 'Assistant');
   await expect(page.getByTestId('shell-ask')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('shell-off')).toHaveAttribute('aria-selected', 'false');
 });
@@ -224,7 +233,7 @@ test('agent: a suggested filing is shown for approval, never applied', async ({ 
   // since the dev server started (`?t=<hmr>`). Two module instances, two
   // listener sets, and the emit reached nobody — so the test passed on a cold
   // server and failed on a warm one.
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   const panel = page.getByTestId('ai-panel');
   await panel.getByLabel('Message the assistant').fill('Help me clear the Inbox');
   await panel.getByRole('button', { name: 'Send' }).click();
@@ -261,10 +270,7 @@ test('agent: a suggested filing is shown for approval, never applied', async ({ 
 
 test('agent: organizing AI-written work records who signed off', async ({ page }) => {
   await boot(page);
-  await page
-    .getByTestId('nav-surfaces')
-    .getByRole('button', { name: /^Inbox/ })
-    .click();
+  await openDestination(page, 'Inbox');
 
   // The seeded capture carrying `generated: {by: claude-code}` is labelled.
   const aiRow = page
@@ -290,17 +296,19 @@ test('library: three shelves, no workspace nav, and nothing posing as a type', a
   // The types sidebar is the vault's SUBJECT MATTER. Skill and Agent are how
   // the vault works, and listing them here gave both a type screen, a place in
   // every List, and a generic property table for editing a security boundary.
+  await showDatabases(page);
   const types = page.getByTestId('sidebar-type');
   await expect(types.filter({ hasText: 'Risk' }).first()).toBeVisible();
   await expect(types.filter({ hasText: 'Skill' })).toHaveCount(0);
   await expect(types.filter({ hasText: 'Agent' })).toHaveCount(0);
 
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Library' }).click();
+  await openDestination(page, 'Library');
   await expect(page.getByTestId('library-page')).toBeVisible();
 
-  // Collections and Types describe the vault; the library holds the machinery
-  // that acts on it. M37.3's one nav column keeps both on screen — what still
-  // matters is that no type row claims the Library page: nothing is active.
+  // The database context can be inspected without leaving Library; no
+  // database row may claim that machinery page as its active selection.
+  await showDatabases(page);
+  await expect(page.getByTestId('library-page')).toBeVisible();
   await expect(types.first()).toBeVisible();
   await expect(page.locator('[data-testid="sidebar-type"][aria-current="page"]')).toHaveCount(0);
 
@@ -320,7 +328,7 @@ test('library: three shelves, no workspace nav, and nothing posing as a type', a
 
 /** The Library's agent shelf, then Release scout's card: its page (M55.12). */
 async function openScoutFromLibrary(page: Page) {
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Library' }).click();
+  await openDestination(page, 'Library');
   await page.getByTestId('library-tab-agent').click();
   await page.getByTestId('library-card').filter({ hasText: 'Release scout' }).click();
   await expect(page.getByTestId('doc-page')).toBeVisible();
@@ -461,6 +469,7 @@ test('agent page: editing its schedule property updates the record', async ({ pa
   // schedule, so the agent never runs and nothing anywhere would say why.
   // So the Schedule row builds one, and writes it on Done.
   await boot(page);
+  await openAgents(page);
   await page.getByTestId('nav-agent').filter({ hasText: 'Release scout' }).click();
   await expect(page.getByTestId('doc-title')).toContainText('Release scout');
 
@@ -487,6 +496,7 @@ test('editor: selecting prose shows AI controls, and a rewrite is a decision', a
   // screen said so — selecting text looked exactly as it had before the
   // assistant existed. M38.3: the Pages tree (and its New page) stands in the
   // nav on every surface, so there is no Docs destination to click first.
+  await showPages(page);
   await page.getByRole('button', { name: 'New page', exact: true }).first().click();
   await page.getByPlaceholder('Page name').fill('Selection test');
   await page.getByRole('button', { name: 'Create' }).click();
@@ -526,6 +536,7 @@ test('editor: the same AI controls appear on a record, not only in Docs', async 
   // be a thing that only works in one of them.
   await page.setViewportSize({ width: 1440, height: 900 });
   await boot(page);
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
   const row = page.getByTestId('table-row').first();
   await row.hover();

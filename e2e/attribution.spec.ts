@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, openAgents, readMockFile } from './boot';
+import { boot, openAgents, readMockFile, openAssistantPanel, openDestination } from './boot';
 
 /**
  * A page says who last changed it, and run detail names the pages a run
@@ -63,7 +63,7 @@ test("a page's Info says who last changed it: you, outside Cerebro, the Assistan
 
   // Another editor changes the file while the page is closed, so no save of
   // the editor's lands over it; the page, opened again, reads the new bytes.
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home' }).click();
+  await openDestination(page, 'Home');
   await expect(page.getByTestId('markdown-editor')).toHaveCount(0);
   await page.evaluate(
     ([path]) =>
@@ -77,7 +77,7 @@ test("a page's Info says who last changed it: you, outside Cerebro, the Assistan
   });
 
   // The Assistant's append goes through its own door, stamped as it.
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   await expect(page.getByTestId('ai-panel')).toBeVisible();
   await ask(page, `append "Agent line." to ${PAGE}`, `I appended that to ${PAGE}.`);
   await showInfo(page);

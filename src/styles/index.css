@@ -11,6 +11,7 @@
 
 /* Unlayered on purpose — see the file's own header. */
 @import './table-chrome.css';
+@import '../app/shell.css';
 
 @theme inline {
   /* M1.x: reset the stock Tailwind palette and radii so only the DS tokens

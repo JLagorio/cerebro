@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, showDatabases, showPages } from './boot';
 
 /**
  * Calendar hours (M61.8): Week and Day draw an all-day row, then the hours,
@@ -69,6 +69,7 @@ async function seed(page: Page): Promise<void> {
 }
 
 async function openThisMonth(page: Page): Promise<void> {
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
   const tab = page.getByTestId('view-tabs').getByRole('tab', { name: 'This month' });
   await expect(tab).toBeVisible();
@@ -217,6 +218,8 @@ test('calendar hours: moves, resizes, selects a slot, cancels and edits an embed
   await expect
     .poll(() => readMockFile(page, path('standup-sync')))
     .toContain('start: 2026-07-28 11:30');
+
+  await showPages(page);
 
   const delivery = page.getByTestId('collection-node-collection').filter({ hasText: 'Delivery' });
   await delivery.getByRole('button', { name: 'Delivery', exact: true }).click();

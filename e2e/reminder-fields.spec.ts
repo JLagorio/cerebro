@@ -1,11 +1,12 @@
 import { expect, test } from '@playwright/test';
-import { boot, readMockFile, seedFileBeforeBoot } from './boot';
+import { boot, readMockFile, seedFileBeforeBoot, showDatabases } from './boot';
 
 test('a date property reminds its unfinished records and stores the type setting', async ({
   page,
 }, testInfo) => {
   await page.setViewportSize({ width: 2000, height: 1080 });
   await boot(page);
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
   await page.getByRole('button', { name: 'Due column menu' }).click();
   await page.getByRole('menuitem', { name: 'Edit property', exact: true }).click();

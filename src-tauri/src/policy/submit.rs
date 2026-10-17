@@ -548,7 +548,7 @@ mod tests {
         // All sit outside the proposal switch.
         let base = served(false);
         let table = PolicyTable::load().unwrap();
-        assert_eq!(base.len(), 35, "{base:?}");
+        assert_eq!(base.len(), 38, "{base:?}");
         assert!(base.contains("report_window_outcome"));
         assert!(base.contains(crate::assembly::prompt::SUBMIT_TOOL));
         assert!(base.is_disjoint(&expected(&table)));

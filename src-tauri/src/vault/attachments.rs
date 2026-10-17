@@ -103,6 +103,11 @@ struct Directory {
     path: PathBuf,
     file: File,
 }
+const STAGED_PREFIX: &str = ".attachment.cerebro-tmp-";
+fn staged_name(name: &str) -> bool {
+    name.strip_prefix(STAGED_PREFIX)
+        .is_some_and(|suffix| suffix.len() == 16 && suffix.bytes().all(|b| b.is_ascii_hexdigit()))
+}
 impl Directory {
     fn open(vault: &Path) -> Result<Self, String> {
         let root = std::fs::canonicalize(vault).map_err(|e| e.to_string())?;
@@ -230,7 +235,12 @@ impl Directory {
                 .open(path)
         }
     }
-    fn remove(&self, name: &str) {
+    fn remove_staged(&self, name: &str) {
+        // Even a future mistaken call cannot unlink an authored page or an
+        // attachment: only one exact hidden staging component is eligible.
+        if !staged_name(name) {
+            return;
+        }
         #[cfg(unix)]
         {
             use std::os::fd::AsRawFd;
@@ -296,10 +306,28 @@ impl Directory {
 struct Staged<'a> {
     directory: &'a Directory,
     name: String,
+    file: File,
+}
+impl<'a> Staged<'a> {
+    fn create(directory: &'a Directory, name: String) -> Result<Self, String> {
+        if !staged_name(&name) {
+            return Err("Invalid attachment staging name".into());
+        }
+        // Arm cleanup only after exclusive creation succeeds. An existing
+        // entry belongs to somebody else, even if its spelling collides.
+        let file = directory
+            .open_file(&name, true)
+            .map_err(|e| e.to_string())?;
+        Ok(Self {
+            directory,
+            name,
+            file,
+        })
+    }
 }
 impl Drop for Staged<'_> {
     fn drop(&mut self) {
-        self.directory.remove(&self.name);
+        self.directory.remove_staged(&self.name);
     }
 }
 
@@ -311,14 +339,12 @@ fn place(
     let _lock = super::write::lock_paths(vault, &[super::write::ATTACHMENTS_DIR])
         .map_err(|_| "attachments/ is not the folder the scanner skips".to_string())?;
     let directory = Directory::open(vault)?;
-    let temp = Staged {
-        directory: &directory,
-        name: format!(".attachment.cerebro-tmp-{:016x}", rand::random::<u64>()),
-    };
-    let mut file = directory
-        .open_file(&temp.name, true)
-        .map_err(|e| e.to_string())?;
-    stage(&mut file)?;
+    let mut temp = Staged::create(
+        &directory,
+        format!("{STAGED_PREFIX}{:016x}", rand::random::<u64>()),
+    )?;
+    let file = &mut temp.file;
+    stage(file)?;
     let size = file.metadata().map_err(|e| e.to_string())?.len();
     if let Some(why) = attachment_refusal(name, size) {
         return Err(why);
@@ -336,7 +362,7 @@ fn place(
             .map_err(|e| e.to_string())?;
     }
     file.sync_all().map_err(|e| e.to_string())?;
-    let digest = hash(&mut file)?;
+    let digest = hash(file)?;
     let name = attachment_name(name);
     let held_names = directory.entries()?;
     let mut candidates = held_names
@@ -456,4 +482,51 @@ pub(super) fn import_bytes(vault: &Path, name: &str, encoded: &str) -> Result<Pl
     place(vault, name, |output| {
         output.write_all(&bytes).map_err(|e| e.to_string())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn failed_staging_creation_preserves_the_existing_entry() {
+        let vault = super::super::testutil::temp_vault("attachment-staging-collision");
+        let directory = Directory::open(&vault).unwrap();
+        let name = format!("{STAGED_PREFIX}0123456789abcdef");
+        std::fs::write(directory.path.join(&name), "existing bytes").unwrap();
+        assert!(Staged::create(&directory, name.clone()).is_err());
+        assert_eq!(
+            std::fs::read_to_string(directory.path.join(name)).unwrap(),
+            "existing bytes"
+        );
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn staging_cleanup_can_remove_only_its_hidden_name() {
+        let vault = super::super::testutil::temp_vault("attachment-staging-cleanup");
+        let directory = Directory::open(&vault).unwrap();
+        super::super::testutil::write(&vault, "page.md", "# Page");
+        std::fs::write(directory.path.join("picture.png"), b"picture").unwrap();
+        for name in [
+            "../page.md",
+            "picture.png",
+            ".attachment.cerebro-tmp-page.md",
+        ] {
+            directory.remove_staged(name);
+            assert!(Staged::create(&directory, name.to_owned()).is_err());
+        }
+        let name = format!("{STAGED_PREFIX}0123456789abcdef");
+        let staged = Staged::create(&directory, name.clone()).unwrap();
+        assert!(directory.path.join(&name).exists());
+        drop(staged);
+        assert!(!directory.path.join(name).exists());
+        assert_eq!(
+            std::fs::read_to_string(vault.join("page.md")).unwrap(),
+            "# Page"
+        );
+        assert_eq!(
+            std::fs::read(directory.path.join("picture.png")).unwrap(),
+            b"picture"
+        );
+        let _ = std::fs::remove_dir_all(vault);
+    }
 }

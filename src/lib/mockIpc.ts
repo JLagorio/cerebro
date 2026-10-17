@@ -1,6 +1,15 @@
+import { MAIL, isMailPath } from '@/engine/mailPolicy';
+let seededMailGate: import('./ipc').MailGateRead | null = null;
+import LINKS from '../../shared/policy/links.v1.json';
+import { planCanvasCreate, planCanvasEdit } from '@/engine/scene/agentEdit';
 import { resetExtractions } from './mockExtract';
 export { extractDocument, seedExtractions } from './mockExtract';
-import { IMPORT_SOURCES, stampRefusal, canonicalRecordId, importPathRefusal } from '@/engine/importSources';
+import {
+  IMPORT_SOURCES,
+  stampRefusal,
+  canonicalRecordId,
+  importPathRefusal,
+} from '@/engine/importSources';
 import { notionCapture, notionRefusal, resetNotionCaptures } from './mockNotion';
 export { seedNotionCapture, beginMockNotionRun, endMockNotionRun } from './mockNotion';
 import { copyIndexOf, planImports, type ImportBatchOp } from '@/engine/importPlan';
@@ -567,6 +576,7 @@ seedFiles();
 /** Re-seed the whole mock — files and the operational fixtures — for test
  * isolation. Safe to call once the module has finished evaluating. */
 export function resetMockFs(): void {
+  seededMailGate = null;
   resetNotionCaptures();
   resetExtractions();
   stagedSheetFile = null;
@@ -700,6 +710,11 @@ export function assignProjects(entries: Entry[]): Entry[] {
 
 if (typeof window !== 'undefined') {
   (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs = files;
+  (
+    window as unknown as { __cerebroSeedFiles: (rows: Record<string, string>) => void }
+  ).__cerebroSeedFiles = (rows) => {
+    for (const [path, content] of Object.entries(rows)) files.set(path, content);
+  };
   (window as unknown as { __cerebroMockWrites: MockWrite[] }).__cerebroMockWrites = writes;
 }
 
@@ -1156,6 +1171,7 @@ export async function agentAppend(
   stamp: WriteStamp,
 ): Promise<void> {
   const expected = parseExpectHash(expectHash);
+  guardAgentMail(path);
   if (isKnowledgePath(path)) throw new Error(AGENT_USE_WRITE_CONCEPT);
   if (path.endsWith('.mmd')) {
     throw new Error(
@@ -1210,6 +1226,7 @@ export async function agentEdit(
   stamp: WriteStamp,
 ): Promise<string> {
   const expected = parseExpectHash(expectHash);
+  guardAgentMail(path);
   if (isKnowledgePath(path)) throw new Error(AGENT_USE_WRITE_CONCEPT);
   guardNoteTarget(path, MARKDOWN);
   const current = files.get(path);
@@ -1239,6 +1256,129 @@ export async function agentEdit(
   ].join('\n');
 }
 
+export async function agentCreateCanvas(
+  vault: string,
+  args: Record<string, unknown>,
+  stamp: WriteStamp,
+  options: { preview?: boolean; readScope?: string[] | null; writeScope?: string[] | null } = {},
+): Promise<{ path: string; reply: string }> {
+  if (typeof args.slug !== 'string') throw new Error('create_canvas needs a slug');
+  if (args.ops !== undefined && !Array.isArray(args.ops))
+    throw new Error('create_canvas needs `ops`, a list of operations');
+  const folder = typeof args.folder === 'string' ? args.folder : '';
+  const slug = args.slug;
+  const refuse = (words: string): never => {
+    throw new Error(`${words}\nNothing was created.`);
+  };
+  try {
+    guardAgentMail(folder);
+  } catch (error) {
+    return refuse(error instanceof Error ? error.message : String(error));
+  }
+  if (isKnowledgePath(folder)) return refuse(AGENT_USE_WRITE_CONCEPT);
+  if (!scopeAdmits(options.writeScope ?? null, folder))
+    return refuse(
+      `This run is scoped to ${options.writeScope?.join(', ') || 'nothing'} and cannot write to ${folder}.`,
+    );
+  if (slug === '' || slug === '.' || slug === '..' || /[/\\]/.test(slug))
+    return refuse(`invalid slug: ${JSON.stringify(slug)}`);
+  const proposed = `${folder === '' ? '' : `${folder}/`}${slug}.canvas`;
+  try {
+    canvasPath(proposed, true);
+  } catch (error) {
+    return refuse(error instanceof Error ? error.message : String(error));
+  }
+  const path = freeCanvasPath(proposed);
+  const result = planCanvasCreate(args.ops, {
+    boardPath: path,
+    webSchemes: LINKS.external_schemes,
+    mintId: sha256Hex,
+    targetState: (file) =>
+      !scopeAdmits(options.readScope ?? null, file)
+        ? 'unchecked'
+        : files.has(file)
+          ? 'exists'
+          : 'missing',
+  });
+  if (!result.ok) return refuse(result.reason);
+  const { content, ...report } = result.plan;
+  try {
+    // The mock door and this call run synchronously up to their resolved
+    // Promise, so the chosen name cannot change between planning and write.
+    await createCanvasFile(vault, proposed, content, options.preview ? 'preview' : 'commit', stamp);
+  } catch (error) {
+    return refuse(error instanceof Error ? error.message : String(error));
+  }
+  return { path, reply: JSON.stringify({ path, hash: sha256Hex(content), ...report }) };
+}
+
+/** One synchronous copied-board plan; no bytes or receipt appear until all ops validate. */
+export async function agentEditCanvas(
+  _vault: string,
+  path: string,
+  args: Record<string, unknown>,
+  stamp: WriteStamp,
+  options: { preview?: boolean; readScope?: string[] | null; writeScope?: string[] | null } = {},
+): Promise<string> {
+  if (!Array.isArray(args.ops)) throw new Error('edit_canvas needs `ops`, a list of operations');
+  const refuse = (words: string): never => {
+    throw new Error(
+      words.endsWith('\nNothing was written.') ? words : `${words}\nNothing was written.`,
+    );
+  };
+  let expected: string | null;
+  try {
+    expected = parseExpectHash(args.expect_hash);
+  } catch (error) {
+    return refuse(error instanceof Error ? error.message : String(error));
+  }
+  try {
+    guardAgentMail(path);
+  } catch (error) {
+    return refuse(error instanceof Error ? error.message : String(error));
+  }
+  if (isKnowledgePath(path)) refuse(AGENT_USE_WRITE_CONCEPT);
+  if (!scopeAdmits(options.writeScope ?? null, path))
+    return refuse(
+      `This run is scoped to ${options.writeScope?.join(', ') || 'nothing'} and cannot write to ${path}.`,
+    );
+  if (!scopeAdmits(options.readScope ?? null, path))
+    return refuse(
+      `This run may read only ${options.readScope?.join(', ') || 'nothing'} and cannot read ${path}.`,
+    );
+  try {
+    canvasPath(path, true);
+  } catch (error) {
+    return refuse(error instanceof Error ? error.message : String(error));
+  }
+  const current = files.get(path);
+  if (current === undefined) return refuse(`no whiteboard at ${path}`);
+  if (utf8Length(current) > CANVAS_FORMAT.limits.max_bytes)
+    return refuse(CANVAS_REFUSALS.too_large);
+  if (expected !== null && sha256Hex(current) !== expected)
+    throw new Error(staleContentMessage(path));
+  const edited = planCanvasEdit(current, sha256Hex(current), args.ops, {
+    boardPath: path,
+    webSchemes: LINKS.external_schemes,
+    mintId: sha256Hex,
+    targetState: (file) =>
+      !scopeAdmits(options.readScope ?? null, file)
+        ? 'unchecked'
+        : files.has(file)
+          ? 'exists'
+          : 'missing',
+  });
+  if (!edited.ok) return refuse(edited.reason);
+  const { content, ...report } = edited.plan;
+  const wrote = content !== current;
+  if (wrote && !options.preview) {
+    files.set(path, content);
+    touch(path);
+    logWrite('vault.write', path, stamp, null, current);
+  }
+  return JSON.stringify({ path, hash: sha256Hex(content), wrote, ...report });
+}
+
 /** The sheet door computes on a private copy and checks that the async
  * engine load did not outlive its source or mock vault. Preview never writes. */
 export async function agentEditSheet(
@@ -1258,6 +1398,7 @@ export async function agentEditSheet(
   } catch (error) {
     return refuse(error instanceof Error ? error.message : String(error));
   }
+  guardAgentMail(path);
   if (isKnowledgePath(path)) refuse(AGENT_USE_WRITE_CONCEPT);
   try {
     guardNoteTarget(path, MARKDOWN);
@@ -1338,6 +1479,7 @@ export async function agentSetFields(
   const parsed = parseSetFieldsRequest({ ...args, path });
   if ('error' in parsed) throw new Error(parsed.error);
   const expected = parseExpectHash(args.expect_hash);
+  guardAgentMail(path);
   if (isKnowledgePath(path)) throw new Error(AGENT_USE_WRITE_CONCEPT);
   if (path.endsWith('.mmd')) {
     throw new Error(`${path}: a .mmd is raw diagram source and has no frontmatter to update`);
@@ -1496,30 +1638,60 @@ export async function agentImportNotion(
     const message = notionRefusal({ reason, words });
     const target = `${reason}:${page}`;
     const holder = window as unknown as {
-      __cerebroMockRefusals?: { run: string; code: string; surface: string; target?: string; detail: string }[];
+      __cerebroMockRefusals?: {
+        run: string;
+        code: string;
+        surface: string;
+        target?: string;
+        detail: string;
+      }[];
     };
     const rows = (holder.__cerebroMockRefusals ??= []);
-    if (!rows.some((row) => row.run === run && row.code === 'import_refused' && row.target === target))
-      rows.push({ run, code: 'import_refused', surface: 'import_notion_page', target, detail: message });
+    if (
+      !rows.some((row) => row.run === run && row.code === 'import_refused' && row.target === target)
+    )
+      rows.push({
+        run,
+        code: 'import_refused',
+        surface: 'import_notion_page',
+        target,
+        detail: message,
+      });
     throw new Error(message);
   };
   if (held === undefined)
-    return refuse('capture_missing', 'This run has no matching Notion fetch. Fetch this page in this turn first.');
+    return refuse(
+      'capture_missing',
+      'This run has no matching Notion fetch. Fetch this page in this turn first.',
+    );
   if (args.body !== undefined && !held.composable)
-    return refuse('not_a_page', "A composed body is accepted only after this page's fetch was refused as truncated, narrated or unhandled_markup.");
+    return refuse(
+      'not_a_page',
+      "A composed body is accepted only after this page's fetch was refused as truncated, narrated or unhandled_markup.",
+    );
   const corpus = [...files].map(([path, content]) => ({ path, content }));
   const existing = copyIndexOf(corpus).get(JSON.stringify(['notion', page]))?.[0];
   const folder = args.folder.replace(/\/+$/, '');
   const landing = (slug: string) => `${folder === '' ? '' : `${folder}/`}${slug}.md`;
   const admits = (folders: readonly string[] | null | undefined, path: string) =>
-    folders == null || folders.some((folder) => {
+    folders == null ||
+    folders.some((folder) => {
       const normalized = folder.replace(/^(?:\.\/)+/, '').replace(/\/+$/, '');
-      return normalized === '' || normalized === '.' || path === normalized || path.startsWith(`${normalized}/`);
+      return (
+        normalized === '' ||
+        normalized === '.' ||
+        path === normalized ||
+        path.startsWith(`${normalized}/`)
+      );
     });
   const check = (path: string) => {
-    if (!admits(scope.read, path)) throw new Error('This run cannot import that page within its read reach.');
+    if (!admits(scope.read, path))
+      throw new Error('This run cannot import that page within its read reach.');
     if (!admits(scope.write, path))
-      throw new Error(`This run is scoped to ${scope.write?.map((folder) => `${folder}/`).join(', ') || 'no folders'} and cannot write to ${path}.`);
+      throw new Error(
+        `This run is scoped to ${scope.write?.map((folder) => `${folder}/`).join(', ') || 'no folders'} and cannot write to ${path}.`,
+      );
+    guardAgentMail(path);
     if (isKnowledgePath(path)) throw new Error(AGENT_USE_WRITE_CONCEPT);
     const invalid = importPathRefusal(path);
     if (invalid !== null) throw new Error(invalid);
@@ -1541,39 +1713,71 @@ export async function agentImportNotion(
     markdown = captured.result.markdown;
     counts = captured.result.counts;
   }
-  let slug = captured.title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '');
+  let slug = captured.title
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-|-$/g, '');
   while (new TextEncoder().encode(slug).length > 120) slug = [...slug].slice(0, -1).join('');
   slug ||= 'notion-page';
   const path = existing?.path ?? landing(slug);
   check(path);
   const plan = planImports(
-    [{ index: 0, op: { op: 'import', system: 'notion', recordId: page, url: `https://www.notion.so/${page}`, path, content: markdown } }],
-    corpus, [...files.keys()], [],
-    { now: new Date().toISOString(), actor: stamp.actor, ...(args.body === undefined ? {} : { method: 'agent_composed' }) },
+    [
+      {
+        index: 0,
+        op: {
+          op: 'import',
+          system: 'notion',
+          recordId: page,
+          url: `https://www.notion.so/${page}`,
+          path,
+          content: markdown,
+        },
+      },
+    ],
+    corpus,
+    [...files.keys()],
+    [],
+    {
+      now: new Date().toISOString(),
+      actor: stamp.actor,
+      ...(args.body === undefined ? {} : { method: 'agent_composed' }),
+    },
   );
   const result = plan.imports[0];
   for (const { op } of plan.writes) {
     check(op.path);
     const before = files.get(op.path);
-    if (op.op === 'create' && before !== undefined) throw new Error(`${op.path} appeared after the import was planned; nothing was written.`);
+    if (op.op === 'create' && before !== undefined)
+      throw new Error(`${op.path} appeared after the import was planned; nothing was written.`);
     if (op.op === 'replace_file' && (before === undefined || sha256Hex(before) !== op.expectHash))
       throw new Error(staleContentMessage(op.path));
-    const governed = governedTypeRefusal(declaredType(op.path, before ?? '')) ?? governedTypeRefusal(declaredType(op.path, op.content));
+    const governed =
+      governedTypeRefusal(declaredType(op.path, before ?? '')) ??
+      governedTypeRefusal(declaredType(op.path, op.content));
     if (governed !== null) throw new Error(governed);
     files.set(op.path, op.content);
     touch(op.path);
-    logWrite(before === undefined ? 'vault.create' : 'vault.write', op.path, stamp, null, before ?? null);
+    logWrite(
+      before === undefined ? 'vault.create' : 'vault.write',
+      op.path,
+      stamp,
+      null,
+      before ?? null,
+    );
   }
-  let reply = result.outcome === 'kept'
-    ? `${result.path} was edited since its import, so it was kept and nothing was written.`
-    : result.outcome === 'unchanged'
-      ? `${result.path} already holds this page, unchanged since its import.`
-      : result.outcome === 'replaced'
-        ? `Updated ${result.path} from Notion; nobody had edited it since its import.`
-        : `Imported “${captured.title}” from Notion to ${result.path}.`;
+  let reply =
+    result.outcome === 'kept'
+      ? `${result.path} was edited since its import, so it was kept and nothing was written.`
+      : result.outcome === 'unchanged'
+        ? `${result.path} already holds this page, unchanged since its import.`
+        : result.outcome === 'replaced'
+          ? `Updated ${result.path} from Notion; nobody had edited it since its import.`
+          : `Imported “${captured.title}” from Notion to ${result.path}.`;
   if (result.outcome !== 'kept') {
     if (counts.linked) reply += ` Linked ${counts.linked} pages already imported.`;
-    if (counts.media) reply += ` ${counts.media} images and files still point at Notion's storage, whose links expire.`;
+    if (counts.media)
+      reply += ` ${counts.media} images and files still point at Notion's storage, whose links expire.`;
     if (counts.databases) reply += ` Dropped ${counts.databases} database blocks.`;
   }
   return { path: result.path, reply, wrote: plan.writes.length > 0 };
@@ -1588,6 +1792,7 @@ export async function agentCreate(
   const { folder, slug, body } = args;
   const refuse = ifExists === 'refuse';
   if (ifExists !== null && ifExists !== 'suffix' && !refuse) throw new Error(IF_EXISTS_VALUES);
+  guardAgentMail(folder);
   if (isKnowledgePath(folder)) throw new Error(AGENT_USE_WRITE_CONCEPT);
   if (slug === '' || slug === '.' || slug === '..' || /[/\\]/.test(slug)) {
     throw new Error(`invalid slug: ${JSON.stringify(slug)}`);
@@ -1625,6 +1830,7 @@ export async function agentUpdateFrontmatter(
   stamp: WriteStamp,
 ): Promise<void> {
   const expected = parseExpectHash(expectHash);
+  guardAgentMail(path);
   if (isKnowledgePath(path)) throw new Error(AGENT_USE_WRITE_CONCEPT);
   guardNoteTarget(path, MARKDOWN);
   const current = mustGet(path);
@@ -4243,6 +4449,12 @@ async function agentDoor(
       const edits = Array.isArray(args.edits) ? (args.edits as QuoteEdit[]) : [];
       return { path, reply: await agentEdit(vault, path, edits, expectHash, stamp) };
     }
+    case 'edit_canvas': {
+      const path = argText(args, 'path');
+      return { path, reply: await agentEditCanvas(vault, path, args, stamp) };
+    }
+    case 'create_canvas':
+      return agentCreateCanvas(vault, args, stamp);
     case 'edit_sheet': {
       const path = argText(args, 'path');
       return { path, reply: await agentEditSheet(vault, path, args, stamp) };
@@ -4266,11 +4478,25 @@ async function previewAgentWrite(
   tool: string,
   args: Record<string, unknown>,
 ): Promise<{ target: string; hash: string | null } | { refused: string }> {
-  if (tool === 'edit_sheet') {
+  if (tool === 'create_canvas') {
+    try {
+      const { path } = await agentCreateCanvas(vault, args, PREVIEW_STAMP, { preview: true });
+      return { target: path, hash: null };
+    } catch (error) {
+      return { refused: error instanceof Error ? error.message : String(error) };
+    }
+  }
+  if (tool === 'edit_sheet' || tool === 'edit_canvas') {
     const path = argText(args, 'path');
     const before = files.get(path);
     try {
-      await agentEditSheet(vault, path, args, PREVIEW_STAMP, { preview: true });
+      await (tool === 'edit_canvas' ? agentEditCanvas : agentEditSheet)(
+        vault,
+        path,
+        args,
+        PREVIEW_STAMP,
+        { preview: true },
+      );
       return { target: path, hash: before === undefined ? null : sha256Hex(before) };
     } catch (error) {
       return { refused: error instanceof Error ? error.message : String(error) };
@@ -7494,17 +7720,22 @@ export async function createCanvasFile(
   path: string,
   content: string,
   mode: 'preview' | 'commit',
+  stamp?: WriteStamp,
 ): Promise<{ path: string; hash: string | null }> {
   canvasPath(path, true);
   if (!readCanvas(content).ok) refuseCanvas('invalid_content');
-  let target = path;
-  for (let n = 2; files.has(target) || folders.has(target); n += 1)
-    target = `${path.slice(0, -7)}-${n}.canvas`;
+  const target = freeCanvasPath(path);
   if (mode === 'preview') return { path: target, hash: null };
   files.set(target, content);
   touch(target);
-  logWrite('vault.create', target);
+  logWrite('vault.create', target, stamp);
   return { path: target, hash: sha256Hex(content) };
+}
+function freeCanvasPath(path: string): string {
+  let target = path;
+  for (let n = 2; files.has(target) || folders.has(target); n += 1)
+    target = `${path.slice(0, -7)}-${n}.canvas`;
+  return target;
 }
 
 export async function sheetRestructure(
@@ -7567,11 +7798,74 @@ if (typeof window !== 'undefined')
   ).__cerebroStageSheetFile = stageSheetFile;
 
 function sheetExports(): { defaultName: string; page: string }[] {
-  const host = window as unknown as { __cerebroMockSheetExports?: { defaultName: string; page: string }[] };
-  return host.__cerebroMockSheetExports ??= [];
+  const host = window as unknown as {
+    __cerebroMockSheetExports?: { defaultName: string; page: string }[];
+  };
+  return (host.__cerebroMockSheetExports ??= []);
 }
 /** The browser records export inputs; only native IronCalc encodes Excel bytes. */
 export async function exportSheetXlsx(defaultName: string, page: string): Promise<string | null> {
   sheetExports().push({ defaultName, page });
   return defaultName;
+}
+
+/** Browser counterpart of the native scoped gate, with an explicit fixture seam. */
+export function __seedMailGate(value: import('./ipc').MailGateRead | null): void {
+  seededMailGate = value;
+}
+export async function mailGateRead(_vault: string): Promise<import('./ipc').MailGateRead> {
+  return (
+    seededMailGate ?? {
+      state: MAIL.gate.open ? 'other_vault' : 'closed',
+      kinds: [...MAIL.gate.kinds],
+    }
+  );
+}
+function guardAgentMail(path: string): void {
+  if (isMailPath(path))
+    throw new Error(
+      `${MAIL.folder}/ holds mail digests, which only cache_source writes. ${path} was not changed.`,
+    );
+}
+
+// Operational dismissals belong to the vault on this Mac, never its fake file map.
+const mailDismissalBooks = new Map<string, import('@/engine/unfiled').MailDismissal[]>();
+export function __seedMailDismissals(
+  vault: string,
+  rows: import('@/engine/unfiled').MailDismissal[],
+): void {
+  mailDismissalBooks.set(
+    vault,
+    rows.map((row) => ({ ...row })),
+  );
+}
+export async function mailDismissalsRead(
+  vault: string,
+): Promise<import('@/engine/unfiled').MailDismissal[]> {
+  const { dismissalOrder } = await import('@/engine/unfiled');
+  return (mailDismissalBooks.get(vault) ?? []).map((row) => ({ ...row })).sort(dismissalOrder);
+}
+export async function mailDismiss(vault: string, kind: string, value: string): Promise<void> {
+  const { dismissalValue } = await import('@/engine/unfiled');
+  const read = dismissalValue(kind, value);
+  if (!read.ok) throw new Error(read.error);
+  const rows = mailDismissalBooks.get(vault) ?? [];
+  if (!rows.some((row) => row.kind === kind && row.value === read.value))
+    rows.push({
+      kind: kind as 'address' | 'domain',
+      value: read.value,
+      dismissedAt: new Date().toISOString(),
+    });
+  mailDismissalBooks.set(vault, rows);
+}
+export async function mailUndismiss(vault: string, kind: string, value: string): Promise<void> {
+  const { dismissalValue } = await import('@/engine/unfiled');
+  const read = dismissalValue(kind, value);
+  if (!read.ok) throw new Error(read.error);
+  mailDismissalBooks.set(
+    vault,
+    (mailDismissalBooks.get(vault) ?? []).filter(
+      (row) => row.kind !== kind || row.value !== read.value,
+    ),
+  );
 }

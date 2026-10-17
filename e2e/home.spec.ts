@@ -2,6 +2,34 @@ import { expect, test } from '@playwright/test';
 import { boot, seedBeforeBoot, readMockFile } from './boot';
 import type { FleetRun } from '../src/lib/mockIpc';
 
+test('Home opens a centered conversation and preserves its draft when docked', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await boot(page);
+  await page.getByTestId('app-rail').getByRole('button', { name: 'Home', exact: true }).click();
+  const entry = page.getByRole('button', { name: /What would you like to work on/ });
+  const entryBox = await entry.boundingBox();
+  expect(entryBox!.width).toBeGreaterThan(600);
+  await entry.click();
+  const chat = page.getByTestId('ai-panel');
+  await expect(chat).toHaveAttribute('data-presentation', 'canvas');
+  const composer = page.getByTestId('chat-composer');
+  const chatBox = await chat.boundingBox();
+  const composerBox = await composer.boundingBox();
+  expect(composerBox!.width).toBeLessThanOrEqual(760);
+  expect(
+    Math.abs(composerBox!.x + composerBox!.width / 2 - (chatBox!.x + chatBox!.width / 2)),
+  ).toBeLessThan(2);
+  const input = chat.getByRole('textbox');
+  await input.fill('Keep this thought while I look at my workspace');
+  await page.getByRole('button', { name: 'Dock conversation' }).click();
+  await expect(chat).toHaveAttribute('data-presentation', 'panel');
+  await expect(input).toHaveValue('Keep this thought while I look at my workspace');
+  await expect(entry).toBeVisible();
+  await page.getByRole('button', { name: 'Expand conversation' }).click();
+  await expect(input).toHaveValue('Keep this thought while I look at my workspace');
+  await expect(chat).toHaveCount(1);
+});
+
 const finishedRun = (id: string, actor: string, ended: string): FleetRun => ({
   run_id: id,
   actor,
@@ -74,7 +102,7 @@ test('Home groups proposals by when they arrived, leads with deadlines and opens
     ],
   });
   await boot(page);
-  const home = page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home', exact: true });
+  const home = page.getByTestId('app-rail').getByRole('button', { name: 'Home', exact: true });
   await home.click();
   const work = page.locator('[data-testid="home-lane"][data-lane="mywork"]');
   await expect(
@@ -91,7 +119,7 @@ test('Home groups proposals by when they arrived, leads with deadlines and opens
   ).toHaveCount(1);
   await expect(proposals.getByRole('heading', { name: 'Yesterday', exact: true })).toBeVisible();
   await expect(proposals.getByRole('button', { name: 'Approve', exact: true })).toHaveCount(0);
-  await expect(home).toHaveText('Home');
+  await expect(home).toHaveAccessibleName('Home');
   const box = await proposals.boundingBox();
   expect(box!.width).toBeGreaterThan(600);
   await page.screenshot({ path: '/private/tmp/cerebro-home.png', animations: 'disabled' });
@@ -105,7 +133,7 @@ test('a failed waiting lane leaves other lanes standing and offers no decision',
   await seedBeforeBoot(page, '__cerebroFailNext', 'review_queue');
   await seedBeforeBoot(page, '__cerebroFailNext', 'pending_writes');
   await boot(page);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home', exact: true }).click();
+  await page.getByTestId('app-rail').getByRole('button', { name: 'Home', exact: true }).click();
   await expect(
     page.locator('[data-lane="proposals"]').getByTestId('section-unavailable'),
   ).toBeVisible();
@@ -117,7 +145,7 @@ test('empty proposal and disabled capture lanes leave no boxes behind', async ({
   await seedBeforeBoot(page, '__cerebroSeedReview', { cards: [] });
   await page.addInitScript(() => localStorage.setItem('cerebro.inboxEnabled', 'false'));
   await boot(page);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home', exact: true }).click();
+  await page.getByTestId('app-rail').getByRole('button', { name: 'Home', exact: true }).click();
   await expect(page.locator('[data-lane="mywork"]')).toBeVisible();
   await expect(page.locator('[data-lane="proposals"]')).toHaveCount(0);
   await expect(page.locator('[data-lane="captures"]')).toHaveCount(0);
@@ -139,7 +167,7 @@ test('a page saved five times shows once in recent edits and opens its current p
     await page.keyboard.type(` Home edit ${n}.`);
     await expect.poll(() => readMockFile(page, path)).toContain(`Home edit ${n}.`);
   }
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home', exact: true }).click();
+  await page.getByTestId('app-rail').getByRole('button', { name: 'Home', exact: true }).click();
   const lane = page.locator('[data-lane="edits"]');
   const row = lane.getByTestId('home-row');
   await expect(row).toHaveCount(1);
@@ -168,7 +196,7 @@ test('finished runs name the first-look window, Done hides only the seen revisio
     finishedRun('construct', 'agent:m26-synthesis', '2026-07-28T11:40:00Z'),
   ]);
   await boot(page);
-  const home = page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home', exact: true });
+  const home = page.getByTestId('app-rail').getByRole('button', { name: 'Home', exact: true });
   await home.click();
   const lane = page.locator('[data-lane="runs"]');
   const scout = lane.locator('[data-subject="process:release-scout"]');
@@ -207,7 +235,7 @@ test('after each actor has a mark, newer runs say since you looked', async ({ pa
     finishedRun('review-old', 'process:weekly-review', '2026-07-26T12:00:00Z'),
   ]);
   await boot(page);
-  const home = page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home', exact: true });
+  const home = page.getByTestId('app-rail').getByRole('button', { name: 'Home', exact: true });
   await home.click();
   const lane = page.locator('[data-lane="runs"]');
   for (const actor of ['process:release-scout', 'process:weekly-review']) {
@@ -243,7 +271,7 @@ test('Knowledge Done has Undo, while a missed reminder names its closed window',
     },
   ]);
   await boot(page);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home', exact: true }).click();
+  await page.getByTestId('app-rail').getByRole('button', { name: 'Home', exact: true }).click();
   const changes = page.locator('[data-lane="changes"]');
   await expect(changes).toContainText('since the last convergence run');
   await changes

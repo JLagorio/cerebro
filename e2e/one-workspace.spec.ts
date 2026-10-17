@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { boot, openAgents, openKnowledgeTab } from './boot';
+import { boot, openAgents, openKnowledgeTab, openAssistantPanel } from './boot';
 
 /**
  * M50 — one workspace. The owner, 2026-09-28: the agents, Knowledge, the docs
@@ -56,7 +56,7 @@ test('one workspace: the assistant follows the page — its knowledge and its qu
 }) => {
   await boot(page);
   await openPhoenixPage(page);
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   const panel = page.getByTestId('ai-panel');
 
   // M50.4 — the questions this page's own surfaces ask, not the Inbox's —
@@ -86,7 +86,7 @@ test('one workspace: the assistant counts the Knowledge that stands, as the page
   await expect(strip).toHaveCount(2);
   await expect(strip.filter({ hasText: 'The offline window' })).toHaveCount(0);
 
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   const panel = page.getByTestId('ai-panel');
   const chip = panel.getByTestId('context-knowledge');
   await expect(chip).toContainText(`Knowledge · ${await strip.count()}`);

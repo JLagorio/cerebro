@@ -544,3 +544,21 @@ mod tests {
         assert_eq!(p.read_part("a", 5).unwrap(), b"12345");
     }
 }
+#[test]
+fn read_entry_checks_the_entry_count_before_it_reads() {
+    let mut bytes = test_package(&[("thumbnail.png", b"data")]);
+    let at = bytes.windows(4).position(|s| s == b"PK\x05\x06").unwrap();
+    bytes[at + 10..at + 12].copy_from_slice(&2_u16.to_le_bytes());
+    assert!(matches!(
+        read_entry(bytes, "thumbnail.png", 8),
+        Err(Failure::Corrupt { .. })
+    ));
+}
+#[test]
+fn read_entry_stops_at_its_cap_however_the_header_lies() {
+    let bytes = test_package(&[("thumbnail.png", b"123456789")]);
+    assert!(matches!(
+        read_entry(bytes, "thumbnail.png", 8),
+        Err(Failure::TooLarge { .. })
+    ));
+}

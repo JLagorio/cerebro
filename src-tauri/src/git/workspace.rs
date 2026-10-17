@@ -90,7 +90,10 @@ fn not_a_repo(vault_root: &str, failure: Option<String>) -> GitWorkspaceInfo {
 
 pub fn resolve(vault_root: impl AsRef<Path>) -> GitWorkspaceInfo {
     let vault = vault_root.as_ref();
-    let vault_str = vault.to_string_lossy().to_string();
+    let Some(vault_str) = vault.to_str() else {
+        return not_a_repo("", Some("the vault path is not valid UTF-8".into()));
+    };
+    let vault_str = vault_str.to_owned();
 
     if !vault.is_dir() {
         return not_a_repo(&vault_str, Some("vault directory does not exist".into()));
@@ -113,6 +116,13 @@ pub fn resolve(vault_root: impl AsRef<Path>) -> GitWorkspaceInfo {
         .canonicalize()
         .unwrap_or_else(|_| PathBuf::from(&toplevel));
 
+    if canonical_vault.to_str().is_none() || canonical_root.to_str().is_none() {
+        return not_a_repo(
+            &vault_str,
+            Some("the repository path is not valid UTF-8".into()),
+        );
+    }
+
     if canonical_vault == canonical_root {
         return GitWorkspaceInfo {
             vault_root: vault_str,
@@ -125,7 +135,13 @@ pub fn resolve(vault_root: impl AsRef<Path>) -> GitWorkspaceInfo {
 
     match canonical_vault.strip_prefix(&canonical_root) {
         Ok(rel) => {
-            let prefix = rel.to_string_lossy().replace('\\', "/");
+            // Join actual components: on Unix a backslash is part of the
+            // folder name, never a separator pointing at another sibling.
+            let prefix = rel
+                .iter()
+                .map(|part| part.to_str().expect("canonical UTF-8 path"))
+                .collect::<Vec<_>>()
+                .join("/");
             GitWorkspaceInfo {
                 vault_root: vault_str,
                 git_root: Some(canonical_root.to_string_lossy().to_string()),
@@ -151,6 +167,50 @@ pub fn resolve(vault_root: impl AsRef<Path>) -> GitWorkspaceInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_backslash_in_a_vault_name_never_selects_a_sibling_folder() {
+        let dir = super::super::commit::tests::scratch_repo_dir("workspace-backslash");
+        std::fs::create_dir_all(dir.join("vault\\notes")).unwrap();
+        std::fs::create_dir_all(dir.join("vault/notes")).unwrap();
+        command::run_str(&dir, &["init"]).unwrap();
+        super::super::commit::tests::assert_isolated(&dir);
+        let ws = resolve(dir.join("vault\\notes"));
+        assert_eq!(ws.vault_pathspec.as_deref(), Some("vault\\notes"));
+        std::fs::write(dir.join("vault\\notes/a.md"), "vault").unwrap();
+        std::fs::write(dir.join("vault/notes/outside.md"), "outside").unwrap();
+        command::run_str(&dir, &["add", "--", "vault/notes/outside.md"]).unwrap();
+        super::super::commit::commit_all(&ws, "literal directory")
+            .unwrap()
+            .unwrap();
+        assert!(command::succeeds(
+            &dir,
+            &["cat-file", "-e", "HEAD:vault\\notes/a.md"]
+        ));
+        assert!(!command::succeeds(
+            &dir,
+            &["cat-file", "-e", "HEAD:vault/notes/outside.md"]
+        ));
+        assert_eq!(
+            command::run_str(&dir, &["show", ":vault/notes/outside.md"]).unwrap(),
+            "outside"
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_non_utf8_vault_path_refuses_before_git_resolution() {
+        use std::os::unix::ffi::OsStringExt;
+        let path = PathBuf::from(std::ffi::OsString::from_vec(b"vault-\xff".to_vec()));
+        let ws = resolve(path);
+        assert!(!ws.is_repo());
+        assert_eq!(
+            ws.resolution_failure.as_deref(),
+            Some("the vault path is not valid UTF-8")
+        );
+    }
 
     #[test]
     fn missing_directory_is_not_a_repo() {

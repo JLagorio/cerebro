@@ -1,5 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, openAgents } from './boot';
+import {
+  chooseSettingsSection,
+  boot,
+  openAgents,
+  openAssistantPanel,
+  openDestination,
+} from './boot';
 
 /**
  * Shell access is off, ask or on (M57.2), and the tool-approval table
@@ -22,7 +28,7 @@ async function bootUnder(page: Page, ceiling: string, options: { autoLearn?: boo
 }
 
 async function openPanel(page: Page) {
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   const panel = page.getByTestId('ai-panel');
   await expect(panel).toBeVisible();
   return panel;
@@ -166,7 +172,8 @@ test('tool approval: Settings counts the person’s own rules and hook events', 
     };
   });
   await boot(page);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Settings' }).click();
+  await openDestination(page, 'Settings');
+  await chooseSettingsSection(page, 'Assistant');
   const rules = page.getByTestId('shell-user-rules');
   await expect(rules).toContainText('201 allow rules');
   await expect(rules).toContainText('hooks on 7 events');
@@ -184,7 +191,8 @@ test('tool approval: Web access gates WebFetch, and the switch survives a reload
     timeout: 10_000,
   });
 
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Settings' }).click();
+  await openDestination(page, 'Settings');
+  await chooseSettingsSection(page, 'Assistant');
   const web = page.getByRole('switch', { name: 'Web access' });
   await expect(web).not.toBeChecked();
   // The checkbox itself is 0×0 by design; the label is what a user clicks.
@@ -192,7 +200,8 @@ test('tool approval: Web access gates WebFetch, and the switch survives a reload
   await expect(web).toBeChecked();
 
   await page.reload();
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Settings' }).click();
+  await openDestination(page, 'Settings');
+  await chooseSettingsSection(page, 'Assistant');
   await expect(page.getByRole('switch', { name: 'Web access' })).toBeChecked();
 
   // The panel was open before the reload, and it remembers that.

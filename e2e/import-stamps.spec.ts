@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile, seedFileBeforeBoot } from './boot';
+import { boot, readMockFile, seedFileBeforeBoot, openAssistantPanel } from './boot';
 
 const PATH = 'records/issues/fix-login.md';
 const PREFIX =
@@ -30,7 +30,7 @@ test('an imported page names its source and agent writes preserve its stamps', a
     'Imported from Linear · 2026-10-15',
   );
   await expect(doc.getByText('import_hash', { exact: true })).toHaveCount(0);
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   await ask(
     page,
     `set import_hash to "x" on ${PATH}`,

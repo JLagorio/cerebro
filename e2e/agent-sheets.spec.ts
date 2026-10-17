@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile, seedFileBeforeBoot } from './boot';
+import { boot, readMockFile, seedFileBeforeBoot, openAssistantPanel } from './boot';
 
 const PATH = 'notes/budget.md';
 const SOURCE =
@@ -13,7 +13,7 @@ async function openBudget(page: Page) {
   await page.getByTestId('quick-open-input').fill('Budget');
   await page.getByTestId('quick-open-result').filter({ hasText: 'Budget' }).first().click();
   await expect(page.getByTestId('markdown-editor').getByTestId('sheet-block')).toBeVisible();
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
 }
 async function ask(page: Page, args: unknown, reply: string) {
   const panel = page.getByTestId('ai-panel');

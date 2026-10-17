@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { boot } from './boot';
+import { boot, openDestination } from './boot';
 
 test('j enters Home, e marks a run done, and Undo returns the exact row', async ({
   page,
 }, testInfo) => {
   await boot(page);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home', exact: true }).click();
+  await openDestination(page, 'Home');
   await expect(page.getByTestId('home-row').first()).toBeVisible();
   await page.evaluate(() => (document.activeElement as HTMLElement)?.blur());
   await page.keyboard.press('j');

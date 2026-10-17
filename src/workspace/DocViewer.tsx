@@ -1,9 +1,11 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import Markdown from 'react-markdown';
+import Markdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useTheme } from '@/hooks/useTheme';
 import { useRootsStore } from '@/stores/rootsStore';
 import { classifyHref, resolveRelative, resolveImagePath } from './docLinks';
+import { imageSource } from '@/engine/imageSource';
+import { RemoteImage } from '@/components/RemoteImage';
 import { FileImage } from '@/components/FileImage';
 import { useGroupId } from './groupContext';
 import { highlight } from './highlighter';
@@ -68,6 +70,7 @@ export function DocViewer({
       >
         <Markdown
           remarkPlugins={[remarkGfm]}
+          urlTransform={(url, key) => (key === 'src' ? url : defaultUrlTransform(url))}
           components={{
             a({ href, children, ...rest }) {
               const target = href ?? '';
@@ -105,6 +108,8 @@ export function DocViewer({
             },
             img({ src, alt }) {
               const source = typeof src === 'string' ? src : '';
+              if (imageSource(source) !== 'vault')
+                return <RemoteImage src={source} alt={alt} className="max-w-full" />;
               const imagePath = resolveImagePath(path, source);
               if (imagePath === null) return <span>Image unavailable: {alt || source}</span>;
               return (

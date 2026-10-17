@@ -607,7 +607,7 @@ pub(crate) fn rewrite_note_in<D: Door>(
 
 /// `rewrite_note_in`, and whether the bytes changed. With `keep_identical`
 /// false, as every other writer asks, identical bytes are written and
-/// recorded like any others; `set_note_fields` and `edit_sheet_page` pass true, so a
+/// recorded like any others; `set_note_fields`, `edit_sheet_page` and `edit_canvas_file` pass true, so a
 /// plan that changes nothing writes nothing: no temp file, no rename, no
 /// `vault_writes` row.
 #[expect(
@@ -1674,6 +1674,54 @@ pub fn read_canvas_hashed(
     Ok(NoteSource { content, hash })
 }
 
+/// One agent edit, reported from the copy planned under the same path lock.
+#[derive(Debug)]
+pub struct EditedCanvas {
+    pub landing: Landing,
+    pub wrote: bool,
+    pub ops: Vec<String>,
+    pub created: Vec<crate::canvas::edit::Created>,
+    pub warnings: Vec<String>,
+}
+/// Validate the whole board batch before one write. An identical plan and a
+/// preview create no receipt row; a stale expectation never runs the planner.
+pub fn edit_canvas_file(
+    vault: &Path,
+    rel: &str,
+    plan: impl FnOnce(&str, &str) -> Result<crate::canvas::edit::Plan, String>,
+    expect: Option<&str>,
+    mode: WriteMode,
+    by: &WriteReceipt<Agent>,
+) -> Result<EditedCanvas, NoteWriteError> {
+    let target = canvas_target(vault, rel, true).map_err(|error| error.message)?;
+    if !target.is_file() {
+        return Err(format!("no whiteboard at {rel}").into());
+    }
+    let mut report = None;
+    let (landing, wrote) = rewrite_note_outcome(
+        vault,
+        rel,
+        CANVAS,
+        expect,
+        mode,
+        true,
+        |current| {
+            let planned = plan(current, &crate::ledger::sha256_hex(current.as_bytes()))?;
+            report = Some((planned.ops, planned.created, planned.warnings));
+            Ok(planned.content)
+        },
+        by,
+    )?;
+    let (ops, created, warnings) = report.expect("successful planner reports");
+    Ok(EditedCanvas {
+        landing,
+        wrote,
+        ops,
+        created,
+        warnings,
+    })
+}
+
 /// A person's serial autosave. Current bytes are judged under the path lock;
 /// a missing or unreadable board is never repaired by overwriting it.
 pub fn save_canvas(
@@ -1719,9 +1767,24 @@ pub fn create_canvas<D: CreatesNotes>(
 ) -> Result<Landing, CanvasRefusal> {
     canvas_target(vault, rel, true)?;
     crate::canvas::read::read(content).map_err(|_| CanvasRefusal::new("invalid_content"))?;
+    create_canvas_planned(vault, rel, mode, by, |_| Ok((content.to_string(), ())))
+        .map(|(landing, ())| landing)
+        .map_err(|_| CanvasRefusal::new("not_a_board_path"))
+}
+
+/// Both creation doors choose and lock the actual name before producing its
+/// bytes. The agent's self-pointer check therefore sees a raced suffix too.
+fn create_canvas_planned<D: CreatesNotes, T>(
+    vault: &Path,
+    rel: &str,
+    mode: WriteMode,
+    by: &WriteReceipt<D>,
+    content: impl FnOnce(&str) -> Result<(String, T), String>,
+) -> Result<(Landing, T), String> {
+    canvas_target(vault, rel, true).map_err(|error| error.message)?;
     let stem = rel
         .strip_suffix(".canvas")
-        .ok_or_else(|| CanvasRefusal::new("not_a_board_path"))?;
+        .ok_or_else(|| CanvasRefusal::new("not_a_board_path").message)?;
     let candidates = (1_u64..).map(|index| {
         if index == 1 {
             rel.to_string()
@@ -1729,24 +1792,91 @@ pub fn create_canvas<D: CreatesNotes>(
             format!("{stem}-{index}.canvas")
         }
     });
+    let mut result = None;
     let path = claim_free_name(
         vault,
         candidates,
-        |candidate| note_join(vault, candidate, CANVAS),
+        |candidate| canvas_target(vault, candidate, true).map_err(|error| error.message),
         |lock, path, target| {
+            let (bytes, report) = content(path)?;
+            crate::canvas::read::read(&bytes)
+                .map_err(|_| CanvasRefusal::new("invalid_content").message)?;
             if mode == WriteMode::Commit {
-                write_file(lock, target, content)?;
-                shadow_write(vault, path, content, "vault.create", by);
+                write_file(lock, target, &bytes)?;
+                shadow_write(vault, path, &bytes, "vault.create", by);
             }
+            result = Some((crate::ledger::sha256_hex(bytes.as_bytes()), report));
             Ok(())
         },
-    )
-    .map_err(|_| CanvasRefusal::new("not_a_board_path"))?;
-    Ok(Landing {
-        path,
-        before: None,
-        after: crate::ledger::sha256_hex(content.as_bytes()),
+    )?;
+    let (after, report) = result.expect("a claimed name has content");
+    Ok((
+        Landing {
+            path,
+            before: None,
+            after,
+        },
+        report,
+    ))
+}
+
+/// Fill a new board under its chosen name's lock, then record one create.
+pub fn create_canvas_batch(
+    vault: &Path,
+    folder: &str,
+    slug: &str,
+    plan: impl FnOnce(&str) -> Result<crate::canvas::edit::Plan, String>,
+    mode: WriteMode,
+    by: &WriteReceipt<Agent>,
+) -> Result<EditedCanvas, String> {
+    if !folder.is_empty() {
+        resolve(vault, folder).map_err(String::from)?;
+    }
+    safe_component("slug", slug)?;
+    let rel = planned_canvas_path(folder, slug).expect("validated slug");
+    let (landing, (ops, created, warnings)) =
+        create_canvas_planned(vault, &rel, mode, by, |path| {
+            let planned = plan(path)?;
+            Ok((
+                planned.content,
+                (planned.ops, planned.created, planned.warnings),
+            ))
+        })?;
+    Ok(EditedCanvas {
+        landing,
+        wrote: true,
+        ops,
+        created,
+        warnings,
     })
+}
+
+pub(crate) fn planned_canvas_path(folder: &str, slug: &str) -> Option<String> {
+    safe_component("slug", slug).ok()?;
+    Some(if folder.is_empty() {
+        format!("{slug}.canvas")
+    } else {
+        format!("{folder}/{slug}.canvas")
+    })
+}
+/// The corpus checks the same actual candidate the create door would choose;
+/// the writer repeats this judgement when it holds that candidate's lock.
+pub(crate) fn new_canvas_refusal(vault: &Path, folder: &str, slug: &str) -> Option<String> {
+    let rel = planned_canvas_path(folder, slug)?;
+    if !folder.is_empty() && resolve(vault, folder).is_err() {
+        return None;
+    }
+    let stem = rel.strip_suffix(".canvas")?;
+    let candidate = (1_u64..)
+        .map(|n| {
+            if n == 1 {
+                rel.clone()
+            } else {
+                format!("{stem}-{n}.canvas")
+            }
+        })
+        .find(|path| !vault.join(path).exists())?;
+    canvas_target_refusal(vault, &candidate)
 }
 
 /// Read the whole markdown file, including its frontmatter and BOM, once.
@@ -2265,22 +2395,120 @@ pub fn write_concept(
     crate::ledger::concepts::write_concept(vault, rel, frontmatter, body, by)
 }
 
-/// The exact-path writer behind `write_source`: the bytes it wrote, and
-/// whether the file existed under its lock.
-fn concept_write(
+/// A private mail projection must stay in its private folder, including its
+/// resolved landing when a parent is an alias.
+fn source_mail_boundary(
     vault: &Path,
     rel: &str,
     frontmatter: &serde_json::Map<String, serde_json::Value>,
-    body: &str,
-) -> Result<(String, bool), String> {
-    // A cached source is a note like any other (PLATFORM-API-1), and the
-    // frontend and `cache_source` find one by SCANNING, for its path or its
-    // `source_id` — a copy written where the scan cannot see it reads as never
-    // fetched, forever.
-    let target = note_join(vault, rel, MARKDOWN)?;
-    if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("{rel}: {e}"))?;
+) -> Result<(), String> {
+    let landing = resolve(vault, rel).map_err(String::from)?;
+    let asked_mail = crate::mail::is_mail_path(rel);
+    let landed_mail = crate::mail::is_mail_path(&slashed(&landing.landing));
+    if asked_mail != landed_mail {
+        return Err(
+            "A mail cache cannot cross its private folder through a symlink. Nothing was written."
+                .into(),
+        );
     }
+    if asked_mail {
+        let policy = crate::policy::mail::table();
+        let kind = frontmatter
+            .get("source_kind")
+            .and_then(serde_json::Value::as_str);
+        if kind != Some(&policy.kinds.thread) && kind != Some(&policy.kinds.text) {
+            return Err("Only mail digests and requested message text belong in the private mail cache. Nothing was written.".into());
+        }
+    }
+    Ok(())
+}
+
+/// One prevalidated cached-source projection.
+pub struct SourcePage {
+    pub path: String,
+    pub frontmatter: serde_json::Map<String, serde_json::Value>,
+    pub body: String,
+}
+
+/// Validate every projection and existing identity before writing any page.
+/// All read/compare/write steps share one ordered path lock; a header and its
+/// requested text cannot interleave with another cache refresh. File I/O still
+/// lands one atomic rename at a time, with a receipt for each successful write.
+pub fn write_sources(
+    vault: &Path,
+    paths: &[&str],
+    build: impl FnOnce() -> Result<Vec<SourcePage>, String>,
+    by: &WriteReceipt<Agent>,
+) -> Result<Vec<bool>, String> {
+    let lock = lock_paths(vault, paths)?;
+    let pages = build()?;
+    if pages
+        .iter()
+        .any(|page| !paths.contains(&page.path.as_str()))
+    {
+        return Err("A cached source was not included in this write's path locks.".into());
+    }
+    let mut plans = Vec::with_capacity(pages.len());
+    for page in &pages {
+        let rel = page.path.as_str();
+        if !(rel == SOURCES_DIR || rel.starts_with(&format!("{SOURCES_DIR}/"))) {
+            return Err(format!(
+                "cache_source only writes into {SOURCES_DIR}/; {rel} is outside it"
+            ));
+        }
+        let target = note_join(vault, rel, MARKDOWN)?;
+        source_mail_boundary(vault, rel, &page.frontmatter)?;
+        let content = source_content(&page.frontmatter, &page.body)?;
+        if crate::mail::is_mail_path(rel) {
+            // An overlong address can exceed the scanner's metadata cap even
+            // when the message and participant counts are within their caps.
+            frontmatter_json(rel, &content)?;
+        }
+        plans.push((target, content, false, true));
+    }
+    for (page, (target, content, existed, changed)) in pages.iter().zip(&mut plans) {
+        let rel = page.path.as_str();
+        source_mail_boundary(vault, rel, &page.frontmatter)?;
+        *existed = target.exists();
+        if *existed && crate::mail::is_mail_path(rel) {
+            let before = std::fs::read_to_string(&target).map_err(|e| format!("{rel}: {e}"))?;
+            let mut old = frontmatter_json(rel, &before)?;
+            let mut next = page.frontmatter.clone();
+            if old.get("source_id") != next.get("source_id")
+                || old.get("source_kind") != next.get("source_kind")
+            {
+                return Err(format!(
+                    "{rel} already holds another page; nothing was written."
+                ));
+            }
+            for key in ["fetched_at", "generated"] {
+                old.shift_remove(key);
+                next.shift_remove(key);
+            }
+            *changed = !(old == next
+                && parse::split_frontmatter(&before).1.trim_end()
+                    == parse::split_frontmatter(content).1.trim_end());
+        }
+    }
+    let mut changed = Vec::with_capacity(pages.len());
+    for (page, (target, content, existed, differs)) in pages.iter().zip(plans) {
+        if differs {
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", page.path))?;
+            }
+            write_file(&lock, &target, &content)?;
+            shadow_write(vault, &page.path, &content, write_kind(existed), by);
+        }
+        changed.push(differs);
+    }
+    Ok(changed)
+}
+
+/// Cached-source bytes, also replayed by the synthetic mail digest fixtures.
+pub(crate) fn source_content(
+    frontmatter: &serde_json::Map<String, serde_json::Value>,
+    body: &str,
+) -> Result<String, String> {
     let mut mapping = serde_yaml::Mapping::new();
     for (k, v) in frontmatter {
         if v.is_null() {
@@ -2294,10 +2522,7 @@ fn concept_write(
         Some(b) => format!("---\n{b}---\n\n{body}\n"),
         None => format!("{body}\n"),
     };
-    let lock = lock_paths(vault, &[rel])?;
-    let existed = target.exists();
-    write_file(&lock, &target, &content)?;
-    Ok((content, existed))
+    Ok(content)
 }
 
 /// Cached copies of fetched external material. Mirrors SOURCES_DIR in
@@ -2313,17 +2538,20 @@ pub fn write_source(
     frontmatter: &serde_json::Map<String, serde_json::Value>,
     body: &str,
     by: &WriteReceipt<Agent>,
-) -> Result<(), String> {
-    if !(rel == SOURCES_DIR || rel.starts_with(&format!("{SOURCES_DIR}/"))) {
-        return Err(format!(
-            "cache_source only writes into {SOURCES_DIR}/; {rel} is outside it"
-        ));
-    }
-    // A cached source is a vault write, not a knowledge event — the five
-    // M21.8 kinds reserve knowledge.* for the bundle.
-    let (content, existed) = concept_write(vault, rel, frontmatter, body)?;
-    shadow_write(vault, rel, &content, write_kind(existed), by);
-    Ok(())
+) -> Result<bool, String> {
+    write_sources(
+        vault,
+        &[rel],
+        || {
+            Ok(vec![SourcePage {
+                path: rel.into(),
+                frontmatter: frontmatter.clone(),
+                body: body.into(),
+            }])
+        },
+        by,
+    )
+    .map(|changed| changed[0])
 }
 
 /// The import writer's agent door (M69.5): exact planned bytes, with either
@@ -2994,6 +3222,61 @@ mod tests {
     const EMPTY_CANVAS: &str = r#"{"nodes":[],"edges":[]}"#;
 
     #[test]
+    fn a_source_projection_reads_its_sibling_only_after_the_path_lock() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let vault = testutil::temp_vault("source-projection-lock");
+        let header = "sources/mail/thread-1.md";
+        let text = "sources/mail/thread-1-text.md";
+        let held = lock_paths(&vault, &[header, text]).unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (built_tx, built_rx) = mpsc::channel();
+        let worker_vault = vault.clone();
+        let worker = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            write_sources(
+                &worker_vault,
+                &[header, text],
+                || {
+                    let exists = worker_vault.join(text).is_file();
+                    built_tx.send(exists).unwrap();
+                    Ok(vec![SourcePage {
+                        path: header.into(),
+                        frontmatter:
+                            serde_json::json!({"source_id":"thread-1","source_kind":"thread"})
+                                .as_object()
+                                .unwrap()
+                                .clone(),
+                        body: if exists {
+                            "Message text: [[thread-1-text]]"
+                        } else {
+                            "No text yet"
+                        }
+                        .into(),
+                    }])
+                },
+                &agent(),
+            )
+            .unwrap();
+        });
+        started_rx.recv().unwrap();
+        let prematurely_built = built_rx.recv_timeout(Duration::from_millis(50)).is_ok();
+        // Simulate the earlier text writer landing while it owns both paths.
+        testutil::write(&vault, text, "# Newly requested text\n");
+        drop(held);
+        worker.join().unwrap();
+        assert!(
+            !prematurely_built,
+            "projection read before acquiring its paths"
+        );
+        assert!(built_rx.recv().unwrap());
+        assert!(std::fs::read_to_string(vault.join(header))
+            .unwrap()
+            .contains("[[thread-1-text]]"));
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
     fn save_canvas_writes_and_returns_the_hash_it_wrote() {
         let vault = testutil::temp_vault("canvas-save");
         testutil::write(&vault, "boards/plan.canvas", EMPTY_CANVAS);
@@ -3085,6 +3368,42 @@ mod tests {
         let _ = std::fs::remove_dir_all(vault);
     }
 
+    #[test]
+    fn two_agent_canvas_creates_choose_distinct_locked_names() {
+        let vault = testutil::temp_vault("canvas-agent-create-race");
+        let barrier = std::sync::Barrier::new(2);
+        let paths = std::thread::scope(|scope| {
+            let start = || {
+                barrier.wait();
+                create_canvas_batch(
+                    &vault,
+                    "boards",
+                    "same",
+                    |path| {
+                        assert!(path == "boards/same.canvas" || path == "boards/same-2.canvas");
+                        Ok(crate::canvas::edit::Plan {
+                            content: crate::canvas::write::empty_board(),
+                            ops: vec![],
+                            created: vec![],
+                            warnings: vec![],
+                        })
+                    },
+                    WriteMode::Commit,
+                    &agent(),
+                )
+                .unwrap()
+                .landing
+                .path
+            };
+            let one = scope.spawn(start);
+            let two = scope.spawn(start);
+            vec![one.join().unwrap(), two.join().unwrap()]
+        });
+        assert_ne!(paths[0], paths[1]);
+        assert!(vault.join("boards/same.canvas").is_file());
+        assert!(vault.join("boards/same-2.canvas").is_file());
+        let _ = std::fs::remove_dir_all(vault);
+    }
     #[test]
     fn create_canvas_takes_the_next_free_name() {
         let vault = testutil::temp_vault("canvas-create");
@@ -3358,11 +3677,14 @@ mod tests {
             ("save_note", "vault.write"),
             ("save_canvas", "vault.write"),
             ("create_canvas", "vault.create"),
+            ("create_canvas_planned", "vault.create"),
+            ("create_canvas_batch", "vault.create"),
             ("append_note_checked", "vault.write"),
             ("append_note_in", "vault.write"),
             ("edit_note", "vault.write"),
             ("edit_note_in", "vault.write"),
             ("edit_sheet_page", "vault.write"),
+            ("edit_canvas_file", "vault.write"),
             ("write_text_file", "vault.create"),
             ("import_attachment", "vault.create"),
             ("import_attachment_bytes", "vault.create"),
@@ -3371,6 +3693,10 @@ mod tests {
             ("create_note_if", "vault.create"),
             ("write_concept", "the ledger's projections"),
             ("write_source", "vault.write or vault.create"),
+            (
+                "write_sources",
+                "vault.write or vault.create per changed page",
+            ),
             ("write_import", "vault.write or vault.create"),
             ("append_knowledge_log", "the ledger's projection"),
             ("set_note_title", "vault.write"),
@@ -5090,7 +5416,7 @@ mod tests {
             if edits && case["seed"] != serde_json::json!(false) {
                 testutil::write(&vault, path, seed);
             }
-            if door == "save_canvas" && case["lands"].is_string() {
+            if matches!(door, "save_canvas" | "edit_canvas") && case["lands"].is_string() {
                 testutil::write(&vault, path, "{}");
             }
             if door == "batch_rename_to" {
@@ -5098,6 +5424,12 @@ mod tests {
             }
             let before = snapshot(&vault);
             let outcome = match door {
+                "write_import" => crate::knowledge::guard_agent_write(path).and_then(|()| write_import(&vault, path, "---\n---\n# Landed\n", None, |_, _| Ok(()), &agent()).map(|_| path.to_string()).map_err(String::from)),
+                "edit_canvas" => crate::knowledge::guard_agent_write(path).and_then(|()| edit_canvas_file(&vault,path,|text,hash| {
+                    let args=serde_json::json!({"ops":[{"op":"add_node","type":"group","x":0,"y":0,"width":1,"height":1}]});
+                    let request=crate::canvas::edit::parse_request(args.as_object().unwrap())?;
+                    crate::canvas::edit::plan(text,hash,&request,&mut crate::canvas::edit::Context {limits:&crate::canvas::agent_limits::table().edit,web_schemes:&[],target_state:&mut |_| crate::canvas::answer::Target::Missing,board_path:path})
+                },None,WriteMode::Commit,&agent()).map(|_|path.to_string()).map_err(String::from)),
                 "save_canvas" => save_canvas(&vault, path, r#"{"nodes":[],"edges":[]}"#, &human())
                     .map(|_| path.to_string())
                     .map_err(|error| error.message),

@@ -57,10 +57,14 @@ fn landing(folder: &str, stem: &str) -> String {
         format!("{folder}/{stem}.md")
     }
 }
+fn readable_landing(vault: &Path, grant: &RunGrant, path: &str) -> bool {
+    grant.may_read(path)
+        && vault::write::landing_path(vault, path).is_none_or(|landing| grant.may_read(&landing))
+}
 fn check_target(vault: &Path, grant: &RunGrant, path: &str) -> Result<WriteReceipt<Agent>, String> {
     // Resolve the actual existing landing, not only the requested folder.
     // Hidden copies are not named to a run that cannot read them.
-    if !scope_admits_landing(vault, &grant.read_scope, path) {
+    if !readable_landing(vault, grant, path) {
         return Err("This run cannot import that page within its read reach.".into());
     }
     if !scope_admits_landing(vault, &grant.scope, path) {
@@ -76,8 +80,12 @@ fn check_target(vault: &Path, grant: &RunGrant, path: &str) -> Result<WriteRecei
         return Err(refusal.message);
     }
     let by = WriteReceipt::run(cleared_for_note(grant, path, Approval::None)?);
-    if let Some(why) =
-        import::path_refusal(path).or_else(|| vault::write::note_target_refusal(vault, path))
+    if let Some(why) = import::path_refusal(path)
+        .or_else(|| {
+            vault::write::landing_path(vault, path)
+                .and_then(|landing| import::path_refusal(&landing))
+        })
+        .or_else(|| vault::write::note_target_refusal(vault, path))
     {
         return Err(why);
     }
@@ -95,6 +103,17 @@ fn stem(path: &str) -> Option<String> {
         .to_str()
         .filter(|s| !s.contains(['[', ']', '#', '\n', '\r']))
         .map(str::to_owned)
+}
+/// A stem is a safe wikilink only when another visible vault item cannot
+/// claim it. Keeping the original URL is preferable to linking the wrong page.
+fn link_stem(path: &str, occupied: &[String]) -> Option<String> {
+    let wanted = stem(path)?;
+    (!occupied.iter().any(|other| {
+        other != path
+            && stem(other)
+                .is_some_and(|candidate| candidate.to_lowercase() == wanted.to_lowercase())
+    }))
+    .then_some(wanted)
 }
 fn unstamp(content: &str) -> Option<(String, Option<String>, Option<String>)> {
     let (yaml, body) = vault::parse::split_frontmatter(content);
@@ -162,7 +181,8 @@ pub(super) fn call(
     // Canonical identity selection and every write share the import mutex.
     // A second importer cannot make a copy while this one is landing.
     let _imports = import::lock();
-    let (files, occupied) = plan::read_vault(vault)?;
+    let (files, occupied) = plan::read_vault(vault)
+        .map_err(|_| "Existing imports could not be read; nothing was written.".to_string())?;
     let copies = plan::copy_index(&files);
     let existing = copies
         .get(&("notion".into(), page.clone()))
@@ -178,8 +198,8 @@ pub(super) fn call(
         .filter_map(|((_, id), copies)| {
             copies
                 .iter()
-                .find(|f| scope_admits_landing(vault, &grant.read_scope, &f.path))
-                .and_then(|f| stem(&f.path))
+                .find(|f| readable_landing(vault, grant, &f.path))
+                .and_then(|f| link_stem(&f.path, &occupied))
                 .map(|stem| (id.clone(), stem))
         })
         .collect();
@@ -251,7 +271,7 @@ pub(super) fn call(
     let mut relinked = 0;
     let mut left = Vec::new();
     let mut left_links = 0;
-    let new_links = stem(&result.path)
+    let new_links = link_stem(&result.path, &occupied)
         .map(|stem| HashMap::from([(page.clone(), stem)]))
         .unwrap_or_default();
     for ((system, id), citers) in &copies {
@@ -259,7 +279,7 @@ pub(super) fn call(
             continue;
         }
         for citer in citers {
-            if !scope_admits_landing(vault, &grant.read_scope, &citer.path) {
+            if !readable_landing(vault, grant, &citer.path) {
                 continue;
             }
             let mut count = 0;
@@ -395,8 +415,8 @@ mod tests {
             "Imported “My page” from Notion to pages/my-page.md."
         );
         let original = std::fs::read_to_string(dir.path().join("pages/my-page.md")).unwrap();
-        assert!(original.contains("source_system: notion\n"));
-        assert!(original.contains("imported_by: process:notion-import\n"));
+        assert!(original.contains("source_system: \"notion\"\n"));
+        assert!(original.contains("imported_by: \"process:notion-import\"\n"));
         let digest = import::stored_import_hash(&original).unwrap();
         assert_eq!(digest.stored, digest.current);
         assert_eq!(
@@ -478,7 +498,7 @@ mod tests {
         assert!(!dir.path().join("pages/first.md").exists());
     }
     #[test]
-    fn captures_belong_to_the_run_and_composed_body_needs_its_own_prior_refusal() {
+    fn an_import_never_takes_page_text_from_the_model_unmarked() {
         let dir = TempDir::new();
         let grant = grant();
         let _lease = fetch(&grant, A, "First", "<unknown>Body</unknown>");
@@ -492,7 +512,9 @@ mod tests {
         call(dir.path(), body.as_object().unwrap(), &grant).unwrap();
         let (files, _) = plan::read_vault(dir.path()).unwrap();
         assert_eq!(files.len(), 1);
-        assert!(files[0].content.contains("import_method: agent_composed\n"));
+        assert!(files[0]
+            .content
+            .contains("import_method: \"agent_composed\"\n"));
         let other = self::grant();
         assert!(
             attempt(dir.path(), &other, A, "pages").starts_with("import_refused: capture_missing")
@@ -547,6 +569,50 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(dir.path().join("pages/a.md")).unwrap(),
             "Person's bytes"
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn an_import_cannot_reach_mail_or_sources_through_a_folder_alias() {
+        let dir = TempDir::new();
+        std::fs::create_dir_all(dir.path().join("sources/mail")).unwrap();
+        std::os::unix::fs::symlink("sources/mail", dir.path().join("alias")).unwrap();
+        let mut grant = grant();
+        let _lease = fetch(&grant, A, "Page", "Body");
+        grant.asks.kind = crate::policy::tool_approval::RunKind::Unattended;
+        assert_eq!(
+            attempt(dir.path(), &grant, A, "alias"),
+            "This run cannot import that page within its read reach."
+        );
+        grant.asks.kind = crate::policy::tool_approval::RunKind::Attended;
+        assert!(attempt(dir.path(), &grant, A, "alias").contains("no import lands there"));
+        assert!(std::fs::read_dir(dir.path().join("sources/mail"))
+            .unwrap()
+            .next()
+            .is_none());
+    }
+    #[test]
+    fn an_ambiguous_stem_keeps_its_notion_url_instead_of_linking_another_page() {
+        let dir = TempDir::new();
+        let first = grant();
+        let _a = fetch(
+            &first,
+            A,
+            "First",
+            &format!("[Second](https://notion.so/{B})"),
+        );
+        imported(dir.path(), &first, A, "pages");
+        write(dir.path(), "elsewhere/second.md", "# An unrelated page");
+        let second = grant();
+        let _b = fetch(&second, B, "Second", "Body");
+        let reply = imported(dir.path(), &second, B, "pages");
+        assert!(!reply.contains("Relinked"));
+        let unchanged = std::fs::read_to_string(dir.path().join("pages/first.md")).unwrap();
+        assert!(unchanged.contains(&format!("https://notion.so/{B}")));
+        imported(dir.path(), &first, A, "pages");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("pages/first.md")).unwrap(),
+            unchanged
         );
     }
     #[test]

@@ -895,8 +895,8 @@ export function aggregateNumbers(values: unknown[], calc: NumericCalc): number |
 }
 
 /**
- * Aggregate `def.property` across the entries referenced by this entry's
- * `def.relation` field. Returns a display string ('' when unresolvable).
+ * Aggregate `def.property` across forward or reverse relation targets.
+ * Cached-mail rollups are evaluated by the schema through its correspondence index. Returns a display string ('' when unresolvable).
  */
 export function computeRollup(
   entry: Entry,

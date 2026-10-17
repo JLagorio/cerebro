@@ -76,11 +76,14 @@ fn every_note_door_is_covered_by_the_stamp_guard() {
             "create_note",
             "edit_note",
             "edit_sheet",
+            "import_notion_page",
             "set_fields",
             "update_frontmatter"
         ]
     );
-    // The sixth door changes only its table body: its normal edit must keep
+    // The stamping import door is deliberately exempt: its own planner
+    // proves the imported identity and current hash before it may restamp.
+    // The sheet door changes only its table body: its normal edit must keep
     // the complete imported frontmatter, including the writer-owned values.
     let vault = temp_vault("mcp-import-sheet");
     let prefix = "---\nsource_system: linear\nimport_hash: original\n---\n";
@@ -127,4 +130,36 @@ fn governed_types_speak_before_stamps() {
         governed_bytes_check("Body", before),
         Err(AGENT_DOC_REFUSAL.into())
     );
+}
+
+#[test]
+fn a_notion_reimport_stamps_while_other_doors_refuse() {
+    let vault = temp_vault("notion-stamping-door");
+    let grant = bound(&vault);
+    let page = "11111111111111111111111111111111";
+    let name = "mcp__notion-toy__notion-fetch";
+    let lease = crate::import::capture::arm(&grant.run_id, vec![name.into()]).unwrap();
+    let handle = lease.handle();
+    let args = args_of(json!({"page":page,"folder":"notion"}));
+    for (call, body) in [("first", "Before"), ("second", "After")] {
+        handle.begin(name, call, Some(&json!({"id":page})));
+        handle.put(call,&format!("<page url=\"https://notion.so/{page}\"><properties>{{\"title\":\"Toy\"}}</properties><content>{body}</content></page>"),false);
+        notion_door::call(&vault, &args, &grant).unwrap();
+        let raw = std::fs::read_to_string(vault.join("notion/toy.md")).unwrap();
+        assert!(raw.contains(body));
+        let stamp = crate::import::stored_import_hash(&raw).unwrap();
+        assert_eq!(stamp.stored, stamp.current);
+    }
+    let raw = std::fs::read_to_string(vault.join("notion/toy.md")).unwrap();
+    assert!(tool_update_frontmatter(
+        &vault,
+        &args_of(json!({"path":"notion/toy.md","patch":{"import_hash":"forged"}}))
+    )
+    .unwrap_err()
+    .contains("Agent writes may not"));
+    assert_eq!(
+        std::fs::read_to_string(vault.join("notion/toy.md")).unwrap(),
+        raw
+    );
+    std::fs::remove_dir_all(vault).unwrap();
 }

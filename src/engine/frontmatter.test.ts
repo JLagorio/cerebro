@@ -16,7 +16,9 @@ describe('the H1 shared by reading and title writes (M60.11)', () => {
           title: entry.title,
           content: readFileSync(join(__dirname, '../../demo-vault', entry.path), 'utf8'),
         })),
-      ...golden.fixtures.map(({ path, content, entry }) => ({ path, content, title: entry.title })),
+      ...golden.fixtures
+        .filter(({ path }) => path.endsWith('.md'))
+        .map(({ path, content, entry }) => ({ path, content, title: entry.title })),
     ];
     expect(pages.length).toBeGreaterThan(100);
     for (const page of pages) {

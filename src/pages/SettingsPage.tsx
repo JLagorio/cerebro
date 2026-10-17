@@ -1,6 +1,15 @@
 import { ClientAccessSettings } from '@/app/ClientAccessSettings';
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { PageHeader } from '@/components/PageHeader';
+import {
+  PageNavigationContent,
+  usePageNavigationControls,
+  usePageNavigationSlot,
+} from '@/app/PageNavigation';
+import { SETTINGS_SECTIONS, SettingsNavigation, type SettingsSection } from './SettingsNavigation';
+import './settings.css';
 import { useLedgerReview, useQuarantine } from '@/stores/ledgerStore';
 import { Button } from '@/components/ui/Button';
 import { ClaudeCodeRow } from '@/pages/ClaudeCodeRow';
@@ -13,6 +22,7 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Switch } from '@/components/ui/Switch';
 import { ConnectorSettings } from '@/app/ConnectorSettings';
 import { TrashSettings } from '@/app/TrashSettings';
+import { MailSettings } from '@/app/MailSettings';
 import { listAgents } from '@/engine/agents';
 import { isPaused, jobQueue } from '@/engine/jobs';
 import type { Entry } from '@/engine/types';
@@ -48,7 +58,7 @@ function SettingRow({
   disabled?: boolean;
 }) {
   return (
-    <div className={`flex items-start gap-3 py-2 ${disabled ? 'opacity-50' : ''}`}>
+    <div className={`cb-setting-row flex items-start gap-3 py-2 ${disabled ? 'opacity-50' : ''}`}>
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-n-800">{label}</div>
         <div className="mt-0.5 text-xs leading-[16px] text-n-500">{hint}</div>
@@ -137,7 +147,7 @@ function ShellAccessRow({ vaultPath }: { vaultPath: string | null }) {
     };
   }, [vaultPath]);
   return (
-    <div className="py-2">
+    <div className="cb-setting-row py-2">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-n-800">Shell access</div>
@@ -198,7 +208,7 @@ function PanelAgentRow({ vaultPath, entries }: { vaultPath: string; entries: Ent
     ...(dangling && bound !== null ? [{ value: bound, label: `@${bound} (not found)` }] : []),
   ];
   return (
-    <div className="py-2">
+    <div className="cb-setting-row py-2">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-n-800">Panel assistant</div>
@@ -217,7 +227,7 @@ function PanelAgentRow({ vaultPath, entries }: { vaultPath: string; entries: Ent
           onChange={(e) =>
             void setPanelAgent(vaultPath, e.target.value === NO_AGENT ? null : e.target.value)
           }
-          className="w-[180px] flex-none"
+          className="w-[220px] max-w-full flex-none"
         />
       </div>
       {dangling && (
@@ -238,6 +248,44 @@ function PanelAgentRow({ vaultPath, entries }: { vaultPath: string; entries: Ent
 }
 
 export function SettingsPage() {
+  const focus = useUiStore((s) => s.settingsFocus);
+  const [selected, setSelected] = useState<SettingsSection>(() =>
+    focus === 'claude-code' ? 'assistant' : 'general',
+  );
+  const [visited, setVisited] = useState<ReadonlySet<SettingsSection>>(() => new Set([selected]));
+  const scrollHost = useRef<HTMLDivElement>(null);
+  const sectionsControl = useRef<HTMLSpanElement>(null);
+  const slot = usePageNavigationSlot('settings');
+  const navigation = usePageNavigationControls('settings');
+  const selectSection = (section: SettingsSection) => {
+    setSelected(section);
+    setVisited((previous) => (previous.has(section) ? previous : new Set([...previous, section])));
+  };
+  useEffect(() => {
+    if (focus === 'claude-code') selectSection('assistant');
+  }, [focus]);
+  useLayoutEffect(() => {
+    if (scrollHost.current) scrollHost.current.scrollTop = 0;
+  }, [selected]);
+  const section = SETTINGS_SECTIONS.find((item) => item.id === selected)!;
+  const sectionNavigation = (
+    <SettingsNavigation selected={selected} onSelect={selectSection} inline={slot === null} />
+  );
+  // Visit lazily, then retain the controller. Changing sections must not erase
+  // a draft, an in-flight action, or the one-time secret shown by Other apps.
+  const panel = (id: SettingsSection, children: ReactNode) =>
+    visited.has(id) && (
+      <div
+        key={id}
+        hidden={selected !== id}
+        inert={selected !== id}
+        className="cb-settings-panel"
+        data-single={id !== 'general'}
+        data-settings-panel={id}
+      >
+        {children}
+      </div>
+    );
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const openVault = useVaultStore((s) => s.openVault);
   const status = useVaultStore((s) => s.status);
@@ -296,181 +344,230 @@ export function SettingsPage() {
   };
 
   return (
-    // The scroll host Settings never had. Without `min-h-0 flex-1
-    // overflow-y-auto` the column simply overflowed the flex row: everything
-    // below the fold — Issue keys, Knowledge, Git, About — was unreachable by
-    // scroll or by keyboard, and painted ON TOP of the status bar, swallowing
-    // its clicks. PulsePage/ChangesPage already use exactly this pattern.
-    <div className="min-h-0 min-w-0 flex-1 overflow-y-auto" data-testid="settings-page">
-      <div className="mx-auto w-full max-w-[640px] px-8 py-8">
-        <h1 className="mb-6 text-xl font-semibold tracking-[-0.01em] text-n-900">Settings</h1>
-        <section className="mb-6 rounded-xl border border-n-200 p-5">
-          <h2 className="mb-1 text-md font-semibold text-n-900">Vault</h2>
-          <p className="mb-3 text-sm text-n-500">
-            Cerebro reads and writes plain markdown files in this folder.
-          </p>
-          <div className="mb-4 rounded-lg border border-n-200 bg-n-25 px-3 py-2 [font-family:var(--font-mono)] text-xs text-n-700">
-            {vaultPath ?? 'No vault open'}
-          </div>
-          {status === 'error' && error ? (
-            // Deviation from the plan's verbatim body (execution-log note 15a,
-            // reported): vaultStore.status === 'error' was displayed nowhere —
-            // surface it beside the recovery action.
-            <p className="mb-4 text-xs text-danger-500">{error}</p>
-          ) : null}
-          <Button
-            variant="secondary"
-            size="sm"
-            icon="folder-open"
-            onClick={() => void changeVault()}
-          >
-            Change vault…
-          </Button>
-        </section>
-        <TrashSettings />
-        <section className="mb-6 rounded-xl border border-n-200 p-5">
-          <h2 className="mb-1 text-md font-semibold text-n-900">Appearance</h2>
-          <p className="mb-4 text-sm text-n-500">
-            How cerebro looks. The choice is remembered on this machine.
-          </p>
-          <div className="flex items-start gap-3 py-2">
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium text-n-800">Theme</div>
-              <div className="mt-0.5 text-xs leading-[16px] text-n-500">
-                System follows your operating system and changes with it — including when it
-                switches on its own at sunset.
+    <div
+      ref={scrollHost}
+      className="cb-settings min-h-0 min-w-0 flex-1 overflow-y-auto"
+      data-testid="settings-page"
+    >
+      {slot !== null
+        ? createPortal(<PageNavigationContent>{sectionNavigation}</PageNavigationContent>, slot)
+        : sectionNavigation}
+      <div className="cb-settings-content">
+        <p className="cb-settings-eyebrow">Settings</p>
+        <PageHeader
+          title={section.label}
+          description={section.description}
+          className="cb-settings-header"
+          headingTestId="settings-heading"
+          actions={
+            navigation && (
+              <span ref={sectionsControl}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon="panel-left"
+                  onClick={() =>
+                    navigation.show(sectionsControl.current?.querySelector('button') ?? undefined)
+                  }
+                >
+                  Sections
+                </Button>
+              </span>
+            )
+          }
+        />
+        {panel(
+          'general',
+          <>
+            <section className="mb-6 rounded-xl border border-n-200 p-5">
+              <h2 className="mb-1 text-md font-semibold text-n-900">Appearance</h2>
+              <p className="mb-4 text-sm text-n-500">
+                How cerebro looks. The choice is remembered on this machine.
+              </p>
+              <div className="cb-setting-row flex items-start gap-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium text-n-800">Theme</div>
+                  <div className="mt-0.5 text-xs leading-[16px] text-n-500">
+                    System follows your operating system and changes with it — including when it
+                    switches on its own at sunset.
+                  </div>
+                </div>
+                <SegmentedControl
+                  ariaLabel="Theme"
+                  options={THEME_OPTIONS}
+                  value={themeMode}
+                  // asThemeMode rather than a cast: SegmentedControl's onChange is
+                  // typed `string`, and a cast would let a typo in THEME_OPTIONS
+                  // through the compiler and into localStorage.
+                  onChange={(v) => setThemeMode(asThemeMode(v))}
+                  className="flex-none"
+                />
               </div>
-            </div>
-            <SegmentedControl
-              ariaLabel="Theme"
-              options={THEME_OPTIONS}
-              value={themeMode}
-              // asThemeMode rather than a cast: SegmentedControl's onChange is
-              // typed `string`, and a cast would let a typo in THEME_OPTIONS
-              // through the compiler and into localStorage.
-              onChange={(v) => setThemeMode(asThemeMode(v))}
-              className="flex-none"
-            />
-          </div>
-        </section>
-        <section className="mb-6 rounded-xl border border-n-200 p-5">
-          <h2 className="mb-1 text-md font-semibold text-n-900">Workflow</h2>
-          <p className="mb-4 text-sm text-n-500">
-            Capture fast, organize deliberately. A note stays in the Inbox until it has a type.
-          </p>
-          <SettingRow
-            label="Inbox"
-            hint="Queue untyped captures for review. Off — every note reads as organized."
-            checked={inboxEnabled}
-            onChange={setInboxEnabled}
-          />
-          <SettingRow
-            label="Auto-advance"
-            hint="After marking a note organized, open the next one in the queue."
-            checked={inboxAutoAdvance}
-            onChange={setInboxAutoAdvance}
-            disabled={!inboxEnabled}
-          />
-        </section>
-        <ReminderSettings />
-        <RecentlyOpenedSettings />
-        <section className="mb-6 rounded-xl border border-n-200 p-5">
-          <h2 className="mb-1 text-md font-semibold text-n-900">Assistant</h2>
-          <p className="mb-4 text-sm leading-[18px] text-n-500">
-            What the assistant may change follows from where it is writing, not from a mode you pick
-            each time: it owns <span className="[font-family:var(--font-mono)]">knowledge/</span>{' '}
-            and writes there directly, and it reaches everything else through cerebro's own tools.
-            Shell access decides what Claude Code's own commands and file edits may do: never, after
-            you answer a card, or directly.
-          </p>
-          <ClaudeCodeRow />
-          {vaultPath !== null && <PanelAgentRow vaultPath={vaultPath} entries={entries} />}
-          <ShellAccessRow vaultPath={vaultPath} />
-          <SettingRow
-            label="Web access"
-            hint={WEB_HINT}
-            checked={webAccess}
-            onChange={setWebAccess}
-          />
-          <SettingRow
-            label="Connectors"
-            hint="Let the assistant use MCP servers — Jira, Confluence — to fetch what a note refers to. Tickets and pages it fetches are written down under sources/, so the same ticket is only ever fetched once. A cached copy past its refresh date is marked stale; ask for a fresh one when you need it. Mail is never cached as a web page."
-            checked={connectors}
-            onChange={setConnectors}
-          />
-          {connectors && <ConnectorSettings />}
-          <CliWorkspaceRow />
-          <div className={`flex items-start gap-3 py-2 ${connectors ? '' : 'opacity-50'}`}>
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium text-n-800">Issue keys</div>
-              <div className="mt-0.5 text-xs leading-[16px] text-n-500">
-                Your tracker's project keys, comma separated —{' '}
-                <span className="[font-family:var(--font-mono)]">PHX, SYN</span>. These cannot be
-                guessed: <span className="[font-family:var(--font-mono)]">PHX-421</span> and{' '}
-                <span className="[font-family:var(--font-mono)]">UTF-8</span> are the same shape, so
-                without them nothing is treated as a ticket.
-              </div>
-            </div>
-            <Input
-              ariaLabel="Issue keys"
-              value={issuePrefixes}
-              placeholder="PHX, SYN"
-              disabled={!connectors}
-              onChange={(e) => setIssuePrefixes(e.target.value)}
-              className="w-[140px] flex-none"
-            />
-          </div>
-        </section>
-        <ClientAccessSettings />
-        <section className="mb-6 rounded-xl border border-n-200 p-5">
-          <h2 className="mb-1 text-md font-semibold text-n-900">Knowledge</h2>
-          <p className="mb-4 text-sm text-n-500">
-            The AI knowledge base in{' '}
-            <span className="[font-family:var(--font-mono)]">knowledge/</span> is written by the
-            agent and recorded in its history. Your edits are recorded as edits, and verifying a
-            concept records who confirmed it.
-          </p>
-          <SettingRow
-            label="Learn on its own"
-            hint="Recheck concepts that have gone stale or whose type changed, refresh cached sources, and run any skills or agents that carry a schedule. Runs in the background, never interrupts, and unattended runs are additive-only. Off by default: schedules do not fire and nothing is rechecked."
-            checked={autoLearn}
-            onChange={setAutoLearn}
-          />
-          {pending > 0 && (
-            <p className="m-0 mb-2 text-xs leading-[16px] text-n-500">
-              {reading !== null
-                ? `Reading ${reading} now.`
-                : `${pending} background job${pending === 1 ? '' : 's'} waiting.`}
+            </section>
+            <section className="mb-6 rounded-xl border border-n-200 p-5">
+              <h2 className="mb-1 text-md font-semibold text-n-900">Workflow</h2>
+              <p className="mb-4 text-sm text-n-500">
+                Capture fast, organize deliberately. A note stays in the Inbox until it has a type.
+              </p>
+              <SettingRow
+                label="Inbox"
+                hint="Queue untyped captures for review. Off — every note reads as organized."
+                checked={inboxEnabled}
+                onChange={setInboxEnabled}
+              />
+              <SettingRow
+                label="Auto-advance"
+                hint="After marking a note organized, open the next one in the queue."
+                checked={inboxAutoAdvance}
+                onChange={setInboxAutoAdvance}
+                disabled={!inboxEnabled}
+              />
+            </section>
+            <RecentlyOpenedSettings />
+          </>,
+        )}
+        {panel(
+          'vault',
+          <section className="mb-6 rounded-xl border border-n-200 p-5">
+            <h2 className="mb-1 text-md font-semibold text-n-900">Vault</h2>
+            <p className="mb-3 text-sm text-n-500">
+              Cerebro reads and writes plain markdown files in this folder.
             </p>
-          )}
-          <div className="flex items-start gap-3 py-2">
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium text-n-800">Your identity</div>
-              <div className="mt-0.5 text-xs leading-[16px] text-n-500">
-                Stamped as{' '}
-                <span className="[font-family:var(--font-mono)]">human:{actorId || 'me'}</span> when
-                you verify. The <span className="[font-family:var(--font-mono)]">human:</span>{' '}
-                prefix is what separates your review from a machine's.
-              </div>
+            <div className="mb-4 rounded-lg border border-n-200 bg-n-25 px-3 py-2 [font-family:var(--font-mono)] text-xs text-n-700">
+              {vaultPath ?? 'No vault open'}
             </div>
-            <Input
-              ariaLabel="Your identity"
-              value={actorId}
-              onChange={(e) => setActorId(e.target.value.trim())}
-              className="w-[140px] flex-none"
+            {status === 'error' && error ? (
+              // Deviation from the plan's verbatim body (execution-log note 15a,
+              // reported): vaultStore.status === 'error' was displayed nowhere —
+              // surface it beside the recovery action.
+              <p className="mb-4 text-xs text-danger-500">{error}</p>
+            ) : null}
+            <Button
+              variant="secondary"
+              size="sm"
+              icon="folder-open"
+              onClick={() => void changeVault()}
+            >
+              Change vault…
+            </Button>
+          </section>,
+        )}
+        {panel('trash', <TrashSettings />)}
+        {panel('reminders', <ReminderSettings />)}
+        {panel(
+          'assistant',
+          <section className="mb-6 rounded-xl border border-n-200 p-5">
+            <h2 className="mb-1 text-md font-semibold text-n-900">Assistant</h2>
+            <p className="mb-4 text-sm leading-[18px] text-n-500">
+              What the assistant may change follows from where it is writing, not from a mode you
+              pick each time: it owns{' '}
+              <span className="[font-family:var(--font-mono)]">knowledge/</span> and writes there
+              directly, and it reaches everything else through cerebro's own tools. Shell access
+              decides what Claude Code's own commands and file edits may do: never, after you answer
+              a card, or directly.
+            </p>
+            <ClaudeCodeRow active={selected === 'assistant'} />
+            {vaultPath !== null && <PanelAgentRow vaultPath={vaultPath} entries={entries} />}
+            <ShellAccessRow vaultPath={vaultPath} />
+            <SettingRow
+              label="Web access"
+              hint={WEB_HINT}
+              checked={webAccess}
+              onChange={setWebAccess}
             />
-          </div>
-        </section>
-        <section className="mb-6 rounded-xl border border-n-200 p-5">
-          <GitSettings />
-        </section>
-        <KeyboardShortcutsSettings />
-        <section className="rounded-xl border border-n-200 p-5">
-          <h2 className="mb-1 text-md font-semibold text-n-900">About</h2>
-          <p className="text-sm text-n-500">
-            Cerebro <span className="[font-family:var(--font-mono)]">{APP_VERSION}</span>
-          </p>
-        </section>
+            <SettingRow
+              label="Connectors"
+              hint="Let the assistant use MCP servers — Jira, Confluence — to fetch what a note refers to. Tickets and pages it fetches are written down under sources/, so the same ticket is only ever fetched once. A cached copy past its refresh date is marked stale; ask for a fresh one when you need it. Mail is never cached as a web page."
+              checked={connectors}
+              onChange={setConnectors}
+            />
+            {connectors && <ConnectorSettings />}
+            <CliWorkspaceRow />
+            <div
+              className={`cb-setting-row flex items-start gap-3 py-2 ${connectors ? '' : 'opacity-50'}`}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium text-n-800">Issue keys</div>
+                <div className="mt-0.5 text-xs leading-[16px] text-n-500">
+                  Your tracker's project keys, comma separated —{' '}
+                  <span className="[font-family:var(--font-mono)]">PHX, SYN</span>. These cannot be
+                  guessed: <span className="[font-family:var(--font-mono)]">PHX-421</span> and{' '}
+                  <span className="[font-family:var(--font-mono)]">UTF-8</span> are the same shape,
+                  so without them nothing is treated as a ticket.
+                </div>
+              </div>
+              <Input
+                ariaLabel="Issue keys"
+                value={issuePrefixes}
+                placeholder="PHX, SYN"
+                disabled={!connectors}
+                onChange={(e) => setIssuePrefixes(e.target.value)}
+                className="w-[140px] flex-none"
+              />
+            </div>
+          </section>,
+        )}
+        {panel('mail', <MailSettings />)}
+        {panel('clients', <ClientAccessSettings />)}
+        {panel(
+          'knowledge',
+          <section className="mb-6 rounded-xl border border-n-200 p-5">
+            <h2 className="mb-1 text-md font-semibold text-n-900">Knowledge</h2>
+            <p className="mb-4 text-sm text-n-500">
+              The AI knowledge base in{' '}
+              <span className="[font-family:var(--font-mono)]">knowledge/</span> is written by the
+              agent and recorded in its history. Your edits are recorded as edits, and verifying a
+              concept records who confirmed it.
+            </p>
+            <SettingRow
+              label="Learn on its own"
+              hint="Recheck concepts that have gone stale or whose type changed, refresh cached sources, and run any skills or agents that carry a schedule. Runs in the background, never interrupts, and unattended runs are additive-only. Off by default: schedules do not fire and nothing is rechecked."
+              checked={autoLearn}
+              onChange={setAutoLearn}
+            />
+            {pending > 0 && (
+              <p className="m-0 mb-2 text-xs leading-[16px] text-n-500">
+                {reading !== null
+                  ? `Reading ${reading} now.`
+                  : `${pending} background job${pending === 1 ? '' : 's'} waiting.`}
+              </p>
+            )}
+            <div className="cb-setting-row flex items-start gap-3 py-2">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium text-n-800">Your identity</div>
+                <div className="mt-0.5 text-xs leading-[16px] text-n-500">
+                  Stamped as{' '}
+                  <span className="[font-family:var(--font-mono)]">human:{actorId || 'me'}</span>{' '}
+                  when you verify. The{' '}
+                  <span className="[font-family:var(--font-mono)]">human:</span> prefix is what
+                  separates your review from a machine's.
+                </div>
+              </div>
+              <Input
+                ariaLabel="Your identity"
+                value={actorId}
+                onChange={(e) => setActorId(e.target.value.trim())}
+                className="w-[140px] flex-none"
+              />
+            </div>
+          </section>,
+        )}
+        {panel(
+          'history',
+          <section className="mb-6 rounded-xl border border-n-200 p-5">
+            <GitSettings />
+          </section>,
+        )}
+        {panel('shortcuts', <KeyboardShortcutsSettings />)}
+        {panel(
+          'about',
+          <section className="rounded-xl border border-n-200 p-5">
+            <h2 className="mb-1 text-md font-semibold text-n-900">About</h2>
+            <p className="text-sm text-n-500">
+              Cerebro <span className="[font-family:var(--font-mono)]">{APP_VERSION}</span>
+            </p>
+          </section>,
+        )}
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { isRootGitRefusal } from '@/engine/roots';
 import * as mock from './mockRoots';
+import { seedBytes, reset as resetBytes } from './mockBytes';
 
 /** A NUL written as an escape — never a raw byte in a source file. */
 const NUL = '\u0000';
@@ -221,5 +222,31 @@ describe('root git sync', () => {
     expect(!isRootGitRefusal(pulled) && pulled.status).toBe('updated');
     const after = await mock.rootGitRemoteStatus(repo.id);
     expect(!isRootGitRefusal(after) && after.behind).toBe(0);
+  });
+});
+
+describe('thumbnail browser parity', () => {
+  beforeEach(() => resetBytes());
+  it('keeps dimensions unrecorded and recognizes PNG bytes', async () => {
+    seedBytes('0', 'picture.png', { bytes: [137, 80, 78, 71, 13, 10, 26, 10] });
+    expect(await mock.fileThumbnail('0', 'picture.png', 128)).toEqual({
+      state: 'ready',
+      dataUrl: 'data:image/png;base64,iVBORw0KGgo=',
+      width: null,
+      height: null,
+      source: 'image',
+    });
+  });
+  it('rejects escapes and reports unsupported Office bytes without inventing a preview', async () => {
+    seedBytes('0', 'file.docx', { text: 'PK archive' });
+    expect(await mock.fileThumbnail('0', 'file.docx', 128)).toEqual({
+      state: 'none',
+      reason: 'unsupported',
+    });
+    for (const path of ['../picture.png', '/etc/passwd', 'missing.png'])
+      expect(await mock.fileThumbnail('0', path, 128)).toEqual({
+        state: 'none',
+        reason: 'notFound',
+      });
   });
 });

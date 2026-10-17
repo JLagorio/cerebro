@@ -10,18 +10,23 @@ pub mod connectors;
 pub mod convergence;
 pub mod crash;
 pub mod demo;
+#[cfg(test)]
+#[path = "../build_support/demo_resources.rs"]
+mod demo_resources;
 pub mod diagnostics;
 pub mod dynamics;
 #[cfg(test)]
 mod eval;
 pub mod files;
+pub mod forge;
+pub mod forge_commands;
 pub mod git;
 pub mod git_commands;
 pub mod import;
 pub mod ingest;
 pub mod knowledge;
-mod mail;
 pub mod ledger;
+mod mail;
 pub mod maintain;
 pub mod mcp;
 pub mod monitor;
@@ -844,6 +849,38 @@ fn job_ledger_scope(
     let conn = runtime::open_existing(&config_dir(app)?)?;
     let vault_id = runtime::scope::register(&conn, Path::new(vault))?;
     Ok((conn, vault_id))
+}
+
+/// Dismissals are operational local state, never a vault write or a receipt.
+#[tauri::command(async)]
+fn mail_dismissals_read(
+    app: tauri::AppHandle,
+    vault: String,
+) -> Result<Vec<runtime::mail_dismissals::MailDismissal>, String> {
+    let (conn, id) = job_ledger_scope(&app, &vault)?;
+    runtime::mail_dismissals::read(&conn, &id)
+}
+#[tauri::command(async)]
+fn mail_dismiss(
+    app: tauri::AppHandle,
+    vault: String,
+    kind: String,
+    value: String,
+) -> Result<(), String> {
+    runtime::mail_dismissals::normalize(&kind, &value)?;
+    let (conn, id) = job_ledger_scope(&app, &vault)?;
+    runtime::mail_dismissals::dismiss(&conn, &id, &kind, &value)
+}
+#[tauri::command(async)]
+fn mail_undismiss(
+    app: tauri::AppHandle,
+    vault: String,
+    kind: String,
+    value: String,
+) -> Result<(), String> {
+    runtime::mail_dismissals::normalize(&kind, &value)?;
+    let (conn, id) = job_ledger_scope(&app, &vault)?;
+    runtime::mail_dismissals::restore(&conn, &id, &kind, &value)
 }
 
 /// Everything the ledgers remember about one vault. REFUSES without a
@@ -1894,6 +1931,11 @@ fn delete_note(vault: String, path: String) -> Result<vault::trash::TrashedItem,
 #[tauri::command(async)]
 fn list_trash(vault: String) -> Result<Vec<vault::trash::TrashedItem>, String> {
     vault::trash::list_trash(Path::new(&vault))
+}
+
+#[tauri::command(async)]
+fn mail_gate_read(vault: String) -> Result<mail::GateRead, String> {
+    mail::gate_read(Path::new(&vault))
 }
 
 /// Restore one Trash item to the path it came from (M60.8), guarded on that
@@ -3438,6 +3480,7 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol("cerebro-file", files::scheme::handle)
         .plugin(tauri_plugin_dialog::init())
         .manage(WatcherState::default())
+        .manage(forge::PrReader::default())
         .manage(agent::AgentState::default())
         .manage(mcp::McpState::default())
         .manage(ingest::ambient::AmbientState::default())
@@ -3451,6 +3494,10 @@ pub fn run() {
         // is built here, with the link guard tauri's own path never attaches.
         .setup(|app| shell::build_main_window(app))
         .invoke_handler(tauri::generate_handler![
+            mail_dismissals_read,
+            mail_dismiss,
+            mail_undismiss,
+            mail_gate_read,
             sheet::calculate_sheets,
             sheet::sheet_restructure,
             pick_sheet_file,
@@ -3601,6 +3648,7 @@ pub fn run() {
             decide_pending_write,
             claude_user_settings,
             diagnostics::log_frontend,
+            forge_commands::pull_request_state,
             // M9.4 — git tracking. Every command resolves the workspace
             // first, so a vault nested in a larger repo scopes correctly.
             git_commands::git_workspace_info,

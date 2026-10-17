@@ -32,6 +32,7 @@ export function inertLine(text: string): string {
     else if ('\\[]()*_`#!|~{}'.includes(char)) out += `\\${char}`;
     else if (char === ':') out += '&#58;';
     else if (char === '@') out += '&#64;';
+    else if (char === '📅') out += '&#128197;';
     else out += char;
   }
   // Rust trim_start is Unicode White_Space (FEFF is not whitespace there).

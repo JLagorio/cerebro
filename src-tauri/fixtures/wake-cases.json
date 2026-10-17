@@ -4,12 +4,7 @@
   "coalesce_max": 20,
   "busy_retry_secs": 60,
   "budget_retry_secs": 600,
-  "cancel_whys": [
-    "paused",
-    "trigger_changed",
-    "agent_gone",
-    "page_gone"
-  ],
+  "cancel_whys": ["paused", "trigger_changed", "agent_gone", "page_gone"],
   "scenarios": [
     {
       "why": "a live key is ignored while pending or started, and admitted again once finished",
@@ -370,9 +365,7 @@
                 "subject": "records/risks/a.md",
                 "detail": "it changes in records/risks"
               },
-              "also": [
-                "records/risks/b.md"
-              ]
+              "also": ["records/risks/b.md"]
             }
           }
         },
@@ -482,9 +475,7 @@
           "at": "2026-10-13T09:01:00.000Z",
           "agent": "process:scout",
           "wake": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "coalesce": [
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-          ],
+          "coalesce": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
           "expect": {
             "error": true
           }
@@ -577,9 +568,7 @@
           "wake": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
           "coalesce": [],
           "expect": {
-            "deferred": [
-              "agent_running"
-            ]
+            "deferred": ["agent_running"]
           }
         },
         {
@@ -1245,9 +1234,7 @@
           "op": "claim",
           "agent": "process:scout",
           "wake": "assigned:12345678:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "coalesce": [
-            "assigned:12345678:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-          ],
+          "coalesce": ["assigned:12345678:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
           "expect": {
             "started": {
               "cause": {

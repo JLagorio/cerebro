@@ -38,3 +38,12 @@ describe('Avatar', () => {
     expect(badge.style.fontSize).toBe('10px');
   });
 });
+
+it.each(['https://images.example/a.png', 'http://images.example/a.png', '//images.example/a.png'])(
+  'a remote avatar draws initials without an image: %s',
+  (src) => {
+    render(<Avatar name="Ana Rios" src={src} />);
+    expect(screen.queryByRole('img')).toBeNull();
+    expect(screen.getByText('AR')).toBeTruthy();
+  },
+);

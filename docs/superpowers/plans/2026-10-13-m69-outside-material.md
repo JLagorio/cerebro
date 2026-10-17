@@ -8,13 +8,13 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M69. House style and rails: the 
 
 ## Status
 
-- **Owner scope change (2026-10-15):** Skip M69.4’s Linear importer. The owner explicitly kept the other planned Notion, mail, GitHub and local file features. M69.6 will supply the shared local-file inlet and import-kind plumbing that originally belonged to .4. Existing Linear connector presets and source identity support are not removed.
+- **Owner scope change (2026-10-15):** Skip M69.4’s Linear importer. The owner explicitly kept the other planned Notion, mail, GitHub and local file features. M69.6 supplies the shared local-file inlet and import-kind plumbing that originally belonged to .4. Existing Linear connector presets and source identity support are not removed. The original .4 design below is retained as history, not remaining work.
 
 - **Precondition:** M53–M57, M70 and M58–M68 closed, in that order: gates green, roadmap statuses updated. All are being built unstaged in this checkout, so this plan names their finished functions, never today's lines. M65 and M68 now have their own plan documents.
-- **Implementation (2026-10-15):** .1 and .2 were already present. .3 is now wired through the native and mock batch writers; its native concurrency, stale-read, Undo/Redo and shared-case checks pass. .3b now protects agent writes and shows provenance; its native, mock and browser checks pass. The remaining import/connector surfaces are still in progress. This is implementation evidence, not milestone closure. The plan has 18 parts.
+- **Implementation (2026-10-15):** All retained parts are implemented, including the shared import writer/provenance, Notion, calendar files, gated mail/text/sweep/retention, correspondence, people/company pack, local dismissals, drafts-only policy and PR status. The native dismissal migration is runtime schema 31. Focused native, mock and browser evidence appears under each part. Integrated frontend coverage, lint, formatting, typechecks, the macOS-compatible native suite, documentation tests and Clippy pass; all failures from the integrated browser run passed after repair in focused reruns. The roadmap's Execution update records the counts and limits. The separately named packaged/live checks remain open; this is not milestone closure. The plan has 18 parts, with .4 excluded by the owner.
 - **Effort:** 1 S + 8 M + 9 L ≈ 13.3 L; the roadmap said ≈6.8 L. Re-measured: .1 S → M; .3 L → L + M (.3b); .4 M → L (M66's kind table and dropped-path reader join it); .7 L → L + L (.7b) + L (.7c) + M (.7d) + M (.7e); .9 L → L + L (.9b); .10 S → M + M (.10b); .11 M → L.
 - **Crash risk:** .3, .5, .7, .7b, .9b, .11.
-- **Packaged checks** (owner, `./scripts/mac-build.sh`): .1, .4, .5, .6, .9b, .11. **Live checks** (owner; CLI 2.1.250; an isolated login, never the main `~/.claude`; the owner's own accounts only where named): .1, .5, .7, .7b, .10, .10b, .11, and .7c and .7e once the Gmail pack is accepted.
+- **Packaged checks** (owner, `./scripts/mac-build.sh`): .1, .5, .6, .9b, .11. **Live checks** (owner; CLI 2.1.250; an isolated login, never the main `~/.claude`; the owner's own accounts only where named): .1, .5, .7, .7b, .10, .10b, .11, and .7c and .7e once the Gmail pack is accepted.
 - **Schema steps:** one (.9b). **New refusal codes:** one, `import_refused` (.5), operational. **New CV ids:** four (.3b, .7, .5, .10). **New MCP tool:** `import_notion_page` (.5); `cache_source` gains kind thread (.7c). **New IPC commands:** five (.7c one, .9b three, .11 one).
 - **Artifacts:** new `shared/import/sources.v1.json` (.3; v2 in .3b) and `shared/policy/mail.v1.json` (.7; bumped by .7b, .7c, .7e). `tools.v1` bumps five times (.5, .7b, .7c, .7d, .10); policy.v3 once (.5); tool-approval.v1 once (.7b); field-kinds.v1 once (.9); M66's `kinds.v1` twice (.4, .6). New case files (prettier, `\u` escapes, no digest): `connector-approvals` (.1), `notion-cases` (.5), `thread-digests` (.7c, .7d), `pr-urls`, `pr-cases` (.11).
 - **New dependency:** `free-email-domains` (MIT, .8). CLDR's Windows zone rows are generated data (.6). The shared source URL grammar adds exact `regex` 1.13.1 as a direct dependency, already present in the lockfile.
@@ -26,7 +26,7 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M69. House style and rails: the 
 | Roadmap bullet | Parts | Proof |
 | --- | --- | --- |
 | Importing one Notion page twice keeps one file; pages imported later become wikilinks | .3, .5 | mcp.rs replays; e2e `notion-import` |
-| A Linear CSV lands on a status-bearing database; labels stay in a footer; a re-import reports duplicates | .3, .4 | e2e `linear-import` |
+| Linear CSV import | .4 | Excluded by the owner, 2026-10-15; no importer acceptance required |
 | A dropped `.ics` becomes pages with time zones kept | .6 | e2e `ics-import`; icsImport.test |
 | After an attended sweep, digests sit under the gitignored `sources/mail/`; a Person shows Correspondence; the unfiled lane lists an address you wrote to | .7–.7e, .8, .9b | commit.rs, changeset.rs; mcp.rs with a test-opened gate; e2e `correspondence`, `unfiled-correspondents`. The live sweep waits on the owner accepting the pack |
 | No tool path sends mail | .10, .10b, .7e | agent/mod.rs denials; recipes.test; mailSweep.test |
@@ -101,7 +101,7 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M69. House style and rails: the 
 | Wave | Parts | Theme |
 | --- | --- | --- |
 | 1 | M69.3, M69.2 | one import writer · link labels |
-| 2 | M69.1, M69.4 | connector presets · Linear CSV |
+| 2 | M69.1; M69.4 excluded | connector presets; Linear importer skipped by the owner |
 | 3 | M69.3b, M69.6 | stamps guarded, provenance shown · `.ics` |
 | 4 | M69.7 | mail out of git; the R14 gate; the Gmail pack |
 | 5 | M69.5 | Notion page import |
@@ -122,7 +122,7 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M69. House style and rails: the 
   - M56–M58: the sanitizer, `TranscriptFold`, tool renderers; `plan_for`, `attended`; receipts and `cleared_for_*`, `settle_run`, `agentAccess`.
   - M59.3's notices, M59.5's list_notes; M60: `fieldValue`, the date grammar, `set_fields`, `convertValue`, `applyBatch`, undo, Trash, `replace_file`, `findOptionByLabel`.
   - M61: `deadline:`, `parseCsv` and `readCsvFile`, `composeNote`, `recordSlug`, the repeat helpers, `createTarget`, `homeFolderFor`; M62.2; M64.1's lab, M64.7's ingest, M64.8–.9's kit and recipes; M66.1's kinds, M66.3's drop router, M66.7b's `vault-import-v1`, M66.7c's captures; M70.2's sidecars.
-- Owner steps that gate a part: the Linear export check (before wave 2) and the Notion recording (before wave 5).
+- Owner steps that gate retained work: the Notion recording (before wave 5). The Linear export check was removed with .4.
 - Ask each wave's questions before it starts; the default applies if unanswered (Owner questions).
 
 ## Parts
@@ -249,6 +249,8 @@ broader full gate and owner connector proofs remain milestone work.
 
 ### M69.5 Notion page import: bytes from the fetch's own result, converted by code, never retyped
 
+**Implementation evidence (2026-10-15, unstaged):** The run-bound capture, Rust enhanced-markdown converter, stamped import door, unchanged-citer relinking, composed fallback, mock fixtures and editor replay are implemented. Captures retain their memory charge until the last in-flight reader drops; stale fetches cannot authorize a newer capture's composed fallback. Read and write checks bind actual landing paths, including mail aliases. Peer review found and repaired those lifetime/scope issues, and a relinker regression now proves an existing wikilink cannot consume later inline code. All requested native capture/fold/door/provenance tests passed in the integrated gate (163 passed overall). Entity decoding now uses the extraction boundary's existing helper; its rail and the converter replay passed the following 17-test gate. Focused TypeScript integration and repairs passed, including all 18 unlossy editor cases; all three type configurations and scoped lint passed. Both Chromium import journeys passed and screenshots were inspected. The fixtures are explicitly synthetic; the owner's isolated real-connector recording and packaged Notion check remain owed, so this is not milestone closure.
+
 - **What:** no import path; `cache_source` is the only connector inlet. Cerebro's server can't call your connector (no control channel before D4 (b)), so the agent fetches in its turn, and Rust keeps the untruncated tool_result by tool_use_id inside M56.3's fold, before the 2,000-char cut. The model passes the page link, never the text. INTEGRATIONS-5. Deviation recorded: M13 sends fetched material to `sources/`; an import lands in the folder you name.
 - **Files:** `src-tauri/src/import/{mod.rs, capture.rs (new), notion.rs (new)}`, `src-tauri/src/{lib.rs, mcp.rs, vault/write.rs, policy/table.rs}`, `src-tauri/src/agent/{fold.rs, mod.rs}`, `shared/policy/{policy.v3.json, policy.v3.sha256, tools.v1.json, tools.v1.sha256, README.md}`, `src-tauri/fixtures/{notion-cases.json (new), cli-stream/real/notion-fetch.{stream.jsonl,session.jsonl,meta.json} (new), tool-cases.json, tool-grants.json, write-doors.json, note-targets.json}`, `src/lib/policy/{table,tools}.test.ts`, `src/engine/tools.test.ts`, `src/agent/{systemPrompt.ts, systemPrompt.test.ts, promptGrant.test.ts, mockAgent.ts, mockAgent.test.ts, agentIpc.ts}`, `src/editor/notionCases.test.ts` (new), `src/lib/{mockIpc,mockIpc.test}.ts`, `e2e/notion-import.spec.ts` (new), `scripts/fixtures.test.ts`, `scripts/cli-record/{sanitize,sanitize.test}.ts`, `AGENTS.md`, `SECURITY.md`. Only if the sweep finds new kinds: `src-tauri/src/agent/kinds.rs`. (Review: the recording moved under `real/`, so the sanitizer joins.)
 - **Approach:**
@@ -313,6 +315,8 @@ broader full gate and owner connector proofs remain milestone work.
 - **Wave** 4 · **Depends** M58.3; M60.8; M70.2; M54.1; M69.3 · **Size** L · **Crash risk** yes (git spawns in `ensure_gitignore` and the run commit) · **Packaged check** no
 - **Commit:** `feat(mail): mail stays out of git, behind an R14 gate only the owner opens (M69.7)`.
 
+**Implementation evidence (2026-10-15, unstaged):** Private mail and its comment sidecars are excluded from checkpoints and per-run commits, including mixed-case paths, nested vaults, previously tracked files with staged changes, and late ignore negations. Mail-only runs report their kept-out count. The scoped R14 pack and loaders are present with the gate closed. Native storage/gate/git tests passed in the combined 163-pass gate; TurnChangeset browser checks passed (2), with screenshots inspected. The live git-vault check and owner acceptance remain separate.
+
 ### M69.7b Runs nobody watches never read mail, and mail is never cached as a web page
 
 - **What:** ignoring a folder keeps it out of git, not out of runs: the scanner ignores `.gitignore`. An unattended agent could read a digest through get_note, search_notes, list_notes, query_records or the CLI's Read, or read mail live through a Gmail connector its record names (M54.9), then write what it learned into knowledge/ or any tracked page in its scope. Ambient ingest scans every file. cache_source's description says to cache every connector fetch, and findExternalRefs files mail.google.com links under `sources/web/` (EMAIL-0). M62.5b runs token client sessions attended.
@@ -332,6 +336,8 @@ broader full gate and owner connector proofs remain milestone work.
 - **Wave** 6 · **Depends** M69.7, .2, .5; M54.7, .9, .10; M57.2, .4, .7; M58.6; M59.5; M60.8b; M62.2, .5b · **Size** L · **Crash risk** yes (every spawn's argv) · **Packaged check** no
 - **Commit:** `fix(mail): runs nobody watches never read mail, and mail is never cached as a web page (M69.7b)`.
 
+**Implementation evidence (2026-10-15, unstaged):** Unattended and token-client reads refuse or withhold mail before content reads; ambient catch-up skips the folder before parsing. Mail URLs cannot enter the web cache, including encoded and Unicode host spellings; Rust and the pure WHATWG parser replay 28 shared URL cases. CLI and connector reader denials derive from the shared artifacts. The native access/cache/argv/catch-up checks passed, alongside 546 frontend policy, prompt, scope and boundary checks and two browser journeys. Peer review repaired numeric-loader/Unicode whitespace parity and Git index/ignore edge cases. Legacy web copies and arbitrary shell access retain the documented limits.
+
 ### M69.7c Thread digests behind the R14 gate: cache_source kind thread writes flat header digests
 
 - **What:** EMAIL-1, header half. cache_source takes only issue or web. A digest must hold flat strings and string lists, carry no bcc and no volatile labels, and have its direction stamped once in Rust from SENT. It is written only behind the closed gate, only by attended runs, only by cache_source.
@@ -349,6 +355,8 @@ broader full gate and owner connector proofs remain milestone work.
 - **Wave** 7 · **Depends** M69.7b, .3, .5; M58.1, .6; M54.10; M55.5; M60.4, .8; M64.1 · **Size** L · **Crash risk** no · **Packaged check** no
 - **Commit:** `feat(mail): cache_source keeps flat header digests of mail threads, behind the R14 gate (M69.7c)`.
 
+**Implementation evidence — 2026-10-15 (.7c).** Header digests are callable behind the shipped closed gate. Native tests cover scope/attendance, unchanged receipts, replacement, ordinary-door refusal, actual symlink landing and scanner metadata limits. The frontend mock replays added mail refusal rows for all ordinary note/canvas doors. Settings has independent gate/cache failures and lists legacy web copies. Its legacy wording deliberately says those copies “may remain in Git history”; a vault scan cannot establish current index membership, so the planned unsupported “git tracks them” claim was removed. Initial header proof: 98 native tests, 686 frontend checks and the browser Settings → digest journey. The combined .7d/.7e gate later passed 1,024 frontend checks; final browser/native details follow below. No live mailbox was read and the R14 gate remains closed.
+
 ### M69.7d Message text only on an attended request: cut to the reply, inert, in its own page
 
 - **What:** EMAIL-1, body half. Text the model writes into cache_source must lose its quoted history and never become live vault syntax. It sits beside the digest, not in it, so a header-only refresh never drops text you asked for, and digests stay small for Correspondence's scans.
@@ -362,6 +370,8 @@ broader full gate and owner connector proofs remain milestone work.
 - **Acceptance:** roadmap: bodies only on an attended request, and only while the gate lists `thread_text`; a header-only call (a sweep) never writes text. Quoted history is cut, forwards stay whole, and a non-header `From:` line stays. Cached text holds no live link, task, date or directive. A header refresh keeps the text page and its link.
 - **Wave** 8 · **Depends** M69.7c; M57.4 · **Size** M · **Crash risk** no · **Packaged check** no
 - **Commit:** `feat(mail): message text is kept only when asked for, cut to the reply and inert (M69.7d)`.
+
+**Implementation evidence (2026-10-15, unstaged):** Optional message text has its own gate and page. A closed text kind, unattended run, oversized call or conflicting source identity refuses before either page is written. Reply extraction cuts quoted history, preserves forwarded messages, and clips by Unicode characters. Header-only refreshes preserve the text link. The source writer locks both paths before projecting their contents; the delayed-sibling regression proves the projection cannot read an older text-page state. Native mail/forge checks passed (44 passed, two deliberate writers ignored); peer review of the source locking and preflight found no remaining blocker. A filesystem failure between the two renames can still leave only one page updated, as SECURITY.md records. Browser verification caught escaped links becoming live in the editor: the shared markdown reader and serializer now preserve literal markers across saves, with focused editor and paste regressions. The final text journey confirms literal link/task/date text, no task in Home or My work, and unchanged disk bytes. Native mail and extraction goldens replay the actual date marker; 31 focused frontend checks and the final four mail/destination browser journeys pass. Text and retention screenshots were inspected. No live Gmail call or R14 acceptance is implied.
 
 ### M69.7e The attended mail sweep and the human-only prune
 
@@ -379,6 +389,8 @@ broader full gate and owner connector proofs remain milestone work.
 - **Wave** 9 · **Depends** M69.7c; M54.9, .11; M55.12; M59.5; M60.6, .7, .8; M64.1 · **Size** M · **Crash risk** no · **Packaged check** no
 - **Commit:** `feat(mail): an attended sweep caches recent mail headers, and only you prune them (M69.7e)`.
 
+**Implementation evidence (2026-10-15, unstaged):** The shared mail artifact supplies the bounded sweep and denial lists. The paused, unscheduled record narrows its connector to two qualified readers and the four named vault tools; its instructions request metadata only, include sent mail, cap and deduplicate threads, and report failures. Current official Gmail MCP documentation confirms the reader names and payload fields; the README links those sources and distinguishes compatibility denials. Settings reads connector, gate and cache failures independently. Retention keeps unknown or unreadable pages, verifies each digest/text identity, caps whole pairs and passes every preview hash to one Trash batch with one Undo. Focused mail/policy/mock/IPC checks passed (1,024 across ten files), and the settings/retention browser journeys passed, including identical bytes after Undo. The bounded peer review found no write/security blocker: no held sweep tool drafts, sends, labels, trashes or marks spam, and only the Settings action calls retention. The gate remains closed pending the owner's R14 decision; no account or live connector was used.
+
 ### M69.8 Correspondence on records: declared email fields, exactly one match, owner addresses from SENT
 
 - **What:** nothing reads cached mail back onto the pages it concerns. `inferKindFromValue` tags any address-shaped value as email, so resolving undeclared values would make every address ambiguous. EMAIL-3. Derived on read; nothing stored.
@@ -392,6 +404,16 @@ broader full gate and owner connector proofs remain milestone work.
 - **Acceptance:** roadmap: a Person with a matching email shows Correspondence; addresses resolve only through declared email fields and only on exactly one match; owner addresses come from SENT; consumer domains come from free-email-domains (MIT, attributed), and the role list is written here; any record with an email gets the section, by capability (CV-08). Nothing stored; absent never reads 0.
 - **Wave** 8 · **Depends** M69.7c; M59.3; M60.3; M53.20; M64.1 · **Size** M · **Crash risk** no · **Packaged check** no
 - **Commit:** `feat(records): a record with an email shows the cached threads it is in (M69.8)`.
+
+**M69.8 implementation evidence (2026-10-15, unstaged):** The declared-email
+index, role classifier, section and five state-lab presets are implemented.
+The pinned consumer list is free-email-domains 1.12.15 (MIT, licence included):
+1.15.1 was only three days old; 1.12.15 was the newest release at least two
+weeks old. Install scripts were disabled to keep the shipped list pinned.
+Matching and component checks pass, the preset sweep passed 507 checks, and
+the browser proof passed in 7.3 seconds. The 1450px screenshot was inspected;
+shared addresses, owner identity, unmatched and unreadable states remain
+explicit. Scoped lint and all three type configurations passed before .9.
 
 ### M69.9 People and companies: a pack with a stage board and a derived Last interaction
 
@@ -408,6 +430,19 @@ broader full gate and owner connector proofs remain milestone work.
 - **Acceptance:** roadmap: a Company/Person pack with a stage board and a derived "Last interaction" rollup. One column per stage plus no stage, and no deal lands in My work. Last interaction is blank with no mail, never 0. One batch, one Undo; a second install plans nothing. D18: Company and Person open as pages and round-trip.
 - **Wave** 10 · **Depends** M69.8, .7c; M60.1, .2, .3, .6, .7; M61.3b, .5, .11, .11b; M64.8 · **Size** L · **Crash risk** no · **Packaged check** no
 - **Commit:** `feat(records): a People and companies pack with a stage board and Last interaction from cached mail (M69.9)`.
+
+**M69.9 implementation evidence (2026-10-15, uncommitted):** Domain matching,
+cached-mail rollups, the pack planner and its one-batch install are implemented.
+The focused integration passed 253 tests; all three type configurations and
+scoped lint passed. The browser journey installed Company, added only missing
+fields to an existing Person database, displayed all five stages plus an
+unassigned column, derived Last interaction, and restored both Type files
+exactly with one Undo. The screenshot was inspected. The schema source cases
+and digest replay pass in TypeScript and the native schema gate passed ten
+tests. Independent planner/domain review found no
+blocking issue. Existing views, field definitions and bodies remain intact.
+The final selector regression also proves that an existing reverse rollup can
+switch to Cached mail, clearing its old source in the same change.
 
 ### M69.9b Unfiled correspondents: an on-demand lane with one-click pages and lasting dismissals
 
@@ -426,12 +461,49 @@ broader full gate and owner connector proofs remain milestone work.
 - **Wave** 11 · **Depends** M69.9, .8; M61.11; M54.3; M64.1 · **Size** L · **Crash risk** yes (schema step) · **Packaged check** yes
 - **Commit:** `feat(records): people you wrote to who have no page, with one-click pages and lasting dismissals (M69.9b)`.
 
+**M69.9b implementation evidence (2026-10-15, uncommitted):** The on-demand lane,
+creation actions, dismissal adapters, per-vault mock and runtime migration 31
+are implemented. The
+focused integration passed 722 tests; the finishing review/preset/schema run
+passed 149. All three type configurations and scoped lint passed. Two browser
+journeys passed: company creation followed by the linked person page, personal
+address dismissal and restore, and all five lab states. The screenshot was
+inspected. Synchronous vault retirement prevents stale results after A→B→A,
+including the dialog's busy state. An initial scan stays loading until its
+ready snapshot belongs to the current vault; all six component checks pass.
+The final IPC/engine/twin gate passed 57 checks. Eight native checks passed,
+covering all 19 normalization cases, order and idempotence, direct SQL CHECKs,
+unavailable versus empty, preservation through v30→31, validation and actual
+database close/reopen/restore persistence. Independent UI/action review closed
+the readiness finding; all-target Clippy is clean. The migration kill-boundary check is written for Linux
+CI; the packaged SQLite proof and final integrated gate remain open.
+
+**Copy amendment:** Cached header data records matching threads and timestamps,
+not per-address send counts or display names. Rows therefore say “wrote in N
+threads” and use the address local part when naming a new page. A missing sent
+time stays “not recorded.” The empty state says “No unfiled correspondents.”
+because dismissed, role and ambiguous addresses do not imply an existing page.
+
 ### M69.10 Never sends: connector send tools denied by name on every run; foreign tools show their server
+
+**Implementation evidence (2026-10-15, unstaged):** Eleven verified send-tool
+spellings now live in the strictly parsed shared `never_call` table. The one
+CLI deny join appends them per loaded server, preserving record and unattended
+mail denials and no-connector argv. Native deny/loader checks passed in the
+combined 98-test gate; the digest was regenerated by its ignored writer as the
+artifact advanced through the mail/canvas integrations. Tool labels, cards and
+prompt checks passed, and the draft-reply browser proof below shows the server
+chip and absence of vault-write treatment. Known limits (unknown aliases,
+legacy global connector names and shell grants) are recorded in SECURITY.md.
+The requested `security-review` skill is absent; peer review is used in its
+place. The owner-only isolated CLI send-denial check remains owed.
+
+**Published-source check (2026-10-15):** The deny inventory uses the [GongRzhe server v1.1.11](https://github.com/GongRzhe/Gmail-MCP-Server), [jimsimoy server v0.1.0](https://github.com/jimsimoy/gmail-mcp), [workspace-mcp v1.26.0](https://github.com/taylorwilsdon/google_workspace_mcp/releases/tag/v1.26.0), [klodr server v1.4.2](https://github.com/klodr/gmail-mcp/blob/main/src/tools.ts), and [Composio Gmail toolkit 20261010_00](https://docs.composio.dev/toolkits/gmail). The published catalogs also verify `reply_all` and `GMAIL_FORWARD_MESSAGE` as send operations, so they join the original candidates. [Anthropic's current Workspace connector guidance](https://support.claude.com/en/articles/10166901-use-google-workspace-connectors) describes sending with approval; this boundary covers verified spellings, not undisclosed tool aliases. [Google's separate Gmail MCP v1 catalog](https://developers.google.com/workspace/gmail/api/reference/mcp) exposes draft creation but no send operation and no `get_draft`; the recipe retains that read name for compatible servers and can use the creation result's id without it. These are documentation reads, never live account calls.
 
 - **What:** once M54.9 grants a connector's server, nothing stops its send tool, and every foreign call renders as a raw `mcp__…` row with the wrench. D15: drafts only. EMAIL-6's first step (the WRITE_TOOLS drift, the false Mirrors comment) is done by M54.2. The roadmap row splits: .10 the boundary and labels, .10b the skill.
 - **Files:** `shared/policy/{tools.v1.json, tools.v1.sha256, README.md}`, `shared/policy/goldens-tool-approval/` (only cells whose lists change), `src-tauri/src/{policy/tools.rs, agent/mod.rs}`, `src/lib/policy/tools{,.test}.ts`, `src/engine/tools{,.test}.ts`, `src/agent/AiActionCard{,.test}.tsx`, `shared/prompt/server-instructions.md`, `src/agent/systemPrompt.test.ts`, `SECURITY.md`, `AGENTS.md`. Only if M54.9 composes the deny list there: `src-tauri/src/connectors.rs`.
 - **Approach:**
-  - **Verify first.** Read the published tool lists of the Gmail MCP servers in common use and keep only tools that send mail or a saved draft; the claude.ai Gmail connector has none. Candidates, checked, never trusted: `send_email`, `send_message`, `send_draft`, `send_gmail_message`, `reply_to_email`, `forward_email`, `GMAIL_SEND_EMAIL`, `GMAIL_SEND_DRAFT`, `GMAIL_REPLY_TO_THREAD`. Each kept row names its server and version in `source`.
+  - **Verify first.** Read the published tool lists of the Gmail MCP servers in common use and keep only tools that send mail or a saved draft. Rechecked 2026-10-15: the old claim that the claude.ai connector cannot send is obsolete; Anthropic now documents send, reply and forward, without publishing exact tool names on that help page. Do not invent those names. Candidates, checked, never trusted: `send_email`, `send_message`, `send_draft`, `send_gmail_message`, `reply_to_email`, `forward_email`, `GMAIL_SEND_EMAIL`, `GMAIL_SEND_DRAFT`, `GMAIL_REPLY_TO_THREAD`. Each kept row names its server and version in `source`.
   - **Artifact.** tools.v1.json's last key, `never_call {why, tools: [{name, source}]}`, names in ASCII order (ritual). tools.rs and tools.ts parse it strictly and refuse, naming row and field: an empty why or source, a name outside `^[A-Za-z0-9_-]{1,64}$`, duplicates, disorder, a cerebro row's name. `never_call_names()` in manifest order.
   - **Argv.** Where M54.9 joins the record's connector denies (beside .7b's unattended mail readers), append `mcp__<cli_name(server)>__<tool>` for each server the run holds × each name, deduped, into the one `--disallowedTools`. No connector, nothing added. No record, skill or allow rule removes one: the deny beats an allow (M54.9 T3).
   - **Labels.** `foreignTool(name)` splits `mcp__<server>__<tool>` (null for cerebro, CLI built-ins and malformed names); `toolDisplay` → `{label, server}`; `toolIconName` gives `plug`. AiActionCard adds a server chip (`action-server`, the CLI's spelling, tooltip in Appendix B), `data-external` and `data-server`; never a write card, no View diff.
@@ -444,6 +516,20 @@ broader full gate and owner connector proofs remain milestone work.
 - **Commit:** `feat(agents): connector send tools are denied by name on every run, and foreign tools show their server (M69.10)`.
 
 ### M69.10b /draft-reply: a recipe that leaves a signed plain-text Gmail draft and answers with its link
+
+**Implementation note (2026-10-15):** M54.9's actual per-tool syntax is
+`connectors: [gmail]` plus `mcp__gmail__…` entries in `allowed-tools`; the recipe
+uses that existing syntax. Skill and agent restrictions intersect, denials
+union, and Up next freezes all three lists. The starter and Library share the
+same editable recipe bytes. Its two browser journeys pass: required inputs,
+plain-text draft with signature, external Gmail cards, no write/diff treatment,
+missing-input question, placeholder omission, returned link, and unchanged
+vault bytes. Screenshot inspected. Focused tests passed (311), followed by the
+policy/attention/trigger, mock IPC and lab replays (1,011 passed, six intentional
+skips); all three type configurations and scoped lint passed. The requested
+`security-review` skill is not installed; code and peer review cover the grant
+and prompt boundaries instead. The owner still owes the isolated live Gmail
+check; this scripted proof is not a claim about a connected account.
 
 - **What:** no skill drafts mail. Skills narrow cerebro tools but not connectors, so a turn reading an untrusted thread holds every connector the vault enables.
 - **Files:** `shared/starter/vault/records/skills/draft-reply.md` (new), `shared/starter/README.md`, `src-tauri/src/starter.rs`, `src/lib/recipes{,.test}.ts`, `src/engine/skills{,.test}.ts`, `src/agent/{useAgentChat.ts, useAgentChat.test.tsx, AiPanel.tsx, mockAgent.ts, mockAgent.test.ts}`, `e2e/draft-reply.spec.ts` (new). Only if its words count two recipes: `src/library/RecipesOffer{,.test}.tsx`.
@@ -460,6 +546,36 @@ broader full gate and owner connector proofs remain milestone work.
 - **Commit:** `feat(skills): /draft-reply leaves a signed plain-text Gmail draft and answers with its link (M69.10b)`.
 
 ### M69.11 PR chip (D16): a pull request link shows its live state through your own `gh`
+
+**Implementation evidence (2026-10-15, unstaged):** The native read door and
+browser twin, pure discovery/readiness/origin helpers, property and body chips,
+peek/page strip and hash-guarded single-status batch are implemented. The shared
+37 URL and 40 read-outcome cases replay in both suites. Focused TS integration
+passed 447 tests, including all five lab presets and exact-byte Undo. Chromium
+passed four scenarios: unknown gh, both check shapes, page/peek navigation,
+bounded chip geometry, merged→Done→Undo and all five lab states; its screenshot
+was reviewed. Native argv, process caps,
+cache, response identity and concurrency checks passed; a fake-process startup
+race was corrected and its final combined gate is recorded by the native lane.
+Peer review found and repaired case-equivalent property/body keys and list/quote
+or tab-indented code discovery, including indented false fence closers; 106 pure
+checks include those regressions and prevent code from making a gh read.
+Typecheck and scoped lint pass. The requested security-review skill is not
+installed; independent native and TS review substitutes for it. The owner-only
+live gh and packaged external-link checks remain owed; no test read a real PR.
+
+Origin markers were checked against primary sources on 2026-10-15: [Codex's
+upstream task URL constructor](https://github.com/openai/codex/blob/main/codex-rs/cloud-tasks/src/util.rs),
+[Cursor's API and branch documentation](https://cursor.com/docs/cloud-agent/api/endpoints),
+[Cognition's published Devin session links](https://cognition.com/blog/devin-generally-available),
+[Jules' session API](https://jules.google/docs/api/reference/sessions/),
+[GitHub's documented copilot/ branch boundary](https://docs.github.com/en/enterprise-cloud%40latest/copilot/responsible-use/agents),
+and Anthropic's [observed generated footer](https://github.com/anthropics/claude-code/issues/19366)
+and [documented Claude Code trailer](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md).
+Only observed markers are recognized; a generic bot login is insufficient.
+These labels say origin hint, never verified attribution or human by absence.
+The strip automatically reads at most eight body PRs and eight property PRs;
+any overflow prevents an all-merged suggestion from an incomplete set.
 
 - **What:** nothing reads a pull request's state. D16 (b), default taken, lifts M30 D3 for reads only: your own `gh`, read-only, no token in the app. CODING-3. Q42–Q45 set its reach.
 - **Files:** `src-tauri/src/{forge.rs (new), forge_commands.rs (new), lib.rs}`, `src-tauri/fixtures/{pr-urls.json, pr-cases.json}` (new), `src/engine/pullRequest{,.test}.ts` (new), `src/lib/{gitIpc, mockGit, mockGit.test}.ts`, `src/detail/usePullRequest.ts` (new), `src/detail/{PullRequestChip,PullRequestStrip}{,.test}.tsx` (new), `src/lab/sections/pullRequestStrip.tsx` (new), `src/detail/FieldEditor{,.test}.tsx`, `src/pages/DocPage{,.test}.tsx`, `e2e/pr-chip.spec.ts` (new), `shared/policy/README.md` (review: the twin registry), `SECURITY.md`.

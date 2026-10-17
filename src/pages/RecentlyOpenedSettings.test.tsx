@@ -5,6 +5,7 @@ import { useOpenLogStore } from '@/stores/openLogStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { makeEntry } from '@/test/factories';
 import { RecentlyOpenedSettings } from './RecentlyOpenedSettings';
+import { keycapText } from '@/components/ui/Keycaps';
 
 afterEach(cleanup);
 
@@ -79,7 +80,7 @@ describe('RecentlyOpenedSettings (M59.3)', () => {
   it('says what is kept, and that agents never count', () => {
     render(<RecentlyOpenedSettings />);
     expect(screen.getByTestId('settings-recently-opened').textContent).toContain(
-      "Pages you open yourself, kept for this vault on this Mac to rank ⌘K and the pickers. An agent's opens never count, and nothing is written to the vault.",
+      `Pages you open yourself, kept for this vault on this Mac to rank ${keycapText('palette.open')} and the pickers. An agent's opens never count, and nothing is written to the vault.`,
     );
   });
 });

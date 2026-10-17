@@ -61,3 +61,12 @@ cargo test --lib canvas::agent_limits::tests::write_canvas_agent_limits_digest -
 ```
 
 Replay `canvas::` and `pnpm test:run src/engine/scene` afterward.
+
+
+Agent edits (M68.7b) use `agent-limits.v1.json` artifact version 2 and the
+shared `src-tauri/fixtures/canvas-edit-cases.json`. Rust's `edit.rs` and
+`scene/agentEdit.test.ts` replay exact bytes and words. The four operations
+never remove items or edit Cerebro extras. A newly added item uses the
+format's canonical key order; updates retain the item's original order.
+A target outside read scope is never looked up; an out-of-vault canonical
+card target refuses. Preview, stale and identical batches write no row.

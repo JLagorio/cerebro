@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { boot } from './boot';
+import { boot, openAssistantPanel } from './boot';
 
 /**
  * Review notes on a turn's diff (M58.5): a turn's View diff opens the
@@ -23,7 +23,7 @@ const assistants = (page: Page) =>
 async function openPanel(page: Page) {
   await page.setViewportSize({ width: 1440, height: 900 });
   await boot(page);
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   await expect(panel(page)).toBeVisible();
 }
 

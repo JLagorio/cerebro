@@ -1,2 +1,5 @@
+packages:
+  - '.'
+
 patchedDependencies:
   '@ironcalc/wasm@0.8.3': patches/@ironcalc__wasm@0.8.3.patch

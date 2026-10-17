@@ -1,12 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
 import YAML from 'yaml';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, showDatabases, showPages } from './boot';
 
 /** M60.2b: a broken saved view explains its references on its full page and
  * in every embed; a field rename leaves every saved view usable. */
 const TYPE_DOC = 'types/work-item.md';
 
 async function openWork(page: Page) {
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
   await expect(page.getByTestId('type-page')).toBeVisible();
 }
@@ -18,6 +19,7 @@ async function openTab(page: Page, id: string) {
 }
 
 async function openDelivery(page: Page) {
+  await showPages(page);
   const row = page.getByTestId('collection-node-collection').filter({ hasText: 'Delivery' });
   await row.getByRole('button', { name: 'Delivery', exact: true }).click();
   await expect(page.getByTestId('database-block')).toHaveCount(3);

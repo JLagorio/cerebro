@@ -1,0 +1,664 @@
+<div id="cerebro-polish-review" aria-label="Proposed Cerebro page composition">
+  <style>
+    #cerebro-polish-review {
+      --cp-bg: light-dark(#ffffff, #161a24);
+      --cp-nav: light-dark(#f6f7fa, #1c2230);
+      --cp-ink: light-dark(#161a24, #edf0f7);
+      --cp-secondary: light-dark(#5a6274, #b3bdd1);
+      --cp-line: light-dark(#e3e6ee, #343d50);
+      --cp-fill: light-dark(#eef1fe, #252f51);
+      --cp-accent: light-dark(#2e48c2, #a6b6ff);
+      --cp-violet: light-dark(#6c3bc2, #c5a7ff);
+      --cp-reading: 720px;
+      --cp-row: 36px;
+      --cp-cell-y: 7px;
+      font-family:
+        'Instrument Sans',
+        -apple-system,
+        BlinkMacSystemFont,
+        'Segoe UI',
+        sans-serif;
+      color: var(--cp-ink);
+      color-scheme: light dark;
+    }
+    #cerebro-polish-review * {
+      box-sizing: border-box;
+    }
+    #cerebro-polish-review .cp-label {
+      font-size: 12px;
+      line-height: 18px;
+      color: var(--cp-secondary);
+      padding: 8px 0 12px;
+    }
+    #cerebro-polish-review .cp-window {
+      background: var(--cp-bg);
+      border: 1px solid var(--cp-line);
+      border-radius: 10px;
+      display: grid;
+      grid-template-columns: 54px 240px minmax(0, 1fr);
+      min-height: 690px;
+      overflow: clip;
+    }
+    #cerebro-polish-review .cp-rail {
+      background: var(--cp-nav);
+      display: flex;
+      align-items: center;
+      flex-direction: column;
+      gap: 23px;
+      padding: 20px 10px;
+      color: var(--cp-secondary);
+    }
+    #cerebro-polish-review .cp-brand {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--cp-accent);
+      margin-bottom: 12px;
+    }
+    #cerebro-polish-review .cp-rail .cp-current {
+      background: var(--cp-fill);
+      color: var(--cp-accent);
+      padding: 9px;
+      border-radius: 8px;
+    }
+    #cerebro-polish-review .cp-side {
+      background: var(--cp-nav);
+      padding: 22px 14px;
+      border-right: 1px solid var(--cp-line);
+      font-size: 14px;
+      line-height: 20px;
+    }
+    #cerebro-polish-review .cp-vault {
+      font-weight: 600;
+      margin: 0 6px 32px;
+    }
+    #cerebro-polish-review .cp-side-label {
+      font-size: 12px;
+      color: var(--cp-secondary);
+      margin: 24px 8px 10px;
+    }
+    #cerebro-polish-review .cp-nav-row {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 8px;
+      border-radius: 6px;
+      margin: 2px 0;
+    }
+    #cerebro-polish-review .cp-nav-row.cp-selected {
+      background: var(--cp-fill);
+      color: var(--cp-accent);
+    }
+    #cerebro-polish-review .cp-main {
+      min-width: 0;
+    }
+    #cerebro-polish-review .cp-location {
+      min-height: 52px;
+      padding: 10px 20px;
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      flex-wrap: wrap;
+      border-bottom: 1px solid var(--cp-line);
+      font-size: 12px;
+      line-height: 18px;
+      color: var(--cp-secondary);
+    }
+    #cerebro-polish-review .cp-location-path {
+      flex: 1;
+      min-width: 100px;
+    }
+    #cerebro-polish-review button {
+      font: inherit;
+      color: inherit;
+      border: 1px solid transparent;
+      background: transparent;
+      border-radius: 6px;
+      min-height: 32px;
+      padding: 5px 9px;
+    }
+    #cerebro-polish-review button:hover {
+      background: var(--cp-nav);
+    }
+    #cerebro-polish-review button:focus-visible {
+      outline: 2px solid var(--cp-accent);
+      outline-offset: 2px;
+    }
+    #cerebro-polish-review button[aria-pressed='true'] {
+      color: var(--cp-accent);
+      background: var(--cp-fill);
+    }
+    #cerebro-polish-review .cp-workspace {
+      display: flex;
+      align-items: stretch;
+      min-width: 0;
+    }
+    #cerebro-polish-review .cp-page {
+      width: 100%;
+      max-width: var(--cp-reading);
+      padding: 40px clamp(20px, 4vw, 48px) 44px;
+      margin: 0 auto;
+      min-width: 0;
+    }
+    #cerebro-polish-review .cp-eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--cp-secondary);
+      font-size: 12px;
+      line-height: 18px;
+      margin-bottom: 12px;
+    }
+    #cerebro-polish-review h1 {
+      font-size: 32px;
+      line-height: 40px;
+      font-weight: 600;
+      letter-spacing: -0.025em;
+      margin: 0 0 16px;
+      overflow-wrap: anywhere;
+    }
+    #cerebro-polish-review .cp-summary {
+      display: flex;
+      align-items: center;
+      gap: 8px 18px;
+      flex-wrap: wrap;
+      font-size: 14px;
+      line-height: 20px;
+    }
+    #cerebro-polish-review .cp-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+    #cerebro-polish-review .cp-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--cp-accent);
+      display: inline-block;
+      flex: none;
+    }
+    #cerebro-polish-review .cp-dot-muted {
+      background: var(--cp-secondary);
+    }
+    #cerebro-polish-review .cp-property-trigger {
+      color: var(--cp-secondary);
+      font-size: 12px;
+    }
+    #cerebro-polish-review .cp-properties {
+      margin: 18px 0 0;
+      display: grid;
+      grid-template-columns: 120px minmax(0, 1fr);
+      gap: 12px 16px;
+      font-size: 14px;
+      line-height: 20px;
+    }
+    #cerebro-polish-review dt {
+      color: var(--cp-secondary);
+    }
+    #cerebro-polish-review dd {
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
+    #cerebro-polish-review .cp-tabs {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      border-bottom: 1px solid var(--cp-line);
+      margin: 28px 0 26px;
+      font-size: 14px;
+      line-height: 20px;
+    }
+    #cerebro-polish-review .cp-tabs button {
+      border-radius: 0;
+      padding: 8px 0 11px;
+      border-bottom: 2px solid transparent;
+    }
+    #cerebro-polish-review .cp-tabs button[aria-pressed='true'] {
+      border-bottom-color: var(--cp-accent);
+      background: transparent;
+      color: var(--cp-ink);
+      font-weight: 600;
+    }
+    #cerebro-polish-review h2 {
+      font-size: 20px;
+      line-height: 28px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      margin: 26px 0 12px;
+    }
+    #cerebro-polish-review p {
+      font-size: 16px;
+      line-height: 28px;
+      margin: 0 0 18px;
+    }
+    #cerebro-polish-review .cp-note {
+      border-left: 3px solid var(--cp-accent);
+      padding: 4px 0 4px 16px;
+      margin: 22px 0;
+    }
+    #cerebro-polish-review .cp-note p {
+      font-size: 14px;
+      line-height: 22px;
+      margin: 0;
+    }
+    #cerebro-polish-review .cp-check {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      font-size: 16px;
+      line-height: 28px;
+      margin: 8px 0;
+    }
+    #cerebro-polish-review input[type='checkbox'] {
+      accent-color: var(--cp-accent);
+      margin: 7px 0 0;
+      flex: none;
+    }
+    #cerebro-polish-review .cp-data-bar {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      font-size: 12px;
+      line-height: 18px;
+      color: var(--cp-secondary);
+      margin-bottom: 12px;
+    }
+    #cerebro-polish-review select {
+      font: inherit;
+      color: var(--cp-ink);
+      background: var(--cp-bg);
+      padding: 6px;
+      border: 1px solid var(--cp-line);
+      border-radius: 6px;
+      max-width: 100%;
+    }
+    #cerebro-polish-review .cp-table-scroll {
+      overflow-x: auto;
+    }
+    #cerebro-polish-review table {
+      min-width: 460px;
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      font-size: 14px;
+      line-height: 20px;
+    }
+    #cerebro-polish-review th {
+      text-align: left;
+      color: var(--cp-secondary);
+      font-size: 12px;
+      font-weight: 500;
+      line-height: 18px;
+      padding: 8px 10px;
+    }
+    #cerebro-polish-review td {
+      padding: var(--cp-cell-y) 10px;
+      min-height: var(--cp-row);
+      height: var(--cp-row);
+      vertical-align: top;
+      border-top: 1px solid var(--cp-line);
+      overflow-wrap: anywhere;
+    }
+    #cerebro-polish-review th:first-child,
+    #cerebro-polish-review td:first-child {
+      padding-left: 0;
+      width: 59%;
+    }
+    #cerebro-polish-review th:nth-child(2) {
+      width: 23%;
+    }
+    #cerebro-polish-review td:last-child {
+      color: var(--cp-secondary);
+    }
+    #cerebro-polish-review .cp-comment-panel {
+      width: 240px;
+      flex: none;
+      border-left: 1px solid var(--cp-line);
+      padding: 24px 18px;
+      font-size: 14px;
+      line-height: 22px;
+      background: var(--cp-bg);
+    }
+    #cerebro-polish-review .cp-comment-panel h2 {
+      font-size: 16px;
+      line-height: 24px;
+      margin: 0 0 22px;
+    }
+    #cerebro-polish-review .cp-quote {
+      border-left: 2px solid var(--cp-line);
+      padding-left: 10px;
+      margin: 14px 0;
+      color: var(--cp-secondary);
+    }
+    #cerebro-polish-review .cp-comment-panel p {
+      font-size: 14px;
+      line-height: 22px;
+    }
+    #cerebro-polish-review .cp-comment-meta {
+      font-size: 12px;
+      line-height: 18px;
+      color: var(--cp-secondary);
+      margin: 2px 0;
+    }
+    #cerebro-polish-review [hidden] {
+      display: none !important;
+    }
+    @media (max-width: 1048px) {
+      #cerebro-polish-review .cp-window {
+        grid-template-columns: 54px minmax(0, 1fr);
+      }
+      #cerebro-polish-review .cp-side {
+        display: none;
+      }
+    }
+    @media (max-width: 650px) {
+      #cerebro-polish-review .cp-workspace {
+        display: block;
+      }
+      #cerebro-polish-review .cp-comment-panel {
+        width: auto;
+        border-left: 0;
+        border-top: 1px solid var(--cp-line);
+      }
+      #cerebro-polish-review .cp-page {
+        padding: 28px 20px;
+      }
+      #cerebro-polish-review h1 {
+        font-size: 24px;
+        line-height: 32px;
+      }
+      #cerebro-polish-review .cp-location {
+        padding: 10px 14px;
+      }
+      #cerebro-polish-review .cp-properties {
+        grid-template-columns: 92px minmax(0, 1fr);
+      }
+      #cerebro-polish-review td,
+      #cerebro-polish-review th {
+        padding-left: 5px;
+        padding-right: 5px;
+      }
+    }
+    @media (pointer: coarse) {
+      #cerebro-polish-review button {
+        min-height: 44px;
+      }
+      #cerebro-polish-review .cp-check {
+        min-height: 44px;
+      }
+    }
+  </style>
+  <div class="cp-label">M85–M87 draft · Proposed composition · Illustrative content</div>
+  <div class="cp-window">
+    <aside class="cp-rail" aria-label="Global navigation preview">
+      <span class="cp-brand">C.</span><i data-lucide="search" aria-hidden="true"></i
+      ><i data-lucide="plus" aria-hidden="true"></i><i data-lucide="sparkles" aria-hidden="true"></i
+      ><i data-lucide="house" aria-hidden="true"></i
+      ><span class="cp-current"><i data-lucide="file-text" aria-hidden="true"></i></span
+      ><i data-lucide="database" aria-hidden="true"></i
+      ><i data-lucide="brain" aria-hidden="true"></i>
+    </aside>
+    <aside class="cp-side" aria-label="Page navigation preview">
+      <div class="cp-vault">Cerebro workspace</div>
+      <div class="cp-side-label">Favorites</div>
+      <div class="cp-nav-row"><i data-lucide="calendar" aria-hidden="true"></i> This week</div>
+      <div class="cp-side-label">Pages</div>
+      <div class="cp-nav-row"><i data-lucide="folder" aria-hidden="true"></i> Delivery</div>
+      <div class="cp-nav-row cp-selected">
+        <i data-lucide="file-text" aria-hidden="true"></i> Field app launch
+      </div>
+      <div class="cp-nav-row">
+        <i data-lucide="file-text" aria-hidden="true"></i> Working agreements
+      </div>
+      <div class="cp-side-label">Databases</div>
+      <div class="cp-nav-row"><i data-lucide="square-check" aria-hidden="true"></i> Work items</div>
+      <div class="cp-nav-row"><i data-lucide="briefcase" aria-hidden="true"></i> Projects</div>
+    </aside>
+    <main class="cp-main">
+      <div class="cp-location">
+        <span class="cp-location-path">Projects &nbsp; / &nbsp; Field app launch</span
+        ><span>Saved</span
+        ><button
+          type="button"
+          class="cursor-interaction"
+          data-action="comments"
+          aria-pressed="false"
+        >
+          Comments
+        </button>
+      </div>
+      <div class="cp-workspace">
+        <article class="cp-page" aria-label="Record page preview">
+          <div class="cp-eyebrow">
+            <i data-lucide="briefcase" aria-hidden="true"></i><span>Project</span>
+          </div>
+          <h1>Field app launch</h1>
+          <div class="cp-summary">
+            <span class="cp-status"><span class="cp-dot"></span> In progress</span
+            ><span>August 18</span
+            ><button
+              type="button"
+              class="cp-property-trigger cursor-interaction"
+              data-action="properties"
+              aria-expanded="false"
+            >
+              Show properties
+            </button>
+          </div>
+          <dl class="cp-properties" hidden>
+            <dt>Owner</dt>
+            <dd>Josef Lang</dd>
+            <dt>Window</dt>
+            <dd>July 31 – August 18</dd>
+            <dt>Priority</dt>
+            <dd>High</dd>
+            <dt>Related work</dt>
+            <dd>Field readiness</dd>
+          </dl>
+          <nav class="cp-tabs" aria-label="Record content">
+            <button
+              type="button"
+              class="cursor-interaction"
+              data-tab="overview"
+              aria-pressed="true"
+            >
+              Overview</button
+            ><button type="button" class="cursor-interaction" data-tab="tasks" aria-pressed="false">
+              Tasks <span>6</span>
+            </button>
+          </nav>
+          <section data-panel="overview" aria-label="Overview">
+            <p>
+              Bring the field team onto the new app with a clear rollout, a tested fallback, and a
+              short guide people can use on their first shift.
+            </p>
+            <h2>What ready looks like</h2>
+            <p>
+              Each site has an owner. The first shift knows where to ask for help, and the team has
+              practiced the recovery path before launch.
+            </p>
+            <div class="cp-note">
+              <p>
+                Keep the rollout small enough to learn from the first site before expanding to the
+                next.
+              </p>
+            </div>
+            <h2>Before launch</h2>
+            <label class="cp-check"
+              ><input type="checkbox" checked /><span
+                >Confirm the pilot site's readiness</span
+              ></label
+            ><label class="cp-check"
+              ><input type="checkbox" /><span
+                >Rehearse the rollback with the night shift</span
+              ></label
+            ><label class="cp-check"
+              ><input type="checkbox" /><span>Publish the first-shift guide</span></label
+            >
+          </section>
+          <section data-panel="tasks" aria-label="Related tasks" hidden>
+            <div class="cp-data-bar">
+              <span>Work items in this project</span
+              ><label
+                >Rows
+                <select data-action="density" aria-label="Table density">
+                  <option value="36">Default</option>
+                  <option value="32">Compact</option>
+                </select></label
+              >
+            </div>
+            <div class="cp-table-scroll" role="region" aria-label="Related tasks table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Status</th>
+                    <th>Due</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Confirm the pilot site's readiness</td>
+                    <td>Done</td>
+                    <td>Aug 8</td>
+                  </tr>
+                  <tr>
+                    <td>Rehearse the rollback with the night shift</td>
+                    <td>In progress</td>
+                    <td>Aug 11</td>
+                  </tr>
+                  <tr>
+                    <td>Publish the first-shift guide</td>
+                    <td>To do</td>
+                    <td>Aug 12</td>
+                  </tr>
+                  <tr>
+                    <td>Review the support escalation path</td>
+                    <td>To do</td>
+                    <td>Aug 14</td>
+                  </tr>
+                  <tr>
+                    <td>Prepare the site owner's briefing</td>
+                    <td>To do</td>
+                    <td>Aug 16</td>
+                  </tr>
+                  <tr>
+                    <td>Complete the launch readiness review</td>
+                    <td>To do</td>
+                    <td>Aug 18</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </article>
+        <aside class="cp-comment-panel" aria-label="Comments preview" hidden>
+          <h2>Comments</h2>
+          <strong>Maya Chen</strong>
+          <div class="cp-comment-meta">On this page</div>
+          <div class="cp-quote">A tested fallback</div>
+          <p>
+            Let's include the night shift in the rehearsal so both teams have practiced the same
+            recovery steps.
+          </p>
+          <div class="cp-comment-meta">Open thread · 1 comment</div>
+        </aside>
+      </div>
+    </main>
+  </div>
+  <script>
+    (() => {
+      const root = document.getElementById('cerebro-polish-review');
+      const state = {
+        tab: 'overview',
+        properties: false,
+        comments: false,
+        measure: 720,
+        density: 36,
+      };
+      const initial = window.openai?.widgetState?.privateContent;
+      if (initial && typeof initial === 'object') {
+        if (initial.tab === 'overview' || initial.tab === 'tasks') state.tab = initial.tab;
+        if (typeof initial.properties === 'boolean') state.properties = initial.properties;
+        if (typeof initial.comments === 'boolean') state.comments = initial.comments;
+      }
+      function render() {
+        root.style.setProperty('--cp-reading', state.measure + 'px');
+        root.style.setProperty('--cp-row', state.density + 'px');
+        root.style.setProperty('--cp-cell-y', (state.density === 32 ? 5 : 7) + 'px');
+        root.querySelector('.cp-properties').hidden = !state.properties;
+        root.querySelector('.cp-comment-panel').hidden = !state.comments;
+        const prop = root.querySelector('[data-action="properties"]');
+        prop.textContent = state.properties ? 'Hide properties' : 'Show properties';
+        prop.setAttribute('aria-expanded', String(state.properties));
+        root
+          .querySelector('[data-action="comments"]')
+          .setAttribute('aria-pressed', String(state.comments));
+        root
+          .querySelectorAll('[data-panel]')
+          .forEach((el) => (el.hidden = el.dataset.panel !== state.tab));
+        root
+          .querySelectorAll('[data-tab]')
+          .forEach((el) => el.setAttribute('aria-pressed', String(el.dataset.tab === state.tab)));
+      }
+      function persist() {
+        window.openai
+          ?.setWidgetState?.({
+            modelContent: {
+              preview: 'Cerebro page composition',
+              tab: state.tab,
+              properties: state.properties,
+              comments: state.comments,
+            },
+            privateContent: { ...state },
+          })
+          ?.catch(() => {});
+      }
+      root.querySelector('[data-action="properties"]').addEventListener('click', () => {
+        state.properties = !state.properties;
+        render();
+        persist();
+      });
+      root.querySelector('[data-action="comments"]').addEventListener('click', () => {
+        state.comments = !state.comments;
+        render();
+        persist();
+      });
+      root.querySelectorAll('[data-tab]').forEach((el) =>
+        el.addEventListener('click', () => {
+          state.tab = el.dataset.tab;
+          render();
+          persist();
+        }),
+      );
+      root.querySelector('[data-action="density"]').addEventListener('change', (event) => {
+        state.density = Number(event.target.value);
+        render();
+        persist();
+      });
+      window.addEventListener('openai:set_globals', (event) => {
+        const value = event.detail?.globals?.widgetState?.privateContent;
+        if (!value) return;
+        if (value.tab === 'tasks' || value.tab === 'overview') state.tab = value.tab;
+        if (typeof value.properties === 'boolean') state.properties = value.properties;
+        if (typeof value.comments === 'boolean') state.comments = value.comments;
+        render();
+      });
+      render();
+      if (globalThis.Tweak) {
+        const tweak = new Tweak({ container: root.querySelector('.cp-page'), onChange: render });
+        tweak.addSlider(state, 'measure', {
+          label: 'Reading measure',
+          min: 620,
+          max: 820,
+          step: 20,
+          unit: 'px',
+        });
+        tweak.addToggle(state, 'properties', { label: 'Expanded properties' });
+        tweak.addToggle(state, 'comments', { label: 'Comments visible' });
+      }
+    })();
+  </script>
+</div>

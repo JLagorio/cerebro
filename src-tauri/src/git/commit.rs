@@ -201,8 +201,10 @@ pub fn has_pending_changes(ws: &GitWorkspaceInfo) -> Result<bool, String> {
 /// `ensure_gitignore`'s untrack, whose file stays on disk and ignored. A
 /// merge whose conflicts are all resolved is finished here too, even with
 /// nothing else changed, since git refuses a partial commit during a merge.
-/// The plain commit also carries what a person staged outside a nested
-/// vault's scope, as every checkpoint before M58.3 did.
+/// For a nested vault, a temporary index starts at HEAD and replaces only the
+/// vault's entries with their staged state. Outside staged changes stay in
+/// the real index and never enter the checkpoint. Parent merges/rebases must
+/// be completed in the parent repository, before any checkpoint mutation.
 ///
 /// Returns Ok(None) when there was nothing to commit — an idle checkpoint
 /// firing on a clean tree, or one where only a run's files changed, is
@@ -217,6 +219,9 @@ pub fn commit_all(ws: &GitWorkspaceInfo, message: &str) -> Result<Option<String>
     let dir = ws.dir();
     let lock = repo_lock(&dir);
     let _held = hold(&lock);
+    if ws.vault_pathspec.is_some() && parent_operation_in_progress(&dir)? {
+        return Err("a parent repository operation is in progress: finish it in that repository before checkpointing this vault".into());
+    }
     ensure_gitignore(Path::new(&ws.vault_root))?;
     let merging = super::conflict::mode(ws) == super::conflict::ConflictMode::Merge;
     let (unowned, _) = split_by_owner(ws)?;
@@ -253,10 +258,14 @@ pub fn commit_all(ws: &GitWorkspaceInfo, message: &str) -> Result<Option<String>
         .iter()
         .filter(|r| !merging && r.index != ' ' && r.index != '?')
         .flat_map(|r| std::iter::once(r.git_path.as_str()).chain(r.orig.as_deref()))
+        .filter(|path| ws.to_vault_relative(path).is_some())
         .collect();
     pathspec_step(&dir, &["reset", "-q"], &unstage)?;
     // Staging and ownership resets must never reintroduce private mail.
     untrack_mail(Path::new(&ws.vault_root))?;
+    if let Some(prefix) = &ws.vault_pathspec {
+        return commit_scoped_index(&dir, prefix, message);
+    }
     let staged = !command::succeeds(&dir, &["diff", "--cached", "--quiet"]);
     if !staged && !merging {
         return Ok(None);
@@ -272,6 +281,177 @@ pub fn commit_all(ws: &GitWorkspaceInfo, message: &str) -> Result<Option<String>
         .trim()
         .to_string(),
     ))
+}
+
+/// A scoped checkpoint cannot complete or disturb an operation owned by the
+/// parent repository. The UI's conflict enum intentionally covers fewer states.
+fn parent_operation_in_progress(dir: &Path) -> Result<bool, String> {
+    let git_dir = command::run_bounded_str(
+        dir,
+        &["rev-parse", "--absolute-git-dir"],
+        command::LOCAL_TIMEOUT,
+    )?;
+    let git_dir = Path::new(git_dir.trim());
+    for marker in [
+        "MERGE_HEAD",
+        "rebase-merge",
+        "rebase-apply",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+        "sequencer",
+    ] {
+        match std::fs::symlink_metadata(git_dir.join(marker)) {
+            Ok(_) => return Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                    "could not check the parent repository operation: {error}"
+                ))
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// The private index is never installed over the real one. The latter already
+/// holds the vault's staged result and every outside entry exactly as before.
+/// A successful commit changes HEAD's vault subtree only; failures leave HEAD
+/// alone, and cleanup removes both the temporary index and any lock file.
+struct ScopedIndex(PathBuf);
+
+impl ScopedIndex {
+    fn new() -> Result<Self, String> {
+        let dir = std::env::temp_dir().join(format!(
+            "cerebro-checkpoint-index-{:032x}",
+            rand::random::<u128>()
+        ));
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        builder.create(&dir).map_err(|e| e.to_string())?;
+        Ok(Self(dir))
+    }
+
+    fn run(&self, dir: &Path, args: &[&str], input: Option<&[u8]>) -> Result<String, String> {
+        command::run_bounded_with_index(dir, &self.0.join("index"), args, input)
+            .map_err(|e| e.message())
+    }
+}
+
+impl Drop for ScopedIndex {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn commit_scoped_index(dir: &Path, prefix: &str, message: &str) -> Result<Option<String>, String> {
+    let index = ScopedIndex::new()?;
+    let scope = format!("{prefix}/");
+    let parent = command::run_bounded_str(
+        dir,
+        &["rev-parse", "--verify", "HEAD"],
+        command::LOCAL_TIMEOUT,
+    )
+    .ok()
+    .map(|s| s.trim().to_string());
+    if let Some(parent) = &parent {
+        index.run(dir, &["read-tree", parent], None)?;
+        // Remove HEAD's vault entries first, so staged deletions and privacy
+        // untracks survive even while their files remain on disk.
+        let previous = command::run_bounded_bytes(
+            dir,
+            &[
+                "--literal-pathspecs",
+                "ls-tree",
+                "-r",
+                "--name-only",
+                "-z",
+                parent,
+                "--",
+                &scope,
+            ],
+        )
+        .map_err(|e| e.message())?;
+        index.run(
+            dir,
+            &["update-index", "--force-remove", "-z", "--stdin"],
+            Some(&previous),
+        )?;
+    } else {
+        index.run(dir, &["read-tree", "--empty"], None)?;
+    }
+    let staged = command::run_bounded_bytes(
+        dir,
+        &[
+            "--literal-pathspecs",
+            "ls-files",
+            "--stage",
+            "-z",
+            "--",
+            &scope,
+        ],
+    )
+    .map_err(|e| e.message())?;
+    index.run(dir, &["update-index", "-z", "--index-info"], Some(&staged))?;
+    match command::run_bounded_with_index(
+        dir,
+        &index.0.join("index"),
+        &["diff", "--cached", "--quiet"],
+        None,
+    ) {
+        Ok(_) => return Ok(None),
+        Err(failure) if failure.code == Some(1) => {}
+        Err(failure) => return Err(failure.message()),
+    }
+    let tree = index.run(dir, &["write-tree"], None)?;
+    let hash = publish_scoped_tree(dir, tree.trim(), parent.as_deref(), message)?;
+    Ok(Some(
+        command::run_bounded_str(
+            dir,
+            &["rev-parse", "--short", &hash],
+            command::LOCAL_TIMEOUT,
+        )?
+        .trim()
+        .to_string(),
+    ))
+}
+
+/// Publishing compares HEAD atomically. A plain commit after preparing the
+/// temporary index could otherwise replace newer outside changes committed by
+/// another process between the HEAD read and commit.
+fn publish_scoped_tree(
+    dir: &Path,
+    tree: &str,
+    parent: Option<&str>,
+    message: &str,
+) -> Result<String, String> {
+    let mut args = vec!["commit-tree", tree];
+    if let Some(parent) = parent {
+        args.extend(["-p", parent]);
+    }
+    let signing = command::run_str(dir, &["config", "--bool", "commit.gpgSign"])
+        .is_ok_and(|value| value.trim() == "true");
+    if signing {
+        args.push("-S");
+    }
+    args.extend(["-m", message]);
+    let hash = command::run_bounded_str(dir, &args, command::LOCAL_TIMEOUT)?;
+    command::run_bounded_str(
+        dir,
+        &[
+            "update-ref",
+            "-m",
+            "Cerebro vault checkpoint",
+            "HEAD",
+            hash.trim(),
+            parent.unwrap_or(""),
+        ],
+        command::LOCAL_TIMEOUT,
+    )?;
+    Ok(hash.trim().to_owned())
 }
 
 /// Every change in the vault's scope, split into the ones no live run owns
@@ -290,10 +470,13 @@ fn split_by_owner(
         return Ok((vec![], vec![]));
     }
     let owners = super::changeset::owned_paths(Path::new(&ws.vault_root));
-    Ok(records.into_iter().partition(|record| {
-        ws.to_vault_relative(&record.git_path)
-            .is_none_or(|path| !owners.contains_key(&path))
-    }))
+    Ok(records
+        .into_iter()
+        .filter(|record| ws.to_vault_relative(&record.git_path).is_some())
+        .partition(|record| {
+            ws.to_vault_relative(&record.git_path)
+                .is_none_or(|path| !owners.contains_key(&path))
+        }))
 }
 
 /// Run `git --literal-pathspecs <args>` over `paths`, passed on stdin so a
@@ -355,11 +538,17 @@ pub(crate) fn commit_paths_in(
         return Err("a commit needs a message".into());
     }
     let dir = ws.dir();
+    if paths
+        .iter()
+        .any(|path| command::safe_relative(path).is_err() || Path::new(path).is_absolute())
+    {
+        return Err("a commit path must stay inside this vault".into());
+    }
     let wanted: HashSet<String> = paths.iter().map(|p| ws.to_git_relative(p)).collect();
     let mut stage: BTreeSet<String> = BTreeSet::new();
     let mut commit: BTreeSet<String> = BTreeSet::new();
     for record in super::status::records(ws)? {
-        if record.conflicted {
+        if record.conflicted || ws.to_vault_relative(&record.git_path).is_none() {
             continue;
         }
         let hit = wanted.contains(&record.git_path)
@@ -378,7 +567,11 @@ pub(crate) fn commit_paths_in(
         }
         if !(record.index == 'A' && record.tree == 'D') {
             commit.insert(record.git_path);
-            commit.extend(record.orig);
+            commit.extend(
+                record
+                    .orig
+                    .filter(|path| ws.to_vault_relative(path).is_some()),
+            );
         }
     }
     if stage.is_empty() && commit.is_empty() {
@@ -908,6 +1101,274 @@ pub(crate) mod tests {
         );
         std::fs::remove_dir_all(dir).ok();
     }
+    #[test]
+    fn a_nested_checkpoint_preserves_outside_staged_and_unstaged_versions() {
+        let (dir, _) = seeded(
+            "nested-index-isolation",
+            &[
+                ("vault/.gitignore", IGNORES.1),
+                ("vault/a.md", "old note"),
+                ("vault/gone.md", "gone"),
+                ("code.rs", "original code"),
+            ],
+        );
+        let ws = super::super::workspace::resolve(dir.join("vault"));
+        std::fs::write(dir.join("code.rs"), "staged code").unwrap();
+        std::fs::write(dir.join("outside-new.rs"), "new outside code").unwrap();
+        command::run_str(&dir, &["add", "--", "code.rs", "outside-new.rs"]).unwrap();
+        std::fs::write(dir.join("code.rs"), "unstaged code").unwrap();
+        let outside = command::run_bytes(
+            &dir,
+            &[
+                "ls-files",
+                "--stage",
+                "-z",
+                "--",
+                "code.rs",
+                "outside-new.rs",
+            ],
+        )
+        .unwrap();
+        std::fs::write(dir.join("vault/a.md"), "new note").unwrap();
+        command::run_str(&dir, &["rm", "--", "vault/gone.md"]).unwrap();
+        let hash = commit_all(&ws, "only vault").unwrap().unwrap();
+        assert_eq!(
+            named(&dir, &hash),
+            vec!["M\tvault/a.md", "D\tvault/gone.md"]
+        );
+        assert_eq!(
+            command::run_str(&dir, &["show", "HEAD:code.rs"]).unwrap(),
+            "original code"
+        );
+        assert!(!command::succeeds(
+            &dir,
+            &["cat-file", "-e", "HEAD:outside-new.rs"]
+        ));
+        assert_eq!(
+            command::run_bytes(
+                &dir,
+                &[
+                    "ls-files",
+                    "--stage",
+                    "-z",
+                    "--",
+                    "code.rs",
+                    "outside-new.rs"
+                ]
+            )
+            .unwrap(),
+            outside
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("code.rs")).unwrap(),
+            "unstaged code"
+        );
+        assert_eq!(commit_all(&ws, "idle").unwrap(), None);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_nested_checkpoint_keeps_index_only_privacy_deletions() {
+        let (dir, _) = seeded(
+            "nested-private-untrack",
+            &[
+                ("vault/a.md", "note"),
+                ("vault/.cerebro/secret", "secret"),
+                ("outside.rs", "old"),
+            ],
+        );
+        let ws = super::super::workspace::resolve(dir.join("vault"));
+        std::fs::write(dir.join("outside.rs"), "staged").unwrap();
+        command::run_str(&dir, &["add", "--", "outside.rs"]).unwrap();
+        commit_all(&ws, "privacy").unwrap().unwrap();
+        assert!(!command::succeeds(
+            &dir,
+            &["cat-file", "-e", "HEAD:vault/.cerebro/secret"]
+        ));
+        assert_eq!(
+            std::fs::read_to_string(dir.join("vault/.cerebro/secret")).unwrap(),
+            "secret"
+        );
+        assert_eq!(
+            command::run_str(&dir, &["show", "HEAD:outside.rs"]).unwrap(),
+            "old"
+        );
+        assert_eq!(
+            command::run_str(&dir, &["show", ":outside.rs"]).unwrap(),
+            "staged"
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_nested_checkpoint_treats_the_vault_prefix_literally() {
+        let (dir, _) = seeded(
+            "nested-literal-prefix",
+            &[
+                ("vault[1]/.gitignore", IGNORES.1),
+                ("vault[1]/a.md", "old"),
+                ("vault1/a.md", "outside old"),
+            ],
+        );
+        let ws = super::super::workspace::resolve(dir.join("vault[1]"));
+        std::fs::write(dir.join("vault[1]/a.md"), "new").unwrap();
+        std::fs::write(dir.join("vault1/a.md"), "outside staged").unwrap();
+        command::run_str(&dir, &["add", "--", "vault1/a.md"]).unwrap();
+        let hash = commit_all(&ws, "literal vault").unwrap().unwrap();
+        assert_eq!(named(&dir, &hash), vec!["M\tvault[1]/a.md"]);
+        assert_eq!(
+            command::run_str(&dir, &["show", "HEAD:vault1/a.md"]).unwrap(),
+            "outside old"
+        );
+        assert_eq!(
+            command::run_str(&dir, &["show", ":vault1/a.md"]).unwrap(),
+            "outside staged"
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_nested_checkpoint_refuses_parent_operations_before_mutating_the_index() {
+        let (dir, _) = seeded(
+            "nested-parent-merge",
+            &[("vault/a.md", "old"), ("outside.rs", "old")],
+        );
+        let ws = super::super::workspace::resolve(dir.join("vault"));
+        let head = command::run_str(&dir, &["rev-parse", "HEAD"]).unwrap();
+        std::fs::write(dir.join("outside.rs"), "staged").unwrap();
+        command::run_str(&dir, &["add", "--", "outside.rs"]).unwrap();
+        let index = std::fs::read(dir.join(".git/index")).unwrap();
+        for marker in [
+            "MERGE_HEAD",
+            "rebase-merge",
+            "rebase-apply",
+            "CHERRY_PICK_HEAD",
+            "REVERT_HEAD",
+            "sequencer",
+        ] {
+            let marker = dir.join(".git").join(marker);
+            // Presence is enough; a partial operation must be left to Git too.
+            std::fs::write(&marker, &head).unwrap();
+            assert!(commit_all(&ws, "must refuse")
+                .unwrap_err()
+                .contains("parent repository operation"));
+            assert_eq!(std::fs::read(dir.join(".git/index")).unwrap(), index);
+            assert!(!dir.join("vault/.gitignore").exists());
+            assert_eq!(
+                command::run_str(&dir, &["rev-parse", "HEAD"]).unwrap(),
+                head
+            );
+            std::fs::remove_file(marker).unwrap();
+        }
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_nested_first_commit_leaves_outside_staged_files_out() {
+        let dir = scratch_repo_dir("nested-unborn-index");
+        std::fs::create_dir_all(dir.join("vault")).unwrap();
+        command::run_str(&dir, &["init"]).unwrap();
+        assert_isolated(&dir);
+        std::fs::write(dir.join("outside.rs"), "staged").unwrap();
+        std::fs::write(dir.join("vault/a.md"), "note").unwrap();
+        command::run_str(&dir, &["add", "--", "outside.rs"]).unwrap();
+        let ws = super::super::workspace::resolve(dir.join("vault"));
+        commit_all(&ws, "first vault").unwrap().unwrap();
+        assert!(!command::succeeds(
+            &dir,
+            &["cat-file", "-e", "HEAD:outside.rs"]
+        ));
+        assert_eq!(
+            command::run_str(&dir, &["show", ":outside.rs"]).unwrap(),
+            "staged"
+        );
+        assert_eq!(
+            command::run_str(&dir, &["show", "HEAD:vault/a.md"]).unwrap(),
+            "note"
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_nested_checkpoint_cannot_overwrite_a_concurrent_parent_commit() {
+        let (dir, _) = seeded(
+            "nested-head-cas",
+            &[("vault/a.md", "note"), ("outside.rs", "old")],
+        );
+        let parent = command::run_str(&dir, &["rev-parse", "HEAD"]).unwrap();
+        let tree = command::run_str(&dir, &["rev-parse", "HEAD^{tree}"]).unwrap();
+        std::fs::write(dir.join("outside.rs"), "new outside commit").unwrap();
+        command::run_str(&dir, &["add", "--", "outside.rs"]).unwrap();
+        command::run_str(&dir, &["commit", "-m", "outside concurrent"]).unwrap();
+        let current = command::run_str(&dir, &["rev-parse", "HEAD"]).unwrap();
+        assert!(
+            publish_scoped_tree(&dir, tree.trim(), Some(parent.trim()), "stale checkpoint")
+                .is_err()
+        );
+        assert_eq!(
+            command::run_str(&dir, &["rev-parse", "HEAD"]).unwrap(),
+            current
+        );
+        assert_eq!(
+            command::run_str(&dir, &["show", "HEAD:outside.rs"]).unwrap(),
+            "new outside commit"
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_nested_checkpoint_preserves_unchanged_non_utf8_paths_exactly() {
+        let (dir, _) = seeded(
+            "nested-byte-exact-index",
+            &[("vault/.gitignore", IGNORES.1), ("vault/a.md", "old")],
+        );
+        // APFS refuses invalid UTF-8 filesystem names, but Git trees and
+        // indexes can still carry them (for example from a remote commit).
+        let blob = command::run_bounded_with_input(
+            &dir,
+            &["hash-object", "-w", "--stdin"],
+            Some(b"raw file"),
+            command::LOCAL_TIMEOUT,
+        )
+        .unwrap();
+        let mut row = format!("100644 {} 0\t", blob.trim()).into_bytes();
+        row.extend_from_slice(b"vault/raw-\xff.md\0");
+        command::run_bounded_with_input(
+            &dir,
+            &["update-index", "-z", "--index-info"],
+            Some(&row),
+            command::LOCAL_TIMEOUT,
+        )
+        .unwrap();
+        command::run_str(&dir, &["commit", "-m", "raw filename"]).unwrap();
+        let before = command::run_bytes(&dir, &["ls-tree", "-r", "-z", "HEAD"]).unwrap();
+        std::fs::write(dir.join("vault/a.md"), "new").unwrap();
+        command::run_str(&dir, &["add", "--", "vault/a.md"]).unwrap();
+        commit_scoped_index(&dir, "vault", "byte exact")
+            .unwrap()
+            .unwrap();
+        let ws = super::super::workspace::resolve(dir.join("vault"));
+        let after = command::run_bytes(&dir, &["ls-tree", "-r", "-z", "HEAD"]).unwrap();
+        let raw_row = |bytes: Vec<u8>| {
+            bytes
+                .split(|b| *b == 0)
+                .find(|row| row.ends_with(b"raw-\xff.md"))
+                .unwrap()
+                .to_vec()
+        };
+        assert_eq!(raw_row(before), raw_row(after));
+        let head = command::run_str(&dir, &["rev-parse", "HEAD"]).unwrap();
+        assert!(commit_all(&ws, "must refuse")
+            .unwrap_err()
+            .contains("not valid UTF-8"));
+        assert_eq!(
+            command::run_str(&dir, &["rev-parse", "HEAD"]).unwrap(),
+            head
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
     #[test]
     fn a_nested_vault_keeps_mail_out() {
         let (dir, _) = seeded(

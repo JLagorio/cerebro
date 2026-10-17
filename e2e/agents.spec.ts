@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { boot, openAgents, openKnowledgeTab, seedBeforeBoot } from './boot';
+import { boot, openAgents, openKnowledgeTab, seedBeforeBoot, openDestination } from './boot';
 
 /**
  * The agents' front door (M41): the roster over the run feed, each agent's
@@ -52,7 +52,7 @@ test('agents: the front door — roster, the agent’s page on its Runs, chain t
   await boot(page);
 
   // -- The fleet door is the Agents SECTION's open-all reveal (M43) --------
-  await page.getByRole('button', { name: 'Open all agents' }).click();
+  await openDestination(page, 'Agents');
   await expect(page.getByTestId('agents-page')).toBeVisible();
   const roster = page.getByTestId('agent-row');
   await expect(roster).toHaveCount(2);

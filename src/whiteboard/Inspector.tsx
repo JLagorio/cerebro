@@ -16,6 +16,7 @@ import type { SceneEditor } from '@/engine/scene/editor';
 import type { Board, Box, Command } from '@/engine/scene/model';
 import { useUiStore } from '@/stores/uiStore';
 import type { BoardStore } from './boardState';
+import './canvasChrome.css';
 import { NumberField } from './NumberField';
 import { ColorField } from './ColorField';
 import type { Preview } from './gestures/types';
@@ -84,11 +85,15 @@ export function Inspector({ editor, state }: { editor: SceneEditor; state: Board
       data-testid="wb-inspector"
       data-no-pan="true"
       aria-label="Whiteboard inspector"
-      className="absolute bottom-3 right-3 top-14 z-10 w-56 overflow-y-auto rounded-md border border-n-200 bg-n-0 p-3 shadow-sm"
+      data-empty={sections.count === 0 || undefined}
+      className="wb-inspector"
     >
-      <h2 className="mb-3 mt-0 text-xs font-semibold text-n-700">Inspector</h2>
+      <h2 className="wb-inspector-heading">Inspector</h2>
       {sections.count === 0 ? (
-        <p className="m-0 text-xs text-n-500">Nothing selected</p>
+        <div className="wb-inspector-empty">
+          <p>Nothing selected</p>
+          <span>Select a card, connection or drawing to adjust it.</span>
+        </div>
       ) : (
         <div key={JSON.stringify(keys)} className="space-y-4">
           <section>

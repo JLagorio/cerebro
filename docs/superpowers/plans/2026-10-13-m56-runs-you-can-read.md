@@ -8,13 +8,14 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M56. House style and rails: the 
 
 ## Status
 
-- **Precondition:** M53, M54 and M55 are closed: gates green, roadmap statuses updated. Today all three are being built, unstaged, in the main checkout. Today's tree (fc510e6 plus drafts) has AGENTS.md at CV-16, `runtime.db` at v18 and `spawn.rs`, and no `tools.v1.json` or `scripts/fixtures.test.ts` yet. This plan names their finished functions, never today's lines.
-- **Built:** M56.1, unstaged (2026-10-14): the recording kit, the live not-signed-in fixture, seven derived fixtures and the D4 record. All 12 roadmap parts were scouted against the three plans and today's tree; all 12 stay.
-- **Owner step (M56.1, owed):** seven of the eight spike scenarios are derived from the 2.1.250 code, not recorded. Once: `CLAUDE_CONFIG_DIR=<record>/claude-config claude`, then `/login` with your own account (never an API key), then `pnpm tsx scripts/cli-record/spike.ts run all` and `pnpm tsx scripts/cli-record/spike.ts reduce all`. The D4 record's owner step says the rest.
+- **Dependencies:** M53–M55 and the D4 transport record. Implementation is present; milestone closure still requires the outstanding acceptance below.
+- **Implementation (2026-10-15):** The recording and sanitization tools, shared transcript fold, failure cards, model/effort controls, bound panel, run causes/detail, typed transcript rows, recent memory, session cleanup and cache-measurement tools are implemented. Derived transport fixtures do not replace the live recordings below.
+- **Integrated evidence:** see the [roadmap execution update](2026-10-12-macro-port-roadmap.md#execution-update--2026-10-15) for the final unit, coverage, browser, native and static gates, plus their limits. These results do not substitute for packaged or authenticated live acceptance.
+- **Owner step (M56.1, deferred on 2026-10-15):** The owner chose to leave live CLI verification pending. Seven of the eight spike scenarios remain derived from the 2.1.250 code, not recorded. When resumed: `CLAUDE_CONFIG_DIR=<record>/claude-config claude`, then `/login` with your own account (never an API key), then `pnpm tsx scripts/cli-record/spike.ts run all` and `pnpm tsx scripts/cli-record/spike.ts reduce all`. The D4 record's owner step says the rest.
 - **Effort:** 1 S + 6 M + 5 L ≈ 8.3 L; the roadmap said ≈4.8 L. Re-measured: .1, .4, .6, .11 and .12 from S to M; .5 from S to L; .2, .7 and .9 from M to L.
 - **CLI:** `claude --version` reads 2.1.250 on this Mac (2026-10-13), M54's pin.
 - **Crash risk:** .2 and .3 (stream()'s reader), .7 (claim and schema v20), .9 (schema v21).
-- **Packaged checks:** .2, .3, .7, .9, .11. **Live checks:** .1 and .2 (the owner records), .3, .5; .4 optional; .12 only if it moves context.
+- **Packaged acceptance still outstanding:** .2, .3, .7, .9, .11. **Live acceptance still outstanding:** .1 and .2 (the owner records), .3, .5; .4 optional; .12 only if it moves context.
 - **Closes left-open items:** M53's other-vault resume (.3); M54's `recent` line and missing `operational_log(run_id)` index (.10, .9); M55's Q24 model rows and its "false until M56.10" copy (.5, .10).
 
 ## Decisions

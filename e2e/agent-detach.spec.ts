@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot } from './boot';
+import { boot, openAssistantPanel } from './boot';
 
 /**
  * A turn outlives its panel (M57.6). Closing the assistant, switching
@@ -15,7 +15,7 @@ const assistants = (page: Page) =>
 const users = (page: Page) => panel(page).locator('[data-testid="chat-message"][data-role="user"]');
 
 async function openPanel(page: Page) {
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   await expect(panel(page)).toBeVisible();
 }
 

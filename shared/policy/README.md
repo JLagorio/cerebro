@@ -38,7 +38,7 @@ two readers, shared cases" below.
 | `goldens-trigger/*.json` | The trigger registry's parity mechanism (M28.0), replayed by `cargo test` and `pnpm test:run` from the same bytes. Each golden is a full `TriggerEvaluation` record (sometimes with its parent) and the outcome both validators must land on: `accepted`, or a refusal named by its CLOSED code — codes are the contract, prose is not. Both suites also assert every refusal code has at least one golden, so a code with no fixture fails the build. Accepted goldens carry ids that genuinely recompute (`sha256(domain\0gate\0scope\0rule_version\0snapshot_hash)`). |
 | `goldens/*.json` | Proposal + preconditions → expected verdict + destiny. Replayed by `cargo test` and `pnpm test:run` from these same files. A fixture may declare `signals` (server-derived escalators), `versions` (`"<class>/<id>": n`, the M22 `state_versions` its expected-version CAS runs against), `ancestry` (the support graph M26.3's preventive walk runs over), and `table` (a FROZEN table to replay against — `"v1"` or `"v2"` — for a refusal the shipped table can no longer produce; M27.4 made every shipped capability available, so `capability_unavailable` lives on against v2 rather than losing its shared fixture). Declaring either state field requires `rust_only: true` — both read reducer state that is out of the mock's scope by declaration, so the TS runner skips the *verdict replay* loudly rather than the directory quietly missing the case. It still asserts the artifact half of every such file: that the op declares the code possible, and that the code declares a destiny. |
 | `concept-types.v1.json` + `.sha256` | The words the agent may type a concept with (M33a.1), and a one-line hint for each. Loaded by `src-tauri/src/knowledge.rs`; the tool manifest's one token, `{{concept_types}}`, renders it into `write_concept`'s type description. Rust-only for now: the read side (`okf.ts`) resolves a concept's type against the vault's own catalog and tolerates unknown values by OKF §4.1, so there is no twin to disagree with. |
-| `tools.v1.json` + `.sha256` | **The tool manifest** (M54.1): one row per hand-written MCP tool in served order — title, kind, idempotence, door, grant axis and target argument (`file` is a contained-file read and `canvas` a whiteboard read, both on axis read and door none), picker summary and toolset, renderer, fold phrases (M56.8), icon, whether an ask-first agent's call waits for the person (`confirmable`, M57.4), search hint, description and input schema — the facts every generated `propose_<op>` tool shares, the picker's toolsets, and the CLI's own built-ins in argv order, each with its tool-approval `family` and the input field its card names it by (`subject`, M57.2). Read by `src-tauri/src/policy/tools.rs`: `mcp.rs` serves `tools/list` from it with annotations, and derives the scope and read targets, the open-page announcements and the read-to-replace guard; `tool-approval.v1.json` plans the CLI's built-ins by its family column. TS reads the same file through `src/lib/policy/tools.ts` (M54.2), refusal for refusal, and derives the picker's toolsets, summaries and writes flags, the transcript's icons, write cards, row renderers and read folds (M56.8), the turn checkpoint's trigger and the run log's paths from it. Both sides hash against `tools.v1.sha256`, and both replay `src-tauri/fixtures/tool-cases.json`, its shared case file. navigate's `to` enum is `src/engine/destinations.ts`'s ids plus view, held there by `destinations.test.ts`; Rust refuses any `to` the served enum doesn't list (M59.1). |
+| `tools.v1.json` + `.sha256` | **The tool manifest** (M54.1): one row per hand-written MCP tool in served order — title, kind, idempotence, door, grant axis and target argument (`file` is a contained-file read and `canvas` a whiteboard read on axis read/door none or an edit on read_write/door canvas), picker summary and toolset, renderer, fold phrases (M56.8), icon, whether an ask-first agent's call waits for the person (`confirmable`, M57.4), search hint, description and input schema — the facts every generated `propose_<op>` tool shares, the picker's toolsets, the verified connector mail send spellings in `never_call` (with server/version sources), and the CLI's own built-ins in argv order, each with its tool-approval `family` and the input field its card names it by (`subject`, M57.2). Read by `src-tauri/src/policy/tools.rs`: `mcp.rs` serves `tools/list` from it with annotations, and derives the scope and read targets, the open-page announcements and the read-to-replace guard; `tool-approval.v1.json` plans the CLI's built-ins by its family column. TS reads the same file through `src/lib/policy/tools.ts` (M54.2), refusal for refusal, and derives the picker's toolsets, summaries and writes flags, the transcript's icons, write cards, row renderers and read folds (M56.8), the turn checkpoint's trigger and the run log's paths from it. Both sides hash against `tools.v1.sha256`, and both replay `src-tauri/fixtures/tool-cases.json`, its shared case file. navigate's `to` enum is `src/engine/destinations.ts`'s ids plus view, held there by `destinations.test.ts`; Rust refuses any `to` the served enum doesn't list (M59.1). |
 
 | `mail.v1.json` + `.sha256` | Mail's private folders, scoped default-closed R14 gate, mail hosts and unattended connector reader denials. Rust `policy/mail.rs` and TS `engine/mailPolicy.ts` load it strictly; `mail/mod.rs` and TS replay the host cases. Runtime reads the artifact alone; tests verify the evidence pack before an open gate can ship. |
 | `tool-approval.v1.json` + `.sha256` | **What Claude Code may run** (M57.2): for each tool family of the manifest, in its order, a grid of run kind (attended, unattended, internal) by ceiling (`none`, the shell's off, ask and on, or since M57.7 the web's off and on) to one of six decisions, the read scope's overrides, the permission modes, a card (title, kind and the answers it offers) on every family that asks and a message on every family that refuses (a `deny` cell says it too, where the family has one), and the words the model and the person read. Since M57.3 the question family (AskUserQuestion) asks on an attended run with a `question` card and is denied wherever nobody watches. Since M57.4 it also decides an ask-first agent's page writes: the `confirmable` family, whose members are the manifest's confirmable rows, is read by the agent's `ask_first` (yes or no) where the other families read a ceiling, and the `ask_first` block holds the record key and the values a record may hold. Since M57.4c an unattended ask-first write queues for Review (`queue`, the ask-first family's alone) within `queue_limits`. Since M57.7 the web family (WebFetch, WebSearch) reads the `web` ceiling, the Settings Web access switch: off denies it, on allows it, and internal runs are denied it either way. Since M60.8b `hidden_paths` names the vault folders (`.trash`) the CLI's own tools may not open, and which tools' path rules close them (Read, Edit). Interpreted by `src-tauri/src/policy/tool_approval.rs` (argv, the init's mode check and the ask gate's `host_answer`) and `src/lib/policy/toolApproval.ts` (the mock, the panel's prompts), refusal for refusal. Both hash against the `.sha256`. |
@@ -91,7 +91,7 @@ A part that adds a shared case file adds its row here in the same commit.
 
 | Twin | Rust replay | TS replay | Held by | Since |
 | --- | --- | --- | --- | --- |
-| mail storage, URL hosts and the scoped admission gate | `src-tauri/src/policy/mail.rs`, `src-tauri/src/mail/mod.rs` | `src/engine/mailPolicy.test.ts` | `shared/policy/mail.v1.json` | M69.7–.7b |
+| mail storage, URL hosts, mailbox normalization and the scoped admission gate | `src-tauri/src/policy/mail.rs`, `src-tauri/src/mail/mod.rs`, `src-tauri/src/mail/address.rs` | `src/engine/mailPolicy.test.ts`, `src/engine/mailAddress.test.ts` | `shared/policy/mail.v1.json` | M69.7–.7c |
 | the policy table and its goldens | `src-tauri/src/policy/goldens.rs` | `src/lib/policy/goldens.test.ts` | `shared/policy/policy.v3.json`, `shared/policy/goldens/` | M24 |
 | critical attention and its goldens | `src-tauri/src/attention/critical.rs` | `src/lib/attention/critical.test.ts` | `shared/policy/critical-attention.v1.json`, `shared/policy/goldens-critical/` | M27.7 |
 | the trigger registry and its goldens | `src-tauri/src/trigger/evaluation.rs` | `src/lib/trigger/evaluation.test.ts` | `shared/policy/trigger-registry.v1.json`, `shared/policy/goldens-trigger/` | M28.0 |
@@ -141,6 +141,7 @@ A part that adds a shared case file adds its row here in the same commit.
 | contained root file addresses, byte doors and refusal words | `src-tauri/src/files/bytes.rs` | `src/engine/fileBytes.test.ts`, `src/lib/mockBytes.test.ts` | `shared/files/bytes.v1.json` | M66.2 |
 | explicitly dropped file metadata and bounded capture text | `src-tauri/src/files/dropped.rs` | `src/lib/mockDropped.test.ts` | `src-tauri/fixtures/dropped-cases.json` | M66.3 |
 | whole-line page media and contained picture destinations | `src-tauri/src/files/media.rs` | `src/engine/pageMedia.test.ts` | `src-tauri/fixtures/media-lines.json` | M66.8b |
+| thumbnail sizes, sources and negative-cache reasons | `src-tauri/src/files/thumbs.rs` | `src/engine/thumbs.test.ts` | `src-tauri/fixtures/thumbnail-cases.json` | M66.9 |
 | contained document paths and refusal order | `src-tauri/src/files/extract/mod.rs` | `src/lib/mockExtract.test.ts` | `src-tauri/fixtures/document-paths.json` | M66.7c |
 | inert extracted document text | `src-tauri/src/files/extract/markdown.rs` | `src/engine/extracted.test.ts` | `src-tauri/fixtures/extract-escape.json` | M66.7c |
 | extraction outcome wire shapes | `src-tauri/src/files/extract/mod.rs` | `src/engine/extracted.test.ts`, `src/lib/mockExtract.test.ts` | `src-tauri/fixtures/extract-wire.json` | M66.7c |
@@ -148,6 +149,10 @@ A part that adds a shared case file adds its row here in the same commit.
 | import identity, stamps and their protection, hash and URL grammar | `src-tauri/src/import/mod.rs`, `src-tauri/src/import/stamps.rs` | `src/engine/importSources.test.ts` | `shared/import/sources.v1.json` | M69.3–.3b |
 | JSON Canvas format, reader and writer, unknown values and refusal words | `src-tauri/src/canvas/format.rs`, `src-tauri/src/canvas/read.rs`, `src-tauri/src/canvas/write.rs` | `src/engine/scene/format.test.ts`, `src/engine/scene/jsonCanvas.test.ts` | `shared/canvas/format.v1.json`, `shared/canvas/format-cases.json`, `shared/canvas/cases.json` | M68.2, M68.7 |
 | whiteboard agent caps and loader refusal words | `src-tauri/src/canvas/agent_limits.rs` | `src/engine/scene/canvasLimits.test.ts` | `shared/canvas/agent-limits.v1.json`, `shared/canvas/agent-limit-cases.json` | M68.7 |
+| checked whiteboard edits: operations, preserved bytes and refusal words | `src-tauri/src/canvas/edit.rs` | `src/engine/scene/agentEdit.test.ts` | `src-tauri/fixtures/canvas-edit-cases.json` | M68.7b |
+| canonical GitHub pull request URLs | `src-tauri/src/forge.rs` | `src/engine/pullRequest.test.ts` | `src-tauri/fixtures/pr-urls.json` | M69.11 |
+| normalized gh read outcomes and check readiness | `src-tauri/src/forge.rs` | `src/engine/pullRequest.test.ts` | `src-tauri/fixtures/pr-cases.json` | M69.11 |
+| normalized correspondent dismissals, words and per-vault rows | `src-tauri/src/runtime/mail_dismissals.rs` | `src/lib/mockIpc.test.ts`, `src/engine/unfiled.test.ts` | `src-tauri/fixtures/mail-dismissal-cases.json` | M69.9b |
 
 ## Regenerating
 
@@ -513,6 +518,13 @@ order and its `cli_tools` in argv order, so neither is sorted.
 
 ## Note exists (M61.6b)
 
+- **`import_refused` is a transport code.** The Notion import door refuses
+  before a byte, bounds one call and claims nothing, so the code is
+  operational and belongs to no proposal op. Its recorder deduplicates by
+  run, reason and canonical page id. A composable refusal licenses only a
+  marked fallback for that same run's latest captured fetch; it never grants
+  permission to supply an unmarked page body.
+
 - **`note_exists` is a transport code.** An agent's `create_note` with
   `if_exists: "refuse"` that finds `<folder>/<slug>.md` taken fails at the
   write door, under the name's lock, before a byte is written. It bounds one
@@ -570,13 +582,31 @@ order and its `cli_tools` in argv order, so neither is sorted.
   argument, the read axis and door none. `read_document` checks scope before
   opening and again against its contained descriptor's canonical path. It is
   granted by the read toolset, including personal-token clients.
-- **Canvas targets are read-only (M68.7).** A `canvas` target requires a
-  schema argument, the read axis and door none. `read_canvas` checks scope
+- **Canvas targets name their door (M68.7–.7c).** A `canvas` target requires a
+  schema argument: read/none or read_write/canvas. Door canvas also admits
+  a folder target on the write axis, and no other combination. `read_canvas` checks scope
   before bytes and again against the pinned descriptor's canonical path.
   It reads one board up to the shared 8 MiB file cap. A file card is looked
   up only within read scope; outside that scope its target is `unchecked`,
   whether or not it exists. A card's contents and web links are never opened.
   The shared canvas limits cap the JSON answer independently of the file.
+  `edit_canvas` validates ordered operations on a private board, then checks
+  the output reads back exactly before one locked write. Existing dangling
+  edges survive; adding or repointing one requires both nodes. Unknown JSON
+  and Cerebro extras survive. Missing card targets warn and retain their
+  pointers; a canonical target outside the vault refuses rather than being
+  misreported as missing. Explicit ids share one namespace across nodes and
+  edges; omitted ids derive from the original hash and one-based op index,
+  retrying deterministic suffixes on collision. No-op plans preserve the
+  original bytes and record nothing.
+  `create_canvas` runs that planner on the exact empty-board seed. The final
+  free filename is chosen and locked before planning, so a self-pointer
+  check sees a concurrent create's numbered suffix. It writes once with one
+  create receipt; Preview selects the same path without writing. A folder
+  target may be optional only when its schema declares a string with
+  `default: ""`, explicitly naming the vault root. Other targets remain
+  required. The handler supplies that default; JSON Schema's annotation is
+  not treated as client-side argument injection.
 - **Note writers are always write-scoped.** Door `note` allows only the write
   and read_write axes, and both need a target argument that the schema
   requires (a note or folder on the write axis, a note on read_write), so a
@@ -896,3 +926,78 @@ cargo test --lib policy::mail::tests::write_mail_digest -- --ignored \
 Replay `policy::mail::tests` and `src/engine/mailPolicy.test.ts`, then the git
 checkpoint/run changeset checks whenever kept-out paths change. There is no
 runtime digest check. Never format the hashed JSON.
+
+Notion conversion (M69.5) is Rust-only, not a second vault semantic in TS.
+`src-tauri/fixtures/notion-cases.json` contains synthetic documented envelopes
+and expected carriers. Regenerate only with
+`UPDATE_NOTION_CASES=1 cargo test --lib import::notion::tests::write_notion_cases -- --ignored`
+and review the changed bytes; `src/editor/notionCases.test.ts` opens those
+outputs through the real editor. The browser mock consumes these normalized
+outcomes and does not implement conversion or automatic relinking. Live
+connector recordings remain an owner check through the isolated recording kit.
+
+The mail host twin uses Rust URL parsing and the pure `whatwg-url` parser in the
+engine. Unicode/percent-encoded hosts, ignored code points, ports, userinfo and
+separator spellings replay the same host cases; a hand-split hostname is not a
+privacy boundary. No DOM global is used.
+
+
+## Connector send denials (M69.10)
+
+`tools.v1.json` ends with `never_call`: one explanation and source-attributed
+names in strict ASCII order. Both loaders reject unknown fields, invalid names,
+duplicates, disorder, empty explanations/sources and collisions with cerebro
+rows. The published server/version source lives beside every name. These names
+are not served tools and do not join the picker or tool-approval families.
+
+`agent::build_args` adds each exact name on every loaded connector server,
+using that server's CLI spelling, to the existing single `--disallowedTools`
+flag. Record denials and unattended mail-reader denials remain there, deduped.
+The approval plan and its goldens have no connector rows and do not change;
+argv tests prove the added boundary. No connector means no added argument.
+Internal runs hold no connectors. A foreign tool remains a transcript step
+with a plug and server attribution, even if its bare name matches a vault
+writer. No native sender is added.
+
+The checked versions and primary links are recorded in M69.10's plan and in
+the artifact. Published catalogs changed since the initial plan: replies and
+forwards send too, and Anthropic's current Workspace connector can send with
+approval. Its undocumented tool spellings are not guessed. This inventory is
+bounded to verified names; SECURITY.md describes other aliases and inherited
+legacy configuration explicitly.
+
+
+Mail header digests are projected in Rust only. Synthetic inputs and exact page
+bytes live in `src-tauri/fixtures/thread-digests.json`; after a deliberate format
+change regenerate with `cargo test --lib mail::digest::tests::write_thread_digest_cases
+-- --ignored` and the full Mac skip list above, then review every changed byte.
+The browser journey opens those same files through the real page renderer.
+
+### Pull request read cases (M69.11)
+
+`pr-urls.json` is the exact argv admission grammar shared by Rust and TS. The
+host and scheme compare in ASCII case only; percent escapes, controls and the
+union of Unicode White_Space and JavaScript whitespace refuse everywhere.
+`pr-cases.json` is hand-shaped gh 2.x JSON with toy names: Rust normalizes the
+process outcome, and TS judges readiness from that same normalized outcome.
+Null checks mean not reported; an empty list means reported with no checks.
+These fixtures have no writer or digest; edit them deliberately and replay
+`forge::tests::replays_pr_urls`, `forge::tests::replays_pr_cases` and
+`src/engine/pullRequest.test.ts`. Origin hints are TS-only, with primary-source
+links beside each observed marker in `pullRequest.ts`; they are never an
+attribution record or an assertion that an unmatched author is human.
+
+The mail sweep block (artifact v4, M69.7e) supplies its limits and read/deny
+names to the generated attended Agent record. Both loaders validate bounded
+positive counts, unique tool-part names and disjoint lists. Refusal controls
+live in the same artifact. Its two granted reader names and parameter forms
+were checked against Google's [search_threads](https://developers.google.com/workspace/gmail/api/reference/mcp/tools_list/search_threads)
+and [get_thread](https://developers.google.com/workspace/gmail/api/reference/mcp/tools_list/get_thread)
+reference on 2026-10-15; no signed-in call was made. The deny list also retains
+older planned spellings as compatibility subtractions. Missing readers refuse
+rather than widening to another server or a shell.
+
+`thread-digests.json` also contains requested-text projections. Regeneration
+writes both `content` and `text_content` for those cases. Every received string
+is made inert; fixtures are synthetic. Message-text permission is a separate
+kind in the same default-closed gate.

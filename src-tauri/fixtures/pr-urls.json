@@ -1,0 +1,239 @@
+{
+  "format": 1,
+  "about": "Canonical github.com PR URL boundary shared by Rust argv and TypeScript. No trim, trailing slash, percent, controls, whitespace or backslash. Scheme/host ASCII case-insensitive; path case kept. Hand-shaped, no live reads.",
+  "cases": [
+    {
+      "name": "ordinary",
+      "input": "https://github.com/acme/notes/pull/1",
+      "expect": {
+        "owner": "acme",
+        "repo": "notes",
+        "number": 1,
+        "canonical": "https://github.com/acme/notes/pull/1",
+        "key": "https://github.com/acme/notes/pull/1"
+      }
+    },
+    {
+      "name": "case-kept",
+      "input": "HTTPS://WWW.GITHUB.COM/Acme/Notes/pull/42",
+      "expect": {
+        "owner": "Acme",
+        "repo": "Notes",
+        "number": 42,
+        "canonical": "https://github.com/Acme/Notes/pull/42",
+        "key": "https://github.com/acme/notes/pull/42"
+      }
+    },
+    {
+      "name": "suffix-files",
+      "input": "https://github.com/acme/notes/pull/12/files?view=split#diff-a",
+      "expect": {
+        "owner": "acme",
+        "repo": "notes",
+        "number": 12,
+        "canonical": "https://github.com/acme/notes/pull/12",
+        "key": "https://github.com/acme/notes/pull/12"
+      }
+    },
+    {
+      "name": "suffix-commits",
+      "input": "https://github.com/acme/notes/pull/12/commits?view=split#diff-a",
+      "expect": {
+        "owner": "acme",
+        "repo": "notes",
+        "number": 12,
+        "canonical": "https://github.com/acme/notes/pull/12",
+        "key": "https://github.com/acme/notes/pull/12"
+      }
+    },
+    {
+      "name": "suffix-checks",
+      "input": "https://github.com/acme/notes/pull/12/checks?view=split#diff-a",
+      "expect": {
+        "owner": "acme",
+        "repo": "notes",
+        "number": 12,
+        "canonical": "https://github.com/acme/notes/pull/12",
+        "key": "https://github.com/acme/notes/pull/12"
+      }
+    },
+    {
+      "name": "maximum-number",
+      "input": "https://github.com/a/x/pull/9999999999",
+      "expect": {
+        "owner": "a",
+        "repo": "x",
+        "number": 9999999999,
+        "canonical": "https://github.com/a/x/pull/9999999999",
+        "key": "https://github.com/a/x/pull/9999999999"
+      }
+    },
+    {
+      "name": "punctuation-repo",
+      "input": "https://github.com/a-b/a._-b/pull/2",
+      "expect": {
+        "owner": "a-b",
+        "repo": "a._-b",
+        "number": 2,
+        "canonical": "https://github.com/a-b/a._-b/pull/2",
+        "key": "https://github.com/a-b/a._-b/pull/2"
+      }
+    },
+    {
+      "name": "query-only",
+      "input": "https://github.com/acme/notes/pull/1?",
+      "expect": {
+        "owner": "acme",
+        "repo": "notes",
+        "number": 1,
+        "canonical": "https://github.com/acme/notes/pull/1",
+        "key": "https://github.com/acme/notes/pull/1"
+      }
+    },
+    {
+      "name": "http",
+      "input": "http://github.com/acme/notes/pull/1",
+      "expect": null
+    },
+    {
+      "name": "host-suffix",
+      "input": "https://github.com.evil.test/acme/notes/pull/1",
+      "expect": null
+    },
+    {
+      "name": "userinfo",
+      "input": "https://person@github.com/acme/notes/pull/1",
+      "expect": null
+    },
+    {
+      "name": "port",
+      "input": "https://github.com:443/acme/notes/pull/1",
+      "expect": null
+    },
+    {
+      "name": "encoded-path",
+      "input": "https://github.com/acme/notes/pull/%31",
+      "expect": null
+    },
+    {
+      "name": "encoded-query",
+      "input": "https://github.com/acme/notes/pull/1?a=%20",
+      "expect": null
+    },
+    {
+      "name": "leading-zero",
+      "input": "https://github.com/acme/notes/pull/01",
+      "expect": null
+    },
+    {
+      "name": "zero",
+      "input": "https://github.com/acme/notes/pull/0",
+      "expect": null
+    },
+    {
+      "name": "too-big-number",
+      "input": "https://github.com/acme/notes/pull/10000000000",
+      "expect": null
+    },
+    {
+      "name": "plural-pulls",
+      "input": "https://github.com/acme/notes/pulls/1",
+      "expect": null
+    },
+    {
+      "name": "issue",
+      "input": "https://github.com/acme/notes/issues/1",
+      "expect": null
+    },
+    {
+      "name": "trailing-slash",
+      "input": "https://github.com/acme/notes/pull/1/",
+      "expect": null
+    },
+    {
+      "name": "unknown-suffix",
+      "input": "https://github.com/acme/notes/pull/1/reviews",
+      "expect": null
+    },
+    {
+      "name": "owner-start-hyphen",
+      "input": "https://github.com/-acme/notes/pull/1",
+      "expect": null
+    },
+    {
+      "name": "owner-underscore",
+      "input": "https://github.com/a_b/notes/pull/1",
+      "expect": null
+    },
+    {
+      "name": "owner-too-long",
+      "input": "https://github.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/notes/pull/1",
+      "expect": null
+    },
+    {
+      "name": "repo-dot",
+      "input": "https://github.com/acme/./pull/1",
+      "expect": null
+    },
+    {
+      "name": "repo-dotdot",
+      "input": "https://github.com/acme/../pull/1",
+      "expect": null
+    },
+    {
+      "name": "repo-too-long",
+      "input": "https://github.com/acme/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/pull/1",
+      "expect": null
+    },
+    {
+      "name": "space",
+      "input": " https://github.com/acme/notes/pull/1",
+      "expect": null
+    },
+    {
+      "name": "newline",
+      "input": "https://github.com/acme/notes/pull/1\n",
+      "expect": null
+    },
+    {
+      "name": "tab-query",
+      "input": "https://github.com/acme/notes/pull/1?x=\t",
+      "expect": null
+    },
+    {
+      "name": "unicode-space",
+      "input": "https://github.com/acme/notes/pull/1#\u00a0",
+      "expect": null
+    },
+    {
+      "name": "control",
+      "input": "https://github.com/acme/notes/pull/1#\u0000",
+      "expect": null
+    },
+    {
+      "name": "backslash",
+      "input": "https://github.com/acme/notes/pull/1#\\",
+      "expect": null
+    },
+    {
+      "name": "wrong-path-case",
+      "input": "https://github.com/acme/notes/PULL/1",
+      "expect": null
+    },
+    {
+      "name": "bom-in-query",
+      "input": "https://github.com/acme/notes/pull/1?\ufeff",
+      "expect": null
+    },
+    {
+      "name": "nel-in-query",
+      "input": "https://github.com/acme/notes/pull/1?\u0085",
+      "expect": null
+    },
+    {
+      "name": "long-s-scheme",
+      "input": "http\u017fs://github.com/acme/notes/pull/1",
+      "expect": null
+    }
+  ]
+}

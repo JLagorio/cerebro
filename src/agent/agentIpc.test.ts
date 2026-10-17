@@ -214,7 +214,12 @@ describe('a mock run commits what it wrote before its Done (M58.3)', () => {
     }, handle.run);
     await doneOf(handle.run);
     stop();
-    expect(changeset).toEqual({ state: 'nothing', run_id: handle.attach, shell_unrecorded: false });
+    expect(changeset).toEqual({
+      state: 'nothing',
+      run_id: handle.attach,
+      shell_unrecorded: false,
+      kept_out_of_git: 0,
+    });
     expect(window.__cerebroMockGit?.commits.length).toBe(before);
   });
 });

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
+import type { SkillNarrowing } from '@/engine/skills';
 import type { AgentChat, TurnContext } from './useAgentChat';
 import { UP_NEXT_CAP, type ResolvedText, type UpNextEntry } from './upNextQueue';
 import { useReviewNotesStore } from '@/stores/reviewNotesStore';
@@ -30,13 +31,13 @@ export interface SkillResolution {
   text: string;
   skill: { path: string } | null;
   expand: (() => Promise<string>) | null;
-  allowedTools: string[] | null;
+  narrowing: SkillNarrowing;
 }
 
 export type SendNow = (
   text: string,
   message?: string | (() => Promise<string>),
-  allowedTools?: string[] | null,
+  narrowing?: SkillNarrowing,
   turn?: TurnContext,
 ) => void;
 
@@ -90,7 +91,7 @@ export function useUpNext({
       sendNow(
         entry.text,
         entry.prompt ?? (() => entry.expansion ?? Promise.resolve(entry.text)),
-        entry.allowedTools,
+        entry.narrowing,
         entry.turn,
       );
       if (entry.notes !== undefined) {
@@ -106,7 +107,7 @@ export function useUpNext({
     (input: UpNextInput, at: string): UpNextEntry => {
       const resolved: SkillResolution =
         input.handoff === true || input.prompt !== undefined || input.notes !== undefined
-          ? { text: input.text.trim(), skill: null, expand: null, allowedTools: null }
+          ? { text: input.text.trim(), skill: null, expand: null, narrowing: {} }
           : resolve(input.text);
       entrySeq += 1;
       return {
@@ -118,7 +119,7 @@ export function useUpNext({
         ...(resolved.expand === null
           ? {}
           : { expansion: resolved.expand().catch(() => resolved.text) }),
-        allowedTools: resolved.allowedTools,
+        narrowing: structuredClone(resolved.narrowing),
         turn: getTurn(),
         vault: at,
         queuedAt: Date.now(),
@@ -162,7 +163,7 @@ export function useUpNext({
         return 'sent';
       }
       const resolved = resolve(input.text);
-      sendNow(resolved.text, resolved.expand ?? undefined, resolved.allowedTools);
+      sendNow(resolved.text, resolved.expand ?? undefined, resolved.narrowing);
       return 'sent';
     },
     [busy, conversationId, entryFor, resolve, sendNow, store, toast, vault],
@@ -242,7 +243,7 @@ export function useUpNext({
       const resolved = resolve(text);
       const given: ResolvedText = {
         skill: resolved.skill,
-        allowedTools: resolved.allowedTools,
+        narrowing: structuredClone(resolved.narrowing),
         ...(resolved.expand === null
           ? {}
           : { expansion: resolved.expand().catch(() => resolved.text) }),

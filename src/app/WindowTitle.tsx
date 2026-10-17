@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { APP_NAME, placeLabel, placeOf, windowTitle } from '@/engine/place';
+import { useUiStore } from '@/stores/uiStore';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -14,14 +15,17 @@ import { useVaultStore } from '@/stores/vaultStore';
  * one a thread chip shows, read against the live vault so a rename retitles.
  */
 export function WindowTitle() {
+  const chatCanvas = useUiStore((s) => s.aiPanelOpen && s.aiPanelPresentation === 'canvas');
   const selection = useNavStore((s) => s.selection);
   const entries = useVaultStore((s) => s.entries);
   const views = useVaultStore((s) => s.views);
   const collections = useVaultStore((s) => s.collections);
 
   useEffect(() => {
-    document.title = windowTitle(placeLabel(placeOf(selection), { entries, views, collections }));
-  }, [selection, entries, views, collections]);
+    document.title = windowTitle(
+      chatCanvas ? 'Assistant' : placeLabel(placeOf(selection), { entries, views, collections }),
+    );
+  }, [chatCanvas, selection, entries, views, collections]);
 
   useEffect(
     () => () => {

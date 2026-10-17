@@ -4,6 +4,7 @@ import { CalendarTimeGrid, HOUR_PX, type TimeGridItem } from '@/views/CalendarTi
 import { buildSchema } from '@/engine/schema';
 import { makeEntry } from '@/test/factories';
 import { useUiStore } from '@/stores/uiStore';
+import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import type { Entry } from '@/engine/types';
 
@@ -149,7 +150,10 @@ describe('CalendarTimeGrid is read-only (M61.8)', () => {
     useVaultStore.setState({ entries: [item.entry] });
     grid([item]);
     fireEvent.click(byPath('calendar-block', 'standup'));
-    expect(openDetail).toHaveBeenCalledWith('records/work-items/standup.md');
+    expect(openDetail).toHaveBeenCalledWith(
+      'records/work-items/standup.md',
+      useNavStore.getState().active,
+    );
   });
 
   it('writes nothing on a pointer drag', () => {

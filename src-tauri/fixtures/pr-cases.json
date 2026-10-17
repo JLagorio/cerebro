@@ -1,0 +1,1118 @@
+{
+  "format": 1,
+  "about": "Hand-shaped gh 2.x output, never a live account. Rust interprets input to the wire result; TypeScript derives readiness from that result. Unknown is never ready.",
+  "checkedAt": "2026-10-15T12:00:00Z",
+  "cases": [
+    {
+      "name": "passing-check-run",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"CheckRun\",\"name\":\"test\",\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\"}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "OPEN",
+          "isDraft": false,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": [
+            {
+              "kind": "check_run",
+              "name": "test",
+              "status": "COMPLETED",
+              "conclusion": "SUCCESS"
+            }
+          ]
+        }
+      },
+      "readiness": "ready"
+    },
+    {
+      "name": "passing-both-shapes",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"CheckRun\",\"name\":\"test\",\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\"},{\"__typename\":\"StatusContext\",\"context\":\"legacy\",\"state\":\"SUCCESS\"}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "OPEN",
+          "isDraft": false,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": [
+            {
+              "kind": "check_run",
+              "name": "test",
+              "status": "COMPLETED",
+              "conclusion": "SUCCESS"
+            },
+            {
+              "kind": "status_context",
+              "name": "legacy",
+              "state": "SUCCESS"
+            }
+          ]
+        }
+      },
+      "readiness": "ready"
+    },
+    {
+      "name": "failed-failure",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"CheckRun\",\"name\":\"test\",\"status\":\"COMPLETED\",\"conclusion\":\"FAILURE\"}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "OPEN",
+          "isDraft": false,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": [
+            {
+              "kind": "check_run",
+              "name": "test",
+              "status": "COMPLETED",
+              "conclusion": "FAILURE"
+            }
+          ]
+        }
+      },
+      "readiness": "not_ready"
+    },
+    {
+      "name": "failed-timed_out",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"CheckRun\",\"name\":\"test\",\"status\":\"COMPLETED\",\"conclusion\":\"TIMED_OUT\"}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "OPEN",
+          "isDraft": false,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": [
+            {
+              "kind": "check_run",
+              "name": "test",
+              "status": "COMPLETED",
+              "conclusion": "TIMED_OUT"
+            }
+          ]
+        }
+      },
+      "readiness": "not_ready"
+    },
+    {
+      "name": "failed-cancelled",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"CheckRun\",\"name\":\"test\",\"status\":\"COMPLETED\",\"conclusion\":\"CANCELLED\"}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "OPEN",
+          "isDraft": false,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": [
+            {
+              "kind": "check_run",
+              "name": "test",
+              "status": "COMPLETED",
+              "conclusion": "CANCELLED"
+            }
+          ]
+        }
+      },
+      "readiness": "not_ready"
+    },
+    {
+      "name": "failed-action_required",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"CheckRun\",\"name\":\"test\",\"status\":\"COMPLETED\",\"conclusion\":\"ACTION_REQUIRED\"}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "OPEN",
+          "isDraft": false,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": [
+            {
+              "kind": "check_run",
+              "name": "test",
+              "status": "COMPLETED",
+              "conclusion": "ACTION_REQUIRED"
+            }
+          ]
+        }
+      },
+      "readiness": "not_ready"
+    },
+    {
+      "name": "failed-startup_failure",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"CheckRun\",\"name\":\"test\",\"status\":\"COMPLETED\",\"conclusion\":\"STARTUP_FAILURE\"}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "OPEN",
+          "isDraft": false,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": [
+            {
+              "kind": "check_run",
+              "name": "test",
+              "status": "COMPLETED",
+              "conclusion": "STARTUP_FAILURE"
+            }
+          ]
+        }
+      },
+      "readiness": "not_ready"
+    },
+    {
+      "name": "acceptable-neutral",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"CheckRun\",\"name\":\"test\",\"status\":\"COMPLETED\",\"conclusion\":\"NEUTRAL\"}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "OPEN",
+          "isDraft": false,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": [
+            {
+              "kind": "check_run",
+              "name": "test",
+              "status": "COMPLETED",
+              "conclusion": "NEUTRAL"
+            }
+          ]
+        }
+      },
+      "readiness": "ready"
+    },
+    {
+      "name": "acceptable-skipped",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"CheckRun\",\"name\":\"test\",\"status\":\"COMPLETED\",\"conclusion\":\"SKIPPED\"}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "OPEN",
+          "isDraft": false,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": [
+            {
+              "kind": "check_run",
+              "name": "test",
+              "status": "COMPLETED",
+              "conclusion": "SKIPPED"
+            }
+          ]
+        }
+      },
+      "readiness": "ready"
+    },
+    {
+      "name": "running",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"CheckRun\",\"status\":\"IN_PROGRESS\",\"conclusion\":null}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "OPEN",
+          "isDraft": false,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": [
+            {
+              "kind": "check_run",
+              "name": null,
+              "status": "IN_PROGRESS",
+              "conclusion": null
+            }
+          ]
+        }
+      },
+      "readiness": "not_ready"
+    },
+    {
+      "name": "legacy-failure",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"StatusContext\",\"context\":\"legacy\",\"state\":\"FAILURE\"}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "OPEN",
+          "isDraft": false,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": [
+            {
+              "kind": "status_context",
+              "name": "legacy",
+              "state": "FAILURE"
+            }
+          ]
+        }
+      },
+      "readiness": "not_ready"
+    },
+    {
+      "name": "legacy-error",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"StatusContext\",\"state\":\"ERROR\"}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "OPEN",
+          "isDraft": false,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": [
+            {
+              "kind": "status_context",
+              "name": null,
+              "state": "ERROR"
+            }
+          ]
+        }
+      },
+      "readiness": "not_ready"
+    },
+    {
+      "name": "legacy-pending",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"StatusContext\",\"state\":\"PENDING\"}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "OPEN",
+          "isDraft": false,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": [
+            {
+              "kind": "status_context",
+              "name": null,
+              "state": "PENDING"
+            }
+          ]
+        }
+      },
+      "readiness": "not_ready"
+    },
+    {
+      "name": "unknown-conclusion",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"CheckRun\",\"status\":\"COMPLETED\",\"conclusion\":\"FUTURE\"}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "OPEN",
+          "isDraft": false,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": [
+            {
+              "kind": "check_run",
+              "name": null,
+              "status": "COMPLETED",
+              "conclusion": "FUTURE"
+            }
+          ]
+        }
+      },
+      "readiness": "checks_unknown"
+    },
+    {
+      "name": "unknown-status",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"CheckRun\",\"status\":\"FUTURE\",\"conclusion\":\"SUCCESS\"}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "OPEN",
+          "isDraft": false,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": [
+            {
+              "kind": "check_run",
+              "name": null,
+              "status": "FUTURE",
+              "conclusion": "SUCCESS"
+            }
+          ]
+        }
+      },
+      "readiness": "checks_unknown"
+    },
+    {
+      "name": "unknown-typename",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"FutureCheck\",\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\"}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "OPEN",
+          "isDraft": false,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": [
+            {
+              "kind": "unknown"
+            }
+          ]
+        }
+      },
+      "readiness": "checks_unknown"
+    },
+    {
+      "name": "malformed-item",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[null]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "OPEN",
+          "isDraft": false,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": [
+            {
+              "kind": "unknown"
+            }
+          ]
+        }
+      },
+      "readiness": "checks_unknown"
+    },
+    {
+      "name": "null-rollup",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":null}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "OPEN",
+          "isDraft": false,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": null
+        }
+      },
+      "readiness": "checks_unknown"
+    },
+    {
+      "name": "wrong-rollup",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":{}}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "OPEN",
+          "isDraft": false,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": null
+        }
+      },
+      "readiness": "checks_unknown"
+    },
+    {
+      "name": "empty-rollup",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "OPEN",
+          "isDraft": false,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": []
+        }
+      },
+      "readiness": "no_checks"
+    },
+    {
+      "name": "draft",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":true,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"CheckRun\",\"name\":\"test\",\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\"}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "OPEN",
+          "isDraft": true,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": [
+            {
+              "kind": "check_run",
+              "name": "test",
+              "status": "COMPLETED",
+              "conclusion": "SUCCESS"
+            }
+          ]
+        }
+      },
+      "readiness": "not_ready"
+    },
+    {
+      "name": "unknown-draft",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":\"false\",\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"CheckRun\",\"name\":\"test\",\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\"}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "OPEN",
+          "isDraft": null,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": [
+            {
+              "kind": "check_run",
+              "name": "test",
+              "status": "COMPLETED",
+              "conclusion": "SUCCESS"
+            }
+          ]
+        }
+      },
+      "readiness": "checks_unknown"
+    },
+    {
+      "name": "merged",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"MERGED\",\"isDraft\":false,\"mergedAt\":\"2026-10-15T12:00:00Z\",\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"CheckRun\",\"name\":\"test\",\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\"}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "MERGED",
+          "isDraft": false,
+          "mergedAt": "2026-10-15T12:00:00Z",
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": [
+            {
+              "kind": "check_run",
+              "name": "test",
+              "status": "COMPLETED",
+              "conclusion": "SUCCESS"
+            }
+          ]
+        }
+      },
+      "readiness": null
+    },
+    {
+      "name": "closed",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"CLOSED\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":\"2026-10-15T12:00:00Z\",\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"CheckRun\",\"name\":\"test\",\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\"}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "CLOSED",
+          "isDraft": false,
+          "mergedAt": null,
+          "closedAt": "2026-10-15T12:00:00Z",
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": [
+            {
+              "kind": "check_run",
+              "name": "test",
+              "status": "COMPLETED",
+              "conclusion": "SUCCESS"
+            }
+          ]
+        }
+      },
+      "readiness": null
+    },
+    {
+      "name": "unknown-state",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"FUTURE\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"CheckRun\",\"name\":\"test\",\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\"}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": "Improve the notes",
+          "state": "FUTURE",
+          "isDraft": false,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": "A small change.",
+          "reviewDecision": "APPROVED",
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": "someone",
+          "checks": [
+            {
+              "kind": "check_run",
+              "name": "test",
+              "status": "COMPLETED",
+              "conclusion": "SUCCESS"
+            }
+          ]
+        }
+      },
+      "readiness": "checks_unknown"
+    },
+    {
+      "name": "unknown-optional",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":42,\"state\":\"OPEN\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":null,\"body\":null,\"reviewDecision\":null,\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"CheckRun\",\"name\":\"test\",\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\"}],\"extra\":\"ignored\"}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "read",
+        "checkedAt": "2026-10-15T12:00:00Z",
+        "pr": {
+          "number": 42,
+          "url": "https://github.com/acme/notes/pull/42",
+          "title": null,
+          "state": "OPEN",
+          "isDraft": false,
+          "mergedAt": null,
+          "closedAt": null,
+          "headRefName": "feature/notes",
+          "baseRefName": "main",
+          "body": null,
+          "reviewDecision": null,
+          "mergeStateStatus": "CLEAN",
+          "updatedAt": "2026-10-15T11:00:00Z",
+          "author": null,
+          "checks": [
+            {
+              "kind": "check_run",
+              "name": "test",
+              "status": "COMPLETED",
+              "conclusion": "SUCCESS"
+            }
+          ]
+        }
+      },
+      "readiness": "ready"
+    },
+    {
+      "name": "missing-number",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":null,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"CheckRun\",\"name\":\"test\",\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\"}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "unreadable",
+        "checkedAt": "2026-10-15T12:00:00Z"
+      },
+      "readiness": "checks_unknown"
+    },
+    {
+      "name": "missing-url",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":null,\"title\":\"Improve the notes\",\"state\":\"OPEN\",\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"CheckRun\",\"name\":\"test\",\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\"}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "unreadable",
+        "checkedAt": "2026-10-15T12:00:00Z"
+      },
+      "readiness": "checks_unknown"
+    },
+    {
+      "name": "missing-state",
+      "input": {
+        "exit": 0,
+        "stdout": "{\"number\":42,\"url\":\"https://github.com/acme/notes/pull/42\",\"title\":\"Improve the notes\",\"state\":null,\"isDraft\":false,\"mergedAt\":null,\"closedAt\":null,\"headRefName\":\"feature/notes\",\"baseRefName\":\"main\",\"author\":{\"login\":\"someone\"},\"body\":\"A small change.\",\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"updatedAt\":\"2026-10-15T11:00:00Z\",\"statusCheckRollup\":[{\"__typename\":\"CheckRun\",\"name\":\"test\",\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\"}]}",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "unreadable",
+        "checkedAt": "2026-10-15T12:00:00Z"
+      },
+      "readiness": "checks_unknown"
+    },
+    {
+      "name": "not_signed_in",
+      "input": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "To get started with GitHub CLI, please run: gh auth login"
+      },
+      "expect": {
+        "state": "not_signed_in",
+        "checkedAt": "2026-10-15T12:00:00Z"
+      },
+      "readiness": "checks_unknown"
+    },
+    {
+      "name": "not_found",
+      "input": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "GraphQL: Could not resolve to a PullRequest"
+      },
+      "expect": {
+        "state": "not_found",
+        "checkedAt": "2026-10-15T12:00:00Z"
+      },
+      "readiness": "checks_unknown"
+    },
+    {
+      "name": "offline",
+      "input": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "error connecting to api.github.com"
+      },
+      "expect": {
+        "state": "offline",
+        "checkedAt": "2026-10-15T12:00:00Z"
+      },
+      "readiness": "checks_unknown"
+    },
+    {
+      "name": "rate_limited",
+      "input": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "API rate limit exceeded"
+      },
+      "expect": {
+        "state": "rate_limited",
+        "checkedAt": "2026-10-15T12:00:00Z"
+      },
+      "readiness": "checks_unknown"
+    },
+    {
+      "name": "gh_outdated",
+      "input": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "Unknown JSON field: statusCheckRollup"
+      },
+      "expect": {
+        "state": "gh_outdated",
+        "checkedAt": "2026-10-15T12:00:00Z"
+      },
+      "readiness": "checks_unknown"
+    },
+    {
+      "name": "failed",
+      "input": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "unclassified failure"
+      },
+      "expect": {
+        "state": "failed",
+        "checkedAt": "2026-10-15T12:00:00Z"
+      },
+      "readiness": "checks_unknown"
+    },
+    {
+      "name": "transport-invalid_url",
+      "input": {
+        "failure": "invalid_url"
+      },
+      "expect": {
+        "state": "invalid_url",
+        "checkedAt": "2026-10-15T12:00:00Z"
+      },
+      "readiness": "checks_unknown"
+    },
+    {
+      "name": "transport-gh_missing",
+      "input": {
+        "failure": "gh_missing"
+      },
+      "expect": {
+        "state": "gh_missing",
+        "checkedAt": "2026-10-15T12:00:00Z"
+      },
+      "readiness": "checks_unknown"
+    },
+    {
+      "name": "transport-timed_out",
+      "input": {
+        "failure": "timed_out"
+      },
+      "expect": {
+        "state": "timed_out",
+        "checkedAt": "2026-10-15T12:00:00Z"
+      },
+      "readiness": "checks_unknown"
+    },
+    {
+      "name": "transport-unreadable",
+      "input": {
+        "failure": "unreadable"
+      },
+      "expect": {
+        "state": "unreadable",
+        "checkedAt": "2026-10-15T12:00:00Z"
+      },
+      "readiness": "checks_unknown"
+    },
+    {
+      "name": "invalid-json",
+      "input": {
+        "exit": 0,
+        "stdout": "not json",
+        "stderr": ""
+      },
+      "expect": {
+        "state": "unreadable",
+        "checkedAt": "2026-10-15T12:00:00Z"
+      },
+      "readiness": "checks_unknown"
+    }
+  ]
+}

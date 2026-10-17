@@ -4,6 +4,9 @@ docs
 demo-vault
 node_modules
 src-tauri/target
+src-tauri/.bundle-resources
+# The reproducible sheet binding has its own Cargo output directory.
+scripts/sheet-values/target
 src-tauri/gen
 test-results
 playwright-report

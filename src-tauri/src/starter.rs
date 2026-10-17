@@ -30,6 +30,10 @@ pub const STARTER_FILES: &[(&str, &str)] = &[
         include_str!("../../shared/starter/vault/records/skills/catch-me-up.md"),
     ),
     (
+        "records/skills/draft-reply.md",
+        include_str!("../../shared/starter/vault/records/skills/draft-reply.md"),
+    ),
+    (
         "records/skills/what-i-did.md",
         include_str!("../../shared/starter/vault/records/skills/what-i-did.md"),
     ),

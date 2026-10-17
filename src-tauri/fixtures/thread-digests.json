@@ -1,0 +1,374 @@
+[
+  {
+    "name": "waiting-on-you",
+    "input": {
+      "id": "thread-1",
+      "kind": "thread",
+      "title": "Launch",
+      "messages": [
+        {
+          "id": "m1",
+          "from": "Dana <dana@example.test>",
+          "to": ["Owner <owner@example.test>"],
+          "cc": [],
+          "date": "2026-07-27T10:00:00Z",
+          "labels": ["INBOX"]
+        }
+      ]
+    },
+    "content": "---\ntype: Source\ntitle: Launch\nsource_id: thread-1\nsource_kind: thread\nfetched_at: 2026-07-28T12:00:00Z\ngenerated:\n  by: agent:mail-sweep\n  at: 2026-07-28T12:00:00Z\nparticipants:\n- dana@example.test\n- owner@example.test\nsent_to: []\nowner_addresses: []\nmessage_ids:\n- m1\nlast_message_id: m1\nmessage_count: 1\nfirst_message_at: 2026-07-27T10:00:00Z\nlast_message_at: 2026-07-27T10:00:00Z\nlast_inbound_at: 2026-07-27T10:00:00Z\nlast_from: dana@example.test\nneeds_reply: true\n---\n\n# Launch\n\nA header digest of a mail thread: who wrote to whom, and when. Message text is kept only when you ask for it in a conversation.\n\n**2026-07-27 10:00 UTC** · Dana (dana&#64;example.test) → Owner (owner&#64;example.test)\n"
+  },
+  {
+    "name": "two-people-replied",
+    "input": {
+      "id": "thread-1",
+      "kind": "thread",
+      "title": "Launch",
+      "messages": [
+        {
+          "id": "m1",
+          "from": "Dana <dana@example.test>",
+          "to": ["Owner <owner@example.test>"],
+          "cc": [],
+          "date": "2026-07-27T10:00:00Z",
+          "labels": ["INBOX"]
+        },
+        {
+          "id": "m2",
+          "from": "Owner <owner@example.test>",
+          "to": ["Dana <dana@example.test>"],
+          "cc": [],
+          "date": "2026-07-27T11:00:00Z",
+          "labels": ["SENT"]
+        }
+      ]
+    },
+    "content": "---\ntype: Source\ntitle: Launch\nsource_id: thread-1\nsource_kind: thread\nfetched_at: 2026-07-28T12:00:00Z\ngenerated:\n  by: agent:mail-sweep\n  at: 2026-07-28T12:00:00Z\nparticipants:\n- dana@example.test\n- owner@example.test\nsent_to:\n- dana@example.test\nowner_addresses:\n- owner@example.test\nmessage_ids:\n- m1\n- m2\nlast_message_id: m2\nmessage_count: 2\nfirst_message_at: 2026-07-27T10:00:00Z\nlast_message_at: 2026-07-27T11:00:00Z\nlast_inbound_at: 2026-07-27T10:00:00Z\nlast_sent_at: 2026-07-27T11:00:00Z\nlast_from: owner@example.test\nneeds_reply: false\n---\n\n# Launch\n\nA header digest of a mail thread: who wrote to whom, and when. Message text is kept only when you ask for it in a conversation.\n\n**2026-07-27 10:00 UTC** · Dana (dana&#64;example.test) → you\n\n**2026-07-27 11:00 UTC** · you → Dana (dana&#64;example.test)\n"
+  },
+  {
+    "name": "sent-only",
+    "input": {
+      "id": "thread-1",
+      "kind": "thread",
+      "title": "Launch",
+      "messages": [
+        {
+          "id": "m1",
+          "from": "Dana <dana@example.test>",
+          "to": ["Owner <owner@example.test>"],
+          "cc": [],
+          "date": "2026-07-27T10:00:00Z",
+          "labels": ["SENT"]
+        }
+      ]
+    },
+    "content": "---\ntype: Source\ntitle: Launch\nsource_id: thread-1\nsource_kind: thread\nfetched_at: 2026-07-28T12:00:00Z\ngenerated:\n  by: agent:mail-sweep\n  at: 2026-07-28T12:00:00Z\nparticipants:\n- dana@example.test\n- owner@example.test\nsent_to:\n- owner@example.test\nowner_addresses:\n- dana@example.test\nmessage_ids:\n- m1\nlast_message_id: m1\nmessage_count: 1\nfirst_message_at: 2026-07-27T10:00:00Z\nlast_message_at: 2026-07-27T10:00:00Z\nlast_sent_at: 2026-07-27T10:00:00Z\nlast_from: dana@example.test\nneeds_reply: false\n---\n\n# Launch\n\nA header digest of a mail thread: who wrote to whom, and when. Message text is kept only when you ask for it in a conversation.\n\n**2026-07-27 10:00 UTC** · you → Owner (owner&#64;example.test)\n"
+  },
+  {
+    "name": "bcc-refused",
+    "input": {
+      "id": "thread-1",
+      "kind": "thread",
+      "title": "Launch",
+      "messages": [
+        {
+          "id": "m1",
+          "from": "Dana <dana@example.test>",
+          "to": ["Owner <owner@example.test>"],
+          "cc": [],
+          "date": "2026-07-27T10:00:00Z",
+          "labels": ["INBOX"],
+          "bcc": ["hidden@example.test"]
+        }
+      ]
+    },
+    "refusal": "bcc is never cached. Leave it out of message m1."
+  },
+  {
+    "name": "draft-dropped",
+    "input": {
+      "id": "thread-1",
+      "kind": "thread",
+      "title": "Launch",
+      "messages": [
+        {
+          "id": "m1",
+          "from": "Dana <dana@example.test>",
+          "to": ["Owner <owner@example.test>"],
+          "cc": [],
+          "date": "2026-07-27T10:00:00Z",
+          "labels": ["INBOX"]
+        },
+        {
+          "id": "draft",
+          "from": "owner@example.test",
+          "to": ["dana@example.test"],
+          "date": "2026-07-27T12:00:00Z",
+          "labels": ["DRAFT"]
+        }
+      ]
+    },
+    "content": "---\ntype: Source\ntitle: Launch\nsource_id: thread-1\nsource_kind: thread\nfetched_at: 2026-07-28T12:00:00Z\ngenerated:\n  by: agent:mail-sweep\n  at: 2026-07-28T12:00:00Z\nparticipants:\n- dana@example.test\n- owner@example.test\nsent_to: []\nowner_addresses: []\nmessage_ids:\n- m1\nlast_message_id: m1\nmessage_count: 1\nfirst_message_at: 2026-07-27T10:00:00Z\nlast_message_at: 2026-07-27T10:00:00Z\nlast_inbound_at: 2026-07-27T10:00:00Z\nlast_from: dana@example.test\nneeds_reply: true\n---\n\n# Launch\n\nA header digest of a mail thread: who wrote to whom, and when. Message text is kept only when you ask for it in a conversation.\n\n**2026-07-27 10:00 UTC** · Dana (dana&#64;example.test) → Owner (owner&#64;example.test)\n"
+  },
+  {
+    "name": "subject-escaped",
+    "input": {
+      "id": "thread-1",
+      "kind": "thread",
+      "title": "[[Launch]] - [ ] :::toggle @2026-07-28 <img> ``` 📅 2026-07-28",
+      "messages": [
+        {
+          "id": "m1",
+          "from": "Dana <dana@example.test>",
+          "to": ["Owner <owner@example.test>"],
+          "cc": [],
+          "date": "2026-07-27T10:00:00Z",
+          "labels": ["INBOX"]
+        }
+      ]
+    },
+    "content": "---\ntype: Source\ntitle: \\[\\[Launch\\]\\] - \\[ \\] &#58;&#58;&#58;toggle &#64;2026-07-28 &lt;img&gt; \\`\\`\\` &#128197; 2026-07-28\nsource_id: thread-1\nsource_kind: thread\nfetched_at: 2026-07-28T12:00:00Z\ngenerated:\n  by: agent:mail-sweep\n  at: 2026-07-28T12:00:00Z\nparticipants:\n- dana@example.test\n- owner@example.test\nsent_to: []\nowner_addresses: []\nmessage_ids:\n- m1\nlast_message_id: m1\nmessage_count: 1\nfirst_message_at: 2026-07-27T10:00:00Z\nlast_message_at: 2026-07-27T10:00:00Z\nlast_inbound_at: 2026-07-27T10:00:00Z\nlast_from: dana@example.test\nneeds_reply: true\n---\n\n# \\[\\[Launch\\]\\] - \\[ \\] &#58;&#58;&#58;toggle &#64;2026-07-28 &lt;img&gt; \\`\\`\\` &#128197; 2026-07-28\n\nA header digest of a mail thread: who wrote to whom, and when. Message text is kept only when you ask for it in a conversation.\n\n**2026-07-27 10:00 UTC** · Dana (dana&#64;example.test) → Owner (owner&#64;example.test)\n"
+  },
+  {
+    "name": "rfc2822-date",
+    "input": {
+      "id": "thread-1",
+      "kind": "thread",
+      "title": "Launch",
+      "messages": [
+        {
+          "id": "m1",
+          "from": "Dana <dana@example.test>",
+          "to": ["Owner <owner@example.test>"],
+          "cc": [],
+          "date": "Mon, 27 Jul 2026 12:00:00 +0200",
+          "labels": ["INBOX"]
+        }
+      ]
+    },
+    "content": "---\ntype: Source\ntitle: Launch\nsource_id: thread-1\nsource_kind: thread\nfetched_at: 2026-07-28T12:00:00Z\ngenerated:\n  by: agent:mail-sweep\n  at: 2026-07-28T12:00:00Z\nparticipants:\n- dana@example.test\n- owner@example.test\nsent_to: []\nowner_addresses: []\nmessage_ids:\n- m1\nlast_message_id: m1\nmessage_count: 1\nfirst_message_at: 2026-07-27T10:00:00Z\nlast_message_at: 2026-07-27T10:00:00Z\nlast_inbound_at: 2026-07-27T10:00:00Z\nlast_from: dana@example.test\nneeds_reply: true\n---\n\n# Launch\n\nA header digest of a mail thread: who wrote to whom, and when. Message text is kept only when you ask for it in a conversation.\n\n**2026-07-27 10:00 UTC** · Dana (dana&#64;example.test) → Owner (owner&#64;example.test)\n"
+  },
+  {
+    "name": "epoch-ms-date",
+    "input": {
+      "id": "thread-1",
+      "kind": "thread",
+      "title": "Launch",
+      "messages": [
+        {
+          "id": "m1",
+          "from": "Dana <dana@example.test>",
+          "to": ["Owner <owner@example.test>"],
+          "cc": [],
+          "date": "1785146400000",
+          "labels": ["INBOX"]
+        }
+      ]
+    },
+    "content": "---\ntype: Source\ntitle: Launch\nsource_id: thread-1\nsource_kind: thread\nfetched_at: 2026-07-28T12:00:00Z\ngenerated:\n  by: agent:mail-sweep\n  at: 2026-07-28T12:00:00Z\nparticipants:\n- dana@example.test\n- owner@example.test\nsent_to: []\nowner_addresses: []\nmessage_ids:\n- m1\nlast_message_id: m1\nmessage_count: 1\nfirst_message_at: 2026-07-27T10:00:00Z\nlast_message_at: 2026-07-27T10:00:00Z\nlast_inbound_at: 2026-07-27T10:00:00Z\nlast_from: dana@example.test\nneeds_reply: true\n---\n\n# Launch\n\nA header digest of a mail thread: who wrote to whom, and when. Message text is kept only when you ask for it in a conversation.\n\n**2026-07-27 10:00 UTC** · Dana (dana&#64;example.test) → Owner (owner&#64;example.test)\n"
+  },
+  {
+    "name": "bad-address-refused",
+    "input": {
+      "id": "thread-1",
+      "kind": "thread",
+      "title": "Launch",
+      "messages": [
+        {
+          "id": "m1",
+          "from": "bad",
+          "to": ["Owner <owner@example.test>"],
+          "cc": [],
+          "date": "2026-07-27T10:00:00Z",
+          "labels": ["INBOX"]
+        }
+      ]
+    },
+    "refusal": "message m1 has an invalid from address"
+  },
+  {
+    "name": "too-many-participants-refused",
+    "input": {
+      "id": "thread-1",
+      "kind": "thread",
+      "title": "Launch",
+      "messages": [
+        {
+          "id": "m1",
+          "from": "Dana <dana@example.test>",
+          "to": ["Owner <owner@example.test>"],
+          "cc": [],
+          "date": "2026-07-27T10:00:00Z",
+          "labels": ["INBOX"]
+        }
+      ]
+    },
+    "limits": {
+      "participants": 1
+    },
+    "refusal": "a thread holds at most 1 participants"
+  },
+  {
+    "name": "unknown-key-refused",
+    "input": {
+      "id": "thread-1",
+      "kind": "thread",
+      "title": "Launch",
+      "messages": [
+        {
+          "id": "m1",
+          "from": "Dana <dana@example.test>",
+          "to": ["Owner <owner@example.test>"],
+          "cc": [],
+          "date": "2026-07-27T10:00:00Z",
+          "labels": ["INBOX"],
+          "snippet": "not a header"
+        }
+      ]
+    },
+    "refusal": "message m1 has an unknown field: snippet"
+  },
+  {
+    "name": "name-via-stripped",
+    "input": {
+      "id": "thread-1",
+      "kind": "thread",
+      "title": "Launch",
+      "messages": [
+        {
+          "id": "m1",
+          "from": "Dana via Relay <dana@example.test>",
+          "to": ["Owner <owner@example.test>"],
+          "cc": [],
+          "date": "2026-07-27T10:00:00Z",
+          "labels": ["INBOX"]
+        }
+      ]
+    },
+    "content": "---\ntype: Source\ntitle: Launch\nsource_id: thread-1\nsource_kind: thread\nfetched_at: 2026-07-28T12:00:00Z\ngenerated:\n  by: agent:mail-sweep\n  at: 2026-07-28T12:00:00Z\nparticipants:\n- dana@example.test\n- owner@example.test\nsent_to: []\nowner_addresses: []\nmessage_ids:\n- m1\nlast_message_id: m1\nmessage_count: 1\nfirst_message_at: 2026-07-27T10:00:00Z\nlast_message_at: 2026-07-27T10:00:00Z\nlast_inbound_at: 2026-07-27T10:00:00Z\nlast_from: dana@example.test\nneeds_reply: true\n---\n\n# Launch\n\nA header digest of a mail thread: who wrote to whom, and when. Message text is kept only when you ask for it in a conversation.\n\n**2026-07-27 10:00 UTC** · Dana (dana&#64;example.test) → Owner (owner&#64;example.test)\n"
+  },
+  {
+    "name": "view-url-kept",
+    "input": {
+      "id": "thread-1",
+      "kind": "thread",
+      "title": "Launch",
+      "messages": [
+        {
+          "id": "m1",
+          "from": "Dana <dana@example.test>",
+          "to": ["Owner <owner@example.test>"],
+          "cc": [],
+          "date": "2026-07-27T10:00:00Z",
+          "labels": ["INBOX"]
+        }
+      ],
+      "source_url": "https://mail.google.com/mail/u/0/#all/thread-1"
+    },
+    "content": "---\ntype: Source\ntitle: Launch\nsource_id: thread-1\nsource_kind: thread\nsource_url: https://mail.google.com/mail/u/0/#all/thread-1\nfetched_at: 2026-07-28T12:00:00Z\ngenerated:\n  by: agent:mail-sweep\n  at: 2026-07-28T12:00:00Z\nparticipants:\n- dana@example.test\n- owner@example.test\nsent_to: []\nowner_addresses: []\nmessage_ids:\n- m1\nlast_message_id: m1\nmessage_count: 1\nfirst_message_at: 2026-07-27T10:00:00Z\nlast_message_at: 2026-07-27T10:00:00Z\nlast_inbound_at: 2026-07-27T10:00:00Z\nlast_from: dana@example.test\nneeds_reply: true\n---\n\n# Launch\n\nA header digest of a mail thread: who wrote to whom, and when. Message text is kept only when you ask for it in a conversation.\n\n**2026-07-27 10:00 UTC** · Dana (dana&#64;example.test) → Owner (owner&#64;example.test)\n"
+  },
+  {
+    "name": "non-mail-url-refused",
+    "input": {
+      "id": "thread-1",
+      "kind": "thread",
+      "title": "Launch",
+      "messages": [
+        {
+          "id": "m1",
+          "from": "Dana <dana@example.test>",
+          "to": ["Owner <owner@example.test>"],
+          "cc": [],
+          "date": "2026-07-27T10:00:00Z",
+          "labels": ["INBOX"]
+        }
+      ],
+      "source_url": "https://evil.example.test/thread-1"
+    },
+    "refusal": "source_url must be an https mail link"
+  },
+  {
+    "name": "with-text",
+    "input": {
+      "id": "thread-1",
+      "kind": "thread",
+      "title": "Launch",
+      "messages": [
+        {
+          "id": "m1",
+          "from": "Dana <dana@example.test>",
+          "to": ["Owner <owner@example.test>"],
+          "cc": [],
+          "date": "2026-07-27T10:00:00Z",
+          "labels": ["INBOX"],
+          "body": "Thanks for checking.\nThis is the reply."
+        }
+      ]
+    },
+    "text_content": "---\ntype: Source\ntitle: Launch (message text)\nsource_id: thread-1\nsource_kind: thread_text\nfetched_at: 2026-07-28T12:00:00Z\ngenerated:\n  by: agent:mail-sweep\n  at: 2026-07-28T12:00:00Z\nmessage_ids:\n- m1\n---\n\n# Launch (message text)\n\n**2026-07-27 10:00 UTC** · Dana (dana&#64;example.test) → Owner (owner&#64;example.test)\n\n> Thanks for checking.\n> This is the reply.\n",
+    "content": "---\ntype: Source\ntitle: Launch\nsource_id: thread-1\nsource_kind: thread\nfetched_at: 2026-07-28T12:00:00Z\ngenerated:\n  by: agent:mail-sweep\n  at: 2026-07-28T12:00:00Z\nparticipants:\n- dana@example.test\n- owner@example.test\nsent_to: []\nowner_addresses: []\nmessage_ids:\n- m1\nlast_message_id: m1\nmessage_count: 1\nfirst_message_at: 2026-07-27T10:00:00Z\nlast_message_at: 2026-07-27T10:00:00Z\nlast_inbound_at: 2026-07-27T10:00:00Z\nlast_from: dana@example.test\nneeds_reply: true\n---\n\n# Launch\n\nA header digest of a mail thread: who wrote to whom, and when. Message text is kept only when you ask for it in a conversation.\n\n**2026-07-27 10:00 UTC** · Dana (dana&#64;example.test) → Owner (owner&#64;example.test)\n\nMessage text: [[thread-1-text]]\n"
+  },
+  {
+    "name": "text-quote-cut",
+    "input": {
+      "id": "thread-1",
+      "kind": "thread",
+      "title": "Re: Launch",
+      "messages": [
+        {
+          "id": "m1",
+          "from": "Dana <dana@example.test>",
+          "to": ["Owner <owner@example.test>"],
+          "cc": [],
+          "date": "2026-07-27T10:00:00Z",
+          "labels": ["INBOX"],
+          "body": "New reply.\n\nOn Monday, Dana wrote:\nOld reply."
+        }
+      ]
+    },
+    "text_content": "---\ntype: Source\ntitle: Re&#58; Launch (message text)\nsource_id: thread-1\nsource_kind: thread_text\nfetched_at: 2026-07-28T12:00:00Z\ngenerated:\n  by: agent:mail-sweep\n  at: 2026-07-28T12:00:00Z\nmessage_ids:\n- m1\n---\n\n# Re&#58; Launch (message text)\n\n**2026-07-27 10:00 UTC** · Dana (dana&#64;example.test) → Owner (owner&#64;example.test)\n\n> New reply.\n",
+    "content": "---\ntype: Source\ntitle: Re&#58; Launch\nsource_id: thread-1\nsource_kind: thread\nfetched_at: 2026-07-28T12:00:00Z\ngenerated:\n  by: agent:mail-sweep\n  at: 2026-07-28T12:00:00Z\nparticipants:\n- dana@example.test\n- owner@example.test\nsent_to: []\nowner_addresses: []\nmessage_ids:\n- m1\nlast_message_id: m1\nmessage_count: 1\nfirst_message_at: 2026-07-27T10:00:00Z\nlast_message_at: 2026-07-27T10:00:00Z\nlast_inbound_at: 2026-07-27T10:00:00Z\nlast_from: dana@example.test\nneeds_reply: true\n---\n\n# Re&#58; Launch\n\nA header digest of a mail thread: who wrote to whom, and when. Message text is kept only when you ask for it in a conversation.\n\n**2026-07-27 10:00 UTC** · Dana (dana&#64;example.test) → Owner (owner&#64;example.test)\n\nMessage text: [[thread-1-text]]\n"
+  },
+  {
+    "name": "text-forward-kept",
+    "input": {
+      "id": "thread-1",
+      "kind": "thread",
+      "title": "Fwd: Launch",
+      "messages": [
+        {
+          "id": "m1",
+          "from": "Dana <dana@example.test>",
+          "to": ["Owner <owner@example.test>"],
+          "cc": [],
+          "date": "2026-07-27T10:00:00Z",
+          "labels": ["INBOX"],
+          "body": "Forwarded note.\nOn Monday, Dana wrote:\nKeep this."
+        }
+      ]
+    },
+    "text_content": "---\ntype: Source\ntitle: Fwd&#58; Launch (message text)\nsource_id: thread-1\nsource_kind: thread_text\nfetched_at: 2026-07-28T12:00:00Z\ngenerated:\n  by: agent:mail-sweep\n  at: 2026-07-28T12:00:00Z\nmessage_ids:\n- m1\n---\n\n# Fwd&#58; Launch (message text)\n\n**2026-07-27 10:00 UTC** · Dana (dana&#64;example.test) → Owner (owner&#64;example.test)\n\n> Forwarded note.\n> On Monday, Dana wrote&#58;\n> Keep this.\n",
+    "content": "---\ntype: Source\ntitle: Fwd&#58; Launch\nsource_id: thread-1\nsource_kind: thread\nfetched_at: 2026-07-28T12:00:00Z\ngenerated:\n  by: agent:mail-sweep\n  at: 2026-07-28T12:00:00Z\nparticipants:\n- dana@example.test\n- owner@example.test\nsent_to: []\nowner_addresses: []\nmessage_ids:\n- m1\nlast_message_id: m1\nmessage_count: 1\nfirst_message_at: 2026-07-27T10:00:00Z\nlast_message_at: 2026-07-27T10:00:00Z\nlast_inbound_at: 2026-07-27T10:00:00Z\nlast_from: dana@example.test\nneeds_reply: true\n---\n\n# Fwd&#58; Launch\n\nA header digest of a mail thread: who wrote to whom, and when. Message text is kept only when you ask for it in a conversation.\n\n**2026-07-27 10:00 UTC** · Dana (dana&#64;example.test) → Owner (owner&#64;example.test)\n\nMessage text: [[thread-1-text]]\n"
+  },
+  {
+    "name": "text-escaped",
+    "input": {
+      "id": "thread-1",
+      "kind": "thread",
+      "title": "Launch",
+      "messages": [
+        {
+          "id": "m1",
+          "from": "Dana <dana@example.test>",
+          "to": ["Owner <owner@example.test>"],
+          "cc": [],
+          "date": "2026-07-27T10:00:00Z",
+          "labels": ["INBOX"],
+          "body": "[[Launch]]\n- [ ] Mail-only phantom task\n:::toggle\n```\n@2026-07-28\n<img src=x>\n📅 2026-07-28"
+        }
+      ]
+    },
+    "text_content": "---\ntype: Source\ntitle: Launch (message text)\nsource_id: thread-1\nsource_kind: thread_text\nfetched_at: 2026-07-28T12:00:00Z\ngenerated:\n  by: agent:mail-sweep\n  at: 2026-07-28T12:00:00Z\nmessage_ids:\n- m1\n---\n\n# Launch (message text)\n\n**2026-07-27 10:00 UTC** · Dana (dana&#64;example.test) → Owner (owner&#64;example.test)\n\n> \\[\\[Launch\\]\\]\n> \\- \\[ \\] Mail-only phantom task\n> &#58;&#58;&#58;toggle\n> \\`\\`\\`\n> &#64;2026-07-28\n> &lt;img src=x&gt;\n> &#128197; 2026-07-28\n",
+    "content": "---\ntype: Source\ntitle: Launch\nsource_id: thread-1\nsource_kind: thread\nfetched_at: 2026-07-28T12:00:00Z\ngenerated:\n  by: agent:mail-sweep\n  at: 2026-07-28T12:00:00Z\nparticipants:\n- dana@example.test\n- owner@example.test\nsent_to: []\nowner_addresses: []\nmessage_ids:\n- m1\nlast_message_id: m1\nmessage_count: 1\nfirst_message_at: 2026-07-27T10:00:00Z\nlast_message_at: 2026-07-27T10:00:00Z\nlast_inbound_at: 2026-07-27T10:00:00Z\nlast_from: dana@example.test\nneeds_reply: true\n---\n\n# Launch\n\nA header digest of a mail thread: who wrote to whom, and when. Message text is kept only when you ask for it in a conversation.\n\n**2026-07-27 10:00 UTC** · Dana (dana&#64;example.test) → Owner (owner&#64;example.test)\n\nMessage text: [[thread-1-text]]\n"
+  }
+]

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { boot, readMockFile, seedFileBeforeBoot } from './boot';
+import { boot, readMockFile, seedFileBeforeBoot, openDestination, showPages } from './boot';
 
 const path = 'studio/budget/index.md';
 const source =
@@ -10,10 +10,7 @@ test('Studio computes linked sheet fences and retains unavailable source without
 }, testInfo) => {
   await seedFileBeforeBoot(page, path, source);
   await boot(page);
-  await page
-    .getByTestId('nav-surfaces')
-    .getByRole('button', { name: 'Studio', exact: true })
-    .click();
+  await openDestination(page, 'Studio');
   await page.getByTestId('studio-project').filter({ hasText: 'Budget prototype' }).click();
   const blocks = page.getByTestId('sheet-block');
   await expect(blocks).toHaveCount(3);
@@ -39,6 +36,7 @@ test('page sheets retain their exact fences through typing and an unmount flush,
   const seeded = `${source}\n\`\`\`cerebro-sheet\n${wide}\n\`\`\`\n\nClosing notes.\n`;
   await seedFileBeforeBoot(page, pagePath, seeded);
   await boot(page);
+  await showPages(page);
   const tree = page.getByTestId('file-tree');
   const folder = tree.getByTestId('tree-folder').filter({ hasText: 'Strategy' });
   if ((await folder.getAttribute('aria-expanded')) !== 'true') await folder.click();
@@ -89,7 +87,7 @@ test('page sheets retain their exact fences through typing and an unmount flush,
     .click();
   await page.keyboard.press('End');
   await page.keyboard.type(' Leaving.');
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home', exact: true }).click();
+  await openDestination(page, 'Home');
   await expect.poll(() => readMockFile(page, pagePath)).toContain('Checked. Leaving.');
   expect(await readMockFile(page, pagePath)).toContain(
     source.slice(source.indexOf('```cerebro-sheet')),

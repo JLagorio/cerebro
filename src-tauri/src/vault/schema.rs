@@ -437,6 +437,8 @@ pub struct FieldDef {
     pub options: Option<Vec<FieldOption>>,
     pub target: Option<String>,
     pub limit_one: bool,
+    /// Preserved for renderer-only cached-mail rollup evaluation.
+    pub source: Option<String>,
     pub relation: Option<String>,
     pub property: Option<String>,
     pub calculate: Option<String>,
@@ -561,6 +563,7 @@ pub fn parse_field_def(name: &str, spec: &Value) -> FieldDef {
         options: None,
         target: None,
         limit_one: false,
+        source: None,
         relation: None,
         property: None,
         calculate: None,
@@ -586,6 +589,7 @@ pub fn parse_field_def(name: &str, spec: &Value) -> FieldDef {
                 _ => false,
             };
             def.formula = s.get("formula").and_then(Value::as_str).map(str::to_string);
+            def.source = string_at(s, "source").filter(|source| source == "correspondence");
             def.relation = string_at(s, "relation");
             def.property = string_at(s, "property");
             def.calculate =
@@ -914,6 +918,7 @@ mod tests {
 
     fn def_json(d: &FieldDef) -> Value {
         json!({
+            "source": d.source,
             "kind": d.kind.id(),
             "options": d.options.as_ref().map(|o| o.iter().map(option_json).collect::<Vec<_>>()),
             "target": d.target,

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile, VAULT_TODAY } from './boot';
+import { boot, readMockFile, VAULT_TODAY, openAssistantPanel } from './boot';
 
 /**
  * Agent writes reach the open page (M53.6), in place (M55.6).
@@ -84,7 +84,7 @@ test('an agent append during a turn shows on the open page and survives the next
   );
   await page.evaluate(([path, md]) => window.__cerebroMockFs.set(path, md), [PAGE, BODY]);
   await openSchedule(page);
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   await expect(page.getByTestId('ai-panel')).toBeVisible();
   const editor = page.getByTestId('markdown-editor');
 
@@ -136,7 +136,7 @@ test('an agent edit replaces only the quoted text on the open page, and an ambig
   ].join('\n');
   await page.evaluate(([path, md]) => window.__cerebroMockFs.set(path, md), [PAGE, body]);
   await openSchedule(page);
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   await expect(page.getByTestId('ai-panel')).toBeVisible();
   const editor = page.getByTestId('markdown-editor');
 

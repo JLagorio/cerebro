@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { boot } from './boot';
+import { boot, openAssistantPanel } from './boot';
 
 /**
  * Transcript rows drawn by the tool manifest (M56.8), against the scripted
@@ -10,7 +10,7 @@ import { boot } from './boot';
 test('agent: five note reads fold into one row', async ({ page }) => {
   await boot(page);
 
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   const panel = page.getByTestId('ai-panel');
   await expect(panel).toBeVisible();
 

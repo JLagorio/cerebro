@@ -309,6 +309,10 @@ interface UiState {
   // --- Local agent (M6) ---
   aiPanelOpen: boolean;
   setAiPanelOpen(v: boolean): void;
+  /** M72: a layout choice, never a second conversation or run. Session-only. */
+  aiPanelPresentation: 'panel' | 'canvas';
+  openAssistantCanvas(): void;
+  setAiPanelPresentation(v: 'panel' | 'canvas'): void;
   /** The conversation the panel should show when it next looks (M57.6): the
    * run list names the thread a detached run belongs to. Memory only; the
    * panel takes it once (`takePanelConversation`). */
@@ -595,7 +599,7 @@ export const THEME_MODE_KEY = 'cerebro.themeMode';
  */
 export const DETAIL_WIDTH_DEFAULT = 560;
 export const DETAIL_WIDTH_MAX = 1000;
-export const SIDEBAR_WIDTH_DEFAULT = 264;
+export const SIDEBAR_WIDTH_DEFAULT = 240;
 export const SIDEBAR_WIDTH_MIN = 180;
 export const SIDEBAR_WIDTH_MAX = 460;
 
@@ -846,6 +850,7 @@ export const useUiStore = create<UiState>((set, get) => ({
     set((state) => ({
       detailPath: path,
       detailPane: owner,
+      aiPanelPresentation: 'panel',
       detailSiblings:
         state.siblingsByPane[owner ?? '*'] ??
         (owner === null ? state.detailSiblings : (state.siblingsByPane['*'] ?? [])),
@@ -1110,6 +1115,12 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
 
   aiPanelOpen: loadString(AI_PANEL_KEY, 'false') === 'true',
+  aiPanelPresentation: 'panel',
+  openAssistantCanvas: () => {
+    storeString(AI_PANEL_KEY, 'true');
+    set({ aiPanelOpen: true, aiPanelPresentation: 'canvas' });
+  },
+  setAiPanelPresentation: (v) => set({ aiPanelPresentation: v }),
   setAiPanelOpen: (v) => {
     storeString(AI_PANEL_KEY, String(v));
     // M17.2: the other half of the one-slot rule, and the other half of the
@@ -1117,7 +1128,10 @@ export const useUiStore = create<UiState>((set, get) => ({
     // every "Ask the agent about this" button threw away the record it was
     // asking about — the snapshot's activeNote is derived from detailPath,
     // so only whatever was baked into the prompt string survived.
-    set({ aiPanelOpen: v });
+    set((state) => ({
+      aiPanelOpen: v,
+      aiPanelPresentation: v ? state.aiPanelPresentation : 'panel',
+    }));
   },
   panelConversation: null,
   showConversation: (id) => {

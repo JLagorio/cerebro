@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import type { ToolCall } from '@/agent/types';
 import { toolStatus, type ToolStatus } from '@/agent/transcriptRows';
-import { bareToolName, showsAsChange, toolIconName, toolRenderer } from '@/engine/tools';
+import { showsAsChange, toolDisplay, toolIconName, toolRenderer } from '@/engine/tools';
 
 /**
  * One thing the agent did (M9.5).
@@ -33,15 +33,11 @@ export function historyOf(ready: boolean, isRepo: boolean): GitHistory | undefin
   return isRepo ? 'git' : 'none';
 }
 
-/** Tool names arrive namespaced by the CLI (`mcp__cerebro__get_note`).
- * Cerebro's own read bare; a connector's name its server (M56.8). */
+/** Compact attribution for text-only callers such as an interaction card.
+ * Action cards render the same facts as a label and a server chip. */
 export function toolLabel(name: string): string {
-  const bare = bareToolName(name);
-  const connector = /^mcp__(.+?)__(.+)$/.exec(bare);
-  if (connector !== null) return `${connector[1]} · ${connector[2].replace(/_/g, ' ')}`;
-  // Native CLI tools are already capitalized and read fine as-is.
-  if (/^[A-Z]/.test(bare)) return bare;
-  return bare.replace(/_/g, ' ');
+  const { label, server } = toolDisplay(name);
+  return server === null ? label : `${server} · ${label}`;
 }
 
 /** What an unfinished call on a stopped turn says (M56.8): the turn ended
@@ -83,9 +79,7 @@ function partOf(
   };
 }
 
-/** The icon the tool manifest gives a call, in either vocabulary the CLI
- * mixes in one transcript (M54.2); the wrench only for a tool it does not
- * know. */
+/** Manifest icons for local calls, a connector plug for foreign calls. */
 export const toolIcon = toolIconName;
 
 /** A write card: the manifest draws this call as a change or a concept, so
@@ -107,6 +101,25 @@ export function toolPath(input: string | null): string | null {
   } catch {
     return null;
   }
+}
+/** A successful checked change can land beside a taken name. Its structured
+ * reply is authoritative for Open; a failed or pending call has no landing. */
+function landedPath(tool: ToolCall): string | null {
+  if (!tool.done || tool.failed || toolRenderer(tool.name) !== 'change') return null;
+  try {
+    const value: unknown = JSON.parse(tool.payload?.output ?? tool.output ?? 'null');
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      'path' in value &&
+      typeof value.path === 'string' &&
+      value.path !== ''
+    )
+      return value.path;
+  } catch {
+    /* Older text replies keep the input target. */
+  }
+  return null;
 }
 
 /** Pretty-print JSON input; fall back to the raw string when it isn't JSON. */
@@ -154,7 +167,8 @@ export function AiActionCard({
   children?: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const path = toolPath(tool.input);
+  const display = toolDisplay(tool.name);
+  const path = landedPath(tool) ?? toolPath(tool.input);
   const write = isWrite(tool.name);
   const state = status ?? toolStatus(tool, !tool.done);
   const payload = tool.payload;
@@ -173,6 +187,8 @@ export function AiActionCard({
     <div
       data-testid="action-card"
       data-tool={tool.name}
+      data-external={display.server !== null ? 'true' : undefined}
+      data-server={display.server ?? undefined}
       data-write={write ? 'true' : 'false'}
       data-failed={tool.failed ? 'true' : 'false'}
       data-renderer={toolRenderer(tool.name)}
@@ -204,7 +220,16 @@ export function AiActionCard({
         {summary !== undefined ? (
           <span className="min-w-0 truncate font-medium text-n-700">{summary}</span>
         ) : (
-          <span className="flex-none font-medium text-n-700">{toolLabel(tool.name)}</span>
+          <span className="flex-none font-medium text-n-700">{display.label}</span>
+        )}
+        {display.server !== null && (
+          <span
+            data-testid="action-server"
+            title={`Ran on the ${display.server} connector, outside this vault`}
+            className="min-w-0 truncate rounded-sm border border-n-200 px-1 text-2xs text-n-500"
+          >
+            {display.server}
+          </span>
         )}
         {/* A write keeps its path visible collapsed — it is the thing you
             might want to undo. */}

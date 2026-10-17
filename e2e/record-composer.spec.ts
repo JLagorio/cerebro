@@ -4,8 +4,11 @@ import { boot, readMockFile } from './boot';
 
 const metadata = (content: string) => YAML.parse(/^---\n([\s\S]*?)\n---\n/.exec(content)![1]);
 async function composer(page: Page) {
-  await page.getByRole('button', { name: 'New', exact: true }).click();
-  await page.getByRole('menuitem', { name: 'New record', exact: true }).click();
+  await page.getByTestId('app-rail').getByRole('button', { name: 'New', exact: true }).click();
+  await page
+    .getByRole('dialog', { name: 'New', exact: true })
+    .getByRole('option', { name: 'Record', exact: true })
+    .click();
   const dialog = page.getByRole('dialog', { name: 'New record', exact: true });
   await dialog.getByTestId('composer-database').selectOption('Work item');
   return dialog;

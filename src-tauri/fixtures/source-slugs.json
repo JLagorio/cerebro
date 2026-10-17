@@ -91,15 +91,15 @@
     },
     {
       "kind": "web",
-      "id": "https://wiki.test/caf\u00e9/na\u00efve",
-      "canonical": "wiki.test/caf\u00e9/na\u00efve",
+      "id": "https://wiki.test/café/naïve",
+      "canonical": "wiki.test/café/naïve",
       "path": "sources/web/wiki.test-caf-na-ve-82305d31a300.md",
       "why": "Non-ASCII never reaches a file name, and no Unicode class has to mean the same thing in both twins."
     },
     {
       "kind": "web",
-      "id": "https://\u00fc\u00f1",
-      "canonical": "\u00fc\u00f1",
+      "id": "https://üñ",
+      "canonical": "üñ",
       "path": "sources/web/c58af104ffd4.md",
       "why": "Nothing readable left: the suffix alone names the file."
     },
@@ -122,6 +122,19 @@
       "id": "https://wiki.test/x/page",
       "canonical": "wiki.test/x/page",
       "path": "sources/web/wiki.test-x-page-d5a166ed61a8.md"
+    },
+    {
+      "kind": "thread",
+      "id": "Thread_A-1",
+      "canonical": "Thread_A-1",
+      "path": "sources/mail/Thread_A-1.md",
+      "why": "Mail ids preserve case; thread parsing separately rejects unsafe ids."
+    },
+    {
+      "kind": "thread",
+      "id": " Thread_A-1 ",
+      "canonical": "Thread_A-1",
+      "path": "sources/mail/Thread_A-1.md"
     }
   ]
 }

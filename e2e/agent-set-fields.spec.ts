@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, openAssistantPanel } from './boot';
 
 /**
  * An agent sets a record's fields through set_fields (M60.4), checked
@@ -26,7 +26,7 @@ async function openObjective(page: Page): Promise<void> {
   await page.getByTestId('quick-open-result').filter({ hasText: TITLE }).first().click();
   await page.getByRole('button', { name: 'Open in full page' }).click();
   await expect(page.getByTestId('doc-page')).toBeVisible();
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   await expect(page.getByTestId('ai-panel')).toBeVisible();
 }
 

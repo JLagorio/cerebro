@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { boot } from './boot';
+import { boot, showDatabases } from './boot';
 
 /**
  * M45.4 — a record tab backed by a database view, corpus bytes to broken card.
@@ -34,6 +34,7 @@ test('view tab: scoped to the host record, and honest when the source dies', asy
   await boot(page);
 
   // -- Open the epic in the record panel, then as a full page ----------
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Epic' }).first().click();
   const row = page.getByTestId('table-row').filter({ hasText: 'Phoenix warehouse cutover' });
   await row.hover();

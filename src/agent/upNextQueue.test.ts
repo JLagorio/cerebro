@@ -15,7 +15,7 @@ const entry = (id: string, over: Partial<UpNextEntry> = {}): UpNextEntry => ({
   id,
   text: `message ${id}`,
   skill: null,
-  allowedTools: null,
+  narrowing: {},
   turn: { systemPrompt: () => `context ${id}`, place: null, conversationId: 'c-1' },
   vault: '/vault',
   queuedAt: 0,
@@ -43,26 +43,26 @@ describe('Up next, the queue (M57.5)', () => {
     const edited = edit(queue, 'b', '  /weekly-review now ', {
       skill: { path: 'skills/weekly-review.md' },
       expansion,
-      allowedTools: ['get_note'],
+      narrowing: { allowedTools: ['get_note'] },
     });
     expect(ids(edited)).toEqual(['a', 'b', 'c']);
     expect(edited[1]).toMatchObject({
       id: 'b',
       text: '/weekly-review now',
       skill: { path: 'skills/weekly-review.md' },
-      allowedTools: ['get_note'],
+      narrowing: { allowedTools: ['get_note'] },
     });
     expect(edited[1].expansion).toBe(expansion);
     expect(edited[1].turn).toBe(queue[1].turn);
     // Plain text drops the old skill's expansion.
-    const plain = edit(edited, 'b', 'just words', { skill: null, allowedTools: null });
+    const plain = edit(edited, 'b', 'just words', { skill: null, narrowing: {} });
     expect(plain[1].expansion).toBeUndefined();
     expect(plain[1].skill).toBeNull();
   });
 
   it('refuses to edit a handoff entry, blank text, or an id not queued', () => {
     const queue = [entry('a'), entry('h', { text: 'Ask to revise · A', prompt: 'Revise …' })];
-    const none = { skill: null, allowedTools: null };
+    const none = { skill: null, narrowing: {} };
     expect(edit(queue, 'h', 'changed', none)).toBe(queue);
     expect(edit(queue, 'a', '   ', none)).toBe(queue);
     expect(edit(queue, 'zz', 'changed', none)).toBe(queue);
@@ -76,7 +76,7 @@ describe('Up next, the queue (M57.5)', () => {
     const queue = [notes];
     expect(isTyped(notes)).toBe(false);
     expect(isTyped(entry('a'))).toBe(true);
-    expect(edit(queue, 'n', 'changed', { skill: null, allowedTools: null })).toBe(queue);
+    expect(edit(queue, 'n', 'changed', { skill: null, narrowing: {} })).toBe(queue);
     expect(queue[0].notes?.ids).toEqual(['rn-1', 'rn-2']);
   });
 

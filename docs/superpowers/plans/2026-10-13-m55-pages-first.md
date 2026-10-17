@@ -8,11 +8,12 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M55. House style and rails: `202
 
 ## Status
 
-- **Precondition:** M53 and M54 are closed: gates green, roadmap statuses updated. Today both are being built, unstaged, in the main checkout, so this plan names their finished functions, never today's lines.
-- **Built:** nothing yet. All 14 roadmap parts were scouted against the M53 and M54 plans and today's tree; all 14 stay.
+- **Dependencies:** M53 and M54. Implementation is present; milestone closure still requires the outstanding acceptance below.
+- **Implementation (2026-10-15):** The write funnel and hashes, quote edits and reconciliation, block carriers, page links, Open with, save-on-quit, page chrome, agent pages, sub-pages and page cards are implemented.
+- **Integrated evidence:** see the [roadmap execution update](2026-10-12-macro-port-roadmap.md#execution-update--2026-10-15) for the final unit, coverage, browser, native and static gates, plus their limits. These results do not substitute for packaged or authenticated live acceptance.
 - **Effort:** 8 M + 6 L ≈ 10 L; the roadmap said ≈5.5 L. Re-measured: .1, .2, .3, .7, .8 and .9 from S to M; .11 and .13 from S to L; .4, .5 and .12 from M to L.
 - **Crash risk:** .1 (the write funnel and a crash child change) and .9 (two new spawn sites).
-- **Packaged checks:** .4, .5, .6, .7, .8, .9, .10, .11, .13. **Live checks:** .1 (dev, optional), .5 (the real CLI). .12 gets the owner's WebKit look.
+- **Packaged acceptance still outstanding:** .4, .5, .6, .7, .8, .9, .10, .11, .13. **Live acceptance still outstanding:** .1 (dev, optional), .5 (the real CLI). .12 gets the owner's WebKit look.
 
 ## Decisions
 

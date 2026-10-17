@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import YAML from 'yaml';
-import { boot } from './boot';
+import { boot, showDatabases } from './boot';
 
 /**
  * A field rename follows every stored reference (M60.2), on the mock
@@ -72,6 +72,7 @@ function namings(node: unknown, name: string, at: string[] = []): string[] {
 }
 
 async function openType(page: Page, name: string): Promise<void> {
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: name }).first().click();
   await expect(page.getByTestId('table-row').first()).toBeVisible();
 }

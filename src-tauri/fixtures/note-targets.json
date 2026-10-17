@@ -27,7 +27,7 @@
     },
     {
       "door": "update_frontmatter",
-      "path": "﻿.git/info/note-target-probe.md",
+      "path": "\uFEFF.git/info/note-target-probe.md",
       "refused": "not a note"
     },
     {
@@ -630,6 +630,55 @@
       "door": "edit_sheet",
       "path": "notes/edit-target.md",
       "lands": "notes/edit-target.md"
+    },
+    {
+      "door": "write_import",
+      "path": ".hidden/landed.md",
+      "refused": "no import lands there",
+      "why": "The import writer refuses hidden, governed and cached-source landings."
+    },
+    {
+      "door": "write_import",
+      "path": "Knowledge/landed.md",
+      "refused": "write_concept",
+      "why": "The import writer refuses hidden, governed and cached-source landings."
+    },
+    {
+      "door": "write_import",
+      "path": "views/landed.md",
+      "refused": "not a note",
+      "why": "The import writer refuses hidden, governed and cached-source landings."
+    },
+    {
+      "door": "write_import",
+      "path": "sources/landed.md",
+      "refused": "no import lands there",
+      "why": "The import writer refuses hidden, governed and cached-source landings."
+    },
+    {
+      "door": "write_import",
+      "path": "notion/landed.md",
+      "lands": "notion/landed.md"
+    },
+    {
+      "door": "edit_canvas",
+      "path": "boards/plan.canvas",
+      "lands": "boards/plan.canvas"
+    },
+    {
+      "door": "edit_canvas",
+      "path": "notes/plan.md",
+      "refused": "not a writable whiteboard path"
+    },
+    {
+      "door": "edit_canvas",
+      "path": ".hidden/plan.canvas",
+      "refused": "not a writable whiteboard path"
+    },
+    {
+      "door": "edit_canvas",
+      "path": "knowledge/plan.canvas",
+      "refused": "knowledge/ is written only through write_concept"
     }
   ]
 }

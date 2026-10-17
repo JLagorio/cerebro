@@ -1,12 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 import { makePdf } from '../src/test/makePdf';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, openDestination } from './boot';
 
 async function drop(page: Page, name: string, bytes: Uint8Array) {
-  await page
-    .getByTestId('nav-surfaces')
-    .getByRole('button', { name: /^Inbox/ })
-    .click();
+  await openDestination(page, 'Inbox');
   const box = await page.getByTestId('inbox-page').boundingBox();
   if (!box) throw new Error('Inbox has no bounds');
   // The header is inside the Inbox drop zone and outside its editor's zone.

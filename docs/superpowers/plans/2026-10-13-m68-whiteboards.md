@@ -8,10 +8,10 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M68. House style: the M53–M67 
 
 ## Status
 
-- **Integrated unstaged (.2):** Rust reader/scanner/corpus/catch-up/guard checks 69 passed (two intended ignored digest writers); TS scanner/search/rename slice 1077 passed plus final targeted rails and retries. Six rename browser scenarios passed, the board-citer warning was reviewed, and its source bytes stayed unchanged. The combined scene/bytes/kinds/scan/IPC/convention gate passed 622 tests. Generated JSON Canvas interoperability fixtures are not a substitute for an actual Obsidian round-trip, which remains unperformed. .2b doors and page lifecycle are now integrating.
+- **Integrated unstaged (.2):** Rust reader/scanner/corpus/catch-up/guard checks 69 passed (two intended ignored digest writers); TS scanner/search/rename slice 1077 passed plus final targeted rails and retries. Six rename browser scenarios passed, the board-citer warning was reviewed, and its source bytes stayed unchanged. The combined scene/bytes/kinds/scan/IPC/convention gate passed 622 tests. Generated JSON Canvas interoperability fixtures are not a substitute for an actual Obsidian round-trip, which remains unperformed. .2b doors and page lifecycle are implemented; their evidence follows below.
 
 - **Precondition:** M53–M57, M70 and M58–M67 closed, in that order, gates green. They are built unstaged in this checkout, so this plan names finished functions, never lines.
-- **Built, unstaged:** .1 scene core. .2 is in progress: shared format, six text goldens, strict TS tokenizer/codec and Rust reader groundwork; scanner and surface integration follow the file-page dependency. The first scene gate passed 171 tests; the expanded shared-case replay passed 39 focused tests. 7 roadmap parts split by their own sentences into 17.
+- **Implementation audit, 2026-10-15:** all 17 split parts have code in the shared checkout: scene/codec, scanner and serial saves, SVG/export, editing and gestures, linked and embedded cards, creation and legacy conversion, and all three checked agent tools. Focused validation is recorded with each part. New work remains uncommitted; the owner controls staging. Final integrated, packaged, live-CLI and actual Obsidian checks remain open.
 - **Effort:** 11 L + 5 M ≈ 13.5 L (roadmap ≈6 L). .2 → .2 + .2b; .3 → .3 + .3b + .3c (M); .4 → .4 + .4b + .4c; .5 → .5 + .5b (M) + .5c (M); .7 M → .7 L + .7b L + .7c M (the Rust writer twin was uncounted).
 - **Crash risk:** none of the crash-suite kind. New doors run on M55.1's funnel and lock; no schema step, spawn or kill point.
 - **Checks:** packaged (owner, `./scripts/mac-build.sh`) .2b, .3, .3b, .4, .4c, .5, .5c, .7b. Live (owner, CLI 2.1.250, an isolated `CLAUDE_CONFIG_DIR`, never the main `~/.claude`) .7, .7b, .7c. Obsidian (owner, a scratch vault) .2, .3b, .5, .6, .7b, .7c.
@@ -297,6 +297,8 @@ Roadmap risks: no rotation (D14; .1, .3b); the Rust validator twins the TS scene
 
 - **Implemented and checked, 2026-10-15 (unstaged):** new tabs create `.canvas` files through the guarded create door, existing `.mmd` pointers keep the Mermaid branch, and missing/invalid/non-board pointers retain their honest faces. New → Whiteboard and `c w` create deduped root files and open them as pages. The focused suite passed 152 tests; all eight browser journeys passed, covering creation, one-step Add record/Undo, reopening, keyboard picker selection, legacy Mermaid edits/chip drags, and both launcher entry points. The new-tab screenshot was inspected and scoped lint passed. All three TypeScript configurations passed after the concurrent import-source typing repair. No native-only claim is made.
 
+- **Integration repair, 2026-10-15:** the full browser run exposed a StrictMode effect replay that created the board but retired its pointer publisher while the in-flight latch prevented a second creator. Creation now keeps one owner through the same mounted instance's replay, permanently retires it on a vault transition (including batched A→B→A), and retires an actual unmount's separate instance. The new StrictMode regression failed before the repair. All 38 WhiteboardView tests, scoped lint, and nine browser journeys passed afterward (all five whiteboard journeys plus four starter-kit integration controls). Independent lifetime review found no remaining issue. The final saved-board screenshot was visually inspected: the record card, selection, toolbars and inspector were readable without overlap. Native, live-CLI and actual Obsidian acceptance remain open.
+
 ### M68.5c A `cerebro-whiteboard` page block: read-only with Open, guarded at 8 levels, saved byte for byte
 
 - **What:** M29.48 refuses whiteboards inside blocks; D14 keeps the page block read-only with Open. .3c gives the grammar and embed, .5 the guard; this part gives the block its disk carrier (M55.4, M55.6).
@@ -367,6 +369,8 @@ Roadmap risks: no rotation (D14; .1, .3b); the Rust validator twins the TS scene
 - **Wave** 7 · **Depends** M68.1, .2, .2b, .3, .7; M67.2b; M60.3; M58.1, .6; M57.4, .4b, .4c; M56.8; M55.1, .3, .5, .6; M54.1, .2, .10; M53.6, .12 · **Size** L · **Crash risk** no · **Packaged check** yes
 - **Commit:** `feat(mcp): edit_canvas changes a whiteboard in one checked batch (M68.7b)`.
 
+- **Implemented and checked, 2026-10-15 (unstaged):** the four checked operations share 54 Rust/TS cases, deterministic ids, exact refusals and byte-preserving unknown fields. The native gate passed 744 tests; a subsequent 17-test replay closed the concurrently updated mail digest and Notion parser rail. The TS integration passed 1,271 tests (6 skipped), all three typechecks and scoped lint passed. All three browser scenarios passed: additions appear on an open board, missing endpoints and 26 operations preserve its bytes, and a later human save keeps the agent additions and unknown data. The final screenshot was inspected. Independent planner/door review found no new correctness issue. Clippy identified six style issues in the new planner, repaired before the final all-target rerun passed. Packaged live-CLI and Obsidian open/save checks remain unperformed.
+
 ### M68.7c create_canvas: a new whiteboard, optionally filled by the same ops, in one write
 
 - **What:** CANVAS-7, create. An agent can make a note but not a board. This reuses .7b's planner on `EMPTY_BOARD` and .2b's `create_canvas` (a free name, M55.1; vault.create, M58.1), filled in one write (Q29).
@@ -382,6 +386,8 @@ Roadmap risks: no rotation (D14; .1, .3b); the Rust validator twins the TS scene
 - **Live check:** "make a board of these three pages" creates one `.canvas` with three file cards. **Obsidian check:** Obsidian opens it.
 - **Wave** 8 · **Depends** M68.2, .2b, .7b; M58.1; M57.4, .4c; M55.1; M54.10 · **Size** M · **Crash risk** no · **Packaged check** no
 - **Commit:** `feat(mcp): create_canvas makes a new whiteboard, filled in the same write (M68.7c)`.
+
+- **Implemented and checked, 2026-10-15 (uncommitted):** 13 create cases replay beside the 54 edit cases in Rust, TS and the browser door. Creation selects and locks the actual free name before planning, records one create, preserves empty-seed bytes and refuses invalid operations atomically. The final native repair gate passed 48 tests, the receipt/mail alias checks passed 2, and the broader contract replay passed 618 (16 intentional ignored writers/probes). The final focused TS gate passed 1,074 tests (6 skipped), all three typechecks and scoped lint passed. Four browser scenarios passed, including two creates with a numbered suffix and opening the returned path; the screenshot was inspected. Tools v31 and approval goldens were regenerated by their prescribed writers. The final all-target Clippy rerun is clean. Live-CLI and actual Obsidian open/save checks remain unperformed.
 
 ## Done or dropped
 

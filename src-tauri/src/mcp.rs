@@ -59,6 +59,8 @@ use crate::vault;
 use crate::vault::receipt::{Agent, ConceptDoor, RunDoor, WriteReceipt, HUMAN_ACTOR};
 use crate::vault::write::WriteMode;
 
+#[path = "mail/door.rs"]
+mod mail_door;
 #[path = "import/notion_door.rs"]
 mod notion_door;
 
@@ -2825,7 +2827,7 @@ fn write_target(name: &str, args: &Map<String, Value>) -> Option<String> {
     let arg = target.arg.as_deref()?;
     match target.kind {
         TargetKind::Folder => Some(arg_str(args, arg).unwrap_or_default()),
-        TargetKind::Note => arg_str(args, arg),
+        TargetKind::Note | TargetKind::Canvas => arg_str(args, arg),
         _ => None,
     }
 }
@@ -3393,6 +3395,11 @@ enum CorpusTarget {
         slug: String,
         planned: String,
     },
+    NewCanvas {
+        folder: String,
+        slug: String,
+        planned: String,
+    },
 }
 
 impl CorpusTarget {
@@ -3403,7 +3410,7 @@ impl CorpusTarget {
             CorpusTarget::Note(path) | CorpusTarget::File(path) | CorpusTarget::Canvas(path) => {
                 path
             }
-            CorpusTarget::New { planned, .. } => planned,
+            CorpusTarget::New { planned, .. } | CorpusTarget::NewCanvas { planned, .. } => planned,
         }
     }
 
@@ -3416,6 +3423,9 @@ impl CorpusTarget {
             CorpusTarget::New { folder, slug, .. } => {
                 vault::write::new_note_refusal(vault, folder, slug)
             }
+            CorpusTarget::NewCanvas { folder, slug, .. } => {
+                vault::write::new_canvas_refusal(vault, folder, slug)
+            }
         }
     }
 }
@@ -3425,7 +3435,7 @@ impl CorpusTarget {
 /// Calls with no target are answered by their own body in its own words.
 fn corpus_target(name: &str, args: &Map<String, Value>) -> Option<CorpusTarget> {
     let row = crate::policy::tools::row(name)?;
-    if row.door != "note"
+    if !matches!(row.door.as_str(), "note" | "canvas")
         && !row
             .target
             .as_ref()
@@ -3442,6 +3452,14 @@ fn corpus_target(name: &str, args: &Map<String, Value>) -> Option<CorpusTarget> 
         TargetKind::Folder => {
             let folder = arg_str(args, arg).unwrap_or_default();
             let slug = arg_str(args, "slug")?;
+            if row.door == "canvas" {
+                let planned = vault::write::planned_canvas_path(&folder, &slug)?;
+                return Some(CorpusTarget::NewCanvas {
+                    folder,
+                    slug,
+                    planned,
+                });
+            }
             let planned = vault::write::planned_note_path(&folder, &slug)?;
             Some(CorpusTarget::New {
                 folder,
@@ -3460,6 +3478,21 @@ fn corpus_target(name: &str, args: &Map<String, Value>) -> Option<CorpusTarget> 
 /// always has.
 fn corpus_refusal(vault: &Path, name: &str, args: &Map<String, Value>) -> Option<GrantRefusal> {
     let target = corpus_target(name, args)?;
+    if crate::policy::tools::row(name).is_some_and(|row| {
+        row.door == "note"
+            || (row.door == "canvas" && matches!(row.axis, Axis::Write | Axis::ReadWrite))
+    }) {
+        let landing = vault::write::landing_path(vault, target.path());
+        if let Some(message) = crate::mail::write_refusal(target.path())
+            .or_else(|| landing.as_deref().and_then(crate::mail::write_refusal))
+        {
+            return Some(GrantRefusal {
+                code: TARGET_OUTSIDE_CORPUS,
+                target: target.path().into(),
+                message,
+            });
+        }
+    }
     if !matches!(target, CorpusTarget::File(_) | CorpusTarget::Canvas(_))
         && crate::knowledge::is_knowledge_path(target.path())
     {
@@ -3684,6 +3717,8 @@ fn call_tool(
         "append_to_note" => tool_append_in(&vault, args, writer),
         "edit_note" => tool_edit_note_in(&vault, args, writer),
         "edit_sheet" => tool_edit_sheet_in(&vault, args, writer),
+        "edit_canvas" => tool_edit_canvas_in(&vault, args, writer),
+        "create_canvas" => tool_create_canvas_in(&vault, args, writer),
         "import_notion_page" => notion_door::call(&vault, args, grant),
         // The comment tools (M70.3) write the page's sidecar, never the page,
         // as the run's actor with its run id.
@@ -3703,7 +3738,11 @@ fn call_tool(
             tool_recheck_concept(&vault, args, &WriteReceipt::run(cleared_for_concept(grant)))
         }
         "cache_source" => {
-            tool_cache_source(&vault, args, &WriteReceipt::run(cleared_for_source(grant)))
+            if mail_door::is_thread(args) {
+                mail_door::cache(&vault, args, grant)
+            } else {
+                tool_cache_source(&vault, args, &WriteReceipt::run(cleared_for_source(grant)))
+            }
         }
         "propose_organize" => tool_propose_organize(app, args),
         "suggest_view" => tool_suggest_view(vault::corpus::shared(), &vault, args, grant),
@@ -4103,10 +4142,12 @@ fn announced_change(
     let rescan = || json!({ "action": "vault_changed" });
     let at = |paths: Vec<String>| json!({ "action": "vault_changed", "paths": paths });
     match name {
-        "append_to_note" | "edit_note" | "edit_sheet" => Some(match arg_str(args, "path") {
-            Some(path) => at(vec![listed_path(vault, &path)]),
-            None => rescan(),
-        }),
+        "append_to_note" | "edit_note" | "edit_sheet" | "edit_canvas" => {
+            Some(match arg_str(args, "path") {
+                Some(path) => at(vec![listed_path(vault, &path)]),
+                None => rescan(),
+            })
+        }
         // The concept as `write_concept` itself spells it, and the update log
         // it appends on every write.
         "write_concept" => Some(
@@ -6139,12 +6180,16 @@ fn approver(approval: Approval) -> Option<&'static str> {
 /// folder is what decides where a create lands, so the folder is the
 /// target); through `append_to_note` it could grow a concept body with no
 /// `sources`, no updated `generated` and no dedup check; and `edit_note`
-/// could rewrite one.
+/// could rewrite one. `edit_canvas` shares this guard so a board cannot create
+/// an alternate write door into knowledge/.
 pub(crate) fn cleared_for_note(
     grant: &RunGrant,
     target: &str,
     approval: Approval,
 ) -> Result<RunCleared<Agent>, String> {
+    if let Some(message) = crate::mail::write_refusal(target) {
+        return Err(message);
+    }
     crate::knowledge::guard_agent_write(target)?;
     Ok(RunCleared {
         actor: grant.actor.clone(),
@@ -6846,6 +6891,119 @@ fn edit_sheet_write(
     })
 }
 
+fn canvas_edit_refusal(words: String) -> String {
+    if words.ends_with("\nNothing was written.") {
+        words
+    } else {
+        format!("{words}\nNothing was written.")
+    }
+}
+fn canvas_create_refusal(words: String) -> String {
+    if words.ends_with("\nNothing was created.") {
+        words
+    } else {
+        format!("{words}\nNothing was created.")
+    }
+}
+fn tool_create_canvas_in(
+    vault: &Path,
+    args: &Map<String, Value>,
+    writer: RunWriter<'_>,
+) -> Result<Value, String> {
+    create_canvas_write(vault, args, writer, WriteMode::Commit).map(|write| write.reply)
+}
+fn create_canvas_write(
+    vault: &Path,
+    args: &Map<String, Value>,
+    writer: RunWriter<'_>,
+    mode: WriteMode,
+) -> Result<NoteWrite, String> {
+    let folder = arg_str(args, "folder").unwrap_or_default();
+    let slug = arg_str(args, "slug").ok_or("create_canvas needs a slug")?;
+    let request = crate::canvas::edit::parse_create_request(args)?;
+    let by = writer.cleared(&folder).map_err(canvas_create_refusal)?;
+    let created = vault::write::create_canvas_batch(
+        vault,
+        &folder,
+        &slug,
+        |path| {
+            let mut targets = |file: &str| canvas_card_target(vault, file, writer.grant);
+            crate::canvas::edit::plan_create(
+                &request,
+                &mut crate::canvas::edit::Context {
+                    limits: &crate::canvas::agent_limits::table().edit,
+                    web_schemes: crate::shell::links::external_schemes(),
+                    target_state: &mut targets,
+                    board_path: path,
+                },
+            )
+        },
+        mode,
+        &by,
+    )
+    .map_err(canvas_create_refusal)?;
+    let reply = json!({"path":created.landing.path,"hash":created.landing.after,"ops":created.ops,"created":created.created,"warnings":created.warnings});
+    Ok(NoteWrite {
+        reply: text_result(reply.to_string()),
+        landing: created.landing,
+    })
+}
+fn tool_edit_canvas_in(
+    vault: &Path,
+    args: &Map<String, Value>,
+    writer: RunWriter<'_>,
+) -> Result<Value, String> {
+    edit_canvas_write(vault, args, writer, WriteMode::Commit).map(|write| write.reply)
+}
+/// Shape, bundle guard, target, expectation, then one copied-board plan under
+/// the path lock. The card lookup consults read scope before touching a target.
+fn edit_canvas_write(
+    vault: &Path,
+    args: &Map<String, Value>,
+    writer: RunWriter<'_>,
+    mode: WriteMode,
+) -> Result<NoteWrite, String> {
+    let path = arg_str(args, "path").ok_or("edit_canvas needs a path")?;
+    let request = crate::canvas::edit::parse_request(args)?;
+    let expect = parse_expect_hash(args).map_err(canvas_edit_refusal)?;
+    let by = writer.cleared(&path).map_err(canvas_edit_refusal)?;
+    let edited = vault::write::edit_canvas_file(
+        vault,
+        &path,
+        |text, hash| {
+            let mut targets = |file: &str| canvas_card_target(vault, file, writer.grant);
+            crate::canvas::edit::plan(
+                text,
+                hash,
+                &request,
+                &mut crate::canvas::edit::Context {
+                    limits: &crate::canvas::agent_limits::table().edit,
+                    web_schemes: crate::shell::links::external_schemes(),
+                    target_state: &mut targets,
+                    board_path: &path,
+                },
+            )
+        },
+        expect.as_deref(),
+        mode,
+        &by,
+    )
+    .map_err(|error| {
+        let stale = matches!(&error, vault::write::NoteWriteError::Stale(_));
+        let words = note_write_refusal(writer.run(), "edit_canvas", error);
+        if stale {
+            words
+        } else {
+            canvas_edit_refusal(words)
+        }
+    })?;
+    let reply = json!({"path":listed_path(vault,&path),"hash":edited.landing.after,"wrote":edited.wrote,"ops":edited.ops,"created":edited.created,"warnings":edited.warnings});
+    Ok(NoteWrite {
+        reply: text_result(reply.to_string()),
+        landing: edited.landing,
+    })
+}
+
 /// One of the confirmable note writers by name, in `mode` (M57.4c), or None
 /// for any other tool. `own` is the run's own record when the call
 /// rewrites its notes (M56.10); `writer` stamps the write and books a stale
@@ -6865,6 +7023,8 @@ fn note_write(
         "append_to_note" => append_write(vault, args, writer, mode),
         "edit_note" => edit_note_write(vault, args, writer, mode),
         "edit_sheet" => edit_sheet_write(vault, args, writer, mode),
+        "edit_canvas" => edit_canvas_write(vault, args, writer, mode),
+        "create_canvas" => create_canvas_write(vault, args, writer, mode),
         _ => return None,
     })
 }
@@ -7095,6 +7255,9 @@ const SOURCE_SUFFIX_HEX: usize = 12;
 /// src-tauri/fixtures/source-slugs.json.
 fn canonical_source_id(kind: &str, id: &str) -> String {
     let trimmed = id.trim_matches(|c: char| c.is_ascii_whitespace());
+    if kind == crate::policy::mail::table().kinds.thread {
+        return trimmed.to_owned();
+    }
     if kind == "issue" {
         return trimmed.to_lowercase();
     }
@@ -7128,6 +7291,13 @@ fn canonical_source_id(kind: &str, id: &str) -> String {
 /// src-tauri/fixtures/source-slugs.json.
 fn source_slug(kind: &str, id: &str) -> String {
     let canonical = canonical_source_id(kind, id);
+    if kind == crate::policy::mail::table().kinds.thread {
+        let folder = crate::policy::mail::table()
+            .folder
+            .strip_prefix("sources/")
+            .expect("validated mail folder");
+        return format!("{folder}/{canonical}");
+    }
     if kind == "issue" {
         return format!("issues/{canonical}");
     }
@@ -7215,6 +7385,9 @@ fn holds_source(entry: &vault::entry::Entry, kind: &str, canonical: &str) -> boo
 ///
 /// Tickets and web pages may be cached; mail has its own attended, gated door.
 fn mail_cache_refusal(args: &Map<String, Value>) -> Option<String> {
+    if mail_door::is_thread(args) {
+        return None;
+    }
     let kind = args.get("kind").and_then(Value::as_str).unwrap_or("web");
     if !matches!(kind, "issue" | "web") {
         return None;
@@ -7240,9 +7413,10 @@ fn tool_cache_source(
     let kind = arg_str(args, "kind").unwrap_or_else(|| "web".into());
     let kinds = crate::import::cache_kinds();
     if !kinds.contains(&kind.as_str()) {
+        let kinds = kinds.join(", ");
+        let thread = &crate::policy::mail::table().kinds.thread;
         return Err(format!(
-            "cache_source kind must be {}, not {kind}",
-            kinds.join(" or ")
+            "cache_source kind must be {kinds} or {thread}, not {kind}"
         ));
     }
     let title = arg_str(args, "title").ok_or("cache_source needs a title")?;
@@ -7512,7 +7686,7 @@ mod tests {
         }
         assert_eq!(
             cache(&vault, "unknown", "source", "Body").unwrap_err(),
-            "cache_source kind must be issue or web, not unknown"
+            "cache_source kind must be issue, web or thread, not unknown"
         );
         let _ = std::fs::remove_dir_all(vault);
     }
@@ -7749,14 +7923,20 @@ mod tests {
     /// The cases the frontend replays through its own reader of the manifest.
     const TOOL_CASES: &str = include_str!("../fixtures/tool-cases.json");
 
-    /// The JSON Schema keywords a served schema may use, and the types.
-    const SCHEMA_KEYWORDS: [&str; 6] = [
+    /// The non-strict JSON Schema subset our served tools use. Array bounds
+    /// and closed objects are standard schema keywords; native doors still
+    /// enforce them. https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools
+    const SCHEMA_KEYWORDS: [&str; 10] = [
         "type",
         "description",
+        "default",
         "properties",
         "required",
         "items",
         "enum",
+        "minItems",
+        "maxItems",
+        "additionalProperties",
     ];
     const SCHEMA_TYPES: [&str; 7] = [
         "string", "number", "integer", "boolean", "object", "array", "null",
@@ -7773,16 +7953,61 @@ mod tests {
                 "{tool} {at}: `{key}` is not a keyword the API takes"
             );
         }
-        let kind = node["type"].as_str().unwrap_or_default();
-        assert!(SCHEMA_TYPES.contains(&kind), "{tool} {at}: type {kind:?}");
+        // JSON Schema permits one type or a nonempty, unique list of types.
+        // Mail dates accept a timestamp string or an integer millisecond count.
+        // https://json-schema.org/understanding-json-schema/reference/type
+        let kinds: Vec<&str> = match &node["type"] {
+            Value::String(kind) => vec![kind.as_str()],
+            Value::Array(kinds) => kinds
+                .iter()
+                .map(|kind| {
+                    kind.as_str()
+                        .unwrap_or_else(|| panic!("{tool} {at}: type names are strings"))
+                })
+                .collect(),
+            _ => panic!("{tool} {at}: type is a string or an array of strings"),
+        };
+        let unique: std::collections::BTreeSet<&str> = kinds.iter().copied().collect();
+        assert!(
+            !kinds.is_empty()
+                && unique.len() == kinds.len()
+                && kinds.iter().all(|kind| SCHEMA_TYPES.contains(kind)),
+            "{tool} {at}: types {kinds:?}"
+        );
         if let Some(description) = node.get("description") {
             assert!(description.is_string(), "{tool} {at}: description");
         }
-        if kind == "array" {
+        if let Some(default) = node.get("default") {
+            assert!(
+                kinds.contains(&"string") && default.is_string(),
+                "{tool} {at}: text default"
+            );
+        }
+        if kinds.contains(&"array") {
             let items = node
                 .get("items")
                 .unwrap_or_else(|| panic!("{tool} {at}: an array carries items"));
             assert_schema_node(tool, &format!("{at}[]"), items);
+        }
+        for key in ["minItems", "maxItems"] {
+            if let Some(bound) = node.get(key) {
+                assert!(
+                    kinds.contains(&"array") && bound.as_u64().is_some(),
+                    "{tool} {at}: {key}"
+                );
+            }
+        }
+        if let (Some(min), Some(max)) = (node.get("minItems"), node.get("maxItems")) {
+            assert!(
+                min.as_u64().unwrap() <= max.as_u64().unwrap(),
+                "{tool} {at}: array bounds"
+            );
+        }
+        if let Some(additional) = node.get("additionalProperties") {
+            assert!(
+                kinds.contains(&"object") && additional.is_boolean(),
+                "{tool} {at}: additionalProperties"
+            );
         }
         if let Some(properties) = node.get("properties") {
             let properties = properties
@@ -7820,6 +8045,22 @@ mod tests {
                 !values.is_empty() && unique.len() == values.len(),
                 "{tool} {at}: enum {values:?}"
             );
+        }
+    }
+
+    #[test]
+    fn schema_type_unions_are_nonempty_known_unique_strings() {
+        assert_schema_node("control", "date", &json!({"type": ["string", "integer"]}));
+        for invalid in [
+            json!([]),
+            json!(["string", "string"]),
+            json!(["date"]),
+            json!([1]),
+        ] {
+            assert!(std::panic::catch_unwind(|| {
+                assert_schema_node("control", "date", &json!({"type": invalid}));
+            })
+            .is_err());
         }
     }
 
@@ -12691,7 +12932,7 @@ mod tests {
 
     #[test]
     fn no_write_tool_escapes_the_scope_check() {
-        // The tripwire, over the manifest: every tool on the note door must
+        // The tripwire, over the manifest: every writer on a note/canvas door must
         // resolve a scope target, and every other served tool is a read the
         // read scope binds, or names its exemption in the manifest — the
         // generated proposal surface included.
@@ -12716,10 +12957,12 @@ mod tests {
                 );
                 continue;
             };
-            if row.door == "note" {
+            if matches!(row.door.as_str(), "note" | "canvas")
+                && matches!(row.axis, Axis::Write | Axis::ReadWrite)
+            {
                 assert!(
                     write_target(&name, &args).is_some(),
-                    "{name} writes notes and must be scope-checked"
+                    "{name} writes pages and must be scope-checked"
                 );
                 continue;
             }
@@ -13246,6 +13489,280 @@ mod tests {
         .expect("the sink is armed")
     }
 
+    fn mail_thread_args() -> Map<String, Value> {
+        args_of(
+            json!({"id":"thread-1","kind":"thread","title":"Launch","messages":[{"id":"m1","from":"dana@example.test","to":["owner@example.test"],"date":"2026-07-27T10:00:00Z","labels":["INBOX"]}]}),
+        )
+    }
+    fn open_mail_policy() -> (crate::policy::mail::MailPolicy, crate::runtime::VaultScope) {
+        let mut policy = crate::policy::mail::table().clone();
+        policy.gate.open = true;
+        policy.gate.scope = Some("vault_store:mail-vault:mail-store".into());
+        let scope = crate::runtime::VaultScope {
+            vault_id: "mail-vault".into(),
+            store_uuid: Some("mail-store".into()),
+        };
+        (policy, scope)
+    }
+    #[test]
+    fn the_closed_gate_refuses_a_thread_and_writes_nothing() {
+        let _sink = ArmedSink::new("mail-closed-gate");
+        let vault = temp_vault("mail-closed-gate-vault");
+        let grant = bound(&vault);
+        for _ in 0..2 {
+            assert!(mail_door::cache(&vault, &mail_thread_args(), &grant)
+                .unwrap_err()
+                .contains("off until the owner accepts"));
+        }
+        assert!(!vault.join("sources").exists());
+        assert!(stamped(&vault).is_empty());
+        assert_eq!(rows_for_run(&grant.run_id).len(), 1);
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn a_thread_cache_requires_its_vault_and_an_attended_conversation() {
+        let vault = temp_vault("mail-open-boundaries");
+        let mut grant = bound(&vault);
+        grant.asks.kind = crate::policy::tool_approval::RunKind::Attended;
+        let (policy, scope) = open_mail_policy();
+        let other = crate::runtime::VaultScope {
+            vault_id: "other".into(),
+            ..scope.clone()
+        };
+        assert!(
+            mail_door::cache_in(&vault, &mail_thread_args(), &grant, &policy, Some(&other))
+                .unwrap_err()
+                .contains("only in the vault")
+        );
+        for (actor, kind) in [
+            (
+                "process:background",
+                crate::policy::tool_approval::RunKind::Unattended,
+            ),
+            (
+                "client:foreign",
+                crate::policy::tool_approval::RunKind::Attended,
+            ),
+        ] {
+            grant.actor = actor.into();
+            grant.asks.kind = kind;
+            assert!(mail_door::cache_in(
+                &vault,
+                &mail_thread_args(),
+                &grant,
+                &policy,
+                Some(&scope)
+            )
+            .unwrap_err()
+            .contains("unattended"));
+        }
+        assert!(!vault.join("sources").exists());
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn an_unchanged_thread_writes_and_records_nothing_and_a_refetch_replaces_it() {
+        let _sink = ArmedSink::new("mail-cache-write");
+        let vault = temp_vault("mail-cache-write-vault");
+        let mut grant = bound(&vault);
+        grant.asks.kind = crate::policy::tool_approval::RunKind::Attended;
+        let (policy, scope) = open_mail_policy();
+        let mut args = mail_thread_args();
+        mail_door::cache_in(&vault, &args, &grant, &policy, Some(&scope)).unwrap();
+        let path = "sources/mail/thread-1.md";
+        assert_eq!(
+            stamped(&vault),
+            vec![row("vault.create", path, &grant, None)]
+        );
+        let before = std::fs::read_to_string(vault.join(path)).unwrap();
+        let mut later = grant.clone();
+        later.actor = "process:another-fetcher".into();
+        let reply = mail_door::cache_in(&vault, &args, &later, &policy, Some(&scope)).unwrap();
+        assert!(reply["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("Unchanged:"));
+        assert_eq!(std::fs::read_to_string(vault.join(path)).unwrap(), before);
+        assert_eq!(stamped(&vault).len(), 1);
+        args.insert("title".into(), json!("Launch revised"));
+        mail_door::cache_in(&vault, &args, &grant, &policy, Some(&scope)).unwrap();
+        assert_eq!(stamped(&vault).len(), 2);
+        assert!(std::fs::read_to_string(vault.join(path))
+            .unwrap()
+            .contains("Launch revised"));
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn text_refuses_while_its_kind_is_closed_and_the_call_cap_refuses_whole() {
+        let vault = temp_vault("mail-text-refused");
+        let mut grant = bound(&vault);
+        grant.asks.kind = crate::policy::tool_approval::RunKind::Attended;
+        let (mut policy, scope) = open_mail_policy();
+        let mut args = mail_thread_args();
+        args["messages"][0]["body"] = json!("Requested reply");
+        policy.gate.kinds.retain(|kind| kind != &policy.kinds.text);
+        assert!(
+            mail_door::cache_in(&vault, &args, &grant, &policy, Some(&scope))
+                .unwrap_err()
+                .contains("Message text is off")
+        );
+        assert!(!vault.join("sources").exists());
+        policy.gate.kinds.push(policy.kinds.text.clone());
+        policy.limits.bodies_chars_per_call = 3;
+        assert!(
+            mail_door::cache_in(&vault, &args, &grant, &policy, Some(&scope))
+                .unwrap_err()
+                .contains("exceeds 3 characters")
+        );
+        assert!(!vault.join("sources").exists());
+        policy.limits.bodies_chars_per_call = 100;
+        grant.asks.kind = crate::policy::tool_approval::RunKind::Unattended;
+        assert!(
+            mail_door::cache_in(&vault, &args, &grant, &policy, Some(&scope))
+                .unwrap_err()
+                .contains("unattended")
+        );
+        assert!(!vault.join("sources").exists());
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn requested_text_is_linked_inert_and_kept_by_a_header_refresh() {
+        let _sink = ArmedSink::new("mail-text-write");
+        let vault = temp_vault("mail-text-write-vault");
+        let mut grant = bound(&vault);
+        grant.asks.kind = crate::policy::tool_approval::RunKind::Attended;
+        let (mut policy, scope) = open_mail_policy();
+        let mut args = mail_thread_args();
+        args["messages"][0]["body"] =
+            json!("[[Launch]]\n- [ ] phantom task\nOn Monday, Dana wrote:\nOld quote.");
+        mail_door::cache_in(&vault, &args, &grant, &policy, Some(&scope)).unwrap();
+        let path = "sources/mail/thread-1.md";
+        let text_path = "sources/mail/thread-1-text.md";
+        let text = std::fs::read_to_string(vault.join(text_path)).unwrap();
+        assert!(!text.contains("Old quote"));
+        assert!(!text.contains("- [ ]"));
+        assert!(crate::vault::parse::wikilink_targets(&text).is_empty());
+        assert!(std::fs::read_to_string(vault.join(path))
+            .unwrap()
+            .contains("Message text: [[thread-1-text]]"));
+        assert_eq!(stamped(&vault).len(), 2);
+        mail_door::cache_in(&vault, &args, &grant, &policy, Some(&scope)).unwrap();
+        assert_eq!(stamped(&vault).len(), 2);
+        mail_door::cache_in(&vault, &mail_thread_args(), &grant, &policy, Some(&scope)).unwrap();
+        assert_eq!(stamped(&vault).len(), 2);
+        assert_eq!(
+            std::fs::read_to_string(vault.join(text_path)).unwrap(),
+            text
+        );
+        policy.limits.body_chars = 3;
+        args["messages"][0]["body"] = json!("é😀abc");
+        mail_door::cache_in(&vault, &args, &grant, &policy, Some(&scope)).unwrap();
+        let clipped = std::fs::read_to_string(vault.join(text_path)).unwrap();
+        assert!(clipped.contains("é😀a"));
+        assert!(clipped.contains("(cut at 3 characters)"));
+        assert_eq!(stamped(&vault).len(), 3);
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn a_text_call_preflights_both_page_identities_before_writing_either() {
+        let vault = temp_vault("mail-text-conflict");
+        let mut grant = bound(&vault);
+        grant.asks.kind = crate::policy::tool_approval::RunKind::Attended;
+        let (policy, scope) = open_mail_policy();
+        let mut args = mail_thread_args();
+        args["messages"][0]["body"] = json!("Requested reply");
+        let path = "sources/mail/thread-1.md";
+        write(&vault, path, "# A person's existing page\n");
+        assert!(
+            mail_door::cache_in(&vault, &args, &grant, &policy, Some(&scope))
+                .unwrap_err()
+                .contains("another page")
+        );
+        assert!(!vault.join("sources/mail/thread-1-text.md").exists());
+        assert_eq!(
+            std::fs::read_to_string(vault.join(path)).unwrap(),
+            "# A person's existing page\n"
+        );
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn a_digest_too_large_for_the_scanner_writes_nothing() {
+        let vault = temp_vault("mail-metadata-cap");
+        let mut grant = bound(&vault);
+        grant.asks.kind = crate::policy::tool_approval::RunKind::Attended;
+        let (policy, scope) = open_mail_policy();
+        let mut args = mail_thread_args();
+        args["messages"][0]["from"] = json!(format!("a@{}.test", "x".repeat(100_000)));
+        assert!(mail_door::cache_in(&vault, &args, &grant, &policy, Some(&scope)).is_err());
+        assert!(!vault.join("sources").exists());
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_mail_cache_never_lands_in_a_public_folder_through_an_alias() {
+        let vault = temp_vault("mail-private-landing");
+        std::fs::create_dir_all(vault.join("sources/public")).unwrap();
+        std::os::unix::fs::symlink(vault.join("sources/public"), vault.join("sources/mail"))
+            .unwrap();
+        let mut grant = bound(&vault);
+        grant.asks.kind = crate::policy::tool_approval::RunKind::Attended;
+        let (policy, scope) = open_mail_policy();
+        let error = mail_door::cache_in(&vault, &mail_thread_args(), &grant, &policy, Some(&scope))
+            .unwrap_err();
+        assert!(error.contains("private folder"), "{error}");
+        assert!(!vault.join("sources/public/thread-1.md").exists());
+        std::fs::remove_file(vault.join("sources/mail")).unwrap();
+        std::fs::create_dir(vault.join("sources/mail")).unwrap();
+        std::os::unix::fs::symlink(vault.join("sources/mail"), vault.join("sources/web-alias"))
+            .unwrap();
+        let by = WriteReceipt::run(cleared_for_source(&grant));
+        let fields = args_of(json!({"source_kind":"web","source_id":"a"}));
+        assert!(
+            vault::write::write_source(&vault, "sources/web-alias/a.md", &fields, "body", &by)
+                .unwrap_err()
+                .contains("private folder")
+        );
+        assert!(
+            vault::write::write_source(&vault, "sources/mail/a.md", &fields, "body", &by)
+                .unwrap_err()
+                .contains("Only mail digests")
+        );
+        assert!(!vault.join("sources/mail/a.md").exists());
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
+    #[test]
+    fn ordinary_agent_doors_cannot_write_mail_but_a_person_can() {
+        let vault = temp_vault("mail-only-cache-door");
+        let path = "sources/mail/thread-1.md";
+        write(&vault, path, "# Private\n");
+        for tool in [
+            "update_frontmatter",
+            "set_fields",
+            "append_to_note",
+            "edit_note",
+            "edit_sheet",
+        ] {
+            let refusal = corpus_refusal(&vault, tool, &args_of(json!({"path":path}))).unwrap();
+            assert_eq!(refusal.code, TARGET_OUTSIDE_CORPUS);
+            assert!(refusal.message.contains("only cache_source writes"));
+        }
+        assert!(cleared_for_note(&bound(&vault), path, Approval::None).is_err());
+        assert!(corpus_refusal(
+            &vault,
+            "create_note",
+            &args_of(json!({"folder":"sources/mail","slug":"new"}))
+        )
+        .is_some());
+        let by = WriteReceipt::for_test(HUMAN_ACTOR, None);
+        vault::write::save_note(&vault, path, "# Owner edit\n", None, &by).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(vault.join(path)).unwrap(),
+            "# Owner edit\n"
+        );
+        let _ = std::fs::remove_dir_all(vault);
+    }
+
     #[test]
     fn an_unattended_run_and_a_token_client_cannot_read_a_digest() {
         let _sink = ArmedSink::new("mail-read-boundary");
@@ -13308,7 +13825,10 @@ mod tests {
             assert!(!text.contains("HiddenMailTitle"), "{text}");
             assert!(!text.contains("needle-private"), "{text}");
             assert!(!text.contains("sources/mail/a.md"), "{text}");
-            assert!(text.to_ascii_lowercase().contains("withheld"), "{text}");
+            assert!(
+                text.contains("1 notes outside this run's read scope"),
+                "{text}"
+            );
         }
         std::fs::remove_dir_all(vault).ok();
     }
@@ -13678,8 +14198,9 @@ mod tests {
 
     #[test]
     fn corpus_targets_cover_every_scoped_writer() {
-        // Every tool the write scope binds is a note door the corpus check
-        // judges, and no other, so a note writer cannot skip the check.
+        // Note and canvas writers must pass the shared corpus judgement.
+        // Imported pages use their own identity-aware actual-landing check
+        // in notion_door; read-only corpus targets are not writers.
         let args = args_of(json!({
             "path": "projects/atlas/a.md",
             "folder": "projects/atlas",
@@ -13688,14 +14209,21 @@ mod tests {
         let scoped: BTreeSet<String> = every_served_name()
             .into_iter()
             .filter(|name| write_target(name, &args).is_some())
+            .filter(|name| {
+                crate::policy::tools::row(name)
+                    .is_some_and(|row| matches!(row.door.as_str(), "note" | "canvas"))
+            })
             .collect();
         let judged: BTreeSet<String> = every_served_name()
             .into_iter()
-            .filter(|name| corpus_target(name, &args).is_some())
+            .filter(|name| {
+                write_target(name, &args).is_some() && corpus_target(name, &args).is_some()
+            })
             .collect();
         assert_eq!(judged, scoped);
         assert!(judged.contains("create_note"), "{judged:?}");
         assert!(judged.contains("append_to_note"), "{judged:?}");
+        assert!(judged.contains("edit_canvas"), "{judged:?}");
     }
 
     #[test]
@@ -15387,6 +15915,11 @@ mod tests {
                     "update_frontmatter" => tool_update_frontmatter(&dir, args),
                     "edit_note" => tool_edit_note(&dir, args),
                     "edit_sheet" => tool_edit_sheet(&dir, args),
+                    "edit_canvas" => tool_edit_canvas_in(
+                        &dir,
+                        args,
+                        test_writer(&RunGrant::unrestricted(DEFAULT_ACTOR)),
+                    ),
                     _ => tool_append(&dir, args),
                 }
                 .expect_err(&format!("{tool} must refuse {target}"));
@@ -15560,7 +16093,7 @@ mod tests {
     #[test]
     fn no_tool_deletes() {
         // Agents do not delete (M17.1). Cerebro's tools can create, revise and
-        // append; edit_note and edit_sheet revise in place, never delete a
+        // append; edit_note, edit_sheet and edit_canvas revise in place, never delete a
         // page or a sheet. Removing something a person may not have finished with is
         // not a capability the catalog offers, and the absence is the design
         // rather than an omission — assert it so nobody adds one casually.
@@ -16045,12 +16578,13 @@ mod tests {
         let catalog = tool_catalog(true);
         let at = catalog
             .iter()
-            .position(|row| row["name"] == "get_note")
+            .position(|row| row["name"] == "read_sheet")
             .unwrap();
+        assert!(catalog[..at].iter().any(|row| row["name"] == "get_note"));
         for (offset, name, title, fold) in [
-            (1, "read_sheet", "Read a sheet", "read a sheet"),
+            (0, "read_sheet", "Read a sheet", "read a sheet"),
             (
-                2,
+                1,
                 "calculate_sheet",
                 "Calculate on a sheet",
                 "calculated on a sheet",
@@ -16352,6 +16886,7 @@ mod tests {
                         "read_sheet" => tool_read_sheet(&vault, args),
                         "calculate_sheet" => tool_calculate_sheet(&vault, args),
                         "edit_sheet" => tool_edit_sheet_in(&vault, args, booked(grant)),
+                        "edit_canvas" => tool_edit_canvas_in(&vault, args, booked(grant)),
                         _ => panic!("unexpected sheet tool"),
                     }
                 });
@@ -18259,6 +18794,28 @@ mod tests {
     // refuses as the table says, or records its one row under the run's
     // stamp. The mock replays the same rows.
     #[test]
+    fn an_import_refusal_records_once_for_its_run_reason_and_page() {
+        let _sink = ArmedSink::new("notion-refusals");
+        let vault = temp_vault("notion-refusal-vault");
+        let grant = bound(&vault);
+        for _ in 0..2 {
+            assert!(notion_door::call(
+                &vault,
+                &args_of(json!({"page":"11111111111111111111111111111111","folder":"notion"})),
+                &grant
+            )
+            .unwrap_err()
+            .starts_with("import_refused: capture_missing"));
+        }
+        let rows = rows_for_run(&grant.run_id);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, "import_refused");
+        assert_eq!(rows[0].1, "import_notion_page");
+        assert!(std::fs::read_dir(&vault).unwrap().next().is_none());
+        std::fs::remove_dir_all(vault).unwrap();
+    }
+
+    #[test]
     fn agent_write_doors_replay_the_shared_cases() {
         let table: Value =
             serde_json::from_str(include_str!("../fixtures/write-doors.json")).unwrap();
@@ -18275,8 +18832,39 @@ mod tests {
             };
             let door = case["door"].as_str().unwrap();
             let args = case["args"].as_object().cloned().unwrap();
-            let outcome = note_write(&vault, door, &args, booked(&grant), None, WriteMode::Commit)
-                .expect("a note door");
+            let _capture = if door == "import_notion_page" {
+                let cases: Value =
+                    serde_json::from_str(include_str!("../fixtures/notion-cases.json")).unwrap();
+                let fixture = cases["cases"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|row| row["name"] == case["notion_case"])
+                    .unwrap();
+                let lease = crate::import::capture::arm(
+                    &grant.run_id,
+                    vec!["mcp__notion-toy__notion-fetch".into()],
+                )
+                .unwrap();
+                lease.handle().begin(
+                    "mcp__notion-toy__notion-fetch",
+                    "fetch",
+                    Some(&json!({"id":fixture["page"]})),
+                );
+                lease
+                    .handle()
+                    .put("fetch", fixture["capture"].as_str().unwrap(), false);
+                Some(lease)
+            } else {
+                None
+            };
+            let outcome = if door == "import_notion_page" {
+                notion_door::call(&vault, &args, &grant).map(|_| ())
+            } else {
+                note_write(&vault, door, &args, booked(&grant), None, WriteMode::Commit)
+                    .expect("a note door")
+                    .map(|_| ())
+            };
             match case["refused"].as_str() {
                 Some(fragment) => {
                     let err = outcome
@@ -18881,6 +19469,219 @@ mod tests {
         ));
         forget_run(&run);
     }
+    #[test]
+    fn create_canvas_replays_the_shared_create_cases() {
+        let _sink = ArmedSink::new("canvas-create-cases");
+        let cases: Value =
+            serde_json::from_str(include_str!("../fixtures/canvas-edit-cases.json")).unwrap();
+        for (index, case) in cases["creates"].as_array().unwrap().iter().enumerate() {
+            let vault = temp_vault(&format!("canvas-create-{index}"));
+            for taken in case["taken"].as_array().unwrap() {
+                write(&vault, taken.as_str().unwrap(), "{}");
+            }
+            let before = vault_bytes(&vault);
+            let mut args = case["args"].as_object().unwrap().clone();
+            args.insert("folder".into(), case["folder"].clone());
+            args.insert("slug".into(), case["slug"].clone());
+            let grant = bound(&vault);
+            let answer = tool_create_canvas_in(&vault, &args, booked(&grant));
+            if let Some(refusal) = case["refusal"].as_str() {
+                let expected = if refusal.contains("needs `ops`") {
+                    refusal.to_string()
+                } else {
+                    format!("{refusal}\nNothing was created.")
+                };
+                assert_eq!(answer.unwrap_err(), expected, "{}", case["name"]);
+                assert_eq!(vault_bytes(&vault), before);
+                assert!(stamped(&vault).is_empty());
+            } else {
+                let answer = answer.unwrap_or_else(|error| panic!("{}: {error}", case["name"]));
+                let report = sheet_json(answer.clone());
+                let path = case["path"].as_str().unwrap();
+                assert_eq!(report["path"], path);
+                assert_eq!(
+                    std::fs::read_to_string(vault.join(path)).unwrap(),
+                    case["after"].as_str().unwrap()
+                );
+                for field in ["ops", "created", "warnings"] {
+                    assert_eq!(report[field], case["report"][field]);
+                }
+                assert_eq!(
+                    stamped(&vault),
+                    vec![row("vault.create", path, &grant, None)]
+                );
+                assert_eq!(
+                    announced_change(&vault, "create_canvas", &args, &Ok(answer)),
+                    Some(json!({"action":"vault_changed"}))
+                );
+            }
+            let _ = std::fs::remove_dir_all(vault);
+        }
+    }
+    #[test]
+    fn create_canvas_previews_and_refuses_scopes_without_a_file_or_row() {
+        let _sink = ArmedSink::new("canvas-create-refusals");
+        let vault = temp_vault("canvas-create-refusals");
+        let grant = bound(&vault);
+        let args = args_of(json!({"folder":"boards","slug":"new"}));
+        let before = vault_bytes(&vault);
+        assert_eq!(
+            sheet_json(
+                create_canvas_write(&vault, &args, booked(&grant), WriteMode::Preview)
+                    .unwrap()
+                    .reply
+            )["path"],
+            "boards/new.canvas"
+        );
+        assert_eq!(vault_bytes(&vault), before);
+        assert!(stamped(&vault).is_empty());
+        for folder in ["knowledge", ".hidden", "../outside"] {
+            assert!(tool_create_canvas_in(
+                &vault,
+                &args_of(json!({"folder":folder,"slug":"new"})),
+                booked(&grant)
+            )
+            .is_err());
+        }
+        let scoped = RunGrant {
+            scope: Some(vec!["elsewhere".into()]),
+            ..grant
+        };
+        assert!(refuse_before_dispatch(&vault, &scoped, "create_canvas", &args).is_some());
+        assert!(refuse_before_dispatch(&vault, &scoped, "create_canvas", &args).is_some());
+        assert_eq!(
+            rows_for_run(&scoped.run_id)
+                .iter()
+                .filter(|row| row.0 == WRITE_OUTSIDE_SCOPE)
+                .count(),
+            1
+        );
+        assert_eq!(vault_bytes(&vault), before);
+        assert!(stamped(&vault).is_empty());
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    fn canvas_edit_args(path: &str) -> Map<String, Value> {
+        args_of(
+            json!({"path":path,"ops":[{"op":"add_node","id":"next","type":"text","x":20,"y":30,"width":100,"height":60,"text":"Next"}]}),
+        )
+    }
+    #[test]
+    fn a_canvas_edit_writes_once_preserving_unknown_values() {
+        let _sink = ArmedSink::new("canvas-edit-one");
+        let vault = temp_vault("canvas-edit-one");
+        let path = "boards/plan.canvas";
+        write(
+            &vault,
+            path,
+            r#"{"extra":{"x":1.50,"x":1e3},"nodes":[],"edges":[]}"#,
+        );
+        let grant = bound(&vault);
+        let args = canvas_edit_args(path);
+        let reply = tool_edit_canvas_in(&vault, &args, booked(&grant)).unwrap();
+        let report = sheet_json(reply.clone());
+        let after = std::fs::read_to_string(vault.join(path)).unwrap();
+        assert!(after.contains(r#""extra": {"x":1.50,"x":1e3}"#));
+        assert_eq!(report["wrote"], true);
+        assert_eq!(report["hash"], crate::ledger::sha256_hex(after.as_bytes()));
+        assert_eq!(
+            stamped(&vault),
+            vec![row("vault.write", path, &grant, None)]
+        );
+        assert_eq!(
+            announced_change(&vault, "edit_canvas", &args, &Ok(reply)),
+            Some(json!({"action":"vault_changed","paths":[path]}))
+        );
+        let unchanged =
+            args_of(json!({"path":path,"ops":[{"op":"update_node","id":"next","x":20}]}));
+        assert_eq!(
+            sheet_json(tool_edit_canvas_in(&vault, &unchanged, booked(&grant)).unwrap())["wrote"],
+            false
+        );
+        assert_eq!(stamped(&vault).len(), 1);
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn a_canvas_batch_refuses_atomically_and_preview_never_writes() {
+        let _sink = ArmedSink::new("canvas-edit-atomic");
+        let vault = temp_vault("canvas-edit-atomic");
+        let path = "boards/plan.canvas";
+        write(&vault, path, "{}");
+        let grant = bound(&vault);
+        let before = vault_bytes(&vault);
+        let mut args = canvas_edit_args(path);
+        let preview = edit_canvas_write(&vault, &args, booked(&grant), WriteMode::Preview).unwrap();
+        assert!(sheet_json(preview.reply)["wrote"].as_bool().unwrap());
+        assert_eq!(vault_bytes(&vault), before);
+        assert!(stamped(&vault).is_empty());
+        args["ops"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"op":"add_edge","fromNode":"next","toNode":"gone"}));
+        assert_eq!(tool_edit_canvas_in(&vault,&args,booked(&grant)).unwrap_err(),"Op 2: the edge would point at \"gone\", which is not on the board.\nNothing was written.");
+        args["ops"] = json!(vec![json!({"op":"add_node"}); 26]);
+        assert!(tool_edit_canvas_in(&vault, &args, booked(&grant))
+            .unwrap_err()
+            .contains("at most 25 ops"));
+        assert_eq!(vault_bytes(&vault), before);
+        assert!(stamped(&vault).is_empty());
+        write(&vault, path, "{");
+        args = canvas_edit_args(path);
+        assert!(tool_edit_canvas_in(&vault, &args, booked(&grant))
+            .unwrap_err()
+            .contains("can't be read as a whiteboard"));
+        assert_eq!(std::fs::read_to_string(vault.join(path)).unwrap(), "{");
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn a_canvas_edit_checks_stale_content_before_ops() {
+        let _sink = ArmedSink::new("canvas-edit-stale");
+        let vault = temp_vault("canvas-edit-stale");
+        let path = "boards/plan.canvas";
+        write(&vault, path, "{}");
+        let grant = bound(&vault);
+        let args = args_of(json!({"path":path,"expect_hash":"0".repeat(64),"ops":[]}));
+        assert!(tool_edit_canvas_in(&vault, &args, booked(&grant))
+            .unwrap_err()
+            .starts_with("stale_content:"));
+        assert_eq!(rows_for_run(&grant.run_id)[0].0, "stale_content");
+        assert_eq!(std::fs::read_to_string(vault.join(path)).unwrap(), "{}");
+        assert!(stamped(&vault).is_empty());
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn a_canvas_edit_refuses_the_bundle_wrong_paths_and_both_scopes() {
+        let vault = temp_vault("canvas-edit-targets");
+        let grant = bound(&vault);
+        for path in [
+            "knowledge/plan.canvas",
+            "notes/plan.md",
+            ".hidden/plan.canvas",
+        ] {
+            write(&vault, path, "{}");
+            assert!(
+                tool_edit_canvas_in(&vault, &canvas_edit_args(path), test_writer(&grant)).is_err()
+            );
+            assert_eq!(std::fs::read_to_string(vault.join(path)).unwrap(), "{}");
+        }
+        let path = "boards/plan.canvas";
+        write(&vault, path, "{}");
+        for grant in [
+            RunGrant {
+                scope: Some(vec!["other".into()]),
+                ..bound(&vault)
+            },
+            RunGrant {
+                read_scope: Some(vec!["other".into()]),
+                ..bound(&vault)
+            },
+        ] {
+            assert!(
+                refuse_before_dispatch(&vault, &grant, "edit_canvas", &canvas_edit_args(path))
+                    .is_some()
+            );
+        }
+        let _ = std::fs::remove_dir_all(vault);
+    }
     fn sheet_edit_args(path: &str) -> Map<String, Value> {
         args_of(
             json!({"path":path,"ops":[{"op":"set_cells","sheet":"Budget","cells":[{"address":"A4","value":"Total"},{"address":"B4","value":"=SUM(B2:B3)"}]}]}),
@@ -19067,6 +19868,156 @@ mod tests {
             .contains("=SUM(B2:B3)"));
         assert_eq!(stamped(&vault).len(), 1);
         assert!(admit_call(&vault, &resumed, "edit_sheet", &args, Some(&book)).is_err());
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn an_unattended_edit_canvas_waits_in_review_without_writing() {
+        let _sink = ArmedSink::new("mcp-canvas-queue-sink");
+        let vault = memory_vault("mcp-canvas-queue");
+        write(&vault, "records/risks/plan.canvas", "{}");
+        let grant = scout_run(&vault, RunKind::Unattended, true);
+        let before = vault_bytes(&vault);
+        let answer = queued_call(
+            &vault,
+            &grant,
+            "edit_canvas",
+            Value::Object(canvas_edit_args("records/risks/plan.canvas")),
+        );
+        assert!(!is_error(&answer), "{}", result_text(&answer));
+        assert_eq!(vault_bytes(&vault), before);
+        let pending = waiting_in(&vault);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].tool, "edit_canvas");
+        assert!(pending[0].target_hash.is_some());
+        assert!(stamped(&vault).is_empty());
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn an_ask_first_edit_canvas_waits_for_allow_once() {
+        let _sink = ArmedSink::new("mcp-canvas-allow-sink");
+        let vault = memory_vault("mcp-canvas-allow");
+        let path = "records/risks/plan.canvas";
+        write(&vault, path, "{}");
+        let args = canvas_edit_args(path);
+        let book = Interactions::with_asks(Vec::new());
+        let asking = scout_run(&vault, RunKind::Attended, true);
+        seat_for(&book, &vault, &asking, "s-1");
+        let before = vault_bytes(&vault);
+        assert!(admit_call(&vault, &asking, "edit_canvas", &args, Some(&book)).is_err());
+        assert_eq!(vault_bytes(&vault), before);
+        let call = GateCall {
+            session_id: "s-1".into(),
+            tool_use_id: "canvas-edit".into(),
+            tool_name: "mcp__cerebro__edit_canvas".into(),
+            tool_input: Value::Object(args.clone()),
+            agent_id: String::new(),
+        };
+        assert_eq!(book.gate(&asking.run_id, &call), GateAnswer::Defer);
+        let card = book.confirm("s-1", "canvas-edit").unwrap();
+        book.close_seat(&asking.run_id);
+        let resume = book
+            .begin_answer(
+                &crate::agent::vault_key(&vault),
+                &card.id,
+                PersonAnswer::from_ipc(allow_once()),
+            )
+            .unwrap();
+        book.record_write_approval(resume.approval.unwrap());
+        let resumed = scout_run(&vault, RunKind::Attended, true);
+        seat_for(&book, &vault, &resumed, "s-1");
+        book.finish_answer(&card.id, &resumed.run_id);
+        let admission = admit_call(&vault, &resumed, "edit_canvas", &args, Some(&book)).unwrap();
+        let answer = tool_edit_canvas_in(
+            &vault,
+            &args,
+            RunWriter {
+                grant: &resumed,
+                approval: admission.approval,
+                books: true,
+            },
+        )
+        .unwrap();
+        assert!(sheet_json(answer)["wrote"].as_bool().unwrap());
+        assert!(std::fs::read_to_string(vault.join(path))
+            .unwrap()
+            .contains("Next"));
+        assert_eq!(stamped(&vault).len(), 1);
+        assert!(admit_call(&vault, &resumed, "edit_canvas", &args, Some(&book)).is_err());
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn an_unattended_create_canvas_waits_in_review_without_writing() {
+        let _sink = ArmedSink::new("mcp-canvas-create-queue-sink");
+        let vault = memory_vault("mcp-canvas-create-queue");
+        let grant = scout_run(&vault, RunKind::Unattended, true);
+        let before = vault_bytes(&vault);
+        let answer = queued_call(
+            &vault,
+            &grant,
+            "create_canvas",
+            json!({"folder":"records/risks","slug":"plan","ops":[{"op":"add_node","id":"next","type":"text","x":0,"y":0,"width":100,"height":50,"text":"Next"}]}),
+        );
+        assert!(!is_error(&answer), "{}", result_text(&answer));
+        assert_eq!(vault_bytes(&vault), before);
+        let pending = waiting_in(&vault);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].tool, "create_canvas");
+        assert!(pending[0].target_hash.is_none());
+        assert!(stamped(&vault).is_empty());
+        let _ = std::fs::remove_dir_all(vault);
+    }
+    #[test]
+    fn an_ask_first_create_canvas_waits_for_allow_once() {
+        let _sink = ArmedSink::new("mcp-canvas-create-allow-sink");
+        let vault = memory_vault("mcp-canvas-create-allow");
+        let path = "records/risks/plan.canvas";
+        let args = args_of(
+            json!({"folder":"records/risks","slug":"plan","ops":[{"op":"add_node","id":"next","type":"text","x":0,"y":0,"width":100,"height":50,"text":"Next"}]}),
+        );
+        let book = Interactions::with_asks(Vec::new());
+        let asking = scout_run(&vault, RunKind::Attended, true);
+        seat_for(&book, &vault, &asking, "s-1");
+        let before = vault_bytes(&vault);
+        assert!(admit_call(&vault, &asking, "create_canvas", &args, Some(&book)).is_err());
+        assert_eq!(vault_bytes(&vault), before);
+        let call = GateCall {
+            session_id: "s-1".into(),
+            tool_use_id: "canvas-create".into(),
+            tool_name: "mcp__cerebro__create_canvas".into(),
+            tool_input: Value::Object(args.clone()),
+            agent_id: String::new(),
+        };
+        assert_eq!(book.gate(&asking.run_id, &call), GateAnswer::Defer);
+        let card = book.confirm("s-1", "canvas-create").unwrap();
+        book.close_seat(&asking.run_id);
+        let resume = book
+            .begin_answer(
+                &crate::agent::vault_key(&vault),
+                &card.id,
+                PersonAnswer::from_ipc(allow_once()),
+            )
+            .unwrap();
+        book.record_write_approval(resume.approval.unwrap());
+        let resumed = scout_run(&vault, RunKind::Attended, true);
+        seat_for(&book, &vault, &resumed, "s-1");
+        book.finish_answer(&card.id, &resumed.run_id);
+        let admission = admit_call(&vault, &resumed, "create_canvas", &args, Some(&book)).unwrap();
+        let answer = tool_create_canvas_in(
+            &vault,
+            &args,
+            RunWriter {
+                grant: &resumed,
+                approval: admission.approval,
+                books: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(sheet_json(answer)["path"], path);
+        assert!(std::fs::read_to_string(vault.join(path))
+            .unwrap()
+            .contains("Next"));
+        assert_eq!(stamped(&vault).len(), 1);
+        assert!(admit_call(&vault, &resumed, "create_canvas", &args, Some(&book)).is_err());
         let _ = std::fs::remove_dir_all(vault);
     }
     #[test]

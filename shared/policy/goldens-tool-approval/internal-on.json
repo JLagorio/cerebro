@@ -47,7 +47,9 @@
       "mcp__cerebro__set_fields": "deny",
       "mcp__cerebro__append_to_note": "deny",
       "mcp__cerebro__edit_note": "deny",
-      "mcp__cerebro__edit_sheet": "deny"
+      "mcp__cerebro__edit_sheet": "deny",
+      "mcp__cerebro__create_canvas": "deny",
+      "mcp__cerebro__edit_canvas": "deny"
     }
   }
 }

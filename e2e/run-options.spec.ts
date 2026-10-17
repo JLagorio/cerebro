@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { boot, openAgents } from './boot';
+import { boot, openAgents, openAssistantPanel } from './boot';
 
 /**
  * Model and effort (M56.5): a conversation's pick reaches the run and the
@@ -14,7 +14,7 @@ import { boot, openAgents } from './boot';
 const SCOUT = 'records/agents/release-scout.md';
 
 async function openPanel(page: Page) {
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   const panel = page.getByTestId('ai-panel');
   await expect(panel).toBeVisible();
   return panel;
@@ -42,7 +42,7 @@ test('run options: the pick rides the turn, the footer names the model, and it s
   // The pick is the conversation's, so it comes back with it.
   await page.reload();
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
+  const sidebarTypes = page.getByTestId('app-rail');
   await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
   if (await demoButton.isVisible()) await demoButton.click();
   // The panel reopens as it was left.

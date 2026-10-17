@@ -1,3 +1,10 @@
+import { createPortal } from 'react-dom';
+import {
+  PageNavigationContent,
+  usePageNavigationSlot,
+  usePageNavigationControls,
+} from '@/app/PageNavigation';
+import { PageHeader } from '@/components/PageHeader';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
@@ -128,6 +135,8 @@ export function NewPrototypeDialog({ onClose }: { onClose: () => void }) {
 }
 
 function ProjectView({ project }: { project: StudioProject }) {
+  const navigationTarget = usePageNavigationSlot('studio');
+  const navigationControls = usePageNavigationControls('studio');
   const openPath = useOpenPath('navigate', { fullPage: true });
   const askAgent = useUiStore((s) => s.askAgent);
   // The previewed page is a LENS — local state, not selection — per the
@@ -137,9 +146,9 @@ function ProjectView({ project }: { project: StudioProject }) {
   const shown =
     project.pages.find((p) => p.path === pagePath) ?? project.main ?? project.pages[0] ?? null;
 
-  return (
-    <div className="flex min-h-0 min-w-0 flex-1">
-      <div className="flex w-56 flex-none flex-col border-r border-n-200 px-2 pb-4">
+  const pageNavigation = (
+    <PageNavigationContent>
+      <div className="flex min-h-0 flex-1 flex-col gap-2 px-2 pb-4">
         <div className={SECTION_LABEL}>Pages</div>
         <div className="min-h-0 flex-1 overflow-y-auto">
           {project.pages.map((page) => (
@@ -147,7 +156,11 @@ function ProjectView({ project }: { project: StudioProject }) {
               key={page.path}
               type="button"
               data-testid="studio-page-row"
-              onClick={() => setPagePath(page.path)}
+              aria-current={shown?.path === page.path ? 'page' : undefined}
+              onClick={() => {
+                setPagePath(page.path);
+                navigationControls?.hide();
+              }}
               className={rowClass(shown?.path === page.path)}
             >
               <Icon name="file-text" size={15} />
@@ -181,10 +194,30 @@ function ProjectView({ project }: { project: StudioProject }) {
           </Button>
         )}
       </div>
+    </PageNavigationContent>
+  );
+
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1">
+      {navigationTarget !== null ? (
+        createPortal(pageNavigation, navigationTarget)
+      ) : (
+        <div className="flex w-56 flex-none flex-col border-r border-n-200">{pageNavigation}</div>
+      )}
       <div
         className="min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-5"
         data-testid="studio-preview"
       >
+        {navigationControls !== null && (
+          <Button
+            variant="ghost"
+            size="sm"
+            icon="panel-left"
+            onClick={(event) => navigationControls.show(event.currentTarget)}
+          >
+            Prototype pages
+          </Button>
+        )}
         {shown === null ? (
           // Absent, not empty: the folder exists with no main page yet.
           <p className="m-0 text-sm text-n-500">
@@ -221,29 +254,33 @@ export function StudioPage({ selection }: { selection: StudioSelection }) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="studio-page">
-      <div className="flex h-11 flex-none items-center gap-2 border-b border-n-200 px-4">
-        {open !== null && (
-          <button
-            type="button"
-            aria-label="All prototypes"
-            data-testid="studio-back"
-            onClick={() => navigate({ kind: 'studio' })}
-            className="flex h-6 w-6 items-center justify-center rounded-md border-0 bg-transparent text-n-400 hover:bg-n-100 hover:text-n-800"
-          >
-            <Icon name="arrow-left" size={15} />
-          </button>
-        )}
-        <Icon name="pencil-ruler" size={16} color="var(--n-600)" />
-        <h1 className="m-0 text-lg font-semibold leading-6 tracking-[-0.005em]">
-          {open === null ? 'Studio' : open.title}
-        </h1>
-        <span className="flex-1" />
-        {open === null && (
-          <Button variant="primary" testId="studio-new" onClick={() => setCreating(true)}>
-            New prototype
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        className={open === null ? '' : 'cb-page-header--compact'}
+        title={open === null ? 'Studio' : open.title}
+        icon={
+          open === null ? (
+            <Icon name="pencil-ruler" size={18} />
+          ) : (
+            <button
+              type="button"
+              aria-label="All prototypes"
+              data-testid="studio-back"
+              onClick={() => navigate({ kind: 'studio' })}
+              className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-n-100"
+            >
+              <Icon name="arrow-left" size={16} />
+            </button>
+          )
+        }
+        description={open === null ? 'A place to build ideas with your assistant.' : undefined}
+        actions={
+          open === null ? (
+            <Button variant="primary" testId="studio-new" onClick={() => setCreating(true)}>
+              New prototype
+            </Button>
+          ) : undefined
+        }
+      />
       {open !== null ? (
         <ProjectView project={open} />
       ) : selection.project !== undefined ? (

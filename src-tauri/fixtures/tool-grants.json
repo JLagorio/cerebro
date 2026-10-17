@@ -3,6 +3,16 @@
   "why": "Which cerebro tools a run holds once its declared tools narrow it (M54.7), as Rust's narrow and its one name test, names_tool (M54.4), decide it: an entry names a tool when, trimmed of the whitespace Rust's str::trim strips and lowercased in ASCII only, it equals the tool's name with or without the mcp__cerebro__ prefix. `allowed_tools` null narrows nothing. `granted` lists what a run the app's TypeScript starts then holds, sorted, and `all` is every such tool: the manifest's base rows that a picker offers. Such a run holds no window, answer or generated proposal tool, and TypeScript cannot read the proposal switch, so none ever appears here; Rust drops them before comparing. The CLI's own tools are not cerebro's and are not listed. Replayed by granted_tools_match_the_shared_cases in src-tauri/src/agent/mod.rs and by src/engine/toolGrant.test.ts, the TS half that decides what a prompt may name.",
   "cases": [
     {
+      "allowed_tools": ["mcp__cerebro__create_canvas"],
+      "granted": ["create_canvas"],
+      "why": "A board create is narrowed through its canvas door."
+    },
+    {
+      "allowed_tools": ["mcp__cerebro__edit_canvas"],
+      "granted": ["edit_canvas"],
+      "why": "A canvas edit is narrowed like every other writer."
+    },
+    {
       "allowed_tools": [" MCP__CEREBRO__IMPORT_NOTION_PAGE "],
       "granted": ["import_notion_page"],
       "why": "Notion import is the import writer's scoped note door (M69.5)."

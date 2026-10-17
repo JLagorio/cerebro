@@ -137,7 +137,6 @@ describe('holds and editsNotes', () => {
       'append_to_note',
       'edit_note',
       'edit_sheet',
-      'import_notion_page',
       'set_fields',
       'update_frontmatter',
     ]);

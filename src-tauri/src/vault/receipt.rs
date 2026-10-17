@@ -32,7 +32,7 @@
 //!
 //! ```compile_fail,E0061
 //! use std::path::Path;
-//! cerebro_lib::vault::write::save_note(Path::new("/vault"), "notes/a.md", "body").unwrap();
+//! cerebro_lib::vault::write::save_note(Path::new("/vault"), "notes/a.md", "body", None).unwrap();
 //! ```
 //!
 //! and with one minted by the human guard, it does:
@@ -41,7 +41,7 @@
 //! use std::path::Path;
 //! use cerebro_lib::vault::receipt::WriteReceipt;
 //! let by = WriteReceipt::ipc(cerebro_lib::knowledge::guard_human_write("notes/a.md").unwrap());
-//! cerebro_lib::vault::write::save_note(Path::new("/vault"), "notes/a.md", "body", &by).unwrap();
+//! cerebro_lib::vault::write::save_note(Path::new("/vault"), "notes/a.md", "body", None, &by).unwrap();
 //! ```
 //!
 //! A receipt cannot be written as a literal:
@@ -82,7 +82,7 @@
 //! use std::path::Path;
 //! use cerebro_lib::vault::receipt::WriteReceipt;
 //! let by = WriteReceipt::ipc(cerebro_lib::knowledge::guard_human_write("sources/a.md").unwrap());
-//! cerebro_lib::vault::write::save_note(Path::new("/vault"), "sources/a.md", "b", &by).unwrap();
+//! cerebro_lib::vault::write::save_note(Path::new("/vault"), "sources/a.md", "b", None, &by).unwrap();
 //! ```
 
 use std::marker::PhantomData;

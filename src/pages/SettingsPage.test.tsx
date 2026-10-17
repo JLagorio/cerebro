@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 vi.mock('@/lib/ipc', async (importOriginal) => {
@@ -20,6 +20,8 @@ vi.mock('@/agent/agentIpc', async (importOriginal) => {
   };
 });
 
+import { PageNavigationProvider } from '@/app/PageNavigation';
+import { useNavStore } from '@/stores/navStore';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { makeEntry } from '@/engine/testHelpers';
 import { resetMockFs } from '@/lib/mockIpc';
@@ -30,49 +32,121 @@ import { useVaultStore } from '@/stores/vaultStore';
 
 afterEach(cleanup);
 
+async function chooseSection(name: string) {
+  await userEvent.click(
+    within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', {
+      name,
+    }),
+  );
+}
+async function renderSettings(name: string) {
+  render(<SettingsPage />);
+  await chooseSection(name);
+}
+
 describe('SettingsPage', () => {
   beforeEach(() => {
     useVaultStore.setState({ vaultPath: '/demo-vault', status: 'ready', error: null });
-    useUiStore.setState({ toasts: [] });
+    useUiStore.setState({ toasts: [], settingsFocus: null });
   });
 
-  it('puts the generated Keyboard shortcuts section immediately before About', () => {
+  it('starts with General and exposes every section through named navigation', async () => {
     render(<SettingsPage />);
-    const headings = [...document.querySelectorAll('h2')].map((h) => h.textContent);
-    expect(headings.indexOf('About')).toBe(headings.indexOf('Keyboard shortcuts') + 1);
-    expect(screen.getByTestId('settings-shortcuts')).toBeTruthy();
+    const nav = screen.getByRole('navigation', { name: 'Settings sections' });
+    expect(
+      within(nav)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual([
+      'General',
+      'Reminders',
+      'Keyboard shortcuts',
+      'Vault',
+      'Knowledge',
+      'History',
+      'Recently deleted',
+      'Assistant',
+      'Mail',
+      'Other apps',
+      'About',
+    ]);
+    expect(screen.getByTestId('settings-heading').textContent).toBe('General');
+    expect(within(nav).getByRole('button', { name: 'General' }).getAttribute('aria-current')).toBe(
+      'page',
+    );
+    expect(screen.queryByTestId('shell-off')).toBeNull();
+    await chooseSection('Keyboard shortcuts');
+    expect(screen.getByTestId('settings-heading').textContent).toBe('Keyboard shortcuts');
+    expect(screen.getByTestId('settings-shortcuts').closest('[hidden]')).toBeNull();
+    expect(screen.queryByRole('tablist', { name: 'Theme' })).toBeNull();
+    await chooseSection('About');
+    expect(screen.getByText('0.1.0').closest('[hidden]')).toBeNull();
   });
 
-  it('shows the current vault path and app version', () => {
-    render(<SettingsPage />);
-    expect(screen.getByText('/demo-vault')).toBeTruthy();
-    expect(screen.getByText('0.1.0')).toBeTruthy();
+  it('shows the current vault path in Vault', async () => {
+    await renderSettings('Vault');
+    expect(screen.getByText('/demo-vault').closest('[hidden]')).toBeNull();
   });
 
-  // M59.3 — the open log is a Settings section, after Workflow.
-  it('puts Other apps immediately before Knowledge', () => {
-    render(<SettingsPage />);
-    const headings = [...document.querySelectorAll('h2')].map((h) => h.textContent);
-    expect(headings.indexOf('Knowledge')).toBe(headings.indexOf('Other apps') + 1);
-  });
-
-  it('renders Recently opened after Reminders', () => {
+  it('keeps Recently opened with the personal workflow controls', () => {
     render(<SettingsPage />);
     const section = screen.getByTestId('settings-recently-opened');
+    expect(section.closest('[hidden]')).toBeNull();
     expect(section.querySelector('h2')?.textContent).toBe('Recently opened');
     const headings = [...document.querySelectorAll('h2')].map((h) => h.textContent);
-    expect(headings.indexOf('Recently opened')).toBe(headings.indexOf('Reminders') + 1);
+    expect(headings.indexOf('Recently opened')).toBe(headings.indexOf('Workflow') + 1);
   });
 
-  // M60.8 — the vault's Trash is a Settings section, right after Vault.
-  it('renders Recently deleted after Vault', async () => {
+  it('opens the existing vault Trash from its own section', async () => {
     resetMockFs();
-    render(<SettingsPage />);
+    await renderSettings('Recently deleted');
     const section = screen.getByTestId('settings-trash');
+    expect(section.closest('[hidden]')).toBeNull();
     expect(section.querySelector('h2')?.textContent).toBe('Recently deleted');
-    const headings = [...document.querySelectorAll('h2')].map((h) => h.textContent);
-    expect(headings.indexOf('Recently deleted')).toBe(headings.indexOf('Vault') + 1);
     expect(await screen.findByTestId('trash-empty')).toBeTruthy();
+  });
+
+  it('retains a local connection draft while other sections are visited', async () => {
+    resetMockFs();
+    await renderSettings('Other apps');
+    const input = screen.getByRole('textbox', { name: 'Client port' });
+    await userEvent.clear(input);
+    await userEvent.type(input, '45678');
+    await chooseSection('General');
+    expect(screen.queryByRole('textbox', { name: 'Client port' })).toBeNull();
+    await chooseSection('Other apps');
+    expect(screen.getByRole('textbox', { name: 'Client port' })).toBe(input);
+    expect((input as HTMLInputElement).value).toBe('45678');
+  });
+
+  it('portals the one navigation into the active shell slot', async () => {
+    const slot = document.createElement('div');
+    document.body.append(slot);
+    const show = vi.fn();
+    try {
+      const { container } = render(
+        <PageNavigationProvider
+          value={{
+            kind: 'settings',
+            paneId: useNavStore.getState().active,
+            target: slot,
+            controls: { show, hide: vi.fn() },
+          }}
+        >
+          <SettingsPage />
+        </PageNavigationProvider>,
+      );
+      expect(slot.querySelector('nav')).not.toBeNull();
+      expect(container.querySelector('nav')).toBeNull();
+      await chooseSection('Knowledge');
+      expect(screen.getByTestId('settings-heading').textContent).toBe('Knowledge');
+      await userEvent.click(screen.getByRole('button', { name: 'Sections' }));
+      expect(show).toHaveBeenCalledExactlyOnceWith(
+        screen.getByRole('button', { name: 'Sections' }),
+      );
+    } finally {
+      slot.remove();
+    }
   });
 
   it('re-picks and opens a new vault from the change vault button', async () => {
@@ -80,7 +154,7 @@ describe('SettingsPage', () => {
     const openVault = vi.fn().mockResolvedValue(undefined);
     useVaultStore.setState({ openVault });
     vi.mocked(ipc.pickVault).mockResolvedValueOnce('/new-vault');
-    render(<SettingsPage />);
+    await renderSettings('Vault');
     await user.click(screen.getByRole('button', { name: 'Change vault…' }));
     await vi.waitFor(() => expect(openVault).toHaveBeenCalledWith('/new-vault'));
   });
@@ -88,9 +162,9 @@ describe('SettingsPage', () => {
   // Deviation test (execution-log note 15a, reported): vaultStore.status ===
   // 'error' was displayed nowhere — the vault section surfaces it so a failed
   // boot is recoverable right where "Change vault…" lives.
-  it('shows the vault error when the last open failed', () => {
+  it('shows the vault error when the last open failed', async () => {
     useVaultStore.setState({ status: 'error', error: 'Not a vault: /gone' });
-    render(<SettingsPage />);
+    await renderSettings('Vault');
     expect(screen.getByText('Not a vault: /gone')).toBeTruthy();
   });
 
@@ -99,7 +173,7 @@ describe('SettingsPage', () => {
   it('surfaces a picker failure via toast', async () => {
     const user = userEvent.setup();
     vi.mocked(ipc.pickVault).mockRejectedValueOnce(new Error('dialog crashed'));
-    render(<SettingsPage />);
+    await renderSettings('Vault');
     await user.click(screen.getByRole('button', { name: 'Change vault…' }));
     await vi.waitFor(() => {
       expect(useUiStore.getState().toasts.map((t) => t.message)).toContain(
@@ -151,7 +225,7 @@ describe('SettingsPage', () => {
 
     it('offers Off, Ask and On, with one hint per value, and keeps Ask', async () => {
       const user = userEvent.setup();
-      render(<SettingsPage />);
+      await renderSettings('Assistant');
       const hint = () => screen.getByTestId('shell-hint').textContent;
       expect(hint()).toBe(
         "Cerebro's tools only. The assistant can't run commands or edit files directly.",
@@ -168,7 +242,7 @@ describe('SettingsPage', () => {
 
     const disclosure = async (settings: unknown) => {
       vi.mocked(agentIpc.claudeUserSettings).mockResolvedValue(settings as never);
-      render(<SettingsPage />);
+      await renderSettings('Assistant');
       await vi.waitFor(() => expect(screen.getByTestId('shell-user-rules')).toBeTruthy());
       return screen.getByTestId('shell-user-rules').textContent ?? '';
     };
@@ -224,7 +298,7 @@ describe('SettingsPage', () => {
     it('reads them again when the window comes back', async () => {
       vi.mocked(agentIpc.claudeUserSettings).mockClear();
       vi.mocked(agentIpc.claudeUserSettings).mockResolvedValue({ state: 'browser' });
-      render(<SettingsPage />);
+      await renderSettings('Assistant');
       await vi.waitFor(() => expect(agentIpc.claudeUserSettings).toHaveBeenCalledTimes(1));
       window.dispatchEvent(new Event('focus'));
       await vi.waitFor(() => expect(agentIpc.claudeUserSettings).toHaveBeenCalledTimes(2));
@@ -240,7 +314,7 @@ describe('SettingsPage', () => {
 
     it('is a switch, off by default, with its hint, and it persists', async () => {
       const user = userEvent.setup();
-      render(<SettingsPage />);
+      await renderSettings('Assistant');
       const web = screen.getByRole('switch', { name: 'Web access' });
       expect((web as HTMLInputElement).checked).toBe(false);
       expect(
@@ -253,8 +327,8 @@ describe('SettingsPage', () => {
       expect(window.localStorage.getItem('cerebro.agentWebAccess')).toBe('true');
     });
 
-    it('sits after Shell access', () => {
-      render(<SettingsPage />);
+    it('sits after Shell access', async () => {
+      await renderSettings('Assistant');
       const shell = screen.getByRole('tablist', { name: 'Shell access' });
       const web = screen.getByRole('switch', { name: 'Web access' });
       expect(shell.compareDocumentPosition(web) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -266,7 +340,7 @@ describe('SettingsPage', () => {
     const status = () => screen.getByTestId('settings-claude-code-status');
 
     it('leads the Assistant section with the version, path and sign-in words', async () => {
-      render(<SettingsPage />);
+      await renderSettings('Assistant');
       const row = screen.getByTestId('settings-claude-code');
       expect(row.textContent).toContain(
         "Cerebro runs your own copy and uses its sign-in; no key enters the app. If a run says Claude Code isn't signed in, open Terminal, run claude, and type /login.",
@@ -289,7 +363,7 @@ describe('SettingsPage', () => {
         version: null,
         path: null,
       });
-      render(<SettingsPage />);
+      await renderSettings('Assistant');
       await vi.waitFor(() =>
         expect(status().textContent).toBe(
           'Claude Code was not found on this machine. Install it, then reopen Cerebro.',
@@ -299,10 +373,27 @@ describe('SettingsPage', () => {
 
     it("says when it couldn't check", async () => {
       vi.mocked(agentIpc.checkAgent).mockRejectedValueOnce(new Error('ipc down'));
-      render(<SettingsPage />);
+      await renderSettings('Assistant');
       await vi.waitFor(() =>
         expect(status().textContent).toBe("Couldn't check for Claude Code on this machine."),
       );
+    });
+
+    it('reveals a previously visited Assistant before consuming a new recovery request', async () => {
+      const scrolled = vi.fn();
+      const original = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = scrolled;
+      try {
+        await renderSettings('Assistant');
+        await chooseSection('General');
+        act(() => useUiStore.getState().setSettingsFocus('claude-code'));
+        await vi.waitFor(() => expect(useUiStore.getState().settingsFocus).toBeNull());
+        expect(screen.getByTestId('settings-heading').textContent).toBe('Assistant');
+        expect(screen.getByTestId('settings-claude-code').closest('[hidden]')).toBeNull();
+        expect(scrolled).toHaveBeenCalledOnce();
+      } finally {
+        Element.prototype.scrollIntoView = original;
+      }
     });
 
     it('scrolls into view once when a card asked for it, then clears the ask', async () => {
@@ -347,13 +438,13 @@ describe('Panel assistant', () => {
       error: null,
       entries: [SCOUT, DIGEST],
     });
-    useUiStore.setState({ toasts: [], panelAgents: {} });
+    useUiStore.setState({ toasts: [], panelAgents: {}, settingsFocus: null });
   });
 
   const select = () => screen.getByRole('combobox', { name: 'Panel assistant' });
 
   it('lists the plain assistant and each agent by title, paused ones marked', async () => {
-    render(<SettingsPage />);
+    await renderSettings('Assistant');
     const options = Array.from(select().querySelectorAll('option')).map((o) => [
       o.value,
       o.textContent,
@@ -370,7 +461,7 @@ describe('Panel assistant', () => {
 
   it('choosing an agent writes the binding, and the plain assistant clears it', async () => {
     const user = userEvent.setup();
-    render(<SettingsPage />);
+    await renderSettings('Assistant');
     await vi.waitFor(() => expect(useUiStore.getState().panelAgents['/demo-vault']).toBeNull());
     await user.selectOptions(select(), 'release-scout');
     await vi.waitFor(async () =>
@@ -385,7 +476,7 @@ describe('Panel assistant', () => {
   it('names a binding no record answers to, and Clear unbinds it', async () => {
     const user = userEvent.setup();
     await ipc.setPanelAgent('/demo-vault', 'old-scout');
-    render(<SettingsPage />);
+    await renderSettings('Assistant');
     const line = await screen.findByTestId('panel-agent-dangling');
     expect(line.textContent).toContain(
       '@old-scout — no agent answers to this name, so the assistant answers',

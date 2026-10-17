@@ -17,6 +17,8 @@ export { VAULT_TODAY };
 /** What a spec may change about the boot (M57.2). */
 export interface BootOptions {
   vault?: 'demo' | 'empty';
+  /** Theme-persistence proofs keep the choice after the first pinned boot. */
+  preserveTheme?: boolean;
   /** Let the background job runner fire (M8.6): off unless a spec is about
    * a scheduled run. */
   autoLearn?: boolean;
@@ -24,7 +26,7 @@ export interface BootOptions {
 
 export async function boot(
   page: Page,
-  { autoLearn = false, vault = 'demo' }: BootOptions = {},
+  { autoLearn = false, vault = 'demo', preserveTheme = false }: BootOptions = {},
 ): Promise<void> {
   // `setFixedTime` and not `install`: this freezes what the clock READS
   // without faking timers, so the app's intervals, debounces and Playwright's
@@ -33,23 +35,24 @@ export async function boot(
   // The background distiller (M8.6) is off for tests that are not about it:
   // a reader that fires four seconds in would rescan the vault mid-assertion.
   await page.addInitScript(
-    ({ learn, empty }) => {
+    ({ learn, empty, preserveTheme }) => {
       (window as unknown as { __cerebroEmptyVault?: boolean }).__cerebroEmptyVault = empty;
       window.localStorage.setItem('cerebro.autoLearn', String(learn));
       // Pin the theme (M16.39). These specs assert on rendered UI, and an unset
       // themeMode resolves 'system' — so a dark display would flip every colour
       // out from under them. The app has two palettes now; the specs assume one.
-      window.localStorage.setItem('cerebro.themeMode', 'light');
+      if (!preserveTheme || window.localStorage.getItem('cerebro.themeMode') === null) {
+        window.localStorage.setItem('cerebro.themeMode', 'light');
+      }
     },
-    { learn: autoLearn, empty: vault === 'empty' },
+    { learn: autoLearn, empty: vault === 'empty', preserveTheme },
   );
   await page.goto('/');
   // With no persisted vault the first-launch chooser renders "Open demo
   // vault"; if the mock IPC restored a last vault it boots straight to the
   // shell. Handle both.
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes =
-    vault === 'empty' ? page.getByTestId('nav-surfaces') : page.getByTestId('sidebar-type');
+  const sidebarTypes = page.getByTestId('app-rail');
   await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
   if (await demoButton.isVisible()) await demoButton.click();
   await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
@@ -92,7 +95,10 @@ export async function seedBeforeBoot(page: Page, seam: string, ...args: unknown[
  * assertion downstream addresses. (The fleet lives on Agents — `openAgents`.)
  */
 export async function openKnowledgeTab(page: Page, tab: 'all' | 'review' | 'activity') {
-  await page.getByRole('button', { name: 'Open Knowledge' }).click();
+  await page
+    .getByTestId('app-rail')
+    .getByRole('button', { name: 'Knowledge', exact: true })
+    .click();
   await page.getByTestId(`knowledge-tab-${tab}`).click();
 }
 
@@ -113,13 +119,85 @@ export async function showConceptDetails(page: Page) {
 
 /** The fleet's one home since M50.5: the Agents surface. */
 export async function openAgents(page: Page) {
-  await page.getByRole('button', { name: 'Open all agents' }).click();
+  await page.getByTestId('app-rail').getByRole('button', { name: 'Agents', exact: true }).click();
+}
+
+/** The rail's Assistant is a destination. Existing side-by-side workflows use
+ * the docked assistant shortcut, without replacing the current page. */
+export async function openAssistantPanel(page: Page): Promise<void> {
+  const panel = page.getByTestId('ai-panel');
+  if (!(await panel.isVisible())) await page.keyboard.press('ControlOrMeta+j');
+  if ((await panel.getAttribute('data-presentation')) === 'canvas') {
+    await panel.getByRole('button', { name: 'Dock conversation', exact: true }).click();
+  }
+  await expect(panel).toBeVisible();
+  await expect(panel).toHaveAttribute('data-presentation', 'panel');
+}
+
+/** Reveal the database list through the real contextual rail. */
+export async function showDatabases(page: Page): Promise<void> {
+  const button = page
+    .getByTestId('app-rail')
+    .getByRole('button', { name: 'Databases', exact: true });
+  if (
+    (await button.getAttribute('aria-pressed')) === 'true' &&
+    (await page.getByTestId('sidebar').isVisible())
+  )
+    return;
+  await button.click();
+  await expect(page.getByTestId('sidebar')).toBeVisible();
+}
+
+export async function openDatabase(page: Page, name: string | RegExp): Promise<void> {
+  await showDatabases(page);
+  await page.getByTestId('sidebar-type').filter({ hasText: name }).first().click();
+}
+
+export async function showPages(page: Page): Promise<void> {
+  const button = page.getByTestId('app-rail').getByRole('button', { name: 'Pages', exact: true });
+  if (
+    (await button.getAttribute('aria-pressed')) === 'true' &&
+    (await page.getByTestId('sidebar').isVisible())
+  )
+    return;
+  await button.click();
+  await expect(page.getByTestId('sidebar')).toBeVisible();
+}
+
+/** Standalone destinations remain real buttons; secondary destinations are
+ * in Home's contextual list. Never use a store mutation to bypass navigation. */
+export async function openDestination(
+  page: Page,
+  name:
+    | 'Home'
+    | 'Inbox'
+    | 'My work'
+    | 'Studio'
+    | 'History'
+    | 'Library'
+    | 'Settings'
+    | 'Agents'
+    | 'Work'
+    | 'Knowledge',
+): Promise<void> {
+  const rail = page.getByTestId('app-rail');
+  if (['Home', 'Settings', 'Agents', 'Work', 'Knowledge'].includes(name)) {
+    await rail.getByRole('button', { name, exact: true }).click();
+    return;
+  }
+  const destination = page.getByTestId('nav-surfaces').getByRole('button', {
+    name: new RegExp(`^${name}(?: \\([0-9]+\\))?$`),
+  });
+  if (!(await destination.isVisible())) {
+    await rail.getByRole('button', { name: 'Home', exact: true }).click();
+  }
+  await destination.click();
 }
 
 /** The History destination (M64.2): the year heatmap, then the feed. Waits
  * for both sections to land. */
 export async function openHistory(page: Page) {
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'History' }).click();
+  await openDestination(page, 'History');
   await expect(page.getByTestId('history-heatmap')).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId('history-feed')).toBeVisible({ timeout: 10_000 });
 }
@@ -335,4 +413,18 @@ export async function seedFileBeforeBoot(page: Page, path: string, text: string)
     },
     { path, text },
   );
+}
+
+/** Settings owns local sections; use its visible navigation, including the compact drawer. */
+export async function chooseSettingsSection(page: Page, name: string) {
+  await expect(page.getByTestId('settings-page')).toBeVisible();
+  const navigation = page.getByRole('navigation', { name: 'Settings sections' });
+  if (!(await navigation.isVisible())) {
+    await page
+      .getByTestId('settings-page')
+      .getByRole('button', { name: 'Sections', exact: true })
+      .click();
+  }
+  await navigation.getByRole('button', { name, exact: true }).click();
+  await expect(page.getByTestId('settings-heading')).toHaveText(name);
 }

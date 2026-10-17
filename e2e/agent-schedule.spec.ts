@@ -1,11 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
 import YAML from 'yaml';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, openDestination } from './boot';
 const PATH = 'records/agents/release-scout.md';
 const schedule = async (page: Page) =>
   YAML.parse(/^---\n([\s\S]*?)\n---\n/.exec(await readMockFile(page, PATH))![1])
     .schedule as unknown;
 async function openScout(page: Page) {
+  await openDestination(page, 'Agents');
   await page
     .getByTestId('sidebar')
     .getByRole('button', { name: 'Release scout', exact: true })
@@ -48,7 +49,7 @@ test('a phrase and monthly list persist, next time is soonest, and an invalid ph
   expect(await readMockFile(page, PATH)).toBe(before);
 });
 async function waiting(page: Page) {
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Settings', exact: true }).click();
+  await openDestination(page, 'Settings');
   const line = page.getByText(/^\d+ background jobs? waiting\.$/);
   return (await line.count()) === 0 ? '0' : await line.textContent();
 }

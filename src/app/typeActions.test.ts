@@ -1407,3 +1407,36 @@ describe('undo labels (M60.7)', () => {
     expect(patches).toEqual([{ path: 'knowledge/types/recipe.md', patch: { fields: {} } }]);
   });
 });
+
+describe('a declared email domain', () => {
+  const seed = () =>
+    useVaultStore.setState({
+      entries: [
+        makeEntry({
+          path: 'types/recipe.md',
+          title: 'Recipe',
+          type: 'Type',
+          properties: { email_domain: 'domain', fields: { domain: 'text' } } as never,
+        }),
+      ],
+      views: [],
+    });
+  it('renames and clears the capability in the same batch as the field', async () => {
+    seed();
+    expect(await renameFieldOnType('Recipe', 'domain', 'Host')).toBe(true);
+    expect(patches[0].patch).toMatchObject({ email_domain: 'host' });
+    patches.length = 0;
+    seed();
+    expect(await removeFieldFromType('Recipe', 'domain')).toBe(true);
+    expect(patches[0].patch.email_domain).toBeNull();
+  });
+  it('retains text to URL and clears other kind changes', async () => {
+    seed();
+    expect(await changeFieldKind('Recipe', 'domain', 'url')).toBe(true);
+    expect(patches[0].patch).not.toHaveProperty('email_domain');
+    patches.length = 0;
+    seed();
+    expect(await changeFieldKind('Recipe', 'domain', 'number')).toBe(true);
+    expect(patches[0].patch.email_domain).toBeNull();
+  });
+});

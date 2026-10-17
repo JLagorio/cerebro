@@ -1,4 +1,5 @@
 import { useFollowupStore } from '@/stores/followupStore';
+import { PageHeader } from '@/components/PageHeader';
 import { useVaultStore } from '@/stores/vaultStore';
 import { waitingFollowup, type Followup } from '@/engine/followups';
 import { RecipesOffer } from './RecipesOffer';
@@ -26,6 +27,7 @@ import { parseTriggers } from '@/engine/triggers';
 import { listTemplates, templateFill } from '@/lib/templates';
 import { nameMatches } from '@/lib/nameRank';
 import type { Entry } from '@/engine/types';
+import '@/pages/workspacePages.css';
 
 /**
  * The library's front door (M18).
@@ -230,75 +232,77 @@ export function LibraryIndex({
   );
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="library-page">
-      <div className="flex-none px-6 pt-5">
-        <h1 className="m-0 text-lg font-semibold tracking-[-0.01em] text-n-900">Library</h1>
-        <p className="m-0 mb-4 max-w-[76ch] text-sm leading-[19px] text-n-500">
-          What the assistant can be told to be. Skills are instructions you invoke, agents are
-          instructions that run themselves, and templates are pages that arrive already shaped — all
-          three are ordinary files in this vault, and what they may write to is enforced rather than
-          requested.
-        </p>
-        <div className="flex items-center gap-2 border-b border-n-200 pb-3">
-          <SegmentedControl
-            size="sm"
-            ariaLabel="Library section"
-            value={tab}
-            onChange={(v) => onTab(v as LibraryKind)}
-            options={LIBRARY_KINDS.map((k) => ({
-              value: k,
-              label: `${libraryLabelPlural(k)}${counts[k] === 0 ? '' : ` ${counts[k]}`}`,
-              icon: libraryIcon(k),
-              testId: `library-tab-${k}`,
-            }))}
-          />
-          <span className="flex-1" />
-          <Input
-            size="sm"
-            icon="search"
-            value={query}
-            onChange={(e) => onQuery(e.target.value)}
-            placeholder={`Search ${libraryLabelPlural(tab).toLowerCase()}…`}
-            ariaLabel="Search the library"
-          />
+    <div
+      className="cb-library-page flex min-h-0 min-w-0 flex-1 flex-col"
+      data-testid="library-page"
+    >
+      <PageHeader
+        title="Library"
+        description="Skills to call on, agents to work with, and templates to make your own."
+        actions={
           <Button variant="primary" size="sm" icon="plus" onClick={onCreate}>
             {`New ${tab}`}
           </Button>
-        </div>
+        }
+      />
+      <div className="cb-library-controls">
+        <SegmentedControl
+          size="md"
+          ariaLabel="Library section"
+          value={tab}
+          onChange={(v) => onTab(v as LibraryKind)}
+          options={LIBRARY_KINDS.map((k) => ({
+            value: k,
+            label: `${libraryLabelPlural(k)}${counts[k] === 0 ? '' : ` ${counts[k]}`}`,
+            icon: libraryIcon(k),
+            testId: `library-tab-${k}`,
+          }))}
+        />
+        <span className="flex-1" />
+        <Input
+          size="sm"
+          icon="search"
+          value={query}
+          onChange={(e) => onQuery(e.target.value)}
+          placeholder={`Search ${libraryLabelPlural(tab).toLowerCase()}…`}
+          ariaLabel="Search the library"
+        />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
-        {tab === 'skill' && <RecipesOffer />}
-        {shown.length === 0 ? (
-          <EmptyState
-            icon={libraryIcon(tab)}
-            title={
-              query.trim() === ''
-                ? `No ${libraryLabelPlural(tab).toLowerCase()} yet`
-                : `Nothing matches “${query.trim()}”`
-            }
-            description={EMPTY_HINT[tab]}
-            action={
-              query.trim() === '' ? (
-                <Button variant="primary" size="sm" icon="plus" onClick={onCreate}>
-                  {`New ${tab}`}
-                </Button>
-              ) : undefined
-            }
-          />
-        ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(272px,1fr))] gap-3">
-            {shown.map((card) => (
-              <Card
-                key={card.path}
-                card={card}
-                icon={libraryIcon(tab)}
-                onOpen={onOpen}
-                onDuty={onDuty}
-              />
-            ))}
-          </div>
-        )}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="cb-library-content">
+          {tab === 'skill' && <RecipesOffer />}
+          {shown.length === 0 ? (
+            <EmptyState
+              icon={libraryIcon(tab)}
+              title={
+                query.trim() === ''
+                  ? `No ${libraryLabelPlural(tab).toLowerCase()} yet`
+                  : `Nothing matches “${query.trim()}”`
+              }
+              description={EMPTY_HINT[tab]}
+              action={
+                query.trim() === '' ? (
+                  <Button variant="primary" size="sm" icon="plus" onClick={onCreate}>
+                    {`New ${tab}`}
+                  </Button>
+                ) : undefined
+              }
+            />
+          ) : (
+            <div className="cb-library-grid">
+              {shown.map((card) => (
+                <Card
+                  key={card.path}
+                  card={card}
+                  icon={libraryIcon(tab)}
+                  onOpen={onOpen}
+                  onDuty={onDuty}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -325,29 +329,26 @@ function Card({
   onDuty: (path: string, on: boolean) => void;
 }) {
   return (
-    <div
-      data-testid="library-card"
-      className="flex flex-col rounded-xl border border-n-200 bg-n-0 transition-[border-color,box-shadow] hover:border-n-300 hover:shadow-[var(--shadow-sm)]"
-    >
-      <button
-        type="button"
-        onClick={() => onOpen(card.path)}
-        className="flex flex-1 cursor-pointer flex-col items-start gap-1.5 border-0 bg-transparent p-3.5 pb-2.5 text-left"
-      >
+    <div data-testid="library-card" className="cb-library-card">
+      <button type="button" onClick={() => onOpen(card.path)} className="cb-library-card-main">
         <span className="flex w-full min-w-0 items-center gap-2">
-          <Icon name={icon} size={14} color="var(--synapse-500)" />
-          <span className="min-w-0 flex-1 truncate text-sm font-semibold text-n-900">
+          <span className="cb-library-card-icon">
+            <Icon name={icon} size={18} />
+          </span>
+          <span className="min-w-0 flex-1 text-base font-semibold text-n-900 [overflow-wrap:anywhere]">
             {card.title}
           </span>
         </span>
-        {card.handle !== '' && (
-          <span className="max-w-full truncate font-mono text-2xs text-n-400">{card.handle}</span>
-        )}
-        <span className="line-clamp-3 text-xs leading-[17px] text-n-600">
+        <span className="cb-library-card-description line-clamp-3">
           {card.description === '' ? 'No description yet.' : card.description}
         </span>
+        {card.handle !== '' && (
+          <span className="cb-library-card-handle max-w-full truncate font-mono text-2xs">
+            {card.handle}
+          </span>
+        )}
         {card.tags.length > 0 && (
-          <span className="mt-0.5 flex flex-wrap gap-1">
+          <span className="mt-1 flex flex-wrap gap-1.5">
             {card.tags.map((tag) => (
               <span
                 key={tag.label}
@@ -367,8 +368,10 @@ function Card({
         )}
       </button>
       {card.duty !== null && (
-        <div className="flex items-center gap-2 border-t border-n-100 px-3.5 py-2">
-          <span className="min-w-0 flex-1 truncate text-2xs text-n-500">{card.duty.reason}</span>
+        <div className="cb-library-card-footer">
+          <span className="min-w-0 flex-1 text-xs leading-relaxed text-n-600">
+            {card.duty.reason}
+          </span>
           <Switch
             checked={card.duty.on}
             // Nothing to fire it means nothing to pause. A switch that flips

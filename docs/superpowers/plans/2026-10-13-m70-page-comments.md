@@ -8,11 +8,12 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M70 (D18 moved it up: it builds 
 
 ## Status
 
-- **Precondition:** M53–M57 closed: gates green, roadmap statuses updated, M56.1's D4 record written. Today they are being built, unstaged, in this checkout, in order (fc510e6 plus drafts: AGENTS.md at CV-17, `runtime.db` v18; no `tools.v1.json`, `quote.rs` or `interaction.rs` yet). This plan names their finished functions, never today's lines.
-- **Built:** nothing. No comment code exists. BlockNote 0.46.2's `CommentsExtension` (MPL-2.0, `@blocknote/core/comments`) is installed and unused, yet already ships: `BlockNoteDefaultUI` imports it, and the Aug 6 build's editor chunk holds "Yjs was already imported" and `bn-thread-mark`.
+- **Dependencies:** M53–M57. Implementation is present; milestone closure still requires the outstanding acceptance below.
+- **Implementation (2026-10-15):** All five split parts have implementations: quote anchors, guarded comment sidecars, page discussion UI, agent comment tools and page-bound @agent turns. The sidecar and rename/delete paths are covered by shared cases and tests.
+- **Integrated evidence:** see the [roadmap execution update](2026-10-12-macro-port-roadmap.md#execution-update--2026-10-15) for the final unit, coverage, browser, native and static gates, plus their limits. These results do not substitute for packaged or authenticated live acceptance.
 - **Effort:** 1 M + 4 L ≈ 4.5 L; the roadmap said ≈2.3 L. Re-measured: .1 S → M; .2 L → 2 L (split into .2 and .2b by its own bullets); .3 and .4 M → L.
 - **Crash risk:** .2 (rename, delete, the write funnel), .4 (a new spawn path, the reader's emit closure, sidecar writes at vault open).
-- **Packaged checks:** .2b, .4. **Live checks** (CLI 2.1.250 on the owner's isolated login, the end-of-build step): .3, .4.
+- **Packaged acceptance still outstanding:** .2b, .4. **Live acceptance still outstanding** (CLI 2.1.250 on the owner's isolated login, the end-of-build step): .3, .4.
 - **The spike needs no login.** .1 is local (BlockNote, the sidecar path, byte stability), and its Playwright checks run on the mock backend. M70 adds no transport fact: thread turns use only facts M56 and M57 pin.
 - **Schema steps:** none. **New refusal codes:** none.
 

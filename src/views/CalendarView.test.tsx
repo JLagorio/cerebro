@@ -6,6 +6,7 @@ import { columnUniverse } from '@/engine/columns';
 import { buildSchema } from '@/engine/schema';
 import { makeEntry } from '@/test/factories';
 import { useUiStore } from '@/stores/uiStore';
+import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import type { Entry, Presentation } from '@/engine/types';
 
@@ -269,7 +270,10 @@ describe('CalendarView drag to reschedule', () => {
     setup([spanning('standup', '2026-08-05', '2026-08-05')]);
 
     fireEvent.click(screen.getByTestId('calendar-chip'));
-    expect(openDetail).toHaveBeenCalledWith('records/campaigns/standup.md');
+    expect(openDetail).toHaveBeenCalledWith(
+      'records/campaigns/standup.md',
+      useNavStore.getState().active,
+    );
   });
 
   it('moves by a day with the arrow keys, and by a week vertically', async () => {

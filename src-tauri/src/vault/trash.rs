@@ -1255,6 +1255,11 @@ mod tests {
             // M60.6: a rollback removes the batch's own staged temps, never
             // a page; a created page goes to the Trash.
             ("batch.rs", "remove_file", "roll_back"),
+            // M66.6: cleanup is armed only after exclusive staging creation
+            // and accepts only its fixed hidden prefix plus a nonce. It never
+            // removes the installed attachment or an authored page.
+            ("attachments.rs", "remove_file", "remove_staged"),
+            ("attachments.rs", "libc::unlinkat", "remove_staged"),
         ];
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/vault");
         let mut found = Vec::new();
@@ -1276,6 +1281,7 @@ mod tests {
                     "remove_dir_all",
                     "trash::delete",
                     ".delete(path)",
+                    "libc::unlinkat",
                 ] {
                     if let Some(i) = code.find(needle) {
                         found.push((name.clone(), needle, fn_at(production, offset + i)));

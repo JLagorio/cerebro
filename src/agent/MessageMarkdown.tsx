@@ -685,5 +685,7 @@ function renderBlocks(blocks: Block[], ctx: RenderContext): ReactNode[] {
 export function MessageText({ text, onOpen }: { text: string; onOpen: (target: string) => void }) {
   const entries = useVaultStore((s) => s.entries);
   const blocks = useMemo(() => parseBlocks(text), [text]);
-  return <div className="space-y-2">{renderBlocks(blocks, { entries, onOpen })}</div>;
+  return (
+    <div className="cb-message-markdown space-y-2">{renderBlocks(blocks, { entries, onOpen })}</div>
+  );
 }

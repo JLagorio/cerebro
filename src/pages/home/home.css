@@ -1,0 +1,58 @@
+/* M82: Home reads as a sequence of useful lists, with one quiet row rhythm.
+   The same lane owns its state-lab rendering and keyboard cursor. */
+.cb-home-lane {
+  margin-bottom: var(--sp-10);
+}
+
+.cb-home-lane-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-1) var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+.cb-home-lane-meta {
+  color: var(--text-meta);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+}
+
+.cb-home-lane-door {
+  margin-left: auto;
+  padding: var(--sp-1) 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+}
+
+.cb-home-lane-door:hover {
+  color: var(--cortex-600);
+}
+
+.cb-home-section-heading {
+  margin: var(--sp-4) 0 var(--sp-1);
+  color: var(--text-meta);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.cb-home-row[data-focused='true'],
+.cb-home-row[aria-selected='true'] {
+  background: var(--surface-selected);
+}
+
+.cb-home-row[data-focused='true'] {
+  box-shadow: inset 2px 0 0 var(--cortex-500);
+}
+
+.cb-home-row-link,
+.cb-home-task {
+  min-height: 44px;
+  padding: var(--sp-2);
+}
+
+.cb-home-event {
+  min-height: 48px;
+}

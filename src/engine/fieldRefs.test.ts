@@ -329,6 +329,7 @@ const maximalView = {
 } as unknown as ViewDefinition;
 
 const maximalType = {
+  emailDomain: m('TypeDef', 'emailDomain'),
   deadline: m('TypeDef', 'deadline'),
   name: m('TypeDef', 'name'),
   icon: m('TypeDef', 'icon'),
@@ -781,6 +782,7 @@ describe('planFieldRename on the demo vault', () => {
       'epic',
       'blocked_by',
       'project',
+      'agent',
     ]);
     const views = parseViewList(doc.views);
     expect(views.map((v) => v.id)).toEqual([
@@ -1187,5 +1189,48 @@ describe('formula references (M61.4)', () => {
     expect(renameFlagWords(plan.flagged, 'target_value')).toBe(
       "Not changed: the formula “Broken” couldn't be read.",
     );
+  });
+});
+
+it('renames the domain capability while mail header properties remain external vocabulary', () => {
+  const doc = makeEntry({
+    path: 'types/company.md',
+    title: 'Company',
+    type: 'Type',
+    properties: {
+      email_domain: 'domain',
+      fields: {
+        domain: 'text',
+        last_message_at: 'text',
+        last: {
+          kind: 'rollup',
+          source: 'correspondence',
+          property: 'last_message_at',
+          calculate: 'latest',
+        },
+      },
+    } as never,
+  });
+  const schema = buildSchema([doc]);
+  expect(
+    typeDefRefs(schema.types.get('Company')!).filter((r) => r.position === 'rollupProperty'),
+  ).toEqual([]);
+  const result = planFieldRename(
+    { type: 'Company', from: 'domain', to: 'website' },
+    { entries: [doc], schema, lists: [] },
+  );
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  expect(patchOf(result.ops, doc.path)).toMatchObject({
+    email_domain: 'website',
+    fields: { website: 'text' },
+  });
+  const header = planFieldRename(
+    { type: 'Company', from: 'last_message_at', to: 'other' },
+    { entries: [doc], schema, lists: [] },
+  );
+  if (!header.ok) throw new Error('rename expected');
+  expect(patchOf(header.ops, doc.path)).toMatchObject({
+    fields: { last: { property: 'last_message_at' } },
   });
 });

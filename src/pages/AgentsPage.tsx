@@ -1,3 +1,4 @@
+import { PageHeader } from '@/components/PageHeader';
 import { useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -117,22 +118,22 @@ export function AgentsPage({ selection }: { selection: AgentsSelection }) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="agents-page">
-      <div className="flex h-11 flex-none items-center gap-2 border-b border-n-200 px-4">
-        <Icon name="bot" size={16} color="var(--n-600)" />
-        <h1 className="m-0 text-lg font-semibold leading-6 tracking-[-0.005em]">Agents</h1>
-        <span className="flex-1" />
-        {/* Creation stays the Library's flow (born paused, M36.2) — one
-            creator. This is the door to it. */}
-        <Button
-          variant="primary"
-          size="sm"
-          testId="agents-new"
-          onClick={() => navigate({ kind: 'library', tab: 'agent' })}
-        >
-          New agent
-        </Button>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6 pt-4">
+      <PageHeader
+        title="Agents"
+        icon={<Icon name="bot" size={18} />}
+        description="Your agents, what they're working on, and what happens next."
+        actions={
+          <Button
+            variant="primary"
+            size="sm"
+            testId="agents-new"
+            onClick={() => navigate({ kind: 'library', tab: 'agent' })}
+          >
+            New agent
+          </Button>
+        }
+      />
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-8 pt-4">
         {/* The roster's click OPENS the agent — its page, on the Runs tab
             (M55.12); on this surface an agent is a destination, not a
             filter. The fleet lives here alone since M50.5; Knowledge's old

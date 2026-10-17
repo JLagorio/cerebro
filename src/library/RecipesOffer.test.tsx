@@ -14,9 +14,11 @@ afterEach(() => {
   vi.restoreAllMocks();
   resetMockFs();
 });
-it('names the missing recipes, adds both, and disappears', async () => {
+it('names the missing recipes, adds all missing recipes, and disappears', async () => {
   render(<RecipesOffer />);
-  expect(screen.getByTestId('recipes-offer').textContent).toContain('Catch me up and What I did');
+  expect(screen.getByTestId('recipes-offer').textContent).toContain(
+    'Catch me up, Draft reply, What I did',
+  );
   fireEvent.click(screen.getByRole('button', { name: 'Add recipes' }));
   await waitFor(() => expect(screen.queryByTestId('recipes-offer')).toBeNull());
   expect(
@@ -68,5 +70,5 @@ it('counts a page at the shipped path even without a slug', async () => {
   render(<RecipesOffer />);
   expect(screen.getByTestId('recipes-offer').textContent).toContain('What I did');
   expect(screen.getByTestId('recipes-offer').textContent).not.toContain('Catch me up');
-  expect(screen.getByRole('button', { name: /^Add recipe$/ })).toBeTruthy();
+  expect(screen.getByRole('button', { name: /^Add recipes$/ })).toBeTruthy();
 });

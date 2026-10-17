@@ -6,16 +6,16 @@ import { collectionsTree, nodeCount } from '@/engine/collections';
 import type { CollectionNode } from '@/engine/types';
 import { LearnedCard } from '@/knowledge/LearnedCard';
 import { useNavStore } from '@/stores/navStore';
+import { useLauncherStore } from '@/stores/launcherStore';
+import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
+import './pages.css';
 
 export function greetingForHour(hour: number): string {
   if (hour < 12) return 'Good morning';
   if (hour < 18) return 'Good afternoon';
   return 'Good evening';
 }
-
-const CARD =
-  'flex min-w-0 flex-col gap-2 rounded-lg border border-n-200 bg-n-0 px-[14px] py-[13px] text-left hover:border-n-300 hover:shadow-[var(--shadow-sm)]';
 
 /** One root Collection (M12.5 — the grid used to be projects). */
 export function CollectionCard({ node }: { node: CollectionNode }) {
@@ -27,17 +27,18 @@ export function CollectionCard({ node }: { node: CollectionNode }) {
       type="button"
       data-testid="home-collection-card"
       onClick={() => navigate({ kind: 'collection', folder: node.id })}
-      className={CARD}
+      className="cb-home-collection"
     >
-      <div className="flex min-w-0 items-center gap-2">
-        <Icon name={node.icon} size={15} color={node.color ?? 'var(--n-500)'} />
-        <span className="overflow-hidden text-ellipsis whitespace-nowrap text-md font-semibold text-n-900">
-          {node.label}
+      <span className="cb-home-collection-icon">
+        <Icon name={node.icon} size={19} color={node.color ?? 'var(--n-500)'} />
+      </span>
+      <span className="cb-home-collection-copy">
+        <span className="truncate text-md font-medium text-n-900">{node.label}</span>
+        <span className="text-xs text-[var(--text-meta)]">
+          {count} {count === 1 ? 'thing' : 'things'} inside
         </span>
-      </div>
-      <div className="text-xs text-[var(--text-meta)]">
-        {count} {count === 1 ? 'thing' : 'things'} inside
-      </div>
+      </span>
+      <Icon name="chevron-right" size={14} color="var(--text-meta)" />
     </button>
   );
 }
@@ -51,6 +52,9 @@ export function HomePage() {
   const views = useVaultStore((s) => s.views);
   const collections = useVaultStore((s) => s.collections);
   const schema = useSchema();
+  const openAssistant = useUiStore((s) => s.openAssistantCanvas);
+  const search = useUiStore((s) => s.setQuickOpen);
+  const startCreate = useLauncherStore((s) => s.startCreate);
 
   // M12.5: the grid shows Collections — the containers — where it used to
   // show a hardcoded Project type nobody has anymore.
@@ -62,27 +66,51 @@ export function HomePage() {
   const greeting = greetingForHour(new Date().getHours());
 
   return (
-    <div className="min-w-0 flex-1 overflow-y-auto bg-n-0">
-      <div className="mx-auto max-w-[1080px] px-8 pb-14 pt-8">
-        <div className="mb-[18px] flex items-baseline gap-3">
-          <h1 className="m-0 text-2xl font-semibold leading-[30px] tracking-[-0.015em]">
-            {greeting}
-          </h1>
-          <span className="text-xs text-[var(--text-meta)]">
-            {roots.length} {roots.length === 1 ? 'collection' : 'collections'}
+    <div className="cb-home min-w-0 flex-1 overflow-y-auto bg-n-0">
+      <div className="cb-home-content">
+        <header className="cb-home-welcome">
+          <span className="cb-home-eyebrow">Your workspace</span>
+          <h1>{greeting}</h1>
+          <p>A little space to think. Everything you’re working on, close at hand.</p>
+        </header>
+
+        <button type="button" className="cb-home-ask" onClick={openAssistant}>
+          <span className="cb-home-ask-icon">
+            <Icon name="sparkles" size={21} />
           </span>
+          <span className="cb-home-ask-copy">
+            <span>What would you like to work on?</span>
+            <span>Think it through with your assistant</span>
+          </span>
+          <span className="cb-home-ask-arrow">
+            <Icon name="arrow-up-right" size={19} />
+          </span>
+        </button>
+        <div className="cb-home-actions" aria-label="Workspace actions">
+          <button type="button" onClick={() => startCreate('page')}>
+            <Icon name="file-plus" size={16} /> New page
+          </button>
+          <button type="button" onClick={() => startCreate('whiteboard')}>
+            <Icon name="pen-tool" size={16} /> New whiteboard
+          </button>
+          <button type="button" onClick={() => search(true)}>
+            <Icon name="search" size={16} /> Find something
+          </button>
         </div>
 
         <StarterOffer />
 
-        <LearnedCard />
-
         <HomeLanes />
 
-        <div className="mb-2.5 flex items-center gap-2">
+        <LearnedCard />
+
+        <div className="cb-home-collections-heading">
           <h2 className={SECTION_HEADING}>Collections</h2>
+          <span className="text-xs text-[var(--text-meta)]">
+            {roots.length} {roots.length === 1 ? 'collection' : 'collections'}
+          </span>
         </div>
-        <div className="grid grid-cols-2 gap-2.5">
+        <div className="cb-home-collections">
           {roots.map((node) => (
             <CollectionCard key={node.id} node={node} />
           ))}

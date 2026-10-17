@@ -48,7 +48,7 @@ export function SheetMenu({
               <button
                 type="button"
                 role="menuitem"
-                className="block w-full rounded px-3 py-2 text-left text-xs text-synapse-600 hover:bg-synapse-50"
+                className="block w-full rounded-sm px-3 py-2 text-left text-xs text-synapse-600 hover:bg-synapse-50"
                 onClick={() => {
                   setOpen(false);
                   onAsk();
@@ -65,7 +65,7 @@ export function SheetMenu({
                   key={label}
                   type="button"
                   role="menuitem"
-                  className="block w-full rounded px-3 py-2 text-left text-xs text-n-700 hover:bg-n-50 disabled:opacity-40"
+                  className="block w-full rounded-sm px-3 py-2 text-left text-xs text-n-700 hover:bg-n-50 disabled:opacity-40"
                   disabled={
                     disabled || gridChangeProblem(sheets, sheet, change, at, count) !== null
                   }

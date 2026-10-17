@@ -10,6 +10,9 @@ scan. A failed marker save after a successful batch does not undo the pages;
 the app tells the person. This is one set of bytes compiled by Rust and loaded
 raw by the browser mock, so it needs no digest.
 
-The kit also includes two editable, read-only recipes: Catch me up and What I
-did. Neither ships scheduled. Existing vaults can add only their missing copies
-from the Library; a page at the shipped path or a Skill with its slug counts.
+The kit also includes three editable recipes: Catch me up, Draft reply and
+What I did. All only read the vault and none ships scheduled. Draft reply
+requires an approved Gmail connector and leaves a draft there; it never sends.
+Its Signature block is editable text on the skill's page, tracked by git.
+Existing vaults can add only their missing copies from the Library; a page at
+the shipped path or a Skill with its slug counts.

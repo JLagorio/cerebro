@@ -94,7 +94,8 @@ export interface FieldDef {
   target?: string;
   /** Relation: at most one linked record when 1 (M12.4); absent = no limit. */
   limit?: 1;
-  /** rollup config: aggregate `property` across the `relation` field's targets. */
+  /** Rollups read related records, or cached mail when source is correspondence. */
+  source?: 'correspondence';
   relation?: string;
   /** Reverse source, two uses: on a rollup (M3.5), aggregate the records of
    * `type` whose `field` points back at this one; on a RELATION (M12.4), this
@@ -234,6 +235,8 @@ export interface TabDef {
 export interface TypeDef {
   /** Declared stored date/range field used for deadline sections (M61.3b). */
   deadline?: string | null;
+  /** Declared text/url field holding the domain whose mail this record groups. */
+  emailDomain?: string | null;
   name: string;
   icon: string | null;
   color: string | null;

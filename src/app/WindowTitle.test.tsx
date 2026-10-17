@@ -2,6 +2,7 @@
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Selection } from '@/engine/types';
+import { useUiStore } from '@/stores/uiStore';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { makeEntry } from '@/test/factories';
@@ -10,6 +11,7 @@ import { WindowTitle } from './WindowTitle';
 describe('WindowTitle (M59.1)', () => {
   beforeEach(() => {
     document.title = 'Cerebro';
+    useUiStore.setState({ aiPanelOpen: false, aiPanelPresentation: 'panel' });
     useVaultStore.setState({ entries: [], views: [], collections: [] });
     useNavStore.setState({ selection: { kind: 'home' } });
   });
@@ -46,6 +48,15 @@ describe('WindowTitle (M59.1)', () => {
     expect(document.title).toBe('Systems map — Cerebro');
     act(() => useVaultStore.setState({ entries: [makeEntry({ path, title: 'Landscape' })] }));
     expect(document.title).toBe('Landscape — Cerebro');
+  });
+
+  it('names the assistant canvas and restores the retained page title when docked', () => {
+    useNavStore.setState({ selection: { kind: 'pulse' } });
+    render(<WindowTitle />);
+    act(() => useUiStore.getState().openAssistantCanvas());
+    expect(document.title).toBe('Assistant — Cerebro');
+    act(() => useUiStore.getState().setAiPanelPresentation('panel'));
+    expect(document.title).toBe('History — Cerebro');
   });
 
   it('puts the app name back when it unmounts', () => {

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot } from './boot';
+import { boot, openDestination } from './boot';
 
 async function files(page: Page) {
   await boot(page);
@@ -72,7 +72,7 @@ async function files(page: Page) {
       '# Media\n\n![Logo](./logo.png)\n\n![Missing](./gone.png)',
     );
   });
-  await page.getByRole('button', { name: 'Open all repositories' }).click();
+  await openDestination(page, 'Work');
   await page.getByTestId('root-tree').getByTestId('tree-row').filter({ hasText: 'media' }).click();
 }
 async function open(page: Page, path: string) {
@@ -135,7 +135,9 @@ test('unknown files explain their limits, executable files omit Open, and markdo
 }) => {
   await files(page);
   await open(page, 'spec.docx');
-  await expect(page.getByTestId('unknown-viewer')).toContainText('No preview is available');
+  await expect(page.getByTestId('unknown-viewer')).toContainText(
+    'No preview for this kind of file',
+  );
   const actions = page.getByTestId('file-actions');
   await expect(actions.getByRole('button')).toHaveCount(4);
   for (const button of await actions.getByRole('button').all()) await expect(button).toBeDisabled();

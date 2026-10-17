@@ -1,3 +1,4 @@
+import CANVAS_EDIT_CASES from '../../src-tauri/fixtures/canvas-edit-cases.json';
 import { stageDropped } from './mockDropped';
 import SHEET_EDIT_CASES from '../../src-tauri/fixtures/sheet-edit-cases.json';
 import VIEW_SUGGESTIONS from '../../src-tauri/fixtures/view-suggestion-cases.json';
@@ -32,6 +33,8 @@ import YAML from 'yaml';
 import BATCH_CASES from '../../src-tauri/fixtures/batch-cases.json';
 import { revertOps } from '@/engine/undoPlan';
 import WRITE_DOORS from '../../src-tauri/fixtures/write-doors.json';
+import NOTION_CASES from '../../src-tauri/fixtures/notion-cases.json';
+import type { MockNotionCapture } from './mockNotion';
 import {
   fileFromValue,
   serializeComments,
@@ -1417,6 +1420,34 @@ describe('mockIpc', () => {
     const call = (c: NoteTargetCase): Promise<string> => {
       const path = c.path ?? '';
       switch (c.door) {
+        case 'write_import': {
+          mock.seedNotionCapture(STAMP.runId!, '11111111111111111111111111111111', {
+            title: 'Landed',
+            result: {
+              markdown: '---\n---\n# Landed\n',
+              counts: { linked: 0, media: 0, databases: 0 },
+            },
+          });
+          return mock
+            .agentImportNotion(
+              '/demo-vault',
+              {
+                page: '11111111111111111111111111111111',
+                folder: path.slice(0, path.lastIndexOf('/')),
+              },
+              STAMP,
+            )
+            .then((result) => result.path);
+        }
+        case 'edit_canvas':
+          return mock
+            .agentEditCanvas(
+              '/demo-vault',
+              path,
+              { ops: [{ op: 'add_node', type: 'group', x: 0, y: 0, width: 1, height: 1 }] },
+              STAMP,
+            )
+            .then(() => path);
         case 'save_canvas':
           return mock
             .saveCanvasFile('/demo-vault', path, '{"nodes":[],"edges":[]}\n')
@@ -1496,7 +1527,8 @@ describe('mockIpc', () => {
     for (const c of NOTE_TARGETS.cases as NoteTargetCase[]) {
       const target = c.path ?? `${c.folder}/${c.slug}`;
       it(`${c.door} ${target} ${c.refused === undefined ? 'lands' : 'refuses'}`, async () => {
-        if (c.door === 'save_canvas' && c.seed !== false) fs().set(c.path ?? '', '{}');
+        if ((c.door === 'save_canvas' || c.door === 'edit_canvas') && c.seed !== false)
+          fs().set(c.path ?? '', '{}');
         if (EDITS.includes(c.door) && c.seed !== false) fs().set(c.path ?? '', NOTE_TARGETS.seed);
         if (c.door === 'batch_rename_to') fs().set('records/source.md', NOTE_TARGETS.seed);
         const before = new Map(fs());
@@ -1522,6 +1554,7 @@ describe('mockIpc', () => {
         'batch_replace_file',
         'create_canvas',
         'create_note',
+        'edit_canvas',
         'edit_note',
         'edit_sheet',
         'restore_version',
@@ -1530,6 +1563,7 @@ describe('mockIpc', () => {
         'set_fields',
         'set_note_title',
         'update_frontmatter',
+        'write_import',
         'write_text_file',
       ]);
     });
@@ -3017,6 +3051,7 @@ describe('every write carries its stamp (M58.1)', () => {
 
   interface DoorCase {
     door: string;
+    notion_case?: string;
     seed?: Record<string, string>;
     args: Record<string, unknown>;
     refused?: string;
@@ -3110,6 +3145,18 @@ describe('every write carries its stamp (M58.1)', () => {
   function callAgent(c: DoorCase): Promise<unknown> {
     const stamp: mock.WriteStamp = { actor: c.stamp!.actor, runId: c.stamp!.run_id };
     switch (c.door) {
+      case 'import_notion_page': {
+        const fixture = NOTION_CASES.cases.find((row) => row.name === c.notion_case)!;
+        mock.seedNotionCapture(stamp.runId!, fixture.page, {
+          title: 'Toy page',
+          result: fixture.expect as MockNotionCapture['result'],
+        });
+        return mock.agentImportNotion(
+          VAULT,
+          { page: text(c.args, 'page'), folder: text(c.args, 'folder') },
+          stamp,
+        );
+      }
       case 'append_to_note':
         return mock.agentAppend(
           VAULT,
@@ -3126,6 +3173,10 @@ describe('every write carries its stamp (M58.1)', () => {
           undefined,
           stamp,
         );
+      case 'edit_canvas':
+        return mock.agentEditCanvas(VAULT, text(c.args, 'path'), c.args, stamp);
+      case 'create_canvas':
+        return mock.agentCreateCanvas(VAULT, c.args, stamp);
       case 'edit_sheet':
         return mock.agentEditSheet(VAULT, text(c.args, 'path'), c.args, stamp);
       case 'set_fields':
@@ -5136,5 +5187,175 @@ describe('whiteboard scan and search', () => {
         (await mock.searchVault('/demo-vault', query)).hits.map((hit) => hit.path),
       ).not.toContain(path);
     fs.delete(path);
+  });
+});
+
+describe('the agent canvas door', () => {
+  const path = 'boards/plan.canvas';
+  const fs = () => (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+  it.each(
+    CANVAS_EDIT_CASES.edits.filter(
+      (test) =>
+        !('limits' in test) &&
+        (!('targets' in test) || !Object.values(test.targets ?? {}).includes('outside')),
+    ),
+  )('replays canvas-edit-cases: $name', async (test) => {
+    fs().set(path, test.source);
+    const targets = 'targets' in test ? test.targets : undefined;
+    if (targets)
+      for (const [file, state] of Object.entries(targets))
+        if (state === 'exists') fs().set(file, '# Present');
+    const readScope = targets && Object.values(targets).includes('unchecked') ? ['boards'] : null;
+    const call = mock.agentEditCanvas('/demo-vault', path, { ops: test.ops }, STAMP, { readScope });
+    if ('refusal' in test) {
+      await expect(call).rejects.toThrow(test.refusal);
+      expect(fs().get(path)).toBe(test.source);
+      expect(mockWrites()).toHaveLength(0);
+    } else {
+      const answer = JSON.parse(await call);
+      expect(answer).toMatchObject({ path, hash: sha256Hex(test.after!), ...test.report });
+      expect(fs().get(path)).toBe(test.after);
+      expect(mockWrites()).toHaveLength(test.after === test.source ? 0 : 1);
+    }
+  });
+  it('refuses Knowledge before the operation cap and staleness before operation validation', async () => {
+    await expect(
+      mock.agentEditCanvas(
+        '/demo-vault',
+        'knowledge/plan.canvas',
+        { ops: Array(26).fill({ op: 'nope' }) },
+        STAMP,
+      ),
+    ).rejects.toThrow('knowledge/ is written only');
+    fs().set(path, '{}');
+    await expect(
+      mock.agentEditCanvas('/demo-vault', path, { ops: [], expect_hash: '0'.repeat(64) }, STAMP),
+    ).rejects.toThrow('stale_content:');
+    expect(fs().get(path)).toBe('{}');
+    expect(mockWrites()).toHaveLength(0);
+  });
+  it('previews without touching bytes or rows', async () => {
+    fs().set(path, '{}');
+    const ops = [{ op: 'add_node', id: 'a', type: 'group', x: 0, y: 0, width: 1, height: 1 }];
+    expect(
+      JSON.parse(await mock.agentEditCanvas('/demo-vault', path, { ops }, STAMP, { preview: true }))
+        .wrote,
+    ).toBe(true);
+    expect(fs().get(path)).toBe('{}');
+    expect(mockWrites()).toHaveLength(0);
+  });
+});
+
+describe('the agent canvas create door', () => {
+  const fs = () => (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+  it('keeps create and edit outside mail digests without a file or receipt', async () => {
+    const path = 'sources/mail/board.canvas';
+    fs().set(path, '{}');
+    const before = new Map(fs());
+    await expect(
+      mock.agentCreateCanvas('/demo-vault', { folder: 'sources/mail', slug: 'new' }, STAMP),
+    ).rejects.toThrow('Nothing was created.');
+    await expect(mock.agentEditCanvas('/demo-vault', path, { ops: [] }, STAMP)).rejects.toThrow(
+      'Nothing was written.',
+    );
+    expect(fs()).toEqual(before);
+    expect(mockWrites()).toHaveLength(0);
+  });
+  it.each(CANVAS_EDIT_CASES.creates)('replays canvas create: $name', async (test) => {
+    for (const path of test.taken) fs().set(path, '{}');
+    const before = new Map(fs());
+    const call = mock.agentCreateCanvas(
+      '/demo-vault',
+      { ...test.args, folder: test.folder, slug: test.slug },
+      STAMP,
+    );
+    if ('refusal' in test) {
+      await expect(call).rejects.toThrow(test.refusal);
+      expect(fs()).toEqual(before);
+      expect(mockWrites()).toHaveLength(0);
+    } else {
+      const result = await call;
+      expect(result.path).toBe(test.path);
+      expect(fs().get(test.path)).toBe(test.after);
+      expect(JSON.parse(result.reply)).toEqual({
+        path: test.path,
+        hash: sha256Hex(test.after!),
+        ...test.report,
+      });
+      expect(mockWrites()).toMatchObject([
+        { kind: 'vault.create', path: test.path, actor: STAMP.actor, runId: STAMP.runId },
+      ]);
+    }
+  });
+  it('previews without mutation and refuses Knowledge, hidden paths, unsafe slugs and write scope', async () => {
+    const before = new Map(fs());
+    expect(
+      (
+        await mock.agentCreateCanvas('/demo-vault', { folder: 'boards', slug: 'new' }, STAMP, {
+          preview: true,
+        })
+      ).path,
+    ).toBe('boards/new.canvas');
+    for (const args of [
+      { folder: 'knowledge', slug: 'new' },
+      { folder: '.hidden', slug: 'new' },
+      { folder: 'boards', slug: 'a/b' },
+    ])
+      await expect(mock.agentCreateCanvas('/demo-vault', args, STAMP)).rejects.toThrow(
+        'Nothing was created.',
+      );
+    await expect(
+      mock.agentCreateCanvas('/demo-vault', { folder: 'boards', slug: 'new' }, STAMP, {
+        writeScope: ['notes'],
+      }),
+    ).rejects.toThrow('cannot write to boards');
+    expect(fs()).toEqual(before);
+    expect(mockWrites()).toHaveLength(0);
+  });
+});
+
+describe('mail dismissals are operational and per vault', () => {
+  it('replays src-tauri/fixtures/mail-dismissal-cases.json in Rust order and words', async () => {
+    const { default: cases } = await import('../../src-tauri/fixtures/mail-dismissal-cases.json');
+    for (const row of cases.cases) {
+      mock.__seedMailDismissals('cases', []);
+      if ('error' in row)
+        await expect(mock.mailDismiss('cases', row.kind, row.value)).rejects.toThrow(row.error);
+      else {
+        await mock.mailDismiss('cases', row.kind, row.value);
+        expect((await mock.mailDismissalsRead('cases'))[0].value).toBe(row.normalized);
+      }
+    }
+    mock.__seedMailDismissals('one', []);
+    mock.__seedMailDismissals('two', []);
+    vi.useFakeTimers();
+    try {
+      for (const row of cases.rows) {
+        vi.setSystemTime(new Date(row.at));
+        await mock.mailDismiss(row.vault, row.kind, row.value);
+      }
+      expect(
+        (await mock.mailDismissalsRead('one')).map((row) => ({
+          ...row,
+          dismissedAt: row.dismissedAt.replace('.000Z', 'Z'),
+        })),
+      ).toEqual(cases.one);
+      expect(await mock.mailDismissalsRead('two')).toHaveLength(1);
+      await mock.mailUndismiss('one', 'address', 'DANA@ACME.EXAMPLE');
+      expect(await mock.mailDismissalsRead('one')).toHaveLength(1);
+      expect(await mock.mailDismissalsRead('two')).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('a dismissal writes no vault file and survives a file-map reload', async () => {
+    mock.__seedMailDismissals('operational', []);
+    const fs = () =>
+      (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+    const before = new Map(fs());
+    await mock.mailDismiss('operational', 'address', 'friend@gmail.com');
+    expect(fs()).toEqual(before);
+    mock.resetMockFs();
+    expect(await mock.mailDismissalsRead('operational')).toHaveLength(1);
   });
 });

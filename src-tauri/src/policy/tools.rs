@@ -337,6 +337,20 @@ pub struct Clients {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct NeverCallTool {
+    pub name: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NeverCall {
+    pub why: String,
+    pub tools: Vec<NeverCallTool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ToolsManifest {
     pub format: u64,
     pub artifact_version: u64,
@@ -352,6 +366,8 @@ pub struct ToolsManifest {
     pub generated: Generated,
     /// In argv order, which is meaning too.
     pub cli_tools: Vec<CliTool>,
+    /// Exact connector send spellings, in ASCII order, with checked sources.
+    pub never_call: NeverCall,
 }
 
 /// The facts a row and the generated block share, checked by one function.
@@ -537,6 +553,7 @@ impl ToolsManifest {
         }
         self.check_generated()?;
         self.check_clients()?;
+        self.check_never_call()?;
         for token in self.tokens.keys() {
             let marker = format!("{{{{{token}}}}}");
             let used = self.tools.iter().any(|row| {
@@ -577,6 +594,39 @@ impl ToolsManifest {
         }
         for tool in &self.cli_tools {
             check_cli(tool)?;
+        }
+        Ok(())
+    }
+
+    fn check_never_call(&self) -> Result<(), String> {
+        if self.never_call.why.trim().is_empty() {
+            return Err(refusal("never_call", "why", "is empty"));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        let mut previous = "";
+        for row in &self.never_call.tools {
+            let subject = format!("never_call tool {}", row.name);
+            if !(1..=64).contains(&row.name.len())
+                || !row
+                    .name
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+            {
+                return Err(refusal(&subject, "name", "must match [A-Za-z0-9_-]{1,64}"));
+            }
+            if !seen.insert(row.name.as_str()) {
+                return Err(refusal(&subject, "name", "is repeated"));
+            }
+            if previous > row.name.as_str() {
+                return Err(refusal(&subject, "name", "must be in ASCII order"));
+            }
+            if self.tools.iter().any(|tool| tool.name == row.name) {
+                return Err(refusal(&subject, "name", "names a cerebro tool"));
+            }
+            if row.source.trim().is_empty() {
+                return Err(refusal(&subject, "source", "is empty"));
+            }
+            previous = &row.name;
         }
         Ok(())
     }
@@ -763,7 +813,14 @@ impl ToolsManifest {
         let (properties, required) = schema_root(&row.input_schema)
             .map_err(|problem| refusal(subject, "input_schema", problem))?;
         if let Some(arg) = row.target.as_ref().and_then(|t| t.arg.as_deref()) {
-            if !properties.contains(arg) || !required.contains(arg) {
+            let property = &row.input_schema["properties"][arg];
+            let root_folder = row
+                .target
+                .as_ref()
+                .is_some_and(|target| target.kind == TargetKind::Folder)
+                && property["type"] == "string"
+                && property["default"].as_str() == Some("");
+            if !properties.contains(arg) || (!required.contains(arg) && !root_folder) {
                 return Err(refusal(
                     subject,
                     "target",
@@ -856,12 +913,25 @@ impl ToolsManifest {
     /// The rules a row and the generated block both answer to.
     fn check_facts(&self, subject: &str, facts: &Facts) -> Result<(), String> {
         if facts.target.is_some_and(|t| t.kind == TargetKind::Canvas)
-            && (facts.axis != Axis::Read || facts.door != "none")
+            && !((facts.axis == Axis::Read && facts.door == "none")
+                || (facts.axis == Axis::ReadWrite && facts.door == "canvas"))
         {
             return Err(refusal(
                 subject,
                 "target",
-                "canvas targets require the read axis and door none",
+                "canvas targets require read with door none or read_write with door canvas",
+            ));
+        }
+        if facts.door == "canvas"
+            && !((facts.axis == Axis::ReadWrite
+                && facts.target.is_some_and(|t| t.kind == TargetKind::Canvas))
+                || (facts.axis == Axis::Write
+                    && facts.target.is_some_and(|t| t.kind == TargetKind::Folder)))
+        {
+            return Err(refusal(
+                subject,
+                "target",
+                "door canvas needs a canvas target on read_write or a folder target on write",
             ));
         }
         if facts.target.is_some_and(|t| t.kind == TargetKind::File)
@@ -943,12 +1013,12 @@ impl ToolsManifest {
                     "must name a note or folder argument on the write axis",
                 ));
             }
-            (Axis::ReadWrite, Some(TargetKind::Note)) => {}
+            (Axis::ReadWrite, Some(TargetKind::Note | TargetKind::Canvas)) => {}
             (Axis::ReadWrite, _) => {
                 return Err(refusal(
                     subject,
                     "target",
-                    "must name a note argument on the read_write axis",
+                    "must name a note or canvas argument on the read_write axis",
                 ));
             }
             (Axis::Read, Some(kind))
@@ -1193,6 +1263,15 @@ pub fn generated() -> &'static Generated {
 
 pub fn clients() -> &'static Clients {
     &manifest().clients
+}
+
+/// Every loaded connector is denied these exact tool spellings.
+pub fn never_call_names() -> impl Iterator<Item = &'static str> {
+    manifest()
+        .never_call
+        .tools
+        .iter()
+        .map(|row| row.name.as_str())
 }
 
 pub fn toolset_writes(id: &str) -> bool {
@@ -1556,7 +1635,7 @@ mod tests {
     }
 
     #[test]
-    fn the_shipped_manifest_confirms_exactly_the_note_writers() {
+    fn the_shipped_manifest_confirms_exactly_the_page_and_board_writers() {
         let rows: Vec<&str> = manifest()
             .tools
             .iter()
@@ -1571,7 +1650,9 @@ mod tests {
                 "set_fields",
                 "append_to_note",
                 "edit_note",
-                "edit_sheet"
+                "edit_sheet",
+                "create_canvas",
+                "edit_canvas"
             ]
         );
         assert!(!generated().confirmable);
@@ -1583,7 +1664,9 @@ mod tests {
                 "mcp__cerebro__set_fields",
                 "mcp__cerebro__append_to_note",
                 "mcp__cerebro__edit_note",
-                "mcp__cerebro__edit_sheet"
+                "mcp__cerebro__edit_sheet",
+                "mcp__cerebro__create_canvas",
+                "mcp__cerebro__edit_canvas"
             ]
         );
         // Every spelling the one name test takes, and nothing else.
@@ -2489,6 +2572,99 @@ mod tests {
     }
 
     #[test]
+    fn never_call_names_follow_the_manifest_order() {
+        let names: Vec<_> = never_call_names().collect();
+        assert!(!names.is_empty());
+        assert_eq!(
+            names,
+            manifest()
+                .never_call
+                .tools
+                .iter()
+                .map(|row| row.name.as_str())
+                .collect::<Vec<_>>()
+        );
+        assert!(names.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+
+    #[test]
+    fn never_call_refusals_name_the_row_and_field() {
+        assert_eq!(
+            refused(|v| v["never_call"]["why"] = json!(" ")),
+            refusal("never_call", "why", "is empty")
+        );
+        for name in ["", "send mail", "send,Read", "send\n", "é", &"x".repeat(65)] {
+            assert_eq!(
+                refused(
+                    |v| v["never_call"]["tools"] = json!([{ "name": name, "source": "checked" }])
+                ),
+                refusal(
+                    &format!("never_call tool {name}"),
+                    "name",
+                    "must match [A-Za-z0-9_-]{1,64}"
+                )
+            );
+        }
+        for (rows, subject, field, problem) in [
+            (
+                json!([{ "name": "send", "source": " " }]),
+                "send",
+                "source",
+                "is empty",
+            ),
+            (
+                json!([{ "name": "send", "source": "a" }, { "name": "send", "source": "b" }]),
+                "send",
+                "name",
+                "is repeated",
+            ),
+            (
+                json!([{ "name": "z", "source": "a" }, { "name": "a", "source": "b" }]),
+                "a",
+                "name",
+                "must be in ASCII order",
+            ),
+            (
+                json!([{ "name": "get_note", "source": "a" }]),
+                "get_note",
+                "name",
+                "names a cerebro tool",
+            ),
+        ] {
+            assert_eq!(
+                refused(|v| v["never_call"]["tools"] = rows),
+                refusal(&format!("never_call tool {subject}"), field, problem)
+            );
+        }
+        for err in [
+            refused(|v| v["never_call"]["allow"] = json!(true)),
+            refused(|v| v["never_call"]["tools"][0]["alias"] = json!("send")),
+        ] {
+            assert!(err.contains("unknown field"), "{err}");
+        }
+    }
+
+    #[test]
+    fn never_call_text_uses_unicode_white_space() {
+        for field in ["why", "source"] {
+            for (value, empty) in [("\u{0085}", true), ("\u{feff}", false)] {
+                let mut raw: Value = serde_json::from_str(TOOLS_JSON).unwrap();
+                if field == "why" {
+                    raw["never_call"][field] = json!(value);
+                } else {
+                    raw["never_call"]["tools"][0][field] = json!(value);
+                }
+                let result = parse(&serde_json::to_string(&raw).unwrap());
+                if empty {
+                    assert!(result.unwrap_err().contains(&format!("`{field}` is empty")));
+                } else {
+                    assert!(result.is_ok());
+                }
+            }
+        }
+    }
+
+    #[test]
     fn an_unknown_field_fails_the_parse_rather_than_being_dropped() {
         let err = refused(|v| tool(v, "get_note")["readonly"] = json!(true));
         assert_names(&err, &[TOOLS_PATH, "readonly"]);
@@ -2523,7 +2699,20 @@ mod tests {
         );
     }
     #[test]
-    fn a_canvas_target_sits_only_on_reads() {
+    fn an_optional_folder_requires_its_explicit_root_default() {
+        assert_eq!(row("create_canvas").unwrap().kind, Kind::Additive);
+        for value in [Value::Null, json!("boards"), json!(0)] {
+            assert_names(
+                &refused(|v| {
+                    tool(v, "create_canvas")["input_schema"]["properties"]["folder"]["default"] =
+                        value
+                }),
+                &["input_schema must declare and require"],
+            );
+        }
+    }
+    #[test]
+    fn a_canvas_target_sits_only_on_its_read_and_write_doors() {
         assert_eq!(
             row("read_canvas").unwrap().target.as_ref().unwrap().kind,
             TargetKind::Canvas
@@ -2534,13 +2723,21 @@ mod tests {
                 &[
                     "tool read_canvas",
                     "target",
-                    "canvas targets require the read axis and door none",
+                    "canvas targets require read with door none or read_write with door canvas",
                 ],
             );
         }
         assert_names(
             &refused(|v| tool(v, "read_canvas")["target"]["arg"] = Value::Null),
             &["tool read_canvas", "target", "canvas needs an argument"],
+        );
+        assert_names(
+            &refused(|v| tool(v, "edit_canvas")["target"]["kind"] = json!("note")),
+            &[
+                "tool edit_canvas",
+                "target",
+                "door canvas needs a canvas target on read_write or a folder target on write",
+            ],
         );
     }
 }

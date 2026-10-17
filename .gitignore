@@ -10,6 +10,8 @@ dist/
 dist-mac/
 .vite/
 src-tauri/target/
+# Sanitized build-only demo snapshot (build.rs), never the source corpus.
+src-tauri/.bundle-resources/
 src-tauri/gen/schemas/
 
 # Playwright artifacts

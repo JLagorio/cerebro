@@ -22,12 +22,12 @@ test('mermaid renders in docs, and the lightbox zooms', async ({ page }) => {
   });
   await page.goto('/');
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
-  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  const shell = page.getByTestId('app-rail');
+  await expect(demoButton.or(shell)).toBeVisible({ timeout: 10_000 });
   if (await demoButton.isVisible()) {
     await demoButton.click();
   }
-  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+  await expect(shell).toBeVisible({ timeout: 10_000 });
 
   // -- Open the corpus doc through quick open ---------------------------
   await page.keyboard.press('ControlOrMeta+k');
@@ -98,12 +98,12 @@ test('authoring: template, live preview, error banner, commit', async ({ page })
   });
   await page.goto('/');
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
-  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  const shell = page.getByTestId('app-rail');
+  await expect(demoButton.or(shell)).toBeVisible({ timeout: 10_000 });
   if (await demoButton.isVisible()) {
     await demoButton.click();
   }
-  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+  await expect(shell).toBeVisible({ timeout: 10_000 });
 
   // -- Open the corpus doc through quick open ---------------------------
   await page.keyboard.press('ControlOrMeta+k');
@@ -192,12 +192,12 @@ test('structural editing round-trips to the file', async ({ page }) => {
   });
   await page.goto('/');
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
-  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  const shell = page.getByTestId('app-rail');
+  await expect(demoButton.or(shell)).toBeVisible({ timeout: 10_000 });
   if (await demoButton.isVisible()) {
     await demoButton.click();
   }
-  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+  await expect(shell).toBeVisible({ timeout: 10_000 });
 
   // -- Open the corpus doc through quick open ---------------------------
   await page.keyboard.press('ControlOrMeta+k');
@@ -271,12 +271,12 @@ test('a .mmd file opens as a diagram page and edits round-trip raw', async ({ pa
   });
   await page.goto('/');
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
-  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  const shell = page.getByTestId('app-rail');
+  await expect(demoButton.or(shell)).toBeVisible({ timeout: 10_000 });
   if (await demoButton.isVisible()) {
     await demoButton.click();
   }
-  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+  await expect(shell).toBeVisible({ timeout: 10_000 });
 
   // -- Open the seeded diagram through quick open ------------------------
   await page.keyboard.press('ControlOrMeta+k');
@@ -329,12 +329,12 @@ test('the diagram page is a pan/zoom canvas with a floating code overlay', async
   });
   await page.goto('/');
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
-  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  const shell = page.getByTestId('app-rail');
+  await expect(demoButton.or(shell)).toBeVisible({ timeout: 10_000 });
   if (await demoButton.isVisible()) {
     await demoButton.click();
   }
-  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+  await expect(shell).toBeVisible({ timeout: 10_000 });
 
   // -- Open the seeded diagram through quick open ------------------------
   await page.keyboard.press('ControlOrMeta+k');
@@ -410,12 +410,12 @@ test('a doc block opens full screen, and a rename flows back into the block', as
   });
   await page.goto('/');
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
-  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  const shell = page.getByTestId('app-rail');
+  await expect(demoButton.or(shell)).toBeVisible({ timeout: 10_000 });
   if (await demoButton.isVisible()) {
     await demoButton.click();
   }
-  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+  await expect(shell).toBeVisible({ timeout: 10_000 });
 
   // -- Open the corpus doc through quick open ---------------------------
   await page.keyboard.press('ControlOrMeta+k');
@@ -489,12 +489,12 @@ test('shapes, colors, and edge animation round-trip as surgical mermaid', async 
   });
   await page.goto('/');
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
-  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  const shell = page.getByTestId('app-rail');
+  await expect(demoButton.or(shell)).toBeVisible({ timeout: 10_000 });
   if (await demoButton.isVisible()) {
     await demoButton.click();
   }
-  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+  await expect(shell).toBeVisible({ timeout: 10_000 });
 
   // -- Open the corpus doc through quick open ---------------------------
   await page.keyboard.press('ControlOrMeta+k');
@@ -637,12 +637,12 @@ test('stage F: group, icon, and record link, end to end', async ({ page }) => {
   });
   await page.goto('/');
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
-  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  const shell = page.getByTestId('app-rail');
+  await expect(demoButton.or(shell)).toBeVisible({ timeout: 10_000 });
   if (await demoButton.isVisible()) {
     await demoButton.click();
   }
-  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+  await expect(shell).toBeVisible({ timeout: 10_000 });
 
   // -- Open the corpus doc through quick open ---------------------------
   await page.keyboard.press('ControlOrMeta+k');
@@ -784,12 +784,12 @@ test('manual layout: a drag writes positions, they survive a reopen, auto return
   });
   await page.goto('/');
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
-  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  const shell = page.getByTestId('app-rail');
+  await expect(demoButton.or(shell)).toBeVisible({ timeout: 10_000 });
   if (await demoButton.isVisible()) {
     await demoButton.click();
   }
-  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+  await expect(shell).toBeVisible({ timeout: 10_000 });
 
   const openDoc = async (name: string) => {
     await page.keyboard.press('ControlOrMeta+k');
@@ -970,10 +970,10 @@ test('M29.51: the editor chrome survives a zoom, and a rename keeps the diagram'
   });
   await page.goto('/');
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
-  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  const shell = page.getByTestId('app-rail');
+  await expect(demoButton.or(shell)).toBeVisible({ timeout: 10_000 });
   if (await demoButton.isVisible()) await demoButton.click();
-  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+  await expect(shell).toBeVisible({ timeout: 10_000 });
 
   await page.keyboard.press('ControlOrMeta+k');
   await page.getByTestId('quick-open-input').fill('Pipeline');
@@ -1105,10 +1105,10 @@ async function bootVault(page: import('@playwright/test').Page): Promise<void> {
   });
   await page.goto('/');
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
-  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  const shell = page.getByTestId('app-rail');
+  await expect(demoButton.or(shell)).toBeVisible({ timeout: 10_000 });
   if (await demoButton.isVisible()) await demoButton.click();
-  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+  await expect(shell).toBeVisible({ timeout: 10_000 });
 }
 
 async function openPipelineDiagram(page: import('@playwright/test').Page): Promise<void> {

@@ -1,6 +1,6 @@
 import { ConvertBoardDialog } from '@/whiteboard/ConvertBoardDialog';
 import { readMermaidBoard } from '@/whiteboard/mermaidBoard';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useOpenPath } from '@/app/useOpenPath';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -14,7 +14,6 @@ import { CanvasUnavailable, CanvasHeldFace, CanvasReadOnly } from '@/whiteboard/
 import { useScene } from '@/whiteboard/useScene';
 import { WhiteboardAncestry } from '@/whiteboard/ancestry';
 import { placedPaths } from '@/engine/boardCards';
-import { useVaultActionGuard } from '@/hooks/useVaultActionGuard';
 import { rankNames } from '@/lib/nameRank';
 import { slugify } from '@/lib/slug';
 import { FullScreenDiagramEditor } from '@/mermaid/FullScreenDiagramEditor';
@@ -72,7 +71,22 @@ export function WhiteboardView({
 }: WhiteboardViewProps) {
   // Tab changes still publish through their pinned callback. A vault change,
   // including an A→B→A round trip batched by React, retires the old action.
-  const capture = useVaultActionGuard('whiteboard-view');
+  // StrictMode replays effects on the SAME mounted instance while creation
+  // is still in flight. Keep that request's owner across the replay; a real
+  // unmount leaves its own ref retired, and a new instance owns another ref.
+  // Vault changes permanently advance the generation, including batched A→B→A.
+  const lifetime = useRef({ mounted: false, generation: 0 });
+  useLayoutEffect(() => {
+    const life = lifetime.current;
+    life.mounted = true;
+    const unsubscribe = useVaultStore.subscribe((next, previous) => {
+      if (next.vaultPath !== previous.vaultPath) life.generation += 1;
+    });
+    return () => {
+      life.mounted = false;
+      unsubscribe();
+    };
+  }, []);
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const toast = useUiStore((s) => s.toast);
   const file = presentation.whiteboard?.file ?? null;
@@ -129,7 +143,12 @@ export function WhiteboardView({
     // is a last-write-wins on one tab instead of corruption across two, and
     // is the same shape every other presentation writer here already has.
     const pinned = latest.current;
-    const current = capture();
+    const life = lifetime.current;
+    const generation = life.generation;
+    const current = () =>
+      life.mounted &&
+      life.generation === generation &&
+      useVaultStore.getState().vaultPath === vaultPath;
     void (async () => {
       let written = false;
       try {
@@ -165,7 +184,7 @@ export function WhiteboardView({
           toast(`Couldn't create whiteboard: ${err instanceof Error ? err.message : String(err)}`);
       }
     })();
-  }, [file, folder, viewName, vaultPath, canPersist, toast, capture]);
+  }, [file, folder, viewName, vaultPath, canPersist, toast]);
 
   if (host === null) {
     // A dashboard tile sends the person to the list that owns the board.

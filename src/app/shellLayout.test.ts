@@ -148,19 +148,23 @@ describe('shellPlan', () => {
 
   it('derives its thresholds from the floors', () => {
     expect(SHELL_TWO_PANEL_MIN).toBe(
-      SIDEBAR_WIDTH_MIN + CANVAS_MIN_WIDTH + 2 * RIGHT_PANEL_MIN_WIDTH,
+      SIDEBAR_RAIL_WIDTH + SIDEBAR_WIDTH_MIN + CANVAS_MIN_WIDTH + 2 * RIGHT_PANEL_MIN_WIDTH,
     );
-    expect(SHELL_TWO_PANEL_MIN).toBe(1220);
+    expect(SHELL_TWO_PANEL_MIN).toBe(1274);
     expect(SHELL_RAIL_TWO_PANEL_MIN).toBe(SIDEBAR_RAIL_WIDTH + 1040);
-    expect(SHELL_BARE_TWO_PANEL_MIN).toBe(1040);
+    expect(SHELL_BARE_TWO_PANEL_MIN).toBe(1094);
     expect(SHELL_PARKED_COLUMN_MIN).toBe(
-      SIDEBAR_WIDTH_MIN + CANVAS_MIN_WIDTH + RIGHT_PANEL_MIN_WIDTH + PARKED_TAB_WIDTH,
+      SIDEBAR_RAIL_WIDTH +
+        SIDEBAR_WIDTH_MIN +
+        CANVAS_MIN_WIDTH +
+        RIGHT_PANEL_MIN_WIDTH +
+        PARKED_TAB_WIDTH,
     );
-    expect(SHELL_PARKED_COLUMN_MIN).toBe(932);
+    expect(SHELL_PARKED_COLUMN_MIN).toBe(986);
   });
 
   it('draws both beside a sidebar column when the column fits', () => {
-    expect(plan(1220, {})).toEqual({ sidebar: 'column', assistant: 'drawn' });
+    expect(plan(1274, {})).toEqual({ sidebar: 'column', assistant: 'drawn' });
   });
 
   it('steps the sidebar down to its rail before it parks the assistant', () => {
@@ -341,14 +345,14 @@ describe('dragCeiling', () => {
 describe('mainColumnFloor', () => {
   it('is the canvas floor alone when no panel is drawn', () => {
     expect(mainColumnFloor({ detail: false, assistant: false, assistantWidth: 380 })).toBe(
-      'min(400px, 100vw - 180px)',
+      'min(400px, 100vw - 234px)',
     );
   });
 
   it('counts the record at its floor and the assistant at its whole width', () => {
     // So the sidebar gives before the assistant does.
     expect(mainColumnFloor({ detail: true, assistant: true, assistantWidth: 380 })).toBe(
-      'min(1100px, 100vw - 180px)',
+      'min(1100px, 100vw - 234px)',
     );
   });
 
@@ -356,13 +360,13 @@ describe('mainColumnFloor', () => {
     // 400 canvas + 272 side panel + 380 assistant.
     expect(
       mainColumnFloor({ detail: false, assistant: true, assistantWidth: 380, pageAside: true }),
-    ).toBe(`min(${CANVAS_MIN_WIDTH + DOC_PANEL_WIDTH + 380}px, 100vw - 180px)`);
+    ).toBe(`min(${CANVAS_MIN_WIDTH + DOC_PANEL_WIDTH + 380}px, 100vw - 234px)`);
   });
 
   it('is capped at what the window holds beside a minimum sidebar', () => {
     // A floor wider than that pushes the whole right edge out of the window.
     expect(mainColumnFloor({ detail: false, assistant: true, assistantWidth: 720 })).toBe(
-      'min(1120px, 100vw - 180px)',
+      'min(1120px, 100vw - 234px)',
     );
   });
 });
@@ -384,8 +388,8 @@ describe('sidebarCeiling', () => {
   const floor = mainColumnFloorPx({ detail: true, assistant: true, assistantWidth: 380 });
 
   it('stops the drag at what can be drawn beside the main column floor', () => {
-    expect(sidebarCeiling(1440, floor)).toBe(1440 - floor);
-    expect(sidebarCeiling(1440, floor)).toBe(340);
+    expect(sidebarCeiling(1440, floor)).toBe(1440 - SIDEBAR_RAIL_WIDTH - floor);
+    expect(sidebarCeiling(1440, floor)).toBe(286);
   });
 
   it('keeps the sidebar maximum when the window has more room than that', () => {
@@ -477,7 +481,7 @@ describe('pane row floors', () => {
       mainColumnFloorPx({ detail: false, assistant: false, assistantWidth: 0, panes: 3 }),
     ).toBe(1232);
     expect(mainColumnFloor({ detail: true, assistant: false, assistantWidth: 0, panes: 2 })).toBe(
-      'min(1152px, 100vw - 180px)',
+      'min(1152px, 100vw - 234px)',
     );
   });
 });

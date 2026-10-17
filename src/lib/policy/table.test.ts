@@ -341,6 +341,14 @@ describe('the table answers the questions an interpreter asks', () => {
     expect(retryVerdict(POLICY, 'no_longer_waiting', 0)).toBe('not_retryable');
   });
 
+  it('declares import_refused an operational transport code, in no op row', () => {
+    expect(destiny(POLICY, 'import_refused')).toBe('operational');
+    expect(POLICY.transport_rejections).toContain('import_refused');
+    for (const [name, rule] of Object.entries(POLICY.ops))
+      expect(rule.possible_rejections, name).not.toContain('import_refused');
+    expect(retryVerdict(POLICY, 'import_refused', 0)).toBe('not_retryable');
+  });
+
   it('declares note_exists an operational transport code, in no op row', () => {
     // M61.6b. A create told to refuse a taken name stops at the write door
     // before a byte, and no hash was named, so it is never stale_content.

@@ -156,6 +156,7 @@ describe('App boot flow', () => {
       toasts: [],
       detailPath: null,
       aiPanelOpen: false,
+      aiPanelPresentation: 'panel',
       inboxSelectedPath: null,
       sidebarCollapsed: false,
     });
@@ -323,7 +324,7 @@ describe('App boot flow', () => {
       expect(record.className).toMatch(/(^|\s)shrink(\s|$)/);
       // … and the assistant keeps its width, capped at the slot less that floor.
       expect(assistant.style.width).toBe('380px');
-      expect(assistant.className).toContain('flex-none');
+      expect(screen.getByTestId('ai-panel-frame').className).toContain('flex-none');
       expect(assistant.className).toContain('max-w-full');
       expect(screen.getByTestId('ai-panel-frame').style.maxWidth).toBe('calc(100% - 320px)');
       // What that comes to — 1176 − 400 canvas floor − 380 — is where a drag
@@ -348,8 +349,8 @@ describe('App boot flow', () => {
       act(() => useUiStore.getState().setAiPanelOpen(true));
       act(() => useUiStore.getState().openDetail(ITEM));
       await screen.findByTestId('detail-panel');
-      // 1440 − (400 canvas + 320 record floor + 380 assistant).
-      expect(handle().getAttribute('aria-valuemax')).toBe('340');
+      // 1440 − 54 rail − (400 canvas + 320 record floor + 380 assistant).
+      expect(handle().getAttribute('aria-valuemax')).toBe('286');
     });
 
     /**
@@ -360,7 +361,7 @@ describe('App boot flow', () => {
      * applies no stylesheet, so these read the classes CSS draws from.
      */
     const column = () => screen.getByTestId('sidebar');
-    const rail = () => screen.getByTestId('sidebar-rail');
+    const rail = () => screen.getByTestId('app-rail');
     const frame = () => screen.getByTestId('ai-panel-frame');
     const tab = () =>
       screen.getByRole('button', { name: 'Assistant hidden — close the record to show it' });
@@ -378,24 +379,24 @@ describe('App boot flow', () => {
       widthAtLeast(SHELL_RAIL_TWO_PANEL_MIN);
       await bothOpen();
 
-      // The rail under 1220, the column above it — latched, since the rail is
+      // The rail under 1274, the column above it — latched, since the rail is
       // what keeps both panels here …
-      expect(rail().className).toContain('hidden max-[1220px]:flex');
-      expect(column().className).toMatch(/(^|\s)max-\[1220px\]:hidden(\s|$)/);
-      // … and the assistant parked under 1084, behind its tab.
-      expect(frame().className).toContain('max-[1084px]:w-0');
-      expect(tab().className).toContain('hidden max-[1084px]:flex');
+      expect(rail().className).toContain('m71-app-rail');
+      expect(column().className).toMatch(/(^|\s)max-\[1274px\]:hidden(\s|$)/);
+      // … and the assistant parked under 1094, behind its tab.
+      expect(frame().className).toContain('max-[1094px]:w-0');
+      expect(tab().className).toContain('hidden max-[1094px]:flex');
       // Here, React agrees: drawn, not inert.
       expect(frame().dataset.parked).toBeUndefined();
       expect(frame().hasAttribute('inert')).toBe(false);
       // Derived: the user's collapsed flag is not the shell's to write.
       expect(useUiStore.getState().sidebarCollapsed).toBe(false);
 
-      // The record closes: nothing to choose between, so no rail and no tab.
+      // The record closes: the context column returns; the rail stays.
       act(() => useUiStore.getState().closeDetail());
-      expect(screen.queryByTestId('sidebar-rail')).toBeNull();
+      expect(rail()).toBeTruthy();
       expect(screen.queryByTestId('ai-parked-tab')).toBeNull();
-      expect(column().className).not.toContain(':hidden');
+      expect(column().className).not.toContain('max-[1274px]:hidden');
       expect(frame().className).not.toContain(':w-0');
     });
 
@@ -424,29 +425,29 @@ describe('App boot flow', () => {
     it('never takes the rail where it would not keep the assistant (M52)', async () => {
       widthAtLeast(SHELL_RAIL_TWO_PANEL_MIN - 1);
       await bothOpen();
-      // The column shows from 932 to 1083; the rail only in the band, and
-      // under 932, where the column would push the parked tab off the window.
+      // The column shows from 986 to 1093; the rail only in the band, and
+      // under 986, where the column would push the parked tab off the window.
       const classes = (el: HTMLElement) => el.className.split(/\s+/);
-      expect(classes(column())).not.toContain('max-[1220px]:hidden');
-      expect(classes(column())).toContain('min-[1084px]:max-[1220px]:hidden');
-      expect(classes(column())).toContain('max-[932px]:hidden');
-      expect(rail().className).toContain('hidden min-[1084px]:max-[1220px]:flex max-[932px]:flex');
+      expect(classes(column())).not.toContain('max-[1274px]:hidden');
+      expect(classes(column())).toContain('min-[1094px]:max-[1274px]:hidden');
+      expect(classes(column())).toContain('max-[986px]:hidden');
+      expect(rail().className).toContain('m71-app-rail');
     });
 
     it('keeps a rail that was showing as the window shrinks past the rail (M52)', async () => {
       const resizeTo = resizableWindow(1150);
       await bothOpen();
       resizeTo(1000);
-      // Latched: the rail under all of 1220, so the sidebar does not grow
+      // Latched: the rail under all of 1274, so the sidebar does not grow
       // back into a column as the window gets smaller.
-      expect(rail().className).toContain('hidden max-[1220px]:flex');
-      expect(column().className).toMatch(/(^|\s)max-\[1220px\]:hidden(\s|$)/);
+      expect(rail().className).toContain('m71-app-rail');
+      expect(column().className).toMatch(/(^|\s)max-\[1274px\]:hidden(\s|$)/);
       expect(frame().dataset.parked).toBe('true');
 
       // Room again: the latch lets go, and the next shrink starts from the column.
       resizeTo(1300);
       resizeTo(1000);
-      expect(rail().className).toContain('hidden min-[1084px]:max-[1220px]:flex');
+      expect(rail().className).toContain('m71-app-rail');
     });
 
     it('keeps one assistant mounted through every crossing (M17.2, M52)', async () => {
@@ -460,6 +461,23 @@ describe('App boot flow', () => {
         expect(screen.getByTestId('ai-panel')).toBe(assistant);
       }
       expect(screen.getAllByTestId('ai-panel')).toHaveLength(1);
+    });
+
+    it('expands the same conversation, hides page commands, and docks when navigation opens a page', async () => {
+      widthAtLeast(1440);
+      await bothOpen();
+      const assistant = screen.getByTestId('ai-panel');
+      const page = document.getElementById('main')!;
+      act(() => useUiStore.getState().openAssistantCanvas());
+      expect(screen.getByTestId('ai-panel')).toBe(assistant);
+      expect(assistant.dataset.presentation).toBe('canvas');
+      expect(page.hasAttribute('inert')).toBe(true);
+      fireEvent.click(screen.getByRole('button', { name: 'Skip to content' }));
+      expect(assistant.contains(document.activeElement)).toBe(true);
+      act(() => useNavStore.getState().navigate({ kind: 'doc', path: ITEM }));
+      expect(screen.getByTestId('ai-panel')).toBe(assistant);
+      expect(assistant.dataset.presentation).toBe('panel');
+      expect(page.hasAttribute('inert')).toBe(false);
     });
 
     it('a vault switch remounts the assistant, so no turn outlives its vault (M53.10)', async () => {
@@ -489,10 +507,9 @@ describe('App boot flow', () => {
       act(() => useUiStore.getState().openDetail(ITEM));
       await screen.findByTestId('detail-panel');
       expect(frame().dataset.parked).toBeUndefined();
-      expect(screen.queryByTestId('sidebar-rail')).toBeNull();
-      // It parks at the bare width, 1040, not the rail's.
-      expect(frame().className).toContain('max-[1040px]:w-0');
-      expect(frame().className).not.toContain('1084');
+      expect(rail()).toBeTruthy();
+      // The persistent rail is included even with the context panel collapsed.
+      expect(frame().className).toContain('max-[1094px]:w-0');
     });
 
     it('gives the main column both floors, and CSS picks by the width it parks at (M52)', async () => {
@@ -500,10 +517,10 @@ describe('App boot flow', () => {
       useUiStore.setState({ aiPanelWidth: 380 });
       await bothOpen();
       const main = screen.getByTestId('main-column');
-      expect(main.style.getPropertyValue('--shell-floor')).toBe('min(1100px, 100vw - 180px)');
+      expect(main.style.getPropertyValue('--shell-floor')).toBe('min(1100px, 100vw - 234px)');
       // Canvas 400 + record 320 + the tab's 32.
-      expect(main.style.getPropertyValue('--shell-floor-parked')).toBe('min(752px, 100vw - 180px)');
-      expect(main.className).toContain('max-[1084px]:min-w-[var(--shell-floor-parked)]');
+      expect(main.style.getPropertyValue('--shell-floor-parked')).toBe('min(752px, 100vw - 234px)');
+      expect(main.className).toContain('max-[1094px]:min-w-[var(--shell-floor-parked)]');
     });
 
     // Verified at 1100px: a concept with its Details panel beside the
@@ -518,14 +535,14 @@ describe('App boot flow', () => {
       const column = main.parentElement?.parentElement;
       if (!column) throw new Error('no main column');
       const floor = () => column.style.getPropertyValue('--shell-floor');
-      expect(floor()).toBe('min(400px, 100vw - 180px)');
+      expect(floor()).toBe('min(400px, 100vw - 234px)');
 
       act(() => useNavStore.getState().navigate({ kind: 'doc', path: ITEM }));
       await screen.findByTestId('doc-side-panel');
-      expect(floor()).toBe('min(672px, 100vw - 180px)');
+      expect(floor()).toBe('min(672px, 100vw - 234px)');
 
       act(() => useUiStore.getState().setDocPanelOpen(false));
-      expect(floor()).toBe('min(400px, 100vw - 180px)');
+      expect(floor()).toBe('min(400px, 100vw - 234px)');
     });
 
     it('parks the assistant rather than unmounting it when one panel fits (M17.2)', async () => {
@@ -666,7 +683,8 @@ describe('App boot flow', () => {
     render(<App />);
     await screen.findByRole('navigation', { name: 'Sidebar' });
     act(() => useNavStore.getState().navigate({ kind: 'settings' }));
-    expect(await screen.findByRole('heading', { name: 'Settings', level: 1 })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'General', level: 1 })).toBeTruthy();
+    expect(screen.getByRole('navigation', { name: 'Settings sections' })).toBeTruthy();
   });
 
   // M45.2 — one mount, one signal: the layout editor lives beside the other

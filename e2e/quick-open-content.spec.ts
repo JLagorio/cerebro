@@ -67,7 +67,8 @@ test('"All N matches" expands In pages in place', async ({ page }) => {
 
 test('rows that arrive late never move the highlight', async ({ page }) => {
   await input(page).fill('rollback');
-  const options = page.getByRole('option');
+  const palette = page.getByRole('dialog', { name: 'Quick open', exact: true });
+  const options = palette.getByRole('option');
   await expect(page.getByTestId('quick-open-result').nth(1)).toBeVisible();
   await expect(options.nth(1)).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('ArrowDown');
@@ -75,7 +76,7 @@ test('rows that arrive late never move the highlight', async ({ page }) => {
   await expect(second).toHaveAttribute('aria-selected', 'true');
   await expect(contentRows(page).first()).toBeVisible();
   await expect(second).toHaveAttribute('aria-selected', 'true');
-  await expect(page.locator('[role="option"][aria-selected="true"]')).toHaveCount(1);
+  await expect(palette.locator('[role="option"][aria-selected="true"]')).toHaveCount(1);
 });
 
 test('Enter on a page row opens that page', async ({ page }) => {
@@ -84,8 +85,7 @@ test('Enter on a page row opens that page', async ({ page }) => {
   await expect(first).toBeVisible();
   const title = (await first.locator('span.text-sm').textContent()) ?? '';
   expect(title).not.toBe('');
-  // Nothing is named "draining", so the highlight starts on the ask row.
-  await page.keyboard.press('ArrowDown');
+  // Ask stays unselected; the first arriving match takes the untouched highlight.
   await expect(first).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('Enter');
   await expect(input(page)).toBeHidden();

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, openDestination } from './boot';
 
 test('inbox: queue untyped captures, organize one, and watch it leave', async ({ page }) => {
   await boot(page);
@@ -44,7 +44,9 @@ test('inbox: queue untyped captures, organize one, and watch it leave', async ({
     .toContain('_organized: true');
   await expect(rows).toHaveCount(queuedBefore - 1);
   await expect(rows.filter({ hasText: 'Warehouse cutover' })).toHaveCount(0);
-  await expect(badge).toHaveText(String(queuedBefore - 1));
+  await expect(page.getByTestId('page-navigation').locator('.m75-queue-heading')).toContainText(
+    String(queuedBefore - 1),
+  );
 
   // -- Auto-advance opened the next capture ----------------------------
   await expect(page.getByLabel('Organize')).toBeVisible();
@@ -52,10 +54,7 @@ test('inbox: queue untyped captures, organize one, and watch it leave', async ({
 
 test('inbox: quick capture writes an untyped note into the queue', async ({ page }) => {
   await boot(page);
-  await page
-    .getByTestId('nav-surfaces')
-    .getByRole('button', { name: /^Inbox/ })
-    .click();
+  await openDestination(page, 'Inbox');
 
   const rows = page.getByTestId('inbox-row');
   const before = await rows.count();

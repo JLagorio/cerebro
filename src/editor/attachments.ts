@@ -200,7 +200,7 @@ export async function addAttachments(options: {
 }
 
 export async function resolveAttachmentUrl(url: string, notePath: string | null): Promise<string> {
-  if (/^https?:\/\//i.test(url)) return url;
+  if (/^(?:https?:\/\/|data:)/i.test(url)) return url;
   const path = resolveImagePath(notePath ?? '', url);
   if (path === null) return '';
   try {

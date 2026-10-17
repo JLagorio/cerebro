@@ -113,33 +113,49 @@ describe('the keydown rail (M65.1)', () => {
   });
 });
 
+/** No AST can contain a glyph absent from both raw text and Unicode escapes. */
+function shortcutLabels(path: string, source: string): number[] {
+  if (!/[⌘⇧⌥⌃]|\\u/.test(source)) return [];
+  const file = ts.createSourceFile(
+    path,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    path.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  const found: number[] = [];
+  const visit = (node: ts.Node) => {
+    if (
+      (ts.isStringLiteralLike(node) ||
+        ts.isJsxText(node) ||
+        ts.isTemplateHead(node) ||
+        ts.isTemplateMiddle(node) ||
+        ts.isTemplateTail(node)) &&
+      /[⌘⇧⌥⌃]/.test(node.text)
+    ) {
+      found.push(file.getLineAndCharacterOfPosition(node.getStart()).line + 1);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return found;
+}
+
+it('the glyph rail finds literal and Unicode-escaped labels, but not comments', () => {
+  expect(shortcutLabels('control.tsx', '<span>⌘K</span>')).toEqual([1]);
+  expect(shortcutLabels('control.ts', "const label = '\\u2318K'")).toEqual([1]);
+  expect(shortcutLabels('control.ts', "const label = '\\u{2318}K'")).toEqual([1]);
+  expect(shortcutLabels('control.ts', '// ⌘K\nconst label = "Search"')).toEqual([]);
+  expect(shortcutLabels('control.ts', 'const label = "Search"')).toEqual([]);
+});
+
 it('shortcut glyphs in labels come from Keycaps, never a hard-coded string', () => {
   const REPO = join(__dirname, '../../..');
   const found: string[] = [];
   for (const path of sources(join(REPO, 'src'))) {
     const rel = relative(REPO, path).split(sep).join('/');
     if (rel.startsWith('src/lib/keys/') || rel === 'src/components/ui/Keycaps.tsx') continue;
-    const file = ts.createSourceFile(
-      path,
-      readFileSync(path, 'utf8'),
-      ts.ScriptTarget.Latest,
-      true,
-      path.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-    );
-    const visit = (node: ts.Node) => {
-      if (
-        (ts.isStringLiteralLike(node) ||
-          ts.isJsxText(node) ||
-          ts.isTemplateHead(node) ||
-          ts.isTemplateMiddle(node) ||
-          ts.isTemplateTail(node)) &&
-        /[⌘⇧⌥⌃]/.test(node.text)
-      ) {
-        found.push(`${rel}:${file.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
-      }
-      ts.forEachChild(node, visit);
-    };
-    visit(file);
+    found.push(...shortcutLabels(path, readFileSync(path, 'utf8')).map((line) => `${rel}:${line}`));
   }
   expect(found).toEqual([]);
 });

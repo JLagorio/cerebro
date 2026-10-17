@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, openDestination } from './boot';
 const PATH = 'boards/tools.canvas';
 const SOURCE = JSON.stringify({ nodes: [], edges: [], vendor: { kept: true } });
 async function open(page: Page) {
@@ -103,7 +103,7 @@ test('typing tool letters stays in the text editor, and leaving the board saves 
   await page.getByTestId('wb-text-editor').pressSequentially('v h t r o p e');
   await expect(page.getByTestId('wb-text-editor')).toHaveValue('v h t r o p e');
   expect(await writes(page)).toBe(0);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home', exact: true }).click();
+  await openDestination(page, 'Home');
   await expect.poll(async () => (await read(page)).nodes[0]?.text).toBe('v h t r o p e');
   expect(await writes(page)).toBe(1);
 });

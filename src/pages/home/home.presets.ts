@@ -123,7 +123,7 @@ export const HOME_PRESETS: {
           clean();
           disk().set('docs/unreadable.md', '# Delivery plan\n- [ ] Check delivery\n');
         },
-        failNext: ['read_note'],
+        failNext: ['read_note_source'],
         expect: ready('mywork', 'Tasks could not be read in Delivery plan.'),
       },
       unavailable: {

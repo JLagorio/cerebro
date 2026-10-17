@@ -113,6 +113,15 @@ On Linux the Rust side additionally needs `libwebkit2gtk-4.1-dev`,
 
 ## Shipping a release
 
+Cargo stages `demo-vault/` into the ignored `src-tauri/.bundle-resources/`
+before Tauri copies resources. This is a sanitized working corpus, including
+new ordinary files without requiring Git: runtime/VCS/macOS junk and the
+private mail roots declared in `shared/policy/mail.v1.json` are omitted.
+Authored hidden content such as `.comments/` and `.gitignore` stays; included
+links or special files stop the build. Source bytes are copied unchanged,
+and each staging pass replaces its previous snapshot so removed files do
+not linger in the shipped demo.
+
 Push a tag:
 
 ```sh

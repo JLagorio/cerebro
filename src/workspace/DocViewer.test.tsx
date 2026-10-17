@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, expect, it } from 'vitest';
 import { resetMockRoots, seedRoot } from '@/lib/mockRoots';
 import { seedBytes } from '@/lib/mockBytes';
@@ -31,6 +31,10 @@ it('never auto-loads remote images or a root escape', () => {
     />,
   );
   expect(screen.queryByRole('img')).toBeNull();
-  expect(screen.getByText('Image unavailable: Remote')).toBeTruthy();
+  expect(screen.getByText('example.com')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Load image' }));
+  expect(screen.getByRole('img', { name: 'Remote' }).getAttribute('referrerpolicy')).toBe(
+    'no-referrer',
+  );
   expect(screen.getByText('Image unavailable: Outside')).toBeTruthy();
 });

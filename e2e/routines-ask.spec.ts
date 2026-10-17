@@ -1,5 +1,12 @@
 import { expect, test } from '@playwright/test';
-import { boot, readMockFile, seedBeforeBoot } from './boot';
+import {
+  boot,
+  readMockFile,
+  seedBeforeBoot,
+  openDestination,
+  showDatabases,
+  openAgents,
+} from './boot';
 
 const SCOUT = 'records/agents/release-scout.md';
 const RISK = 'records/risks/risk-scanner-delivery.md';
@@ -12,6 +19,7 @@ test('a no checks once, skips with its question and reason, and starts no full r
   await seedBeforeBoot(page, '__cerebroSeedCondition', 'no');
   await seedBeforeBoot(page, '__cerebroSeedFleet', []);
   await boot(page, { autoLearn: true });
+  await openAgents(page);
   await page.getByTestId('nav-agent').filter({ hasText: 'Release scout' }).click();
   await page.getByTestId('agent-add-trigger').click();
   const editor = page.getByTestId('agent-editor-trigger-new');
@@ -23,6 +31,7 @@ test('a no checks once, skips with its question and reason, and starts no full r
   await editor.getByRole('button', { name: 'Done', exact: true }).click();
   await expect.poll(() => readMockFile(page, SCOUT)).toContain(QUESTION);
 
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: /^Risk/ }).first().click();
   const risk = page.locator(`[data-testid="table-row"][data-path="${RISK}"]`);
   await risk.getByRole('button', { name: 'Mitigating', exact: true }).click();
@@ -34,10 +43,7 @@ test('a no checks once, skips with its question and reason, and starts no full r
     })
     .toEqual(['condition_not_met']);
 
-  await page
-    .getByTestId('sidebar')
-    .getByRole('button', { name: 'Open all agents', exact: true })
-    .click();
+  await openDestination(page, 'Agents');
   await expect(page.getByTestId('agent-wake-words')).toHaveText('skipped — its check answered no');
   await expect(page.getByTestId('agent-wake-check')).toHaveText(
     `“${QUESTION}” — The check answered no.`,

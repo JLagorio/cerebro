@@ -292,3 +292,75 @@ describe('a card’s status and its whole payload (M56.8)', () => {
     expect(formatSize(1.5 * 1024 * 1024)).toBe('1.5 MB');
   });
 });
+
+describe('foreign connector cards', () => {
+  afterEach(cleanup);
+
+  it('names the server separately and never offers a vault diff', () => {
+    const tool: ToolCall = {
+      id: 'foreign',
+      name: 'mcp__claude_ai_Gmail__edit_note',
+      input: '{"path":"notes/plan.md"}',
+      output: 'Done',
+      done: true,
+      failed: false,
+    };
+    render(
+      <AiActionCard
+        tool={tool}
+        onOpenPath={() => undefined}
+        onViewDiff={() => undefined}
+        history="git"
+      />,
+    );
+    const card = screen.getByTestId('action-card');
+    expect(card.getAttribute('data-external')).toBe('true');
+    expect(card.getAttribute('data-server')).toBe('claude_ai_Gmail');
+    expect(card.getAttribute('data-write')).toBe('false');
+    expect(card.getAttribute('data-renderer')).toBe('step');
+    expect(screen.getByTestId('action-server').textContent).toBe('claude_ai_Gmail');
+    expect(screen.getByTestId('action-server').title).toBe(
+      'Ran on the claude_ai_Gmail connector, outside this vault',
+    );
+    expect(toolIcon(tool.name)).toBe('plug');
+    expect(resolveIcon('plug').Comp).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /edit note/ }));
+    expect(screen.queryByTestId('action-view-diff')).toBeNull();
+    expect(card.className).not.toContain('bg-cortex-50');
+  });
+
+  it.each(['mcp__cerebro__get_note', 'Bash'])('keeps %s local', (name) => {
+    render(
+      <AiActionCard
+        tool={{ id: 'local', name, input: null, output: 'Done', done: true, failed: false }}
+        onOpenPath={() => undefined}
+      />,
+    );
+    expect(screen.queryByTestId('action-server')).toBeNull();
+    expect(screen.getByTestId('action-card').hasAttribute('data-external')).toBe(false);
+    expect(screen.getByTestId('action-card').hasAttribute('data-server')).toBe(false);
+  });
+});
+
+describe('a checked create landing', () => {
+  afterEach(cleanup);
+  it('opens the returned suffix path and never treats a failed reply as a landing', () => {
+    const opened: string[] = [];
+    const tool: ToolCall = {
+      id: 'create',
+      name: 'create_canvas',
+      input: '{"folder":"boards","slug":"plan"}',
+      output: '{"path":"boards/plan-2.canvas"}',
+      done: true,
+      failed: false,
+    };
+    const view = render(<AiActionCard tool={tool} onOpenPath={(path) => opened.push(path)} />);
+    fireEvent.click(screen.getByRole('button', { name: /boards\/plan-2.canvas/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    expect(opened).toEqual(['boards/plan-2.canvas']);
+    view.rerender(
+      <AiActionCard tool={{ ...tool, failed: true }} onOpenPath={(path) => opened.push(path)} />,
+    );
+    expect(screen.queryByText('boards/plan-2.canvas', { selector: 'span' })).toBeNull();
+  });
+});

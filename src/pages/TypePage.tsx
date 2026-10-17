@@ -1,3 +1,6 @@
+import { PageHeader } from '@/components/PageHeader';
+import { UnfiledCorrespondents } from '@/views/UnfiledCorrespondents';
+import { Button } from '@/components/ui/Button';
 import { IcsImportDialog } from '@/app/IcsImportDialog';
 import { icsTargets } from '@/engine/icsImport';
 import { useEntryState } from '@/app/useEntryState';
@@ -81,6 +84,9 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
     savedViews[0];
   const activeId = activeView.id;
 
+  const vault = useVaultStore((s) => s.vaultPath);
+  const [unfiled, setUnfiled] = useState(false);
+  useEffect(() => setUnfiled(false), [selection.name, vault]);
   const [dialog, setDialog] = useState<TypeDialog | null>(null);
   // M12.8: the chip bar below the tabs, engaged from the tab-row icons.
   const [controlsOpen, setControlsOpen] = useEntryState('view.controls', false);
@@ -244,55 +250,62 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
   return (
     <div className="flex min-h-0 min-w-0 flex-1" data-testid="type-page">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex-none px-5 pt-3.5">
-          <div className="mb-2.5 flex min-w-0 items-center gap-2">
-            {/* M12.8: the icon and the name ARE the edit affordance (Notion's
-                header) — the pencil and palette buttons this replaces sat in
-                the corner pretending to be about something else. */}
+        <PageHeader
+          icon={
             <button
               type="button"
               data-testid="type-icon-edit"
               title="Change icon & color"
               onClick={() => setDialog('style')}
-              className="flex h-7 w-7 flex-none items-center justify-center rounded-md border-0 bg-transparent hover:bg-n-50"
+              className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-n-100"
             >
-              <Icon name={listing.icon} size={16} color={listing.color ?? 'var(--n-600)'} />
+              <Icon
+                name={listing.icon}
+                size={18}
+                color={listing.color ?? 'var(--text-secondary)'}
+              />
             </button>
+          }
+          title={
             <button
               type="button"
               data-testid="type-title-edit"
               title={listing.system ? 'Change icon & color' : 'Change display name'}
               onClick={() => setDialog(listing.system ? 'style' : 'rename')}
-              className="min-w-0 rounded-md border-0 bg-transparent px-1 py-0.5 hover:bg-n-50"
+              className="max-w-full rounded-md px-1 text-left hover:bg-n-50 [overflow-wrap:anywhere]"
             >
-              <h1 className="m-0 truncate text-lg font-semibold leading-6 tracking-[-0.005em]">
-                {listing.name}
-              </h1>
+              {listing.name}
             </button>
-            {/* M16.31: the records this view is showing, not `listing.count`
-                — the number of records of this type in the vault. Those are
-                the same number until you filter or search, and then the
-                header goes on reporting the vault while the canvas reports
-                the view. The List page had the milder form of this (it
-                followed filters but not search) and both now read the same
-                thing: what is on screen. */}
-            <span
-              data-testid="view-count"
-              className="[font-family:var(--font-mono)] text-xs text-n-400"
-            >
-              {sortedEntries.length}
-            </span>
-            {listing.system && (
-              <span className="inline-flex items-center gap-1 rounded-full border border-n-200 px-2 py-0.5 text-2xs text-n-500">
-                <Icon name="lock" size={10} />
-                System type
-              </span>
-            )}
-            <span className="flex-1" />
-            {/* M12.8: no config buttons up here — properties and Delete type
-                live in the view-settings menu on the tab row. */}
-          </div>
-        </div>
+          }
+          metadata={<span data-testid="view-count">{sortedEntries.length}</span>}
+          actions={
+            <>
+              {listing.system && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-n-200 px-2 py-0.5 text-2xs text-n-500">
+                  <Icon name="lock" size={10} />
+                  System type
+                </span>
+              )}
+              {schema.types.get(listing.name)?.fields.some((field) => field.kind === 'email') && (
+                <Button
+                  testId="unfiled-open"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setUnfiled(true)}
+                >
+                  Unfiled correspondents
+                </Button>
+              )}
+            </>
+          }
+        />
+        {unfiled && (
+          <UnfiledCorrespondents
+            key={`${vault}:${listing.name}`}
+            typeName={listing.name}
+            onClose={() => setUnfiled(false)}
+          />
+        )}
         {/* M12.3: the same saved-views strip a List has. The tab row owns
             layout; the toolbar below carries no pills. */}
         <ViewTabs

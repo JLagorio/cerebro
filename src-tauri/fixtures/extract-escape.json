@@ -22,5 +22,9 @@
   {
     "input": "x\u0000y\tvalue | cell",
     "expected": "xy value \\| cell"
+  },
+  {
+    "input": "\ud83d\udcc5 2026-07-28",
+    "expected": "&#128197; 2026-07-28"
   }
 ]

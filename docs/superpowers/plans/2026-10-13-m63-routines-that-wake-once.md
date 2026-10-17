@@ -9,7 +9,8 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M63. House style and rails: the 
 ## Status
 
 - **Precondition:** M53–M57, M70 and M58–M62 are closed, in that order: gates green, roadmap statuses updated. They are being built unstaged in this checkout, so this plan names their finished functions, never today's lines.
-- **Built:** nothing. All 8 roadmap parts were scouted against those plans and today's tree, and all build. Five split by their own sentences, giving 13 parts.
+- **Implementation audit, 2026-10-15:** all 13 split parts have code in the shared checkout. Durable wake admission and chain attribution, assignment relations and triggers, project inheritance and Runs, the shared manual/background start path, schedule phrases and next-fire baselines, pre-run conditions, and durable follow-ups with cancellation are wired. The engine/store/native regression suites and browser scenarios were run during their implementation. New work remains uncommitted; the owner controls staging.
+- **Verification still open:** the final integrated gate, Linux crash checks and the packaged/live checks below. The current source audit does not replace those checks or declare milestone closure.
 - **Effort:** 5 M + 8 L ≈ 10.5 L; the roadmap said ≈5 L. Re-measured: .1 L → L + M (.1b); .3 M → M + L (.3b); .4 M → L + M (.4b); .5 M → L; .6 M → L + M (.6b); .7 M → L; .8 M → L + M (.8b).
 - **Crash risk:** .1 and .2 (claim's transaction, schema steps), .5 (run slots, a refusal before spawn), .7 (a fourth internal spawn site, a finalize variant), .8 (a schema step, fire before spawn).
 - **Packaged checks:** .1, .2, .3b, .4b, .5, .8; .6 is a WebKit look. **Live checks** (CLI 2.1.250, an isolated `CLAUDE_CONFIG_DIR`, never the owner's main `~/.claude`): .3b, .7, .8.
@@ -401,7 +402,7 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M63. House style and rails: the 
 
 ## Done or dropped
 
-- **Done:** none. **Dropped:** none.
+- **Implementation present:** all 13 split parts. **Dropped:** none. Final integration and owner live checks remain as listed above.
 - **Split by their own sentences:** .1 → .1b (the lobby list), .3 → .3b (trigger, key and brief), .4 → .4b (the Runs tab), .6 → .6b (resume and edit), .8 → .8b (list and cancel).
 - **Renamed:** the roadmap's "AgentEditor gets 'is assigned via <field>'" lands in M55.12's AgentProperties TriggerRow (.3b).
 - **Beyond the roadmap, on purpose:** wake expiry after 7 days (.1; Macro never expires one); a 20-wake coalescing cap (.1); Rust single flight for manual starts (.5); the queue gives back a fire Rust refused to start (.5); a 5-minute follow-up floor (.8).

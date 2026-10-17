@@ -24,6 +24,7 @@ import { fixtureVault, makeEntry } from '@/test/factories';
 vi.mock('@/lib/ipc', () => ({
   listenOsFileDrop: vi.fn().mockResolvedValue(() => {}),
   readNote: vi.fn().mockResolvedValue('Existing body'),
+  readNoteSource: vi.fn().mockResolvedValue({ content: 'Existing body', hash: 'a'.repeat(64) }),
   saveNote: vi.fn().mockResolvedValue(undefined),
   setNoteTitle: vi.fn().mockResolvedValue(undefined),
   pickVault: vi.fn(),

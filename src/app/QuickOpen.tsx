@@ -446,6 +446,8 @@ function QuickOpenBody() {
     setActiveIndex(preferred);
   }
   const active = Math.min(activeIndex, results.length - 1);
+  // Rows can move under a stationary cursor as the query changes. Only an
+  // actual mouse move changes the keyboard highlight; enter alone does not.
   const mark = (index: number) => {
     moved.current = true;
     setActiveIndex(index);
@@ -553,7 +555,7 @@ function QuickOpenBody() {
               data-testid={`palette-category-${chip.id}`}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => setCategory(chip.id)}
-              className={`rounded px-2.5 py-1 text-xs ${category === chip.id ? 'bg-n-100 text-n-900' : 'text-n-500'}`}
+              className={`rounded-sm px-2.5 py-1 text-xs ${category === chip.id ? 'bg-n-100 text-n-900' : 'text-n-500'}`}
             >
               {chip.label}
             </button>
@@ -660,7 +662,7 @@ function QuickOpenBody() {
         aria-selected={i === active}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => r.target.run()}
-        onMouseEnter={() => mark(i)}
+        onMouseMove={() => mark(i)}
         className="flex w-full flex-col gap-0.5 rounded-md px-2.5 py-1.5 text-left"
         style={{ background: i === active ? 'var(--n-50)' : 'transparent' }}
       >
@@ -710,7 +712,7 @@ function QuickOpenBody() {
         aria-selected={i === active}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => r.target.run()}
-        onMouseEnter={() => mark(i)}
+        onMouseMove={() => mark(i)}
         className="flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left"
         style={{ background: i === active ? 'var(--n-50)' : 'transparent' }}
       >

@@ -267,9 +267,9 @@
         ]
       },
       "outgoingLinks": [],
-      "snippet": "An account counts as completed when it has finished every required step of guided onboarding within 14 days of first login.[^kr-onboarding] | Term | Meaning | |",
+      "snippet": "An account counts as completed when it has finished every required step of guided onboarding within 14 days of first login.[^kr-onboarding] | Term          | Me",
       "parseError": null,
-      "hash": "6834e751408493fc8baaf50839bbab629f8ddf12ceb349800eebecead8b4eaf5"
+      "hash": "3c08ee28988b2bc6b726009beb9d4a4acee3daffb38296c2f169e0f5d8cf1893"
     },
     {
       "path": "knowledge/metrics/sync-error-rate.md",
@@ -2430,7 +2430,7 @@
       ],
       "snippet": "The theory behind epic-offline-conflict-model: most \"the app lost my work\" contacts are conflicts resolved silently against the crew. We win if support contact ",
       "parseError": null,
-      "hash": "e7c0aef6d0db8a06c4b865c6bd39bd369830f34dd8966af803a6ae6696aaa5b4"
+      "hash": "54acb5992f4e763c88e46964fcc56fc44f72ef64f917f765ee4d64ee5d98589c"
     },
     {
       "path": "records/bets/bet-named-customer-unlocks-pipeline.md",
@@ -3353,9 +3353,9 @@
       },
       "relationships": {},
       "outgoingLinks": [],
-      "snippet": "What we are trying to be true by the end of the year, and the work that would make it so. :::columns ::::column width=2 :::: ::::column The nesting is one group",
+      "snippet": "What we are trying to be true by the end of the year, and the work that would\\ make it so. :::columns ::::column width=2.49 :::: ::::column width=0.51 The nesti",
       "parseError": null,
-      "hash": "088de74721bcbdf2c2db0069038df21dd7591bf6125b32bed561d9f96f71c4ba"
+      "hash": "ba571fd662c21ae2f8467592df5133ab0805a28613894f91fbdd2bb76109291c"
     },
     {
       "path": "strategy/systems-map.md",

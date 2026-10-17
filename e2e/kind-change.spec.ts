@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, showDatabases } from './boot';
 
 /**
  * Change type keeps every value (M60.5).
@@ -29,6 +29,7 @@ const filesUnder = (page: Page, folder: string) =>
 const stakeLine = (text: string): string => text.split('\n').find((l) => l.startsWith('stake:'))!;
 
 async function openType(page: Page, name: string): Promise<void> {
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: name }).first().click();
   await expect(page.getByTestId('table-row').first()).toBeVisible();
 }

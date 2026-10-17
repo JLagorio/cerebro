@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import YAML from 'yaml';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, showDatabases } from './boot';
 
 /**
  * A database-wide change is one batch (M60.6), on the mock backend. Renaming
@@ -39,6 +39,7 @@ const frontmatterOf = (text: string): Record<string, unknown> => {
 };
 
 async function openType(page: Page, name: string): Promise<void> {
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: name }).first().click();
   await expect(page.getByTestId('table-row').first()).toBeVisible();
 }

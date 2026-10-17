@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import YAML from 'yaml';
-import { boot, readMockFile } from './boot';
+import { chooseSettingsSection, boot, readMockFile, showDatabases, openDestination } from './boot';
 
 /**
  * The keymap (M65.1): one capture-phase listener, scopes and editor claims,
@@ -63,6 +63,7 @@ test("a mermaid block's ⌘Z, with focus left on body, undoes the block and not 
   await boot(page);
 
   // -- An undoable batch first: rename a Work item column -----------------
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
   await expect(page.getByTestId('table-row').first()).toBeVisible();
   await page.getByRole('button', { name: 'Estimate column menu' }).click();
@@ -123,10 +124,7 @@ test('⌘[ in a page body stays put, and from outside its text goes back', async
 test('Inbox ⌘E files the open capture, and never while typing in its body', async ({ page }) => {
   test.setTimeout(60_000);
   await boot(page);
-  await page
-    .getByTestId('nav-surfaces')
-    .getByRole('button', { name: /^Inbox/ })
-    .click();
+  await openDestination(page, 'Inbox');
   await expect(page.getByTestId('inbox-page')).toBeVisible();
   const PATH = 'inbox/warehouse-cutover-thought.md';
   const row = page.getByTestId('inbox-row').filter({ hasText: 'Warehouse cutover' });
@@ -154,7 +152,7 @@ test('g chords navigate, wait before hinting, swallow a hinted miss, and pass Es
   page,
 }, testInfo) => {
   await boot(page);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'My work' }).click();
+  await openDestination(page, 'My work');
   await blurToBody(page);
   await page.keyboard.press('g');
   await page.keyboard.press('h');
@@ -217,6 +215,7 @@ test('c p creates an ordinary page, and g comma opens the complete shortcut cata
   await page.keyboard.press('g');
   await page.keyboard.press(',');
   await expect(page.getByTestId('settings-page')).toBeVisible();
+  await chooseSettingsSection(page, 'Keyboard shortcuts');
   const shortcuts = page.getByTestId('settings-shortcuts');
   await shortcuts.evaluate((element) => element.scrollIntoView({ block: 'start' }));
   await expect(shortcuts.locator('[data-command="go.home"]')).toHaveAttribute('data-keys', 'g h');
@@ -224,7 +223,7 @@ test('c p creates an ordinary page, and g comma opens the complete shortcut cata
     'data-keys',
     'mod+k',
   );
-  await expect(shortcuts.getByText('Keyboard shortcuts', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Keyboard shortcuts', level: 1 })).toBeVisible();
   await page.screenshot({
     path: testInfo.outputPath('keyboard-settings.png'),
     animations: 'disabled',

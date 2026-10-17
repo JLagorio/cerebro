@@ -1,3 +1,4 @@
+import { MAIL } from './mailPolicy';
 import { describe, expect, it } from 'vitest';
 import SOURCE_SLUGS from '../../src-tauri/fixtures/source-slugs.json';
 import {
@@ -322,7 +323,7 @@ describe('external references', () => {
     // and it is fetched again.
     const sources = new Map<string, string>();
     for (const { kind, id, canonical, path } of SOURCE_SLUGS.cases) {
-      expect(['issue', 'web']).toContain(kind);
+      expect(['issue', 'web', MAIL.kinds.thread]).toContain(kind);
       const source = kind as SourceKind;
       expect(canonicalSourceId(source, id), JSON.stringify(id)).toBe(canonical);
       expect(sourceCachePath(source, id), JSON.stringify(id)).toBe(path);

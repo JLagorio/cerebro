@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, seedFileBeforeBoot, readMockFile } from './boot';
+import { boot, seedFileBeforeBoot, readMockFile, openDestination } from './boot';
 const NOTE = 'notes/attachment-page.md';
 const PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6WQAAAAASUVORK5CYII=';
@@ -71,7 +71,7 @@ test('paste reuses bytes, renders the image, undoes one batch, and survives reop
   ).toBe(1);
   await page.keyboard.press('ControlOrMeta+z');
   await expect(images).toHaveCount(1);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: /^Home/ }).click();
+  await openDestination(page, 'Home');
   await page.keyboard.press('ControlOrMeta+[');
   await expect(images).toHaveCount(1);
   await page
@@ -115,17 +115,15 @@ test('OS and HTML5 drops name skips once and copy a PDF into a durable file bloc
     const transfer = new DataTransfer();
     transfer.items.add(new File(['%PDF-1.7\n'], 'report.pdf', { type: 'application/pdf' }));
     const rect = host.getBoundingClientRect();
-    host
-      .querySelector('.bn-editor')!
-      .dispatchEvent(
-        new DragEvent('drop', {
-          dataTransfer: transfer,
-          clientX: rect.x + 100,
-          clientY: rect.y + rect.height - 10,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
+    host.querySelector('.bn-editor')!.dispatchEvent(
+      new DragEvent('drop', {
+        dataTransfer: transfer,
+        clientX: rect.x + 100,
+        clientY: rect.y + rect.height - 10,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
   });
   await expect
     .poll(() => readMockFile(page, NOTE))
@@ -143,13 +141,11 @@ test('/image Upload states the cap and copies the selected file', async ({ page 
     path: '/private/tmp/cerebro-attachment-upload.png',
     animations: 'disabled',
   });
-  await page
-    .getByTestId('attachment-upload-input')
-    .setInputFiles({
-      name: 'upload.png',
-      mimeType: 'image/png',
-      buffer: Buffer.from(PNG, 'base64'),
-    });
+  await page.getByTestId('attachment-upload-input').setInputFiles({
+    name: 'upload.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(PNG, 'base64'),
+  });
   await expect.poll(() => readMockFile(page, NOTE)).toContain('![](/attachments/upload.png)');
 });
 
@@ -161,9 +157,17 @@ test('a locked page refuses an OS attachment before any copy', async ({ page }) 
   const box = await editor.boundingBox();
   if (box === null) throw new Error('No editor');
   const before = await page.evaluate(() => window.__cerebroMockWrites.length);
-  await page.evaluate(({ at, png }) => window.__cerebroMockDrop({ at, files: [{ path: '/outside/readonly.png', base64: png }] }), { at: { x: box.x + 100, y: box.y + box.height - 10 }, png: PNG });
-  await expect(page.getByTestId('toast-host')).toContainText('This page is read-only — nothing was added');
+  await page.evaluate(
+    ({ at, png }) =>
+      window.__cerebroMockDrop({ at, files: [{ path: '/outside/readonly.png', base64: png }] }),
+    { at: { x: box.x + 100, y: box.y + box.height - 10 }, png: PNG },
+  );
+  await expect(page.getByTestId('toast-host')).toContainText(
+    'This page is read-only — nothing was added',
+  );
   expect(await page.evaluate(() => window.__cerebroMockWrites.length)).toBe(before);
-  expect(await page.evaluate(() => window.__cerebroMockFs.has('attachments/readonly.png'))).toBe(false);
+  expect(await page.evaluate(() => window.__cerebroMockFs.has('attachments/readonly.png'))).toBe(
+    false,
+  );
   expect(await readMockFile(page, NOTE)).toBe(body);
 });

@@ -24,6 +24,7 @@ import type {
 import { flushOpenPages } from '@/editor/openPages';
 import { listAgents, narrowTools, readAddress } from '@/engine/agents';
 import type { Place } from '@/engine/place';
+import type { SkillNarrowing } from '@/engine/skills';
 import { grantedTools, holdsShell, holdsWeb, type PromptGrant } from '@/engine/toolGrant';
 import { readNote } from '@/lib/ipc';
 import { effectiveCeiling, type ShellCeiling } from '@/lib/policy/toolApproval';
@@ -138,11 +139,9 @@ export interface AgentChat {
   send(
     text: string,
     message?: string | (() => Promise<string>),
-    /** Narrow THIS turn's tools — a skill's `allowed-tools:` (M17.8). Per
-     * invocation rather than per conversation, because it belongs to the
-     * thing being invoked, not to the thread it was invoked in. Intersected
-     * with the addressed agent's own narrowing, if the turn named one. */
-    allowedTools?: string[] | null,
+    /** One invocation's tools and connectors intersect with the recipient's;
+     * connector denials union. Nothing here widens a grant. */
+    narrowing?: SkillNarrowing,
     /** The context this turn was queued in (M57.5, Up next), frozen then; it
      * replaces `getTurn()`. The Settings ceilings and the panel's binding
      * are still read now, so a ceiling lowered since binds the turn. */
@@ -663,7 +662,7 @@ export function useAgentChat(
     (
       text: string,
       message?: string | (() => Promise<string>),
-      allowedTools?: string[] | null,
+      narrowing?: SkillNarrowing,
       frozen?: TurnContext,
     ) => {
       const trimmed = text.trim();
@@ -701,6 +700,8 @@ export function useAgentChat(
           ? (listAgents(entries).find((a) => a.handle === turn.boundAgent) ?? null)
           : null;
       const recipient = addressedTo ?? bound;
+      // Async saves and expansion must not retake a mutable invocation grant.
+      const skillGrant = structuredClone(narrowing ?? {});
       const assistantId = nextId();
       // A labelled ask's prompt rides on its bubble (ChatMessage.prompt), so a
       // retry can send it again. A skill's expansion is a function read inside
@@ -794,12 +795,22 @@ export function useAgentChat(
               );
             }
           }
-          // Two narrowings can meet on one turn — a skill's `allowed-tools:`
-          // and the recipient's — so they intersect. Never union. What
-          // the turn then holds is what its prompts may name (M54.7): the
-          // narrowing, the shell its ceiling plans for it (M57.2), which a
-          // read limit withdraws (M53.5), and a person watching.
-          const allowed = narrowTools(allowedTools ?? null, recipient?.allowedTools ?? null);
+          // Skill grants only subtract from the recipient's: intersect allows
+          // and connector servers, union denials. Prompts use this same grant.
+          const allowed = narrowTools(
+            skillGrant.allowedTools ?? null,
+            recipient?.allowedTools ?? null,
+          );
+          const connectorNames = narrowTools(
+            skillGrant.connectors ?? null,
+            recipient?.connectors ?? null,
+          );
+          const denials = [
+            ...new Set([
+              ...(recipient?.disallowedTools ?? []),
+              ...(skillGrant.disallowedTools ?? []),
+            ]),
+          ];
           // M57.2 — the ceiling this turn may hold: the Settings ceiling, and
           // for an addressed or bound agent only when its record declares
           // `tools: shell`. A record can only SUBTRACT: none grants itself
@@ -864,7 +875,7 @@ export function useAgentChat(
               shell: ceiling,
               web: webCeiling,
               connectors,
-              connectorNames: recipient?.connectors ?? null,
+              connectorNames,
               // A person typed this turn and is watching it stream — the one
               // kind of run allowed to fall back to their global MCP config
               // when the vault has no connectors.json and the turn names no
@@ -882,9 +893,8 @@ export function useAgentChat(
               // The narrowing the grant above was read from, so the prompt and
               // the CLI's tools are the same set.
               allowedTools: allowed,
-              // M54.9: the connector tools the recipient's record denies. A
-              // skill names none, so an unaddressed turn denies nothing here.
-              disallowedTools: recipient?.disallowedTools ?? null,
+              // Both sets bind, including an invoked skill on an unaddressed turn.
+              disallowedTools: denials.length ? denials : null,
               // M17.13: enforced in Rust against the bearer the child presents,
               // so an addressed agent cannot talk its way out of its folders.
               scope: recipient?.scope ?? null,

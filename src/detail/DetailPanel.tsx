@@ -1,3 +1,4 @@
+import { PullRequestStrip } from '@/detail/PullRequestStrip';
 import { PageRunsTab } from '@/detail/PageRunsTab';
 import { PageAgentsTab } from '@/detail/PageAgentsTab';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -9,6 +10,7 @@ import { DetailHeaderActions } from '@/detail/DetailHeaderActions';
 import { PageCoverBand, PageIconHeader } from '@/detail/PageChrome';
 import { HeadingProperties, stripCells } from '@/detail/HeadingProperties';
 import { RecordProperties } from '@/detail/RecordProperties';
+import { CorrespondenceSection } from '@/detail/CorrespondenceSection';
 import { ImportProvenance } from '@/detail/ImportProvenance';
 import { RecordTabs, recordTabSet } from '@/detail/RecordTabs';
 import { TabSections } from '@/detail/TabSections';
@@ -502,6 +504,7 @@ export function DetailPanel({
               onToggleDetails={() => setDetails({ path: entry.path, shown: !detailsShown })}
             />
           )}
+          <PullRequestStrip entry={entry} schema={schema} />
           {/* M3: extracted to RecordProperties — shared with the split view.
             Keyed per record (prefixed: the sibling NoteBodyEditor also keys
             on the path) so the add-property flyout closes on switch.
@@ -514,6 +517,7 @@ export function DetailPanel({
           {(!stripShows || detailsShown) && (
             <RecordProperties key={`props:${entry.path}`} entry={entry} schema={schema} />
           )}
+          <CorrespondenceSection key={entry.path} entry={entry} schema={schema} />
           {/* The peek's own chrome (M45.6, re-placed M46.1): freshness and the
             knowledge loop are facts about the RECORD, not about the lens you
             have open, and a tab that hid them would make them unreachable

@@ -39,12 +39,22 @@ function nearestScope(target: EventTarget | null): Element | null {
 }
 
 function isNeutral(target: EventTarget | null): boolean {
-  return target instanceof Element && target.closest('[data-key-neutral]') !== null;
+  // An explicit scope inside chrome (a page's contextual navigation portal)
+  // takes its own keys. A neutral control inside that scope still opts out.
+  return (
+    target instanceof Element &&
+    target.closest('[data-key-neutral], [data-key-scope]')?.hasAttribute('data-key-neutral') ===
+      true
+  );
 }
 
 function record(e: Event): void {
   if (isNeutral(e.target)) return;
   recorded = nearestScope(e.target);
+}
+
+function available(scope: Element): boolean {
+  return scope.isConnected && scope.closest('[inert], [hidden], [aria-hidden="true"]') === null;
 }
 
 /** The chain of scope ids a keystroke resolves along right now. */
@@ -53,10 +63,14 @@ export function activeChain(): Chain {
   const active = document.activeElement;
   const focusCounts = active !== null && active !== document.body && !isNeutral(active);
   let start = focusCounts ? nearestScope(active) : recorded;
-  if (start !== null && !start.isConnected) start = null;
+  if (start !== null && !available(start)) start = null;
+  const pages = [...document.querySelectorAll('[data-key-scope-page]')];
   const page =
-    document.querySelector('[data-testid="pane"][data-active="true"][data-key-scope-page]') ??
-    document.querySelector('[data-key-scope-page]');
+    pages.find(
+      (page) => page.matches('[data-testid="pane"][data-active="true"]') && available(page),
+    ) ??
+    pages.find(available) ??
+    null;
   if (start?.closest('[data-testid="pane"][data-parked="true"]')) start = null;
   start ??= page;
   const chain: string[] = [];
@@ -65,7 +79,9 @@ export function activeChain(): Chain {
     if (id !== null) chain.push(id);
     node = node.parentElement?.closest('[data-key-scope]') ?? null;
   }
-  if (page === null) chain.push(ROOT_PAGE_ID);
+  // Isolated page tests bind the root fallback. Mounted but hidden pages,
+  // including those behind canvas chat, must never regain that authority.
+  if (page === null && pages.length === 0) chain.push(ROOT_PAGE_ID);
   chain.push('app');
   return chain;
 }

@@ -8,12 +8,16 @@ use super::{
 };
 
 type Pairs = IndexMap<String, String>;
+/// The same empty seed the renderer writes for a new board.
+pub fn empty_board() -> String {
+    write(&super::read::read("").expect("empty text is a valid seed"))
+}
 fn quote(text: &str) -> String {
     serde_json::to_string(text).expect("valid Unicode serializes")
 }
 /// Remove only JSON whitespace outside strings, never interpreting an unknown
 /// number, escaped surrogate, duplicate member or escape spelling.
-fn minify(raw: &str) -> String {
+pub(crate) fn minify(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     let mut string = false;
     let mut escape = false;
@@ -210,6 +214,13 @@ mod tests {
         } else {
             source.into()
         }
+    }
+    #[test]
+    fn the_empty_board_is_the_seed() {
+        assert_eq!(
+            empty_board(),
+            include_str!("../../../shared/canvas/goldens/empty.canvas")
+        );
     }
     #[test]
     fn replays_the_shared_canvas_goldens() {

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, openDestination } from './boot';
 const PATH = 'boards/render.canvas';
 const SOURCE = JSON.stringify({
   vendor: { untouched: true },
@@ -150,7 +150,7 @@ test('draws every item, pans and zooms without a write, and remembers the camera
   await page.getByRole('button', { name: 'Zoom out' }).click();
   await expect(page.getByRole('button', { name: 'Reset zoom' })).toHaveText('150%');
   const moved = await plane.getAttribute('style');
-  await page.locator('[data-testid="nav-surfaces"]').getByText('Home', { exact: true }).click();
+  await openDestination(page, 'Home');
   await openBoard(page);
   await expect(plane).toHaveAttribute('style', moved!);
   expect(await readMockFile(page, PATH)).toBe(SOURCE);

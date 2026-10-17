@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, showPages } from './boot';
 
 const OLD = 'strategy/systems-map.md';
 const NEXT = 'strategy/systems-atlas.md';
@@ -26,6 +26,7 @@ async function seedLinks(page: Page) {
 }
 
 async function beginRename(page: Page) {
+  await showPages(page);
   const tree = page.getByTestId('file-tree');
   const folder = tree.getByTestId('tree-folder').filter({ hasText: 'Strategy' });
   if ((await folder.getAttribute('aria-expanded')) !== 'true') await folder.click();
@@ -175,6 +176,7 @@ test('Move to folder keeps a cited stem without a rewrite prompt', async ({ page
     },
     [DECISION, DECISION_BYTES, WORK, WORK_BYTES],
   );
+  await showPages(page);
   const tree = page.getByTestId('file-tree');
   await tree.getByTestId('tree-folder').filter({ hasText: 'Strategy' }).click();
   await tree

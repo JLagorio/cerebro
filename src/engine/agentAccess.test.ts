@@ -551,3 +551,32 @@ it('mail reads are explained as attended and never offered to unattended rows', 
   );
   expect(panelRow(rows).read).toBe(true);
 });
+
+it('whiteboards expose their canvas tools and never claim note writers can edit them', () => {
+  const path = 'boards/plan.canvas';
+  const entries = vault(
+    scout({
+      'allowed-tools': ['read_canvas', 'edit_canvas', 'edit_note'],
+      scope: ['boards'],
+      'read-scope': ['boards'],
+    }),
+  );
+  const agent = row(access(entries, path).rows, 'process:release-scout');
+  expect(agent.heldWriters).toEqual(['Edit a whiteboard']);
+  expect(agent.read).toBe(true);
+  const noteOnly = row(
+    access(
+      vault(
+        scout({
+          'allowed-tools': ['edit_note', 'get_note'],
+          scope: ['boards'],
+          'read-scope': ['boards'],
+        }),
+      ),
+      path,
+    ).rows,
+    'process:release-scout',
+  );
+  expect(noteOnly.heldWriters).toEqual([]);
+  expect(noteOnly.read).toBe(false);
+});

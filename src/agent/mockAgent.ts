@@ -35,6 +35,10 @@ import { parseSuggestionResult } from '@/engine/viewSuggestion';
  * on the reply needs the reply to be a function of the prompt.
  * `edit sheet in <path>.md: <json>` carries its checked batch through
  * onEditSheet and the same write gate as the other page writers (M67.2b).
+ * `edit canvas <path>.canvas: <json ops>` uses onEditCanvas and that gate
+ * for an atomic whiteboard change (M68.7b).
+ * `create canvas <slug> in <folder>: <json ops>` uses onCreateCanvas;
+ * the optional operations fill the new board in its single create (M68.7c).
  */
 
 interface Script {
@@ -60,6 +64,8 @@ interface Script {
   /** What its `edit_note` call replaces (M55.5) — another. */
   edit?: { path: string; edits: QuoteEdit[] };
   sheetEdit?: { path: string; json: string };
+  canvasEdit?: { path: string; ops: unknown };
+  canvasCreate?: { slug: string; folder: string; ops?: unknown };
   notionImport?: { page: string; folder: string };
   /** What its `set_fields` call sets (M60.4) — another: one field, to one
    * value, checked against the record's database. */
@@ -635,7 +641,44 @@ function scriptFor(message: string, systemPrompt?: string): Script {
   const notion = /^import notion (\S+) to (.*)$/.exec(message.trim());
   if (notion !== null) {
     const args = { page: notion[1], folder: notion[2] };
-    return { tools: [{ name: 'import_notion_page', input: JSON.stringify(args) }], notionImport: args, text: '' };
+    return {
+      tools: [{ name: 'import_notion_page', input: JSON.stringify(args) }],
+      notionImport: args,
+      text: '',
+    };
+  }
+  const canvasCreate = /^create canvas (\S+) in ([^:]*?)(?::\s*([\s\S]+))?$/.exec(message.trim());
+  if (canvasCreate !== null) {
+    const [, slug, folder, json] = canvasCreate;
+    let ops: unknown;
+    if (json !== undefined) {
+      try {
+        ops = JSON.parse(json);
+      } catch {
+        ops = null;
+      }
+    }
+    const args = { slug, folder: folder.trim(), ...(json === undefined ? {} : { ops }) };
+    return {
+      tools: [{ name: 'create_canvas', input: JSON.stringify(args) }],
+      canvasCreate: args,
+      text: '',
+    };
+  }
+  const canvasEdit = /^edit canvas (\S+\.canvas):\s*([\s\S]+)$/.exec(message.trim());
+  if (canvasEdit !== null) {
+    const [, path, json] = canvasEdit;
+    let ops: unknown = null;
+    try {
+      ops = JSON.parse(json);
+    } catch {
+      /* The checked door supplies the shape refusal. */
+    }
+    return {
+      tools: [{ name: 'edit_canvas', input: JSON.stringify({ path, ops }) }],
+      canvasEdit: { path, ops },
+      text: `I edited the whiteboard ${path}.`,
+    };
   }
   const sheetEdit = /^edit sheet in (\S+\.md):\s*([\s\S]+)$/.exec(message.trim());
   if (sheetEdit !== null) {
@@ -699,6 +742,50 @@ function scriptFor(message: string, systemPrompt?: string): Script {
   }
   // A skill's prose may name the Inbox; it is an invocation, never a filing request.
   const skill = /^The user invoked the skill "([^"]+)"/.exec(message);
+  if (skill?.[1] === 'Draft reply') {
+    // This is a deterministic connector transcript, not a mail client. It
+    // exercises the attended recipe and never invokes a vault write callback.
+    const request = /^The user's input for this run: (.*)$/m.exec(message)?.[1]?.trim();
+    if (!request)
+      return { text: 'Which Gmail thread should I reply to? Share its link, id or page.' };
+    const thread = request.split(/\s+/)[0];
+    const threadId = thread.includes('#') ? thread.split('/').at(-1)! : thread;
+    const signature = /## Signature\b[\s\S]*?```text\n([\s\S]*?)\n```/.exec(message)?.[1] ?? '';
+    const signed = signature.trim() !== '' && !signature.includes('YOUR SIGNATURE HERE');
+    const body = `Thanks for the update. I'll follow up on the next steps.${signed ? `\n\n${signature}` : ''}`;
+    return {
+      tools: [
+        {
+          name: 'mcp__gmail__get_thread',
+          input: JSON.stringify({ threadId, messageFormat: 'PLAIN_TEXT' }),
+          output: JSON.stringify({
+            messages: [
+              {
+                id: 'mock-newest-incoming',
+                from: 'teammate@example.com',
+                to: ['owner@example.com'],
+                subject: 'Next steps',
+              },
+            ],
+          }),
+        },
+        {
+          name: 'mcp__gmail__create_draft',
+          input: JSON.stringify({
+            to: ['teammate@example.com'],
+            subject: 'Re: Next steps',
+            body,
+            replyToMessageId: 'mock-newest-incoming',
+          }),
+          output: JSON.stringify({
+            id: 'mock-draft',
+            viewUrl: 'https://mail.google.com/mail/u/0/#drafts/mock-draft',
+          }),
+        },
+      ],
+      text: `The [draft is in Gmail](https://mail.google.com/mail/u/0/#drafts/mock-draft). To: teammate@example.com. Subject: Re: Next steps. Nothing was sent.${signed ? '' : ' The draft has no signature because the Signature block still needs your text.'}`,
+    };
+  }
   if (skill) {
     const named = new Set(mentionedTools(message));
     return {
@@ -939,6 +1026,8 @@ export function runMockAgent(
     onAppend,
     onEdit,
     onEditSheet,
+    onEditCanvas,
+    onCreateCanvas,
     onImportNotion,
     onSetFields,
     onSuggestView,
@@ -966,7 +1055,12 @@ export function runMockAgent(
      * refuses. */
     onEdit?: (path: string, edits: QuoteEdit[]) => Promise<string>;
     onEditSheet?: (path: string, args: Record<string, unknown>) => Promise<string>;
-    onImportNotion?: (args: { page: string; folder: string }) => Promise<{ path: string; reply: string; wrote: boolean }>;
+    onEditCanvas?: (path: string, args: Record<string, unknown>) => Promise<string>;
+    onCreateCanvas?: (args: Record<string, unknown>) => Promise<{ path: string; reply: string }>;
+    onImportNotion?: (args: {
+      page: string;
+      folder: string;
+    }) => Promise<{ path: string; reply: string; wrote: boolean }>;
     /** Carries out the set script's `set_fields` (M60.4): the mock backend's
      * `agentSetFields`, which answers with the tool's report. Absent, the
      * tool refuses. */
@@ -1126,6 +1220,32 @@ export function runMockAgent(
     }
   };
 
+  const createCanvas = async (id: string, args: Record<string, unknown>) => {
+    await writeGate();
+    if (cancelled) return;
+    try {
+      if (onCreateCanvas === undefined) throw new Error('create_canvas is not available here');
+      const landed = await onCreateCanvas(args);
+      onUiAction?.({ action: 'vault_changed', paths: [landed.path] });
+      reply = `I created ${landed.path}.`;
+      if (!cancelled) emit({ kind: 'ToolDone', tool_id: id, output: landed.reply });
+    } catch (error) {
+      const refusal = error instanceof Error ? error.message : String(error);
+      reply = `I could not create the whiteboard: ${refusal.split('\n')[0]}`;
+      if (!cancelled) emit({ kind: 'ToolDone', tool_id: id, output: refusal, is_error: true });
+    }
+  };
+  const editCanvas = (id: string, target: { path: string; ops: unknown }) =>
+    writeStep(
+      id,
+      target.path,
+      async () => {
+        if (onEditCanvas === undefined) throw new Error('edit_canvas is not available here');
+        return onEditCanvas(target.path, { ops: target.ops });
+      },
+      (refusal) => `I could not edit the whiteboard ${target.path}: ${refusal.split('\n')[0]}`,
+    );
+
   const editSheet = (id: string, target: { path: string; json: string }) =>
     writeStep(
       id,
@@ -1260,6 +1380,8 @@ export function runMockAgent(
     if (i < resumeAt) return;
     const edited = name === 'edit_note' ? script.edit : undefined;
     const sheetEdited = name === 'edit_sheet' ? script.sheetEdit : undefined;
+    const canvasEdited = name === 'edit_canvas' ? script.canvasEdit : undefined;
+    const canvasCreated = name === 'create_canvas' ? script.canvasCreate : undefined;
     const notionImported = name === 'import_notion_page' ? script.notionImport : undefined;
     const fielded = name === 'set_fields' ? script.fields : undefined;
     const suggested = name === 'suggest_view' ? script.suggestion : undefined;
@@ -1267,30 +1389,34 @@ export function runMockAgent(
     const created = name === 'create_note' ? script.create : undefined;
     const commented = name === script.comment?.tool ? script.comment : undefined;
     const completion: Step =
-      notionImported !== undefined
-        ? () => importNotion(id, notionImported)
-        : sheetEdited !== undefined
-        ? () => editSheet(id, sheetEdited)
-        : later !== undefined
-          ? () => scheduleFollowup(id, later)
-          : suggested !== undefined
-            ? () => suggestView(id, suggested)
-            : appended !== undefined
-              ? () => append(id, appended)
-              : edited !== undefined
-                ? () => edit(id, edited)
-                : fielded !== undefined
-                  ? () => setFields(id, fielded)
-                  : created !== undefined
-                    ? () => create(id, created)
-                    : commented !== undefined
-                      ? () => comment(id, commented)
-                      : () =>
-                          emit(
-                            output === undefined
-                              ? { kind: 'ToolDone', tool_id: id }
-                              : { kind: 'ToolDone', tool_id: id, output },
-                          );
+      canvasCreated !== undefined
+        ? () => createCanvas(id, canvasCreated)
+        : canvasEdited !== undefined
+          ? () => editCanvas(id, canvasEdited)
+          : notionImported !== undefined
+            ? () => importNotion(id, notionImported)
+            : sheetEdited !== undefined
+              ? () => editSheet(id, sheetEdited)
+              : later !== undefined
+                ? () => scheduleFollowup(id, later)
+                : suggested !== undefined
+                  ? () => suggestView(id, suggested)
+                  : appended !== undefined
+                    ? () => append(id, appended)
+                    : edited !== undefined
+                      ? () => edit(id, edited)
+                      : fielded !== undefined
+                        ? () => setFields(id, fielded)
+                        : created !== undefined
+                          ? () => create(id, created)
+                          : commented !== undefined
+                            ? () => comment(id, commented)
+                            : () =>
+                                emit(
+                                  output === undefined
+                                    ? { kind: 'ToolDone', tool_id: id }
+                                    : { kind: 'ToolDone', tool_id: id, output },
+                                );
     // M57.2: a CLI tool's call decides through the run's plan. Argv denies
     // what the plan disallows; the host answers the rest.
     const table = approval !== undefined && isCliTool(approval, name);

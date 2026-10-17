@@ -1,3 +1,12 @@
+import { createPortal } from 'react-dom';
+import {
+  PageNavigationContent,
+  usePageNavigationControls,
+  usePageNavigationSlot,
+} from '@/app/PageNavigation';
+import { DrawerScrim, useDrawerFocus } from '@/components/ui/DrawerScrim';
+import { useMeasuredWidth } from '@/hooks/useMeasuredWidth';
+import './inbox.css';
 import { ImportInlet } from '@/app/ImportInlet';
 import type { ImportInput } from '@/engine/inlets';
 import { claimOf } from '@/engine/panes';
@@ -183,9 +192,17 @@ function OrganizePanel({
   entry,
   schema,
   onFile,
+  open,
+  overlay,
+  panelRef,
+  onClose,
 }: {
   entry: Entry;
   schema: Schema;
+  open: boolean;
+  overlay: boolean;
+  panelRef: React.Ref<HTMLElement>;
+  onClose: () => void;
   /** Files the capture through the page, which owns the undo affordance. */
   onFile: (path: string) => void;
 }) {
@@ -246,8 +263,19 @@ function OrganizePanel({
   return (
     <aside
       aria-label="Organize"
-      className="flex w-[272px] flex-none flex-col overflow-y-auto border-l border-n-200 px-4 pb-5 pt-3.5 @[1100px]/canvas:w-[300px] @[1360px]/canvas:w-[320px]"
+      ref={panelRef}
+      hidden={!open}
+      inert={!open}
+      data-overlay={overlay || undefined}
+      tabIndex={overlay ? -1 : undefined}
+      className="m75-organize-panel"
     >
+      <div className="m75-organize-heading">
+        <span>Organize capture</span>
+        <button type="button" aria-label="Close organizing inspector" onClick={onClose}>
+          <Icon name="x" size={15} />
+        </button>
+      </div>
       {/* Type leads, and the type's own fields follow it, because assigning a
           type is the whole job here — everything else on this panel is either
           advice about that decision or something to do once it is made. The
@@ -394,6 +422,14 @@ function OrganizePanel({
 }
 
 export function InboxPage() {
+  const navigationTarget = usePageNavigationSlot('inbox');
+  const navigationControls = usePageNavigationControls('inbox');
+  const [readerRowRef, readerRowWidth] = useMeasuredWidth({ beforePaint: true });
+  const inspectorFolded = readerRowWidth !== null && readerRowWidth < 760;
+  const [inspectorPreference, setInspectorPreference] = useState<boolean | null>(null);
+  const inspectorOpen = inspectorPreference ?? !inspectorFolded;
+  const inspectorDrawer = inspectorOpen && inspectorFolded;
+  const inspectorRef = useDrawerFocus<HTMLElement>(inspectorDrawer);
   const entries = useVaultStore((s) => s.entries);
   const schema = useSchema();
   const period = useUiStore((s) => s.inboxPeriod);
@@ -448,6 +484,7 @@ export function InboxPage() {
   // Focus follows the file: after ⌘E the row that opened next should be where
   // the keyboard is, or the next Tab restarts at the nav.
   const rowRefs = useRef(new Map<string, HTMLButtonElement>());
+  const readerRef = useRef<HTMLDivElement>(null);
   const refocusRow = useRef(false);
 
   const fileNote = (path: string) => {
@@ -463,7 +500,11 @@ export function InboxPage() {
     if (!refocusRow.current) return;
     refocusRow.current = false;
     if (selectedPath === null) return;
-    rowRefs.current.get(selectedPath)?.focus();
+    const row = rowRefs.current.get(selectedPath);
+    const sidebar = row?.closest<HTMLElement>('[data-testid="sidebar"]');
+    if (row?.closest('[hidden]') || (sidebar && getComputedStyle(sidebar).display === 'none')) {
+      readerRef.current?.focus();
+    } else row?.focus();
   }, [selectedPath]);
 
   // Cmd/Ctrl+E organizes the open capture — the whole loop is meant to run
@@ -597,6 +638,150 @@ export function InboxPage() {
     })();
   };
 
+  const captureNavigation = (
+    <PageNavigationContent>
+      <div className="m75-capture-navigation">
+        <div className="m75-queue-heading">
+          <span>Captures</span>
+          <span>{queue.entries.length}</span>
+        </div>
+        <PeriodPills active={period} counts={counts} onChange={setPeriod} />
+        <div
+          role="listbox"
+          aria-label="Captures"
+          {...cursor.containerProps}
+          className="m75-capture-list"
+        >
+          <ListSelectionBar
+            count={cursor.state.selected.size}
+            onCopy={() =>
+              void copyPageLinks(
+                queue.entries.filter((entry) => cursor.state.selected.has(entry.path)),
+              )
+            }
+          />
+          {queue.entries.map((e) => {
+            const active = e.path === selectedPath;
+            const rowProps = cursor.itemProps(e.path);
+            // Held in place by the queue while you work on it, but it
+            // already satisfies the membership rule — so the counts say 3
+            // while 4 rows show. Mark it, or that reads as a bug.
+            const ready = !inInbox(e);
+            const learned = conceptsFrom(e.path, concepts).length;
+            return (
+              <button
+                key={e.path}
+                type="button"
+                // option inside the listbox above, not `row`: role="row"
+                // overrode the button role in a document with no table
+                // anywhere, so the queue announced as rows of nothing.
+                role="option"
+                {...rowProps}
+                ref={(el) => {
+                  rowProps.ref(el);
+                  if (el === null) rowRefs.current.delete(e.path);
+                  else rowRefs.current.set(e.path, el);
+                }}
+                data-testid="inbox-row"
+                data-page-navigation-item
+                data-path={e.path}
+                onPointerDownCapture={(event) => {
+                  // Activating an inactive pane moves this queue into the
+                  // shell before pointerup. Keep the intended row selection
+                  // in that same pointer task, before its old DOM retires.
+                  if (event.button === 0) queue.select(e.path);
+                }}
+                onClick={() => queue.select(e.path)}
+                className={['m75-capture-row', active ? 'is-current' : ''].join(' ')}
+              >
+                <span className="flex min-w-0 items-center gap-1.5">
+                  {e.parseError !== null && (
+                    <span className="inline-flex flex-none text-warn-500">
+                      <Icon name="triangle-alert" size={12} />
+                    </span>
+                  )}
+                  {ready && (
+                    <span
+                      // ⌘E files whatever is OPEN, never the row under the
+                      // cursor — the old wording read as an instruction
+                      // about this row and filed a different note.
+                      title={
+                        active
+                          ? `Organized — press ${keycapText('inbox.file')} to file it`
+                          : 'Organized — open it to file it'
+                      }
+                      className="inline-flex flex-none text-success-600"
+                    >
+                      <Icon name="circle-check" size={12} />
+                    </span>
+                  )}
+                  <span
+                    // Titles are how you pick the next capture, and at this
+                    // width most of them clip mid-word.
+                    title={e.title}
+                    className={[
+                      'truncate text-sm',
+                      ready
+                        ? 'font-medium text-n-500'
+                        : active
+                          ? 'font-semibold text-n-900'
+                          : 'font-medium text-n-800',
+                    ].join(' ')}
+                  >
+                    {e.title}
+                  </span>
+                </span>
+                {e.snippet !== '' && (
+                  <span className="truncate text-xs text-n-500">{e.snippet}</span>
+                )}
+                <span className="flex items-center gap-2 text-2xs text-n-400">
+                  <span>{e.createdAt.slice(0, 10)}</span>
+                  {/* M7: what the agent wrote is labelled, so the review
+                        queue never hides machine output among your own. */}
+                  {isAgentWritten(e) && (
+                    <span
+                      data-testid="from-ai"
+                      className="inline-flex items-center gap-1 text-[var(--text-ai)]"
+                    >
+                      <Icon name="sparkles" size={10} />
+                      AI
+                    </span>
+                  )}
+                  {e.type !== null && (
+                    <span className="inline-flex items-center gap-1">
+                      <Icon
+                        name={typeStyle(e.type, schema).icon}
+                        size={11}
+                        color={typeStyle(e.type, schema).color ?? 'var(--n-400)'}
+                      />
+                      {e.type}
+                    </span>
+                  )}
+                  {/* M8.5 — the base took something from this one. Shown on
+                        the row because "did I already learn from that?" is a
+                        question you ask while scanning, not after opening. */}
+                  {learned > 0 && (
+                    <span
+                      data-testid="row-committed"
+                      title={`${learned} concept${learned === 1 ? '' : 's'} distilled from this`}
+                      className="inline-flex items-center gap-1 text-cortex-600"
+                    >
+                      <Icon name="brain" size={10} />
+                      {learned}
+                    </span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {queue.entries.length === 0 && (
+          <p className="m75-queue-empty">No captures in this period.</p>
+        )}
+      </div>
+    </PageNavigationContent>
+  );
+
   // Reachable through nav history after the workflow is switched off —
   // explain and offer the way back rather than bouncing to another screen.
   if (!inboxEnabled) {
@@ -618,7 +803,7 @@ export function InboxPage() {
 
   return (
     <div
-      className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+      className="m75-inbox relative flex min-h-0 min-w-0 flex-1 flex-col"
       data-testid="inbox-page"
       onPaste={onPaste}
       {...osDrop.zoneProps}
@@ -638,12 +823,24 @@ export function InboxPage() {
         takeFiles([...e.dataTransfer.files]);
       }}
     >
-      <header className="flex flex-none items-center gap-3 border-b border-n-200 px-5 py-2.5">
+      {navigationTarget !== null && createPortal(captureNavigation, navigationTarget)}
+      <header className="m75-inbox-header">
         {/* h1, like every other page's chrome title — the Inbox used to be
             the one screen whose highest-ranked heading was an h2, so "jump to
             main heading" found nothing here. */}
-        <h1 className="m-0 text-lg font-semibold text-n-900">Inbox</h1>
-        <PeriodPills active={period} counts={counts} onChange={setPeriod} />
+        <div className="m75-inbox-title">
+          <h1>Inbox</h1>
+          <span>Capture now. Make sense of it when you’re ready.</span>
+        </div>
+        {navigationControls && (
+          <button
+            type="button"
+            className="m75-captures-toggle"
+            onClick={(event) => navigationControls.show(event.currentTarget)}
+          >
+            <Icon name="panel-left" size={15} /> Captures
+          </button>
+        )}
         <span className="flex-1" />
         <input
           ref={fileInput}
@@ -666,9 +863,19 @@ export function InboxPage() {
         >
           Add files
         </Button>
-        <Button variant="secondary" size="sm" icon="plus" onClick={capture}>
+        <Button variant="primary" size="sm" icon="plus" onClick={capture}>
           Capture
         </Button>
+        {selected !== null && (
+          <button
+            type="button"
+            className="m75-organize-toggle"
+            aria-expanded={inspectorOpen}
+            onClick={() => setInspectorPreference(!inspectorOpen)}
+          >
+            <Icon name="sliders-horizontal" size={15} /> Organize
+          </button>
+        )}
       </header>
 
       {/* Filing removes the note from the only list that showed it, so the
@@ -748,154 +955,27 @@ export function InboxPage() {
           />
         </div>
       ) : (
-        // Three fixed columns inside a container that could not scroll meant
-        // the surplus was simply clipped: at 1024px the reading pane fell to
-        // ~100px and the Organize panel — the Type select and "Mark
-        // organized" — sat off the right edge with no way to reach it. Now
-        // the flanks give width back as the canvas narrows, the reading pane
-        // keeps a legible floor, and past the point where they cannot yield
-        // any further the row scrolls instead of hiding a control.
-        <div className="flex min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
-          <div
-            role="listbox"
-            aria-label="Captures"
-            {...cursor.containerProps}
-            className="flex w-[220px] flex-none flex-col overflow-y-auto border-r border-n-200 @[1100px]/canvas:w-[260px] @[1360px]/canvas:w-[300px]"
-          >
-            <ListSelectionBar
-              count={cursor.state.selected.size}
-              onCopy={() =>
-                void copyPageLinks(
-                  queue.entries.filter((entry) => cursor.state.selected.has(entry.path)),
-                )
-              }
-            />
-            {queue.entries.map((e) => {
-              const active = e.path === selectedPath;
-              const rowProps = cursor.itemProps(e.path);
-              // Held in place by the queue while you work on it, but it
-              // already satisfies the membership rule — so the counts say 3
-              // while 4 rows show. Mark it, or that reads as a bug.
-              const ready = !inInbox(e);
-              const learned = conceptsFrom(e.path, concepts).length;
-              return (
-                <button
-                  key={e.path}
-                  type="button"
-                  // option inside the listbox above, not `row`: role="row"
-                  // overrode the button role in a document with no table
-                  // anywhere, so the queue announced as rows of nothing.
-                  role="option"
-                  {...rowProps}
-                  ref={(el) => {
-                    rowProps.ref(el);
-                    if (el === null) rowRefs.current.delete(e.path);
-                    else rowRefs.current.set(e.path, el);
-                  }}
-                  data-testid="inbox-row"
-                  data-path={e.path}
-                  onClick={() => queue.select(e.path)}
-                  className={[
-                    'flex flex-col gap-0.5 border-0 border-b border-solid border-n-100 px-4 py-2.5 text-left',
-                    active ? 'bg-cortex-50' : 'bg-transparent hover:bg-n-25',
-                  ].join(' ')}
-                >
-                  <span className="flex min-w-0 items-center gap-1.5">
-                    {e.parseError !== null && (
-                      <span className="inline-flex flex-none text-warn-500">
-                        <Icon name="triangle-alert" size={12} />
-                      </span>
-                    )}
-                    {ready && (
-                      <span
-                        // ⌘E files whatever is OPEN, never the row under the
-                        // cursor — the old wording read as an instruction
-                        // about this row and filed a different note.
-                        title={
-                          active
-                            ? `Organized — press ${keycapText('inbox.file')} to file it`
-                            : 'Organized — open it to file it'
-                        }
-                        className="inline-flex flex-none text-success-600"
-                      >
-                        <Icon name="circle-check" size={12} />
-                      </span>
-                    )}
-                    <span
-                      // Titles are how you pick the next capture, and at this
-                      // width most of them clip mid-word.
-                      title={e.title}
-                      className={[
-                        'truncate text-sm',
-                        ready
-                          ? 'font-medium text-n-500'
-                          : active
-                            ? 'font-semibold text-n-900'
-                            : 'font-medium text-n-800',
-                      ].join(' ')}
-                    >
-                      {e.title}
-                    </span>
-                  </span>
-                  {e.snippet !== '' && (
-                    <span className="truncate text-xs text-n-500">{e.snippet}</span>
-                  )}
-                  <span className="flex items-center gap-2 text-2xs text-n-400">
-                    <span>{e.createdAt.slice(0, 10)}</span>
-                    {/* M7: what the agent wrote is labelled, so the review
-                        queue never hides machine output among your own. */}
-                    {isAgentWritten(e) && (
-                      <span
-                        data-testid="from-ai"
-                        className="inline-flex items-center gap-1 text-synapse-600"
-                      >
-                        <Icon name="sparkles" size={10} />
-                        AI
-                      </span>
-                    )}
-                    {e.type !== null && (
-                      <span className="inline-flex items-center gap-1">
-                        <Icon
-                          name={typeStyle(e.type, schema).icon}
-                          size={11}
-                          color={typeStyle(e.type, schema).color ?? 'var(--n-400)'}
-                        />
-                        {e.type}
-                      </span>
-                    )}
-                    {/* M8.5 — the base took something from this one. Shown on
-                        the row because "did I already learn from that?" is a
-                        question you ask while scanning, not after opening. */}
-                    {learned > 0 && (
-                      <span
-                        data-testid="row-committed"
-                        title={`${learned} concept${learned === 1 ? '' : 's'} distilled from this`}
-                        className="inline-flex items-center gap-1 text-cortex-600"
-                      >
-                        <Icon name="brain" size={10} />
-                        {learned}
-                      </span>
-                    )}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+        <div ref={readerRowRef} className="m75-inbox-content">
+          {navigationTarget === null && (
+            <div className="m75-queue-fallback">{captureNavigation}</div>
+          )}
 
-          <div className="min-h-0 min-w-[360px] flex-1 overflow-y-auto pb-10 pt-6">
-            <div className="mx-auto w-full max-w-[760px] px-6">
+          <div
+            ref={readerRef}
+            className="m75-capture-reader"
+            tabIndex={-1}
+            data-testid="capture-reader"
+          >
+            <div className="m75-capture-document">
               {/* Which capture this is, and where it sits in the queue. The
                   pane used to name it nowhere — the only clue was the
                   highlighted row off to the left, and "Mark organized" takes
                   it out of the list you would check against. */}
-              <div
-                data-testid="inbox-pane-header"
-                className="mb-4 flex items-baseline gap-3 border-b border-n-100 pb-2"
-              >
+              <div data-testid="inbox-pane-header" className="m75-capture-header">
                 <span className="min-w-0 flex-1">
                   <span
                     title={selected.title}
-                    className={`block truncate text-md font-semibold ${
+                    className={`m75-capture-title ${
                       hasRealTitle(selected) ? 'text-n-900' : 'text-n-500 italic'
                     }`}
                   >
@@ -953,7 +1033,22 @@ export function InboxPage() {
             </div>
           </div>
 
-          <OrganizePanel entry={selected} schema={schema} onFile={fileNote} />
+          {inspectorDrawer && (
+            <DrawerScrim
+              label="Close organizing inspector"
+              onDismiss={() => setInspectorPreference(false)}
+              className="absolute inset-0 z-20"
+            />
+          )}
+          <OrganizePanel
+            entry={selected}
+            schema={schema}
+            onFile={fileNote}
+            open={inspectorOpen}
+            overlay={inspectorDrawer}
+            panelRef={inspectorRef}
+            onClose={() => setInspectorPreference(false)}
+          />
         </div>
       )}
       {imports[0] && (

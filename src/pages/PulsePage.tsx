@@ -1,3 +1,5 @@
+import { PageHeader } from '@/components/PageHeader';
+import '@/history/historyPage.css';
 import { Icon } from '@/components/ui/Icon';
 import { HistoryHeatmapSection } from '@/history/ActivityHeatmap';
 import { HistoryFeedSection } from '@/history/ActivityFeed';
@@ -19,28 +21,19 @@ import { HistoryFeedSection } from '@/history/ActivityFeed';
 export function PulsePage() {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="pulse-page">
-      <PulseHeader />
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6">
-        <div className="mx-auto flex w-full max-w-[720px] flex-col gap-6 pt-1">
-          <HistoryHeatmapSection />
-          <HistoryFeedSection />
+      <div className="history-page-scroll">
+        <div className="history-page-column">
+          <PageHeader
+            title="History"
+            icon={<Icon name="activity" size={18} />}
+            description="Changes, sessions and checkpoints across your vault."
+            className="history-page-header"
+          />
+          <div className="history-page-sections">
+            <HistoryHeatmapSection />
+            <HistoryFeedSection />
+          </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-/** The header shares the content column's left edge (M15). In `px-5` against
- * a centred 720px list it floated ~220px to the left of every card it labels,
- * reading as two unrelated fragments. It is also titled "History", because
- * that is what the nav and the status bar call this destination — a button
- * labelled History that opens a page called Pulse is two names for one place. */
-function PulseHeader() {
-  return (
-    <div className="flex-none px-5 pb-2 pt-3.5">
-      <div className="mx-auto flex w-full min-w-0 max-w-[720px] items-center gap-2">
-        <Icon name="activity" size={16} color="var(--n-600)" />
-        <h1 className="m-0 text-lg font-semibold leading-6 tracking-[-0.005em]">History</h1>
       </div>
     </div>
   );

@@ -4,12 +4,14 @@ import { agentFacingOps, POLICY } from '@/lib/policy/table';
 import { TOOLS } from '@/lib/policy/tools';
 import {
   ALL_TOOLS,
+  foreignTool,
   holdsProposalTools,
   isWriteTool,
   matchedToolset,
   proposalConsequence,
   showsAsChange,
   toolFold,
+  toolDisplay,
   toolIconName,
   toolRenderer,
   TOOLSETS,
@@ -165,7 +167,7 @@ describe('the read toolset (M59.5)', () => {
 });
 
 describe('the write toolset', () => {
-  it('is create_note, update_frontmatter, set_fields, append_to_note, edit_note and edit_sheet, in that order, all writing', () => {
+  it('keeps the declared page, board and import writer order', () => {
     const write = TOOLSETS.find((s) => s.id === 'write');
     expect(write?.tools.map((t) => t.name)).toEqual([
       'create_note',
@@ -174,6 +176,9 @@ describe('the write toolset', () => {
       'append_to_note',
       'edit_note',
       'edit_sheet',
+      'create_canvas',
+      'edit_canvas',
+      'import_notion_page',
     ]);
     expect(write?.tools.every((t) => t.writes)).toBe(true);
   });
@@ -219,10 +224,11 @@ describe('showsAsChange and toolIconName', () => {
     expect(showsAsChange('mcp__gmail__send')).toBe(false);
   });
 
-  it('falls back to the wrench only for a tool the manifest does not know', () => {
+  it('uses a connector plug for foreign calls and a wrench for unknown CLI tools', () => {
     expect(toolIconName('mcp__cerebro__hand_to')).toBe('forward');
     expect(toolIconName('Task')).toBe('bot');
-    expect(toolIconName('mcp__gmail__send')).toBe('wrench');
+    expect(toolIconName('mcp__gmail__send')).toBe('plug');
+    expect(toolIconName('SomethingNew')).toBe('wrench');
   });
 });
 
@@ -321,5 +327,38 @@ describe('proposal consequence (M36.5)', () => {
     expect(holdsProposalTools(['propose_organize'])).toBe(false);
     expect(holdsProposalTools(['commit_proposals'])).toBe(true);
     expect(holdsProposalTools([`propose_${agentFacingOps(POLICY)[0]}`])).toBe(true);
+  });
+});
+
+describe('foreign tool attribution', () => {
+  it.each([
+    ['mcp__cerebro__get_note', 'get note', null],
+    ['Bash', 'Bash', null],
+    ['mcp__gmail__create_draft', 'create draft', 'gmail'],
+    ['mcp__claude_ai_Gmail__create_draft', 'create draft', 'claude_ai_Gmail'],
+    ['mcp__my-server__do_thing', 'do thing', 'my-server'],
+  ])('displays %s without losing its server', (name, label, server) => {
+    expect(toolDisplay(name)).toEqual({ label, server });
+  });
+
+  it('does not treat malformed names or local calls as a connector', () => {
+    for (const name of [
+      'mcp__gmail',
+      'mcp____call',
+      'mcp__gmail__',
+      'mcp__gmail.__call',
+      'mcp__gmail__call\n',
+      'mcp__cerebro__get_note',
+      'Bash',
+    ]) {
+      expect(foreignTool(name), name).toBeNull();
+    }
+  });
+
+  it('a foreign write-like name stays a step outside vault write accounting', () => {
+    expect(foreignTool('mcp__other__edit_note')).toEqual({ server: 'other', tool: 'edit_note' });
+    expect(isWriteTool('mcp__other__edit_note')).toBe(false);
+    expect(showsAsChange('mcp__other__edit_note')).toBe(false);
+    expect(toolRenderer('mcp__other__edit_note')).toBe('step');
   });
 });

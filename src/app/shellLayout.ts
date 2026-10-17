@@ -50,8 +50,8 @@ import {
  * decides the rest.
  */
 
-/** The sidebar's icon rail: its three header controls, stacked (M52). */
-export const SIDEBAR_RAIL_WIDTH = 44;
+/** M71's persistent application rail, beside the contextual sidebar. */
+export const SIDEBAR_RAIL_WIDTH = 54;
 
 /** The parked assistant's tab on the canvas row's right edge (M52). */
 export const PARKED_TAB_WIDTH = 32;
@@ -62,9 +62,9 @@ const TWO_PANEL_ROW = CANVAS_MIN_WIDTH + 2 * RIGHT_PANEL_MIN_WIDTH;
 /**
  * Window widths at which a record and the assistant are both drawn (M17.2),
  * one per way the sidebar can be drawn beside them: at its floor, as its
- * rail, and collapsed by the user (no column at all).
+ * rail, and collapsed by the user (rail only).
  *
- * 180 + 400 + 2 × 320 = 1220 for a sidebar column. The 264px sidebar in M15's
+ * 54 + 180 + 400 + 2 × 320 = 1274 for a sidebar column. The 240px sidebar in M15's
  * "~20px canvas at 1280" complaint is its DEFAULT width, not its floor; at the
  * floor the arithmetic clears 1280 with room to spare.
  *
@@ -72,19 +72,23 @@ const TWO_PANEL_ROW = CANVAS_MIN_WIDTH + 2 * RIGHT_PANEL_MIN_WIDTH;
  * class scanner reads source text and cannot see an interpolated number;
  * shellLayout.test.ts holds the two to the same values.
  */
-export const SHELL_TWO_PANEL_MIN = SIDEBAR_WIDTH_MIN + TWO_PANEL_ROW;
+export const SHELL_TWO_PANEL_MIN = SIDEBAR_RAIL_WIDTH + SIDEBAR_WIDTH_MIN + TWO_PANEL_ROW;
 export const SHELL_RAIL_TWO_PANEL_MIN = SIDEBAR_RAIL_WIDTH + TWO_PANEL_ROW;
-export const SHELL_BARE_TWO_PANEL_MIN = TWO_PANEL_ROW;
+export const SHELL_BARE_TWO_PANEL_MIN = SIDEBAR_RAIL_WIDTH + TWO_PANEL_ROW;
 
 /**
  * The window width at which a sidebar column still fits beside a record and
- * the parked assistant's tab: 180 + 400 + 320 + 32 = 932 (M52). Tauri lets
+ * the parked assistant's tab: 54 + 180 + 400 + 320 + 32 = 986 (M52). Tauri lets
  * the window go to 900, and in between the tab was the one thing left to
  * give — a 20px sliver of it at 920, nothing at 900 — so under this the
  * sidebar takes its rail instead.
  */
 export const SHELL_PARKED_COLUMN_MIN =
-  SIDEBAR_WIDTH_MIN + CANVAS_MIN_WIDTH + RIGHT_PANEL_MIN_WIDTH + PARKED_TAB_WIDTH;
+  SIDEBAR_RAIL_WIDTH +
+  SIDEBAR_WIDTH_MIN +
+  CANVAS_MIN_WIDTH +
+  RIGHT_PANEL_MIN_WIDTH +
+  PARKED_TAB_WIDTH;
 
 /** Which of those widths the window clears. */
 export interface ShellRoom {
@@ -107,7 +111,7 @@ export function roomAt(width: number): ShellRoom {
 
 /** How the shell draws the sidebar and the assistant. */
 export interface ShellPlan {
-  /** `collapsed` is the user's word (the floating cluster); `rail` is derived. */
+  /** `collapsed` hides the context panel by choice; `rail` hides it for space. */
   sidebar: 'column' | 'rail' | 'collapsed';
   /** `parked` is open but not drawn: still mounted, still streaming. */
   assistant: 'drawn' | 'parked' | 'closed';
@@ -134,16 +138,16 @@ export interface ShellState {
  * M17.2's rule stands: when only one fits the RECORD wins — something just
  * asked for it to be seen, and that is the newer intent. What changed is how
  * soon it comes to that. The assistant used to park the moment the window
- * was under 1220, silently. Now the sidebar steps down to its rail first,
- * which keeps both panels down to 1084, and below that the assistant parks
+ * was under 1274, silently. Now the sidebar steps down to its rail first,
+ * which keeps both panels down to 1094, and below that the assistant parks
  * behind a tab that says so.
  *
- * The rail is taken only when it keeps something on screen. Below 1084 it
+ * The rail is taken only when it keeps something on screen. Below 1094 it
  * no longer keeps the assistant, so the sidebar keeps its column — opening
  * the assistant or a record there never costs the sidebar anything — unless
- * the rail was already showing as the window shrank past 1084
+ * the rail was already showing as the window shrank past 1094
  * (`railLatched`), when growing it back into a column would be a jump the
- * other way. Under 932 the column does not leave room for the parked tab,
+ * other way. Under 986 the column does not leave room for the parked tab,
  * and the rail is what keeps THAT on screen, so it is taken again. Like a
  * parked assistant, the rail is derived: the stored collapsed flag is never
  * written, and the sidebar comes back the moment there is room or no record.
@@ -167,9 +171,9 @@ export function shellPlan({
 
 /**
  * The latch `shellPlan` reads, one render on: set while the rail is what
- * keeps both panels (1084–1219), cleared by anything that does away with the
- * rail, and held below 1084, where the window no longer says. The rail under
- * 932 sets nothing: the window says there, and the column is back the moment
+ * keeps both panels (1094–1273), cleared by anything that does away with the
+ * rail, and held below 1094, where the window no longer says. The rail under
+ * 986 sets nothing: the window says there, and the column is back the moment
  * it fits beside the tab.
  */
 export function nextRailLatch(
@@ -184,12 +188,12 @@ export function nextRailLatch(
  * The media-query half of `shellPlan`: which way the window's width goes,
  * left to CSS so it is decided in the same layout pass as the width itself.
  *
- * - `rail` — `band`: the rail in 1084–1219, where it keeps both panels, and
- *   under 932, where it keeps the parked tab (the column between, the
- *   assistant parked); `below`: the rail anywhere under 1220 (latched);
+ * - `rail` — `band`: the rail in 1094–1273, where it keeps both panels, and
+ *   under 986, where it keeps the parked tab (the column between, the
+ *   assistant parked); `below`: the rail anywhere under 1274 (latched);
  *   `none`: no rail at all.
- * - `park` — the width under which the assistant parks: 1084 beside a sidebar
- *   (column or rail), 1040 beside a user-collapsed one; `never` with no
+ * - `park` — the width under which the assistant parks: 1094 beside a sidebar
+ *   (column or rail), 1094 beside a user-collapsed one; `never` with no
  *   record or no assistant, when there is nothing to choose between.
  */
 export interface ShellBands {
@@ -219,24 +223,24 @@ export const SHELL_CLASSES = {
   rail: {
     none: { column: '', rail: 'hidden' },
     band: {
-      column: 'min-[1084px]:max-[1220px]:hidden max-[932px]:hidden',
-      rail: 'hidden min-[1084px]:max-[1220px]:flex max-[932px]:flex',
+      column: 'min-[1094px]:max-[1274px]:hidden max-[986px]:hidden',
+      rail: 'hidden min-[1094px]:max-[1274px]:flex max-[986px]:flex',
     },
-    below: { column: 'max-[1220px]:hidden', rail: 'hidden max-[1220px]:flex' },
+    below: { column: 'max-[1274px]:hidden', rail: 'hidden max-[1274px]:flex' },
   },
   park: {
     never: { frame: '', tab: 'hidden', floor: '' },
     rail: {
       frame:
-        'max-[1084px]:invisible max-[1084px]:w-0 max-[1084px]:overflow-hidden max-[1084px]:*:max-w-none',
-      tab: 'hidden max-[1084px]:flex',
-      floor: 'max-[1084px]:min-w-[var(--shell-floor-parked)]',
+        'max-[1094px]:invisible max-[1094px]:w-0 max-[1094px]:overflow-hidden max-[1094px]:*:max-w-none',
+      tab: 'hidden max-[1094px]:flex',
+      floor: 'max-[1094px]:min-w-[var(--shell-floor-parked)]',
     },
     bare: {
       frame:
-        'max-[1040px]:invisible max-[1040px]:w-0 max-[1040px]:overflow-hidden max-[1040px]:*:max-w-none',
-      tab: 'hidden max-[1040px]:flex',
-      floor: 'max-[1040px]:min-w-[var(--shell-floor-parked)]',
+        'max-[1094px]:invisible max-[1094px]:w-0 max-[1094px]:overflow-hidden max-[1094px]:*:max-w-none',
+      tab: 'hidden max-[1094px]:flex',
+      floor: 'max-[1094px]:min-w-[var(--shell-floor-parked)]',
     },
   },
 } as const;
@@ -310,7 +314,7 @@ export function dragCeiling(room: number | null, max: number): number {
  * to prevent.
  */
 export function mainColumnFloor(panels: FloorPanels): string {
-  return `min(${mainColumnFloorPx(panels)}px, 100vw - ${SIDEBAR_WIDTH_MIN}px)`;
+  return `min(${mainColumnFloorPx(panels)}px, 100vw - ${SIDEBAR_WIDTH_MIN + SIDEBAR_RAIL_WIDTH}px)`;
 }
 
 /** What the main column's floor counts. */
@@ -355,7 +359,10 @@ export function mainColumnFloorPx({
  */
 export function sidebarCeiling(window: number | null, floor: number): number {
   if (window === null) return SIDEBAR_WIDTH_MAX;
-  return Math.max(SIDEBAR_WIDTH_MIN, Math.min(SIDEBAR_WIDTH_MAX, window - floor));
+  return Math.max(
+    SIDEBAR_WIDTH_MIN,
+    Math.min(SIDEBAR_WIDTH_MAX, window - SIDEBAR_RAIL_WIDTH - floor),
+  );
 }
 
 /** How a page draws its own panels in the width it was given. */

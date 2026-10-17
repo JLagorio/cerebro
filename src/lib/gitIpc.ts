@@ -1,5 +1,5 @@
 /**
- * Git IPC facade (M9.4). Same shape as `lib/ipc.ts`: inside Tauri these
+ * Git and read-only gh IPC facade. Same shape as `lib/ipc.ts`: inside Tauri these
  * invoke the Rust commands; in the browser (pnpm dev, vitest, Playwright)
  * they delegate to `mockGit.ts`.
  *
@@ -200,4 +200,14 @@ export function gitAbortConflict(vault: string): Promise<void> {
 
 export function gitProviderStatus(): Promise<GitProviderStatus> {
   return inTauri() ? invokeTauri('git_provider_status') : mock.gitProviderStatus();
+}
+
+/** Read-only GitHub state through the owner's gh login; never enters the vault. */
+export function pullRequestState(
+  url: string,
+  refresh = false,
+): Promise<import('@/engine/pullRequest').PrRead> {
+  return inTauri()
+    ? invokeTauri('pull_request_state', { url, refresh })
+    : mock.pullRequestState(url, refresh);
 }

@@ -45,9 +45,9 @@ const resolve = vi.fn((text: string): SkillResolution =>
         text: text.trim(),
         skill: { path: 'skills/weekly.md' },
         expand: expandSkill,
-        allowedTools: ['get_note'],
+        narrowing: { allowedTools: ['get_note'] },
       }
-    : { text: text.trim(), skill: null, expand: null, allowedTools: null },
+    : { text: text.trim(), skill: null, expand: null, narrowing: {} },
 );
 const expandSkill = vi.fn(() => Promise.resolve('EXPANDED BODY'));
 
@@ -91,6 +91,34 @@ describe('useUpNext (M57.5)', () => {
     expandSkill.mockClear();
   });
 
+  it('freezes all skill restrictions while the queued turn waits', () => {
+    const narrowing = {
+      allowedTools: ['get_note'],
+      connectors: ['gmail'],
+      disallowedTools: ['mcp__gmail__trash_thread'],
+    };
+    resolve.mockReturnValueOnce({
+      text: '/draft-reply abc',
+      skill: { path: 'skills/draft-reply.md' },
+      expand: expandSkill,
+      narrowing,
+    });
+    const { result, set, sendNow } = setup();
+    set({ streaming: true });
+    act(() => {
+      result.current.submit({ text: '/draft-reply abc' });
+    });
+    narrowing.allowedTools.push('create_note');
+    narrowing.connectors.push('notion');
+    narrowing.disallowedTools.length = 0;
+    set({ streaming: false, messages: [user('first'), reply()] });
+    expect(sendNow.mock.calls[0][2]).toEqual({
+      allowedTools: ['get_note'],
+      connectors: ['gmail'],
+      disallowedTools: ['mcp__gmail__trash_thread'],
+    });
+  });
+
   it('starts the head with its frozen context once a turn ends on its own', () => {
     const { result, set, sendNow, walk } = setup();
     set({ streaming: true, messages: [user('first'), reply({ streaming: true })] });
@@ -107,7 +135,7 @@ describe('useUpNext (M57.5)', () => {
     const [text, message, tools, frozen] = sendNow.mock.calls[0];
     expect(text).toBe('follow up');
     expect(typeof message).toBe('function');
-    expect(tools).toBeNull();
+    expect(tools).toEqual({});
     expect((frozen as TurnContext).systemPrompt({} as never)).toBe('context: Roadmap');
     expect(result.current.entries).toEqual([]);
   });
@@ -235,7 +263,7 @@ describe('useUpNext (M57.5)', () => {
     expect(sendNow).toHaveBeenLastCalledWith(
       'Ask to revise · B',
       'REVISE B',
-      null,
+      {},
       expect.anything(),
     );
   });
@@ -266,7 +294,7 @@ describe('useUpNext (M57.5)', () => {
     set({ streaming: false, messages: [user('x'), reply()] });
     const [text, message, tools] = sendNow.mock.calls[0];
     expect(text).toBe('/weekly go');
-    expect(tools).toEqual(['get_note']);
+    expect(tools).toEqual({ allowedTools: ['get_note'] });
     await expect((message as () => Promise<string>)()).resolves.toBe('EXPANDED BODY');
     expect(expandSkill).toHaveBeenCalledOnce();
   });

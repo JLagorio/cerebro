@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import YAML from 'yaml';
-import { boot } from './boot';
+import { boot, showDatabases, showPages } from './boot';
 
 const disk = (page: Page): Promise<Record<string, string>> =>
   page.evaluate(() => Object.fromEntries(window.__cerebroMockFs.entries()));
@@ -17,6 +17,7 @@ test('database rename keeps records, relations, tabs and embeds connected; one U
   page,
 }) => {
   await boot(page);
+  await showDatabases(page);
   await typeRow(page, 'Work item').click();
   await expect(page.getByTestId('type-page')).toBeVisible();
   const before = await disk(page);
@@ -60,6 +61,8 @@ test('database rename keeps records, relations, tabs and embeds connected; one U
     before['delivery/delivery.md'].replaceAll('database: Work item', 'database: Task'),
   );
 
+  await showPages(page);
+
   const delivery = page.getByTestId('collection-node-collection').filter({ hasText: 'Delivery' });
   await delivery.getByRole('button', { name: 'Delivery', exact: true }).click();
   await expect(page.getByTestId('database-block')).toHaveCount(3);
@@ -67,6 +70,8 @@ test('database rename keeps records, relations, tabs and embeds connected; one U
   for (const block of await page.getByTestId('database-block').all()) {
     await expect(block.getByTestId('view-problems')).toHaveCount(0);
   }
+
+  await showDatabases(page);
 
   await typeRow(page, 'Epic').click();
   const row = page.getByTestId('table-row').filter({ hasText: 'Phoenix warehouse cutover' });
@@ -80,6 +85,8 @@ test('database rename keeps records, relations, tabs and embeds connected; one U
   const related = page.getByTestId('view-tab-embed');
   await expect(related.getByTestId('table-row')).toHaveCount(4);
   await expect(related.getByText('Rehearse the rollback in staging')).toBeVisible();
+
+  await showDatabases(page);
 
   await typeRow(page, 'Task').click();
   await page.getByTestId('table-view').focus();

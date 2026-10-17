@@ -48,7 +48,9 @@
       "mcp__cerebro__set_fields": "cli",
       "mcp__cerebro__append_to_note": "cli",
       "mcp__cerebro__edit_note": "cli",
-      "mcp__cerebro__edit_sheet": "cli"
+      "mcp__cerebro__edit_sheet": "cli",
+      "mcp__cerebro__create_canvas": "cli",
+      "mcp__cerebro__edit_canvas": "cli"
     }
   }
 }

@@ -419,7 +419,8 @@ mod tests {
             serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
         let csp = config["app"]["security"]["csp"].as_str().unwrap();
         let directives = csp.split(';').map(str::trim).collect::<Vec<_>>();
-        assert!(directives.contains(&"img-src 'self' data: cerebro-file:"));
+        // M66.9b's explicit Load admits HTTPS pictures in this directive only.
+        assert!(directives.contains(&"img-src 'self' data: cerebro-file: https:"));
         assert!(directives.contains(&"media-src 'self' cerebro-file:"));
         assert_eq!(
             directives

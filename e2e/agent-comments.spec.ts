@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, openAssistantPanel } from './boot';
 
 /**
  * Agents comment by quote (M70.3): comment_on_note, reply_to_comment and
@@ -35,7 +35,7 @@ async function sidecar(page: Page): Promise<Sidecar> {
 async function openAssistant(page: Page): Promise<void> {
   await page.setViewportSize({ width: 1440, height: 900 });
   await boot(page);
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   await expect(page.getByTestId('ai-panel')).toBeVisible();
 }
 

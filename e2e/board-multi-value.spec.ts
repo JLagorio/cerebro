@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import YAML from 'yaml';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, showDatabases } from './boot';
 
 test('moving one decider membership keeps the other decider and both rendered cards', async ({
   page,
@@ -26,6 +26,7 @@ test('moving one decider membership keeps the other decider and both rendered ca
     seed();
   });
   await boot(page);
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Decision' }).first().click();
   await expect(page.getByTestId('view-tab-by-decider')).toHaveAttribute('aria-selected', 'true');
   const source = page

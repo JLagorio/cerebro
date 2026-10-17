@@ -27,7 +27,13 @@
  */
 
 import { agentFacingOps, POLICY } from '@/lib/policy/table';
-import { TOOLS, toolFacts, type FoldPhrases, type Renderer } from '@/lib/policy/tools';
+import {
+  bareToolName,
+  TOOLS,
+  toolFacts,
+  type FoldPhrases,
+  type Renderer,
+} from '@/lib/policy/tools';
 
 export { bareToolName } from '@/lib/policy/tools';
 
@@ -87,10 +93,26 @@ export function showsAsChange(name: string): boolean {
   return renderer === 'change' || renderer === 'concept';
 }
 
-/** The lucide icon for a call to `name`, or the wrench for a tool the
- * manifest does not know: another server's, or a CLI tool it does not list. */
+/** The CLI's spelling identifies a foreign server; it never borrows a
+ * cerebro tool's write classification, even when the bare names match. */
+export function foreignTool(name: string): { server: string; tool: string } | null {
+  const match = /^mcp__([A-Za-z0-9_-]+?)__([A-Za-z0-9_-]+)$/.exec(name);
+  if (match === null || match[0] !== name || match[1] === TOOLS.server) return null;
+  return { server: match[1], tool: match[2] };
+}
+
+/** A readable action and its separate connector attribution. */
+export function toolDisplay(name: string): { label: string; server: string | null } {
+  const foreign = foreignTool(name);
+  if (foreign !== null) return { label: foreign.tool.replace(/_/g, ' '), server: foreign.server };
+  const bare = bareToolName(name);
+  return { label: /^[A-Z]/.test(bare) ? bare : bare.replace(/_/g, ' '), server: null };
+}
+
+/** Known tools use their manifest icon; foreign calls use the connector
+ * plug, and an unrecognized CLI name keeps the generic wrench. */
 export function toolIconName(name: string): string {
-  return toolFacts(name)?.icon ?? 'wrench';
+  return foreignTool(name) !== null ? 'plug' : (toolFacts(name)?.icon ?? 'wrench');
 }
 
 /** A picker entry, its writes flag read off the manifest. */

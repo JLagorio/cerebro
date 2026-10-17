@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { boot, openKnowledgeTab, readMockFile, showConceptDetails } from './boot';
+import { boot, openKnowledgeTab, readMockFile, showConceptDetails, openDestination } from './boot';
 
 /**
  * The M8.2/M8.3 pipeline: ingest → distil → augment.
@@ -42,10 +42,7 @@ test('ingest: a dropped transcript becomes an untyped working doc in the Inbox',
   page,
 }) => {
   await boot(page);
-  await page
-    .getByTestId('nav-surfaces')
-    .getByRole('button', { name: /^Inbox/ })
-    .click();
+  await openDestination(page, 'Inbox');
 
   await dropScannerSlip(page);
 
@@ -75,10 +72,7 @@ test('ingest: dropping the same transcript again names its filed copy and writes
   page,
 }) => {
   await boot(page);
-  await page
-    .getByTestId('nav-surfaces')
-    .getByRole('button', { name: /^Inbox/ })
-    .click();
+  await openDestination(page, 'Inbox');
   await dropScannerSlip(page);
   await expect(
     page.locator('[data-testid="inbox-row"][data-path="inbox/scanner-slip.md"]'),
@@ -100,10 +94,7 @@ test('meeting: a transcript files as a record with its matched speakers, only on
   page,
 }) => {
   await boot(page);
-  await page
-    .getByTestId('nav-surfaces')
-    .getByRole('button', { name: /^Inbox/ })
-    .click();
+  await openDestination(page, 'Inbox');
   await page.locator(`[data-testid="inbox-row"][data-path="${TRANSCRIPT}"]`).click();
 
   // The three speakers are the demo's people, each matched to one page.
@@ -184,10 +175,7 @@ test('commit: any note says what the base took from it, not just Inbox captures'
 
   // The same fact, visible without opening anything: the transcript row in
   // the queue carries what was distilled from it.
-  await page
-    .getByTestId('nav-surfaces')
-    .getByRole('button', { name: /^Inbox/ })
-    .click();
+  await openDestination(page, 'Inbox');
   const row = page.locator(`[data-testid="inbox-row"][data-path="${TRANSCRIPT}"]`);
   await expect(row.getByTestId('row-committed')).toHaveText('1');
 
@@ -290,15 +278,12 @@ test('grow: filing a capture hands it to the base without anyone asking', async 
   });
   await page.goto('/');
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
-  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  const shell = page.getByTestId('app-rail');
+  await expect(demoButton.or(shell)).toBeVisible({ timeout: 10_000 });
   if (await demoButton.isVisible()) await demoButton.click();
-  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+  await expect(shell).toBeVisible({ timeout: 10_000 });
 
-  await page
-    .getByTestId('nav-surfaces')
-    .getByRole('button', { name: /^Inbox/ })
-    .click();
+  await openDestination(page, 'Inbox');
   await page.locator('[data-testid="inbox-row"]').filter({ hasText: 'Warehouse cutover' }).click();
 
   const organize = page.getByLabel('Organize').getByTestId('knowledge-commit');

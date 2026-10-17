@@ -32,7 +32,7 @@ const COUNT_LABELS: Record<keyof IcsCounts, string> = {
   addressesRemoved: 'Address occurrences removed',
   unknownZone: 'Unknown-zone events kept as local times',
   dstEdge: 'Daylight-saving gaps or overlaps kept as local times',
-  secondsDropped: 'Events rounded down to the minute',
+  secondsDropped: 'Events rounded-sm down to the minute',
   invalidEnd: 'Unreadable ends omitted',
 };
 export function IcsImportDialog(props: {

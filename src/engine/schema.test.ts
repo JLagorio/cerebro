@@ -853,3 +853,19 @@ describe('formula reads (M61.4)', () => {
     expect(chart.total).toBe(70);
   });
 });
+
+it('email_domain names exactly a declared text or URL field', () => {
+  for (const kind of ['text', 'url', 'email', 'number', 'formula']) {
+    const row = makeEntry({
+      path: 'types/business.md',
+      title: 'Business',
+      type: 'Type',
+      properties: { email_domain: ' domain ', fields: { domain: { kind } } },
+    });
+    expect(buildSchema([row]).types.get('Business')?.emailDomain).toBe(
+      ['text', 'url'].includes(kind) ? 'domain' : null,
+    );
+    const wrong = { ...row, properties: { ...row.properties, email_domain: 'Domain' } };
+    expect(buildSchema([wrong]).types.get('Business')?.emailDomain).toBeNull();
+  }
+});

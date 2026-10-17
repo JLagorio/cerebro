@@ -1,10 +1,7 @@
 {
   "docx": {
     "markdown": "## Overview\n\n#### Details\n\n4. First\n\n5. Second\n\nKept inserted [site](https://example.test/notes)\n\n| Merged |  |\n| --- | --- |\n|  |  |\n\n*Image: A dot*\n\nText box once",
-    "not_carried": [
-      "headers",
-      "table of contents fields"
-    ],
+    "not_carried": ["headers", "table of contents fields"],
     "truncated": false
   },
   "pptx": {

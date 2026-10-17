@@ -25,11 +25,9 @@ export function UnknownViewer({
         caption
         className="inline-flex max-h-96 max-w-full flex-col items-center gap-2"
       />
-      <p>
-        {probe.open === 'deny'
-          ? 'This looks like a program or script. You can reveal or preview it.'
-          : 'No preview is available for this kind of file.'}
-      </p>
+      {probe.open === 'deny' && (
+        <p>This looks like a program or script. You can reveal or preview it.</p>
+      )}
     </div>
   );
 }

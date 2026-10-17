@@ -1,5 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile, seedFileBeforeBoot } from './boot';
+import {
+  boot,
+  readMockFile,
+  seedFileBeforeBoot,
+  openDestination,
+  openAssistantPanel,
+} from './boot';
 
 const PATH = 'delivery/how-we-schedule.md';
 const NOTE = '# How we schedule\n\nSee [[systems-map]] and [[strategy]].\n';
@@ -55,7 +61,7 @@ test('Shift+Enter opens beside from Quick open and a list cursor', async ({ page
   await openPage(page, 'Systems map', true);
   await expect(page.getByTestId('pane')).toHaveCount(2);
   await frame(page, 1).getByTestId('pane-close').click();
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'My work' }).click();
+  await openDestination(page, 'My work');
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.keyboard.press('j');
   await page.keyboard.press('Shift+Enter');
@@ -64,8 +70,14 @@ test('Shift+Enter opens beside from Quick open and a list cursor', async ({ page
   await expect(frame(page, 1)).toHaveAttribute('data-active', 'true');
 });
 
-test('a full narrow row opens in place and says why', async ({ page }) => {
+test('a full narrow row beside the assistant opens in place and says why', async ({ page }) => {
   await start(page, 1000);
+  // The contextual sidebar folds at this width, so two panes alone fit.
+  // A docked companion leaves this row genuinely below its two-pane floor.
+  await openAssistantPanel(page);
+  await expect
+    .poll(async () => (await page.getByTestId('pane-row').boundingBox())!.width)
+    .toBeLessThan(832);
   await systemLink(page).click({ modifiers: ['ControlOrMeta'] });
   await expect(page.getByTestId('pane')).toHaveCount(1);
   await expect(page).toHaveTitle('Systems map — Cerebro');
@@ -77,10 +89,18 @@ test('a full narrow row opens in place and says why', async ({ page }) => {
 test('narrowing parks the older pane at zero width and its tab restores it', async ({
   page,
 }, testInfo) => {
-  await start(page);
+  await start(page, 1600);
+  await openAssistantPanel(page);
   await systemLink(page).click({ modifiers: ['ControlOrMeta'] });
   await expect(page.getByTestId('pane')).toHaveCount(2);
+  await expect
+    .poll(async () => (await page.getByTestId('pane-row').boundingBox())!.width)
+    .toBeGreaterThanOrEqual(832);
+  await expect(frame(page, 0)).toHaveAttribute('data-parked', 'false');
   await page.setViewportSize({ width: 1000, height: 720 });
+  await expect
+    .poll(async () => (await page.getByTestId('pane-row').boundingBox())!.width)
+    .toBeLessThan(832);
   await expect(frame(page, 0)).toHaveAttribute('data-parked', 'true');
   await expect
     .poll(() => frame(page, 0).evaluate((node) => node.getBoundingClientRect().width))

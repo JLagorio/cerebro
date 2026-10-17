@@ -31,6 +31,15 @@ export function useKeyRoot(): void {
   useLayoutEffect(() => installKeyRoot(), []);
 }
 
+/** Mark a portaled child with its existing nearest scope. This does not
+ * register a new scope or change where its React descendants bind. */
+export function useKeyScopeProps(): Record<string, string> {
+  const scope = useContext(KeyScopeContext)[0];
+  return scope
+    ? { 'data-key-scope': scope.name, 'data-key-scope-id': scope.id }
+    : { 'data-key-scope': 'page', 'data-key-scope-id': ROOT_PAGE_ID };
+}
+
 export interface KeyScope extends ScopeRef {
   /** Spread on the scope's root element. */
   props: Record<string, string>;

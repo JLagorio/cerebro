@@ -72,6 +72,7 @@ import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import {
   AiBlock,
+  GatedImageBlock,
   CalloutBlock,
   ColumnBlock,
   ColumnListBlock,
@@ -147,6 +148,7 @@ export const TABLE_SETTINGS = {
 export const cerebroSchema = BlockNoteSchema.create({
   blockSpecs: {
     ...defaultBlockSpecs,
+    image: GatedImageBlock(),
     codeBlock: codeBlockSpec,
     ai: AiBlock(),
     callout: CalloutBlock(),

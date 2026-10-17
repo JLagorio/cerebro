@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { usePageNavigationControls } from '@/app/PageNavigation';
 import { Icon } from '@/components/ui/Icon';
 import { gitBadgeText, syncNotice } from '@/engine/roots';
 import { selectActiveTab, useRootsStore } from '@/stores/rootsStore';
@@ -16,6 +17,7 @@ import { flattenTree, nodeKey, type TreeRow } from './treeRows';
  * PAST the tree instead of through four hundred files.
  */
 export function RootTree() {
+  const navigation = usePageNavigationControls('workspace');
   const roots = useRootsStore((s) => s.roots);
   const expanded = useRootsStore((s) => s.expanded);
   const children = useRootsStore((s) => s.children);
@@ -55,7 +57,10 @@ export function RootTree() {
 
   const activate = (row: TreeRow): void => {
     if (row.isDir) void toggle(row.rootId, row.path);
-    else openFile(row.rootId, row.path);
+    else {
+      openFile(row.rootId, row.path);
+      navigation?.hide();
+    }
   };
 
   /** Move the roving focus to a row and put the DOM focus there with it. */
@@ -199,6 +204,7 @@ export function RootTree() {
                 aria-selected={active}
                 tabIndex={row.key === tabbable ? 0 : -1}
                 data-testid="tree-row"
+                data-page-navigation-item={!row.isDir || undefined}
                 data-path={row.path}
                 data-root={row.rootId}
                 data-active={active}
@@ -209,7 +215,7 @@ export function RootTree() {
                 onKeyDown={onKeyDown(row, index)}
                 style={{ paddingLeft: `${row.depth * 12 + 6}px` }}
                 className={`flex w-full min-w-0 items-center gap-1 border-0 py-[3px] pr-2 text-left text-[13px] ${
-                  active ? 'bg-n-100 text-n-900' : 'bg-transparent hover:bg-n-50'
+                  active ? 'bg-surface-selected text-cortex-700' : 'bg-transparent hover:bg-n-50'
                 } ${row.ignored ? 'opacity-50' : ''} ${row.isRoot ? 'font-semibold' : ''}`}
               >
                 {/* Directories keep a caret AS WELL as their glyph: the caret

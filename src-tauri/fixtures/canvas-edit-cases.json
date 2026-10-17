@@ -1,0 +1,1437 @@
+{
+  "edits": [
+    {
+      "name": "add a text card",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "id": "c",
+          "type": "text",
+          "x": 10,
+          "y": 20,
+          "width": 120,
+          "height": 80,
+          "text": "Next"
+        }
+      ],
+      "after": "{\n\t\"nodes\": [\n\t\t{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},\n\t\t{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"},\n\t\t{\"id\":\"c\",\"type\":\"text\",\"text\":\"Next\",\"x\":10,\"y\":20,\"width\":120,\"height\":80}\n\t],\n\t\"edges\": []\n}",
+      "report": {
+        "ops": ["Added the text node c."],
+        "created": [
+          {
+            "op": 1,
+            "id": "c"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "whole decimals and lower-case colour",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 10.0,
+          "y": 20.0,
+          "color": "#AABBCC",
+          "text": "Updated"
+        }
+      ],
+      "after": "{\n\t\"nodes\": [\n\t\t{\"id\":\"a\",\"type\":\"text\",\"x\":10,\"y\":20,\"width\":100,\"height\":60,\"text\":\"Updated\",\"color\":\"#aabbcc\"},\n\t\t{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}\n\t],\n\t\"edges\": []\n}",
+      "report": {
+        "ops": ["Changed x, y, color and text on node a."],
+        "created": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "same values preserve the exact source",
+      "source": " { \"nodes\": [{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"}] }\n",
+      "ops": [
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0,
+          "text": "Goals"
+        }
+      ],
+      "after": " { \"nodes\": [{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"}] }\n",
+      "report": {
+        "ops": ["Node a already had those values."],
+        "created": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "clear optional fields",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "update_node",
+          "id": "b",
+          "label": ""
+        }
+      ],
+      "after": "{\n\t\"nodes\": [\n\t\t{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},\n\t\t{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60}\n\t],\n\t\"edges\": []\n}",
+      "report": {
+        "ops": ["Changed label on node b."],
+        "created": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "add then connect earlier card",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "id": "c",
+          "type": "text",
+          "x": 10,
+          "y": 20,
+          "width": 120,
+          "height": 80,
+          "text": "Next"
+        },
+        {
+          "op": "add_edge",
+          "id": "e",
+          "fromNode": "a",
+          "toNode": "c",
+          "fromSide": "right",
+          "toEnd": "arrow",
+          "label": "Next"
+        }
+      ],
+      "after": "{\n\t\"nodes\": [\n\t\t{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},\n\t\t{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"},\n\t\t{\"id\":\"c\",\"type\":\"text\",\"text\":\"Next\",\"x\":10,\"y\":20,\"width\":120,\"height\":80}\n\t],\n\t\"edges\": [\n\t\t{\"id\":\"e\",\"fromNode\":\"a\",\"fromSide\":\"right\",\"toNode\":\"c\",\"toEnd\":\"arrow\",\"label\":\"Next\"}\n\t]\n}",
+      "report": {
+        "ops": ["Added the text node c.", "Added the edge e from a to c."],
+        "created": [
+          {
+            "op": 1,
+            "id": "c"
+          },
+          {
+            "op": 2,
+            "id": "e"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "change connection",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[{\"id\":\"e\",\"fromNode\":\"a\",\"toNode\":\"b\",\"fromSide\":\"right\",\"toEnd\":\"arrow\",\"label\":\"Next\"}]}",
+      "ops": [
+        {
+          "op": "update_edge",
+          "id": "e",
+          "fromNode": "b",
+          "toNode": "a",
+          "fromSide": "",
+          "toEnd": "none",
+          "label": "Back"
+        }
+      ],
+      "after": "{\n\t\"nodes\": [\n\t\t{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},\n\t\t{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}\n\t],\n\t\"edges\": [\n\t\t{\"id\":\"e\",\"fromNode\":\"b\",\"toNode\":\"a\",\"toEnd\":\"none\",\"label\":\"Back\"}\n\t]\n}",
+      "report": {
+        "ops": ["Changed fromNode, toNode, fromSide, toEnd and label on edge e."],
+        "created": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "old dangling edge does not block node changes",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"}],\"edges\":[{\"id\":\"old\",\"fromNode\":\"a\",\"toNode\":\"gone\",\"color\":\"old-colour\"}]}",
+      "ops": [
+        {
+          "op": "update_node",
+          "id": "a",
+          "text": "Still here"
+        }
+      ],
+      "after": "{\n\t\"nodes\": [\n\t\t{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Still here\"}\n\t],\n\t\"edges\": [\n\t\t{\"id\":\"old\",\"fromNode\":\"a\",\"toNode\":\"gone\",\"color\":\"old-colour\"}\n\t]\n}",
+      "report": {
+        "ops": ["Changed text on node a."],
+        "created": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "old dangling edge label may change",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"}],\"edges\":[{\"id\":\"old\",\"fromNode\":\"a\",\"toNode\":\"gone\"}]}",
+      "ops": [
+        {
+          "op": "update_edge",
+          "id": "old",
+          "label": "Old pointer"
+        }
+      ],
+      "after": "{\n\t\"nodes\": [\n\t\t{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"}\n\t],\n\t\"edges\": [\n\t\t{\"id\":\"old\",\"fromNode\":\"a\",\"toNode\":\"gone\",\"label\":\"Old pointer\"}\n\t]\n}",
+      "report": {
+        "ops": ["Changed label on edge old."],
+        "created": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "file target missing",
+      "source": "{}",
+      "ops": [
+        {
+          "op": "add_node",
+          "id": "f",
+          "type": "file",
+          "x": 0,
+          "y": 0,
+          "width": 50,
+          "height": 50,
+          "file": "notes/missing.md",
+          "subpath": "#Next"
+        }
+      ],
+      "after": "{\n\t\"nodes\": [\n\t\t{\"id\":\"f\",\"type\":\"file\",\"file\":\"notes/missing.md\",\"subpath\":\"#Next\",\"x\":0,\"y\":0,\"width\":50,\"height\":50}\n\t]\n}",
+      "report": {
+        "ops": ["Added the file node f."],
+        "created": [
+          {
+            "op": 1,
+            "id": "f"
+          }
+        ],
+        "warnings": [
+          "The card f points at notes/missing.md, which is not in the vault; it keeps that path."
+        ]
+      },
+      "targets": {
+        "notes/missing.md": "missing"
+      }
+    },
+    {
+      "name": "file target unchecked",
+      "source": "{}",
+      "ops": [
+        {
+          "op": "add_node",
+          "id": "f",
+          "type": "file",
+          "x": 0,
+          "y": 0,
+          "width": 50,
+          "height": 50,
+          "file": "notes/missing.md",
+          "subpath": "#Next"
+        }
+      ],
+      "after": "{\n\t\"nodes\": [\n\t\t{\"id\":\"f\",\"type\":\"file\",\"file\":\"notes/missing.md\",\"subpath\":\"#Next\",\"x\":0,\"y\":0,\"width\":50,\"height\":50}\n\t]\n}",
+      "report": {
+        "ops": ["Added the file node f."],
+        "created": [
+          {
+            "op": 1,
+            "id": "f"
+          }
+        ],
+        "warnings": [
+          "The card f points at notes/missing.md, outside what this run may read, so it was not checked."
+        ]
+      },
+      "targets": {
+        "notes/missing.md": "unchecked"
+      }
+    },
+    {
+      "name": "file target exists",
+      "source": "{}",
+      "ops": [
+        {
+          "op": "add_node",
+          "id": "f",
+          "type": "file",
+          "x": 0,
+          "y": 0,
+          "width": 50,
+          "height": 50,
+          "file": "notes/missing.md",
+          "subpath": "#Next"
+        }
+      ],
+      "after": "{\n\t\"nodes\": [\n\t\t{\"id\":\"f\",\"type\":\"file\",\"file\":\"notes/missing.md\",\"subpath\":\"#Next\",\"x\":0,\"y\":0,\"width\":50,\"height\":50}\n\t]\n}",
+      "report": {
+        "ops": ["Added the file node f."],
+        "created": [
+          {
+            "op": 1,
+            "id": "f"
+          }
+        ],
+        "warnings": []
+      },
+      "targets": {
+        "notes/missing.md": "exists"
+      }
+    },
+    {
+      "name": "empty",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [],
+      "refusal": "edit_canvas needs at least one op."
+    },
+    {
+      "name": "too many",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        },
+        {
+          "op": "update_node",
+          "id": "a",
+          "x": 0
+        }
+      ],
+      "refusal": "edit_canvas takes at most 25 ops in one call; this call has 26."
+    },
+    {
+      "name": "not object",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [1],
+      "refusal": "Op 1 must be an object with `op`."
+    },
+    {
+      "name": "unknown operation",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "remove_node",
+          "id": "a"
+        }
+      ],
+      "refusal": "Op 1: `op` must be add_node, update_node, add_edge or update_edge."
+    },
+    {
+      "name": "unknown key",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "update_node",
+          "id": "a",
+          "shape": "ellipse"
+        }
+      ],
+      "refusal": "Op 1: shape isn't something update_node sets."
+    },
+    {
+      "name": "never edit extras",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "update_node",
+          "id": "a",
+          "cerebro": {}
+        }
+      ],
+      "refusal": "Op 1: cerebro isn't something update_node sets."
+    },
+    {
+      "name": "type change",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "update_node",
+          "id": "a",
+          "type": "text"
+        }
+      ],
+      "refusal": "Op 1: a node's type can't change."
+    },
+    {
+      "name": "missing type",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node"
+        }
+      ],
+      "refusal": "Op 1: add_node needs `type`: text, file, link or group."
+    },
+    {
+      "name": "missing geometry",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "type": "text"
+        }
+      ],
+      "refusal": "Op 1: a text node needs `x`."
+    },
+    {
+      "name": "wrong content",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "id": "c",
+          "type": "text",
+          "x": 10,
+          "y": 20,
+          "width": 120,
+          "height": 80,
+          "text": "Next",
+          "file": "notes/a.md"
+        }
+      ],
+      "refusal": "Op 1: a text node takes no `file`."
+    },
+    {
+      "name": "fractional x",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "id": "c",
+          "type": "text",
+          "x": 0.1,
+          "y": 20,
+          "width": 120,
+          "height": 80,
+          "text": "Next"
+        }
+      ],
+      "refusal": "Op 1: `x` must be a whole number from -1000000000 to 1000000000."
+    },
+    {
+      "name": "zero width",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "id": "c",
+          "type": "text",
+          "x": 10,
+          "y": 20,
+          "width": 0,
+          "height": 80,
+          "text": "Next"
+        }
+      ],
+      "refusal": "Op 1: `width` must be a whole number from 1 to 1000000000."
+    },
+    {
+      "name": "not text",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "id": "c",
+          "type": "text",
+          "x": 10,
+          "y": 20,
+          "width": 120,
+          "height": 80,
+          "text": 5
+        }
+      ],
+      "refusal": "Op 1: `text` must be text."
+    },
+    {
+      "name": "invalid id",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "id": "bad id",
+          "type": "text",
+          "x": 10,
+          "y": 20,
+          "width": 120,
+          "height": 80,
+          "text": "Next"
+        }
+      ],
+      "refusal": "Op 1: \"bad id\" can't be an id. Use 1 to 64 letters, digits, - or _."
+    },
+    {
+      "name": "id collision",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "id": "a",
+          "type": "text",
+          "x": 10,
+          "y": 20,
+          "width": 120,
+          "height": 80,
+          "text": "Next"
+        }
+      ],
+      "refusal": "Op 1: the id a is already on this board."
+    },
+    {
+      "name": "unknown node",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "update_node",
+          "id": "gone",
+          "text": "x"
+        }
+      ],
+      "refusal": "Op 1: no node with id \"gone\" on this board."
+    },
+    {
+      "name": "unknown edge",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "update_edge",
+          "id": "gone",
+          "label": "x"
+        }
+      ],
+      "refusal": "Op 1: no edge with id \"gone\" on this board."
+    },
+    {
+      "name": "no update fields",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "update_node",
+          "id": "a"
+        }
+      ],
+      "refusal": "Op 1: update_node needs `id` and at least one field to change."
+    },
+    {
+      "name": "bad colour",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "id": "c",
+          "type": "text",
+          "x": 10,
+          "y": 20,
+          "width": 120,
+          "height": 80,
+          "text": "Next",
+          "color": "red"
+        }
+      ],
+      "refusal": "Op 1: \"red\" isn't a colour. Use a preset 1 to 6, or #rrggbb."
+    },
+    {
+      "name": "control text",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "id": "c",
+          "type": "text",
+          "x": 10,
+          "y": 20,
+          "width": 120,
+          "height": 80,
+          "text": "x\u0001"
+        }
+      ],
+      "refusal": "Op 1: `text` holds a control character a board can't carry."
+    },
+    {
+      "name": "bad side",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_edge",
+          "fromNode": "a",
+          "toNode": "b",
+          "fromSide": "center"
+        }
+      ],
+      "refusal": "Op 1: \"center\" isn't a side. Use top, right, bottom or left."
+    },
+    {
+      "name": "bad end",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_edge",
+          "fromNode": "a",
+          "toNode": "b",
+          "toEnd": "circle"
+        }
+      ],
+      "refusal": "Op 1: \"circle\" isn't an edge end. Use none or arrow."
+    },
+    {
+      "name": "dangling after valid operation",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "id": "c",
+          "type": "text",
+          "x": 10,
+          "y": 20,
+          "width": 120,
+          "height": 80,
+          "text": "Next"
+        },
+        {
+          "op": "add_edge",
+          "fromNode": "c",
+          "toNode": "missing"
+        }
+      ],
+      "refusal": "Op 2: the edge would point at \"missing\", which is not on the board."
+    },
+    {
+      "name": "bad file ../outside.md",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "type": "file",
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 1,
+          "file": "../outside.md"
+        }
+      ],
+      "refusal": "Op 1: \"../outside.md\" isn't a path inside the vault. Name a file such as notes/plan.md, with no ../, leading / or hidden folder."
+    },
+    {
+      "name": "bad file /absolute.md",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "type": "file",
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 1,
+          "file": "/absolute.md"
+        }
+      ],
+      "refusal": "Op 1: \"/absolute.md\" isn't a path inside the vault. Name a file such as notes/plan.md, with no ../, leading / or hidden folder."
+    },
+    {
+      "name": "bad file .hidden/a.md",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "type": "file",
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 1,
+          "file": ".hidden/a.md"
+        }
+      ],
+      "refusal": "Op 1: \".hidden/a.md\" isn't a path inside the vault. Name a file such as notes/plan.md, with no ../, leading / or hidden folder."
+    },
+    {
+      "name": "bad file notes//a.md",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "type": "file",
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 1,
+          "file": "notes//a.md"
+        }
+      ],
+      "refusal": "Op 1: \"notes//a.md\" isn't a path inside the vault. Name a file such as notes/plan.md, with no ../, leading / or hidden folder."
+    },
+    {
+      "name": "bad file notes/../a.md",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "type": "file",
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 1,
+          "file": "notes/../a.md"
+        }
+      ],
+      "refusal": "Op 1: \"notes/../a.md\" isn't a path inside the vault. Name a file such as notes/plan.md, with no ../, leading / or hidden folder."
+    },
+    {
+      "name": "bad file notes\\a.md",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "type": "file",
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 1,
+          "file": "notes\\a.md"
+        }
+      ],
+      "refusal": "Op 1: \"notes\\\\a.md\" isn't a path inside the vault. Name a file such as notes/plan.md, with no ../, leading / or hidden folder."
+    },
+    {
+      "name": "self board",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "type": "file",
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 1,
+          "file": "boards/plan.canvas"
+        }
+      ],
+      "refusal": "Op 1: a card can't show its own board."
+    },
+    {
+      "name": "bad subpath",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "type": "file",
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 1,
+          "file": "notes/a.md",
+          "subpath": "Heading"
+        }
+      ],
+      "refusal": "Op 1: `subpath` must start with #."
+    },
+    {
+      "name": "symlink outside",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "type": "file",
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 1,
+          "file": "notes/a.md"
+        }
+      ],
+      "refusal": "Op 1: \"notes/a.md\" isn't a path inside the vault. Name a file such as notes/plan.md, with no ../, leading / or hidden folder.",
+      "targets": {
+        "notes/a.md": "outside"
+      }
+    },
+    {
+      "name": "bad url file:///tmp/a",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "type": "link",
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 1,
+          "url": "file:///tmp/a"
+        }
+      ],
+      "refusal": "Op 1: \"file:///tmp/a\" isn't a web address. Start it with http or https://."
+    },
+    {
+      "name": "bad url javascript:alert(1)",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "type": "link",
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 1,
+          "url": "javascript:alert(1)"
+        }
+      ],
+      "refusal": "Op 1: \"javascript:alert(1)\" isn't a web address. Start it with http or https://."
+    },
+    {
+      "name": "bad url https://",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "type": "link",
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 1,
+          "url": "https://"
+        }
+      ],
+      "refusal": "Op 1: \"https://\" isn't a web address. Start it with http or https://."
+    },
+    {
+      "name": "bad url https://exa mple.test",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "type": "link",
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 1,
+          "url": "https://exa mple.test"
+        }
+      ],
+      "refusal": "Op 1: \"https://exa mple.test\" isn't a web address. Start it with http or https://."
+    },
+    {
+      "name": "bad url https://x\u0085z",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "type": "link",
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 1,
+          "url": "https://x\u0085z"
+        }
+      ],
+      "refusal": "Op 1: \"https://x\u0085z\" isn't a web address. Start it with http or https://."
+    },
+    {
+      "name": "cap text",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "type": "text",
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 1,
+          "text": "abcd"
+        }
+      ],
+      "refusal": "Op 1: `text` is longer than 3 characters.",
+      "limits": {
+        "text_chars": 3
+      }
+    },
+    {
+      "name": "cap label",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "type": "group",
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 1,
+          "label": "abcd"
+        }
+      ],
+      "refusal": "Op 1: `label` is longer than 3 characters.",
+      "limits": {
+        "label_chars": 3
+      }
+    },
+    {
+      "name": "cap file",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "type": "file",
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 1,
+          "file": "abcd"
+        }
+      ],
+      "refusal": "Op 1: `file` is longer than 3 characters.",
+      "limits": {
+        "file_chars": 3
+      }
+    },
+    {
+      "name": "cap subpath",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "type": "file",
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 1,
+          "subpath": "#abcd",
+          "file": "a.md"
+        }
+      ],
+      "refusal": "Op 1: `subpath` is longer than 3 characters.",
+      "limits": {
+        "subpath_chars": 3
+      }
+    },
+    {
+      "name": "cap url",
+      "source": "{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"x\":0,\"y\":0,\"width\":100,\"height\":60,\"text\":\"Goals\"},{\"id\":\"b\",\"type\":\"group\",\"x\":200,\"y\":0,\"width\":100,\"height\":60,\"label\":\"Plans\"}],\"edges\":[]}",
+      "ops": [
+        {
+          "op": "add_node",
+          "type": "link",
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 1,
+          "url": "https://a"
+        }
+      ],
+      "refusal": "Op 1: `url` is longer than 3 characters.",
+      "limits": {
+        "url_chars": 3
+      }
+    },
+    {
+      "name": "unreadable board",
+      "source": "{",
+      "ops": [
+        {
+          "op": "add_node",
+          "id": "c",
+          "type": "text",
+          "x": 10,
+          "y": 20,
+          "width": 120,
+          "height": 80,
+          "text": "Next"
+        }
+      ],
+      "refusal": "boards/plan.canvas can't be read as a whiteboard (This whiteboard isn't valid JSON.), so it was left as it is."
+    }
+  ],
+  "creates": [
+    {
+      "name": "no operations writes the empty seed",
+      "folder": "boards",
+      "slug": "new",
+      "taken": [],
+      "args": {},
+      "path": "boards/new.canvas",
+      "after": "{\n\t\"nodes\": [],\n\t\"edges\": []\n}",
+      "report": {
+        "ops": [],
+        "created": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "an explicit empty operations list writes the seed",
+      "folder": "boards",
+      "slug": "new",
+      "taken": [],
+      "args": {
+        "ops": []
+      },
+      "path": "boards/new.canvas",
+      "after": "{\n\t\"nodes\": [],\n\t\"edges\": []\n}",
+      "report": {
+        "ops": [],
+        "created": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "one group",
+      "folder": "boards",
+      "slug": "new",
+      "taken": [],
+      "args": {
+        "ops": [
+          {
+            "op": "add_node",
+            "id": "g",
+            "type": "group",
+            "x": 0,
+            "y": 0,
+            "width": 100,
+            "height": 50
+          }
+        ]
+      },
+      "path": "boards/new.canvas",
+      "after": "{\n\t\"nodes\": [\n\t\t{\"id\":\"g\",\"type\":\"group\",\"x\":0,\"y\":0,\"width\":100,\"height\":50}\n\t],\n\t\"edges\": []\n}",
+      "report": {
+        "ops": ["Added the group node g."],
+        "created": [
+          {
+            "op": 1,
+            "id": "g"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "a new board uses the seed hash to mint its id",
+      "folder": "boards",
+      "slug": "new",
+      "taken": [],
+      "args": {
+        "ops": [
+          {
+            "op": "add_node",
+            "type": "group",
+            "x": 0,
+            "y": 0,
+            "width": 100,
+            "height": 50
+          }
+        ]
+      },
+      "path": "boards/new.canvas",
+      "after": "{\n\t\"nodes\": [\n\t\t{\"id\":\"ee8d5ac16d252374\",\"type\":\"group\",\"x\":0,\"y\":0,\"width\":100,\"height\":50}\n\t],\n\t\"edges\": []\n}",
+      "report": {
+        "ops": ["Added the group node ee8d5ac16d252374."],
+        "created": [
+          {
+            "op": 1,
+            "id": "ee8d5ac16d252374"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "two cards and a connection",
+      "folder": "boards",
+      "slug": "new",
+      "taken": [],
+      "args": {
+        "ops": [
+          {
+            "op": "add_node",
+            "id": "g",
+            "type": "group",
+            "x": 0,
+            "y": 0,
+            "width": 100,
+            "height": 50
+          },
+          {
+            "op": "add_node",
+            "id": "t",
+            "type": "text",
+            "text": "Next",
+            "x": 120,
+            "y": 0,
+            "width": 100,
+            "height": 50
+          },
+          {
+            "op": "add_edge",
+            "id": "e",
+            "fromNode": "g",
+            "toNode": "t",
+            "toEnd": "arrow"
+          }
+        ]
+      },
+      "path": "boards/new.canvas",
+      "after": "{\n\t\"nodes\": [\n\t\t{\"id\":\"g\",\"type\":\"group\",\"x\":0,\"y\":0,\"width\":100,\"height\":50},\n\t\t{\"id\":\"t\",\"type\":\"text\",\"text\":\"Next\",\"x\":120,\"y\":0,\"width\":100,\"height\":50}\n\t],\n\t\"edges\": [\n\t\t{\"id\":\"e\",\"fromNode\":\"g\",\"toNode\":\"t\",\"toEnd\":\"arrow\"}\n\t]\n}",
+      "report": {
+        "ops": [
+          "Added the group node g.",
+          "Added the text node t.",
+          "Added the edge e from g to t."
+        ],
+        "created": [
+          {
+            "op": 1,
+            "id": "g"
+          },
+          {
+            "op": 2,
+            "id": "t"
+          },
+          {
+            "op": 3,
+            "id": "e"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "an update can name an earlier add",
+      "folder": "boards",
+      "slug": "new",
+      "taken": [],
+      "args": {
+        "ops": [
+          {
+            "op": "add_node",
+            "id": "g",
+            "type": "group",
+            "x": 0,
+            "y": 0,
+            "width": 100,
+            "height": 50
+          },
+          {
+            "op": "update_node",
+            "id": "g",
+            "x": 10
+          }
+        ]
+      },
+      "path": "boards/new.canvas",
+      "after": "{\n\t\"nodes\": [\n\t\t{\"id\":\"g\",\"type\":\"group\",\"x\":10,\"y\":0,\"width\":100,\"height\":50}\n\t],\n\t\"edges\": []\n}",
+      "report": {
+        "ops": ["Added the group node g.", "Changed x on node g."],
+        "created": [
+          {
+            "op": 1,
+            "id": "g"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "a taken name gets suffix 2",
+      "folder": "boards",
+      "slug": "new",
+      "taken": ["boards/new.canvas"],
+      "args": {},
+      "path": "boards/new-2.canvas",
+      "after": "{\n\t\"nodes\": [],\n\t\"edges\": []\n}",
+      "report": {
+        "ops": [],
+        "created": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "a taken name gets suffix 3",
+      "folder": "boards",
+      "slug": "new",
+      "taken": ["boards/new.canvas", "boards/new-2.canvas"],
+      "args": {},
+      "path": "boards/new-3.canvas",
+      "after": "{\n\t\"nodes\": [],\n\t\"edges\": []\n}",
+      "report": {
+        "ops": [],
+        "created": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "root folder",
+      "folder": "",
+      "slug": "new",
+      "taken": [],
+      "args": {},
+      "path": "new.canvas",
+      "after": "{\n\t\"nodes\": [],\n\t\"edges\": []\n}",
+      "report": {
+        "ops": [],
+        "created": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "a later invalid edge creates nothing",
+      "folder": "boards",
+      "slug": "new",
+      "taken": [],
+      "args": {
+        "ops": [
+          {
+            "op": "add_node",
+            "id": "g",
+            "type": "group",
+            "x": 0,
+            "y": 0,
+            "width": 100,
+            "height": 50
+          },
+          {
+            "op": "add_edge",
+            "fromNode": "g",
+            "toNode": "absent"
+          }
+        ]
+      },
+      "path": "boards/new.canvas",
+      "refusal": "Op 2: the edge would point at \"absent\", which is not on the board."
+    },
+    {
+      "name": "26 operations create nothing",
+      "folder": "boards",
+      "slug": "new",
+      "taken": [],
+      "args": {
+        "ops": [
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          },
+          {
+            "op": "add_node"
+          }
+        ]
+      },
+      "path": "boards/new.canvas",
+      "refusal": "create_canvas takes at most 25 ops in one call; this call has 26."
+    },
+    {
+      "name": "ops must be a list",
+      "folder": "boards",
+      "slug": "new",
+      "taken": [],
+      "args": {
+        "ops": null
+      },
+      "path": "boards/new.canvas",
+      "refusal": "create_canvas needs `ops`, a list of operations"
+    },
+    {
+      "name": "self pointer sees the suffixed name",
+      "folder": "boards",
+      "slug": "new",
+      "taken": ["boards/new.canvas"],
+      "args": {
+        "ops": [
+          {
+            "op": "add_node",
+            "id": "file",
+            "type": "file",
+            "file": "boards/new-2.canvas",
+            "x": 0,
+            "y": 0,
+            "width": 100,
+            "height": 50
+          }
+        ]
+      },
+      "path": "boards/new-2.canvas",
+      "refusal": "Op 1: a card can't show its own board."
+    }
+  ]
+}

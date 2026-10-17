@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, openAssistantPanel } from './boot';
 
 const TYPE = 'types/work-item.md';
 const PAGE = 'delivery/how-we-schedule.md';
@@ -22,7 +22,7 @@ const board = {
   },
 };
 async function suggest(page: Page, args: unknown) {
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   const panel = page.getByTestId('ai-panel');
   await panel.getByLabel('Message the assistant').fill(`suggest view ${JSON.stringify(args)}`);
   await panel.getByRole('button', { name: 'Send', exact: true }).click();

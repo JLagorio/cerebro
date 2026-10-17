@@ -33,6 +33,8 @@ import {
   agentCreate,
   agentEdit,
   agentEditSheet,
+  agentEditCanvas,
+  agentCreateCanvas,
   agentImportNotion,
   beginMockNotionRun,
   endMockNotionRun,
@@ -622,7 +624,11 @@ function startMockRun(
   // person's, with no run).
   const actor = options.actor?.trim() ? options.actor : ASSISTANT_ACTOR;
   const stamp: WriteStamp = { actor, runId: mockAttach(run) };
-  beginMockNotionRun(stamp.runId!, options.allowedTools == null || options.allowedTools.some((tool) => namesTool(tool, 'import_notion_page')));
+  beginMockNotionRun(
+    stamp.runId!,
+    options.allowedTools == null ||
+      options.allowedTools.some((tool) => namesTool(tool, 'import_notion_page')),
+  );
   // M58.3: the run's paths are its own from here until its commit lands, as
   // Rust's claim holds them; the commit comes before its closing events.
   beginMockRun(stamp.runId, actor);
@@ -677,19 +683,47 @@ function startMockRun(
     // Knowledge can read the snapshot the real agent would. The write
     // scripts land on the mock disk through the same refusals as Rust's:
     // the append as tool_append's (M53.6), the edit as tool_edit_note's
-    // (M55.5), the sheet edit as edit_sheet_write's (M67.2b), the set as
+    // (M55.5), sheet and canvas edits as their checked batch doors', the set as
     // set_fields_write's (M60.4), and the comment
     // scripts in the page's sidecar as comment_tools.rs's (M70.3).
     {
       onUiAction: emitUiAction,
       onAppend: (path, content) => agentAppend(vault, path, content, undefined, stamp),
       onEdit: (path, edits) => agentEdit(vault, path, edits, undefined, stamp),
+      onEditCanvas: (path, args) => {
+        if (
+          options.allowedTools != null &&
+          !options.allowedTools.some((tool) => namesTool(tool, 'edit_canvas'))
+        )
+          return Promise.reject(new Error('edit_canvas is not available here'));
+        return agentEditCanvas(vault, path, args, stamp, {
+          readScope: options.readScope,
+          writeScope: options.scope,
+        });
+      },
+      onCreateCanvas: (args) => {
+        if (
+          options.allowedTools != null &&
+          !options.allowedTools.some((tool) => namesTool(tool, 'create_canvas'))
+        )
+          return Promise.reject(new Error('create_canvas is not available here'));
+        return agentCreateCanvas(vault, args, stamp, {
+          readScope: options.readScope,
+          writeScope: options.scope,
+        });
+      },
       onEditSheet: (path, args) =>
         agentEditSheet(vault, path, args, stamp, { alive: () => !stopped && !settled }),
       onImportNotion: (args) => {
-        if (options.allowedTools != null && !options.allowedTools.some((tool) => namesTool(tool, 'import_notion_page')))
+        if (
+          options.allowedTools != null &&
+          !options.allowedTools.some((tool) => namesTool(tool, 'import_notion_page'))
+        )
           return Promise.reject(new Error('import_notion_page is not available here'));
-        return agentImportNotion(vault, args, stamp, { write: options.scope, read: options.readScope });
+        return agentImportNotion(vault, args, stamp, {
+          write: options.scope,
+          read: options.readScope,
+        });
       },
       onSetFields: (path, args) => agentSetFields(vault, path, args, stamp),
       onSuggestView: (args) => agentSuggestView(vault, args),

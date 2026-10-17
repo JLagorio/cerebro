@@ -17,7 +17,13 @@ import type { ConversationState } from '@/agent/useConversations';
  * purpose: a list that hid the rest would make "which thread was that in?"
  * unanswerable from the one place you are sure to look.
  */
-export function ConversationSwitcher({ state }: { state: ConversationState }) {
+export function ConversationSwitcher({
+  state,
+  navigation = false,
+}: {
+  state: ConversationState;
+  navigation?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -103,6 +109,7 @@ export function ConversationSwitcher({ state }: { state: ConversationState }) {
         <>
           <button
             type="button"
+            aria-current={c.id === state.activeId ? true : undefined}
             onClick={() => {
               state.select(c.id);
               setOpen(false);
@@ -124,7 +131,7 @@ export function ConversationSwitcher({ state }: { state: ConversationState }) {
               <span className="block truncate text-2xs text-n-400">{c.placeLabel}</span>
             )}
           </button>
-          <span className="hidden gap-0.5 group-hover:inline-flex">
+          <span className="hidden gap-0.5 group-hover:inline-flex group-focus-within:inline-flex">
             <button
               type="button"
               aria-label={`Rename ${c.title}`}
@@ -151,39 +158,60 @@ export function ConversationSwitcher({ state }: { state: ConversationState }) {
   );
 
   return (
-    <span className="relative inline-flex min-w-0">
-      <button
-        type="button"
-        data-testid="conversation-switcher"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        className="inline-flex min-w-0 items-center gap-1 rounded-md border-0 bg-transparent px-1 py-0.5 text-xs text-n-600 hover:bg-n-50 hover:text-n-900"
-      >
-        <span className="max-w-[150px] truncate">{state.active?.title ?? 'Assistant'}</span>
-        <Icon name="chevron-down" size={11} />
-      </button>
-      {open && (
+    <div
+      className={navigation ? 'cb-conversation-nav' : 'relative inline-flex min-w-0'}
+      role={navigation ? 'navigation' : undefined}
+      aria-label={navigation ? 'Conversations' : undefined}
+    >
+      {!navigation && (
+        <button
+          type="button"
+          data-testid="conversation-switcher"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+          className="inline-flex min-w-0 items-center gap-1 rounded-md border-0 bg-transparent px-1 py-0.5 text-xs text-n-600 hover:bg-n-50 hover:text-n-900"
+        >
+          <span className="max-w-[150px] truncate">{state.active?.title ?? 'Assistant'}</span>
+          <Icon name="chevron-down" size={11} />
+        </button>
+      )}
+      {(navigation || open) && (
         <>
-          <button
-            type="button"
-            aria-label="Close conversations"
-            onClick={() => setOpen(false)}
-            onWheel={() => setOpen(false)}
-            className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
-          />
-          <div className="cb-menu-in absolute left-0 top-6 z-50 w-[260px] rounded-lg border border-n-200 bg-n-0 p-1 shadow-[var(--shadow-lg)]">
+          {!navigation && (
+            <button
+              type="button"
+              aria-label="Close conversations"
+              onClick={() => setOpen(false)}
+              onWheel={() => setOpen(false)}
+              className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
+            />
+          )}
+          <div
+            className={
+              navigation
+                ? 'cb-conversation-nav-content'
+                : 'cb-menu-in absolute left-0 top-6 z-50 w-[260px] rounded-lg border border-n-200 bg-n-0 p-1 shadow-[var(--shadow-lg)]'
+            }
+          >
+            {navigation && <div className="cb-conversation-nav-heading">Conversations</div>}
             <button
               type="button"
               onClick={() => {
                 state.start();
                 setOpen(false);
               }}
-              className="mb-1 flex w-full items-center gap-1.5 rounded-md border-0 bg-transparent px-2 py-1 text-left text-sm text-n-700 hover:bg-n-50"
+              className="cb-conversation-new mb-1 flex w-full items-center gap-1.5 rounded-md border-0 bg-transparent px-2 py-1 text-left text-sm text-n-700 hover:bg-n-50"
             >
               <Icon name="plus" size={12} color="var(--n-500)" />
               New conversation
             </button>
-            <div className="max-h-[280px] overflow-y-auto border-t border-n-100 pt-1">
+            <div
+              className={
+                navigation
+                  ? 'cb-conversation-nav-list'
+                  : 'max-h-[280px] overflow-y-auto border-t border-n-100 pt-1'
+              }
+            >
               {sections.map((section) => (
                 <div key={section.id}>
                   {section.label !== null && (
@@ -201,6 +229,12 @@ export function ConversationSwitcher({ state }: { state: ConversationState }) {
           </div>
         </>
       )}
-    </span>
+    </div>
   );
+}
+
+/** The canvas sidebar uses the panel's existing conversation state through a
+ * portal. It never starts a second conversation controller or live turn. */
+export function ConversationNavigation({ state }: { state: ConversationState }) {
+  return <ConversationSwitcher state={state} navigation />;
 }

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile, seedBeforeBoot, type E2eSeedCommit } from './boot';
+import { boot, readMockFile, seedBeforeBoot, type E2eSeedCommit, openAssistantPanel } from './boot';
 
 /**
  * A page's history, as prose, with Restore (M58.4), in the browser.
@@ -118,7 +118,7 @@ test.describe('page history (M58.4)', () => {
     // A record opens in the peek, whose foot keeps the page's history list.
     const RISK = 'records/risks/risk-scanner-delivery.md';
     await boot(page);
-    await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+    await openAssistantPanel(page);
     const panel = page.getByTestId('ai-panel');
     await expect(panel).toBeVisible();
     await panel.getByLabel('Message the assistant').fill(`append "A dated mitigation." to ${RISK}`);

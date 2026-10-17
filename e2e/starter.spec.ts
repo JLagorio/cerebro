@@ -1,8 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { boot, openStateLab } from './boot';
+import { readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { boot, openStateLab, openDestination } from './boot';
 
 async function home(page: import('@playwright/test').Page) {
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home' }).click();
+  await openDestination(page, 'Home');
 }
 test('an empty vault accepts the kit once and opens its Getting started page', async ({ page }) => {
   await boot(page, { vault: 'empty' });
@@ -13,7 +15,16 @@ test('an empty vault accepts the kit once and opens its Getting started page', a
   await offer.getByRole('button', { name: 'Add the starter kit' }).click();
   await expect(page.getByTestId('doc-title')).toContainText('Getting started');
   const files = await page.evaluate(() => Object.fromEntries(window.__cerebroMockFs));
-  expect(Object.keys(files).filter((path) => path.endsWith('.md'))).toHaveLength(9);
+  const kit = readdirSync(fileURLToPath(new URL('../shared/starter/vault/', import.meta.url)), {
+    recursive: true,
+  })
+    .map(String)
+    .filter((path) => path.endsWith('.md'));
+  expect(
+    Object.keys(files)
+      .filter((path) => path.endsWith('.md'))
+      .sort(),
+  ).toEqual(kit.sort());
   expect(files['types/tasks.md']).toContain('deadline: due');
   expect(Object.keys(files).filter((path) => path.startsWith('tasks/'))).toHaveLength(3);
   expect(Object.keys(files).some((path) => path.startsWith('knowledge/'))).toBe(false);
@@ -32,7 +43,7 @@ test('No thanks writes only a marker and stays declined', async ({ page }) => {
   expect(await page.evaluate(() => [...window.__cerebroMockFs.keys()])).toEqual([
     '.cerebro/starter.json',
   ]);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Inbox' }).click();
+  await openDestination(page, 'Inbox');
   await home(page);
   await expect(page.getByTestId('starter-offer')).toHaveCount(0);
 });

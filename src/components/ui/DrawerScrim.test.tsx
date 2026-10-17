@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useEscapeLayer } from '@/components/ui/Popover';
+import { hasModalLayers } from './layers';
 import { DrawerScrim, useDrawerFocus } from './DrawerScrim';
 
 /**
@@ -27,6 +28,21 @@ describe('DrawerScrim', () => {
     render(scrim(onDismiss));
     fireEvent.click(screen.getByTestId('scrim'));
     expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('can retain page shortcuts without surrendering its own Escape', () => {
+    const dismiss = vi.fn();
+    render(
+      <DrawerScrim
+        modal={false}
+        onDismiss={dismiss}
+        label="Close navigation"
+        className="absolute inset-0"
+      />,
+    );
+    expect(hasModalLayers()).toBe(false);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(dismiss).toHaveBeenCalledOnce();
   });
 
   it('dismisses on Escape', () => {
@@ -116,6 +132,56 @@ describe('DrawerScrim', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByTestId('drawer')).toBeNull();
     expect(document.activeElement).toBe(toggle);
+  });
+
+  function RetainedDrawer({ moveFocus = false }: { moveFocus?: boolean }) {
+    const [open, setOpen] = useState(false);
+    const drawer = useDrawerFocus<HTMLDivElement>(open);
+    const outside = useRef<HTMLButtonElement>(null);
+    return (
+      <>
+        <button onClick={() => setOpen(true)}>Open navigation</button>
+        <button ref={outside}>Another action</button>
+        {open && (
+          <DrawerScrim
+            label="Close navigation"
+            className="absolute inset-0"
+            onDismiss={() => {
+              setOpen(false);
+              if (moveFocus) outside.current?.focus();
+            }}
+          />
+        )}
+        <div
+          ref={drawer}
+          tabIndex={-1}
+          data-testid="retained-drawer"
+          data-overlay={open || undefined}
+          style={{ display: open ? 'block' : 'none' }}
+        />
+      </>
+    );
+  }
+
+  it('restores Escape focus when a retained drawer becomes hidden without losing focus', () => {
+    render(<RetainedDrawer />);
+    const opener = screen.getByRole('button', { name: 'Open navigation' });
+    opener.focus();
+    fireEvent.click(opener);
+    const drawer = screen.getByTestId('retained-drawer');
+    expect(document.activeElement).toBe(drawer);
+    fireEvent.keyDown(drawer, { key: 'Escape' });
+    expect(drawer.style.display).toBe('none');
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it('does not reclaim a newer focus when a retained drawer hides', () => {
+    render(<RetainedDrawer moveFocus />);
+    const opener = screen.getByRole('button', { name: 'Open navigation' });
+    opener.focus();
+    fireEvent.click(opener);
+    fireEvent.keyDown(screen.getByTestId('retained-drawer'), { key: 'Escape' });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Another action' }));
   });
 
   it('leaves focus alone after a press — the pointer went somewhere on purpose', () => {

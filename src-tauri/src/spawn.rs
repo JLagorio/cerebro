@@ -495,6 +495,17 @@ fn signal_group(pgid: i32, signal: Signal) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn wait_within_kills_a_child_past_its_limit() {
+        let started = std::time::Instant::now();
+        let result = super::wait_within(
+            super::command("/bin/sh").args(["-c", "sleep 30"]),
+            std::time::Duration::from_millis(25),
+        )
+        .unwrap();
+        assert!(result.is_none());
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
     use super::*;
     #[cfg(unix)]
     use std::io::{BufRead, BufReader};

@@ -11,6 +11,8 @@ import { useRootsStore } from '@/stores/rootsStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { Sidebar } from './Sidebar';
+import { createRef } from 'react';
+import type { PageNavigationControls } from './PageNavigation';
 
 function mkEntry(partial: Partial<Entry> & { path: string }): Entry {
   return {
@@ -31,6 +33,10 @@ function mkEntry(partial: Partial<Entry> & { path: string }): Entry {
   };
 }
 
+const railButton = (name: string) =>
+  within(screen.getByTestId('app-rail')).getByRole('button', { name });
+const chooseArea = (name: string) => fireEvent.click(railButton(name));
+
 const project = mkEntry({
   path: 'projects/foundations/project.md',
   filename: 'project.md',
@@ -40,6 +46,32 @@ const project = mkEntry({
 });
 
 describe('Sidebar', () => {
+  it('restores an explicit context opener after compact selection without stealing newer focus', async () => {
+    const controls = createRef<PageNavigationControls>();
+    render(
+      <>
+        <button>Captures opener</button>
+        <button>Another control</button>
+        <Sidebar narrow pageNavigationKind="inbox" pageNavigationRef={controls} />
+      </>,
+    );
+    const opener = screen.getByRole('button', { name: 'Captures opener' });
+    const another = screen.getByRole('button', { name: 'Another control' });
+    act(() => controls.current!.show(opener));
+    const item = document.createElement('button');
+    screen.getByTestId('page-navigation').append(item);
+    item.focus();
+    act(() => controls.current!.hide());
+    await waitFor(() => expect(document.activeElement).toBe(opener));
+    act(() => controls.current!.show(opener));
+    item.focus();
+    act(() => {
+      controls.current!.hide();
+      another.focus();
+    });
+    await Promise.resolve();
+    expect(document.activeElement).toBe(another);
+  });
   it.each([false, true])(
     'Search and Assistant show catalog hints with collapsed=%s',
     async (collapsed) => {
@@ -115,6 +147,7 @@ describe('Sidebar', () => {
       inboxEnabled: true,
       inboxPeriod: 'all',
       aiPanelOpen: false,
+      aiPanelPresentation: 'panel',
       sidebarCollapsed: false,
       // The nav groups open (M42.2) — a fold left behind by another test is
       // state, not a default.
@@ -152,7 +185,7 @@ describe('Sidebar', () => {
 
     it('Home carries no count, whatever its lanes hold (D9 b)', () => {
       render(<Sidebar />);
-      const home = screen.getByRole('button', { name: 'Home' });
+      const home = within(screen.getByTestId('nav-surfaces')).getByRole('button', { name: 'Home' });
       expect(home.textContent).toBe('Home');
     });
 
@@ -164,16 +197,7 @@ describe('Sidebar', () => {
       // M43.10: Work and Base left the destinations for SECTIONS — their
       // subjects list like every other shelf — so Studio and History stand
       // alone under My work.
-      expect(labels).toEqual([
-        'Inbox',
-        'Home',
-        'My work',
-        'Studio',
-        'History',
-        'Library',
-        'Theme',
-        'Settings',
-      ]);
+      expect(labels).toEqual(['Inbox', 'Home', 'My work', 'Studio', 'History', 'Library']);
       // M33a.2 folded the Status hub into Knowledge; M37.2 spent the locked
       // names (Base was Knowledge, Work was Workspace); M38.3 retired Docs —
       // pages are a standing tree section, not a destination. M43 moved
@@ -223,6 +247,7 @@ describe('Sidebar', () => {
         render(<Sidebar />);
         for (const kind of ['workspace', 'knowledge', 'agents'] as const) {
           const d = destination(kind);
+          chooseArea(d.label);
           expect(screen.getByRole('button', { name: d.label, expanded: true })).toBeTruthy();
           expect(screen.getByRole('button', { name: d.door })).toBeTruthy();
         }
@@ -255,7 +280,18 @@ describe('Sidebar', () => {
       for (const selection of surfaces) {
         useNavStore.setState({ selection });
         render(<Sidebar />);
-        expect(surfaceLabels()).toHaveLength(8);
+        expect(screen.getByTestId('app-rail')).toBeTruthy();
+        for (const name of [
+          'Home',
+          'Pages',
+          'Databases',
+          'Knowledge',
+          'Agents',
+          'Work',
+          'Assistant',
+          'Settings',
+        ])
+          expect(railButton(name)).toBeTruthy();
         cleanup();
       }
     });
@@ -289,11 +325,23 @@ describe('Sidebar', () => {
       ]) {
         useNavStore.setState({ selection });
         render(<Sidebar />);
-        expect(
-          screen.getByRole('button', { name: 'Home' }).getAttribute('aria-current'),
-        ).toBeNull();
+        expect(railButton('Home').getAttribute('aria-current')).toBeNull();
         cleanup();
       }
+    });
+
+    it('marks Settings alone, then Assistant alone when its canvas opens over Settings', () => {
+      useNavStore.setState({ selection: { kind: 'settings' } });
+      render(<Sidebar />);
+      const rail = screen.getByTestId('app-rail');
+      const selected = () => rail.querySelectorAll('[aria-current="page"], [aria-pressed="true"]');
+      expect([...selected()]).toEqual([railButton('Settings')]);
+      expect(rail.querySelectorAll('[data-active]')).toHaveLength(0);
+      fireEvent.click(railButton('Assistant'));
+      expect([...selected()]).toEqual([railButton('Assistant')]);
+      expect([...rail.querySelectorAll('[data-active]')]).toEqual([railButton('Assistant')]);
+      fireEvent.click(railButton('Settings'));
+      expect([...selected()]).toEqual([railButton('Settings')]);
     });
 
     it('marks the current destination with aria-current and the assistant with aria-pressed', () => {
@@ -441,7 +489,10 @@ describe('Sidebar', () => {
       expect(useNavStore.getState().selection).toEqual({ kind: 'agents' });
       // Folding is not navigating: the header hides the rows and the
       // selection stays where it was.
-      const head = screen.getByRole('button', { name: 'Agents' });
+      const head = within(screen.getByTestId('sidebar')).getByRole('button', {
+        name: 'Agents',
+        expanded: true,
+      });
       expect(head.getAttribute('aria-expanded')).toBe('true');
       fireEvent.click(head);
       expect(screen.queryAllByTestId('nav-agent')).toEqual([]);
@@ -646,7 +697,7 @@ describe('Sidebar', () => {
   it('wears the vault as the header tile (M43)', () => {
     render(<Sidebar />);
     const tile = screen.getByTestId('vault-tile');
-    expect(tile.getAttribute('title')).toBe('demo-vault');
+    expect(tile.parentElement?.getAttribute('title')).toBe('demo-vault');
     expect(tile.textContent).toBe('D');
     expect(screen.queryByRole('heading', { name: 'demo-vault' })).toBeNull();
   });
@@ -655,21 +706,24 @@ describe('Sidebar', () => {
   // narrow window. The sidebar has to be the column that yields.
   it('is shrinkable down to its minimum rather than fixed', () => {
     const { container } = render(<Sidebar />);
-    const nav = container.querySelector('nav');
+    const nav = container.querySelector<HTMLElement>('[data-testid=sidebar]');
     expect(nav?.className).not.toContain('flex-none');
     expect(nav?.style.minWidth).toBe('180px');
   });
 
   it('draws at its minimum and withdraws the resize handle while narrow', () => {
     useUiStore.setState({ sidebarWidth: 420 });
-    const { container } = render(<Sidebar narrow />);
-    expect(container.querySelector('nav')?.style.width).toBe('180px');
+    render(<Sidebar narrow />);
+    expect(screen.getByTestId('sidebar').className).toContain('max-[1048px]:hidden');
+    fireEvent.click(railButton('Show sidebar'));
+    expect(screen.getByTestId('sidebar').style.width).toBe('420px');
+    expect(screen.getByTestId('sidebar').dataset.overlay).toBe('true');
     expect(screen.queryByRole('separator', { name: 'Resize sidebar' })).toBeNull();
     cleanup();
     // The STORED preference is untouched — widening the window restores it.
     expect(useUiStore.getState().sidebarWidth).toBe(420);
     const wide = render(<Sidebar />);
-    expect(wide.container.querySelector('nav')?.style.width).toBe('420px');
+    expect(wide.getByTestId('sidebar').style.width).toBe('420px');
   });
 
   // M52 — verified at 1440 beside a record and the assistant: the drag stored
@@ -702,11 +756,11 @@ describe('Sidebar', () => {
 
     it('keeps expand, ask and search in a strip of its own', () => {
       render(<Sidebar rail railBand="band" />);
-      const rail = screen.getByTestId('sidebar-rail');
+      const rail = screen.getByTestId('app-rail');
       // Both mounted; the media query shows the rail in 1084–1219 and the
       // column either side of it.
-      expect(rail.className).toContain('hidden min-[1084px]:max-[1220px]:flex');
-      expect(screen.getByTestId('sidebar').className).toContain('min-[1084px]:max-[1220px]:hidden');
+      expect(rail.className).toContain('m71-app-rail');
+      expect(screen.getByTestId('sidebar').className).toContain('min-[1094px]:max-[1274px]:hidden');
       for (const name of ['Show sidebar', 'Assistant', 'Search']) {
         expect(within(rail).getByRole('button', { name })).toBeTruthy();
       }
@@ -716,7 +770,7 @@ describe('Sidebar', () => {
 
     it('opens the whole sidebar as a drawer, and Escape closes it without collapsing', () => {
       render(<Sidebar rail railBand="band" />);
-      const rail = screen.getByTestId('sidebar-rail');
+      const rail = screen.getByTestId('app-rail');
       fireEvent.click(within(rail).getByRole('button', { name: 'Show sidebar' }));
       const drawer = screen.getByTestId('sidebar');
       expect(drawer.dataset.overlay).toBe('true');
@@ -726,7 +780,7 @@ describe('Sidebar', () => {
       expect(within(drawer).queryByRole('separator', { name: 'Resize sidebar' })).toBeNull();
       fireEvent.keyDown(window, { key: 'Escape' });
       expect(drawerOpen()).toBe(false);
-      expect(screen.getByTestId('sidebar-rail')).toBeTruthy();
+      expect(screen.getByTestId('app-rail')).toBeTruthy();
       expect(useUiStore.getState().sidebarCollapsed).toBe(false);
     });
 
@@ -734,7 +788,7 @@ describe('Sidebar', () => {
       render(<Sidebar rail railBand="band" />);
       const open = () =>
         fireEvent.click(
-          within(screen.getByTestId('sidebar-rail')).getByRole('button', { name: 'Show sidebar' }),
+          within(screen.getByTestId('app-rail')).getByRole('button', { name: 'Show sidebar' }),
         );
 
       open();
@@ -758,29 +812,29 @@ describe('Sidebar', () => {
       const { rerender } = render(<Sidebar rail railBand="band" />);
       const nav = screen.getByTestId('sidebar');
       fireEvent.click(
-        within(screen.getByTestId('sidebar-rail')).getByRole('button', { name: 'Show sidebar' }),
+        within(screen.getByTestId('app-rail')).getByRole('button', { name: 'Show sidebar' }),
       );
       rerender(<Sidebar />);
       // The same nav throughout: a drawer opening or closing never remounts it.
       expect(screen.getByTestId('sidebar')).toBe(nav);
       expect(nav.dataset.overlay).toBeUndefined();
-      expect(screen.queryByTestId('sidebar-rail')).toBeNull();
+      expect(screen.getByTestId('app-rail')).toBeTruthy();
       // And the next rail starts closed.
       rerender(<Sidebar rail railBand="band" />);
       expect(drawerOpen()).toBe(false);
     });
 
-    it('holds the rail under all of 1220 once latched', () => {
+    it('holds the rail under all of 1274 once latched', () => {
       render(<Sidebar rail railBand="below" />);
-      expect(screen.getByTestId('sidebar-rail').className).toContain('hidden max-[1220px]:flex');
-      expect(screen.getByTestId('sidebar').className).toMatch(/(^|\s)max-\[1220px\]:hidden(\s|$)/);
+      expect(screen.getByTestId('app-rail').className).toContain('m71-app-rail');
+      expect(screen.getByTestId('sidebar').className).toMatch(/(^|\s)max-\[1274px\]:hidden(\s|$)/);
     });
   });
 
   // Task 14 / M38.3: the Drive-style file tree is the standing Pages section
   // now — the Docs destination died with its surface, and in a shell where
   // everything is a page the pages ARE navigation, not a mode.
-  it('carries the Pages tree on every surface', () => {
+  it('makes the Pages tree reachable from every surface', () => {
     const doc = mkEntry({
       path: 'inbox/welcome.md',
       filename: 'welcome.md',
@@ -788,6 +842,7 @@ describe('Sidebar', () => {
     });
     useVaultStore.setState({ entries: [project, doc], folders: ['inbox', 'projects'] });
     render(<Sidebar />);
+    chooseArea('Pages');
     const fileTree = screen.getByTestId('file-tree');
     expect(screen.queryByTestId('sidebar-project')).toBeNull();
     // Scoped into the tree: the Inbox DESTINATION row shares the accessible
@@ -807,6 +862,7 @@ describe('Sidebar', () => {
 
   // M3: collapsible Types section above Views.
   describe('Types section', () => {
+    beforeEach(() => useNavStore.setState({ selection: { kind: 'type', name: 'Recipe' } }));
     const recipeType = mkEntry({
       path: 'types/recipe.md',
       title: 'Recipe',
@@ -853,7 +909,7 @@ describe('Sidebar', () => {
     // testid) deliberately keeps the old word: labels spend, kinds stay.
     it('collapses via the section header', () => {
       render(<Sidebar />);
-      fireEvent.click(screen.getByRole('button', { name: 'Databases' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Databases', expanded: true }));
       expect(screen.queryAllByTestId('sidebar-type')).toEqual([]);
       expect(useUiStore.getState().typesOpen).toBe(false);
     });
@@ -1076,6 +1132,7 @@ describe('Sidebar', () => {
 
     it("creates pages from the Pages header through the tree's own dialog", () => {
       render(<Sidebar />);
+      chooseArea('Pages');
       fireEvent.click(screen.getByRole('button', { name: 'New page' }));
       // The FileTree's dialog — one creation flow, now opened from the header.
       expect(screen.getByRole('dialog', { name: 'New page' })).toBeTruthy();
@@ -1112,6 +1169,7 @@ describe('Sidebar', () => {
     // M50.5: the section is Knowledge now — one word for what agents learned.
     it('opens the Knowledge home from the section’s ↗ (M43.10)', () => {
       render(<Sidebar />);
+      chooseArea('Knowledge');
       fireEvent.click(screen.getByRole('button', { name: 'Open Knowledge' }));
       expect(useNavStore.getState().selection).toEqual({ kind: 'knowledge' });
     });
@@ -1119,7 +1177,7 @@ describe('Sidebar', () => {
     it('cycles the theme from the footer', () => {
       useUiStore.setState({ themeMode: 'system' });
       render(<Sidebar />);
-      const theme = screen.getByRole('button', { name: 'Theme' });
+      const theme = screen.getByRole('button', { name: 'Theme: system' });
       fireEvent.click(theme);
       expect(useUiStore.getState().themeMode).toBe('light');
       fireEvent.click(theme);

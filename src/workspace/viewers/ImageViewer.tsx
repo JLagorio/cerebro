@@ -21,11 +21,21 @@ export function ImageViewer({
     return <p data-testid="viewer-too-large">This image is over the 64 MiB preview limit.</p>;
   return (
     <div data-testid="image-viewer" className="image-viewer" data-fit={fit ? 'fit' : 'actual'}>
-      <div className="file-viewer-controls">
-        <Button size="sm" variant={fit ? 'secondary' : 'ghost'} onClick={() => setFit(true)}>
+      <div className="file-viewer-controls" role="group" aria-label="Image zoom">
+        <Button
+          size="sm"
+          variant={fit ? 'secondary' : 'ghost'}
+          aria-pressed={fit}
+          onClick={() => setFit(true)}
+        >
           Fit
         </Button>
-        <Button size="sm" variant={fit ? 'ghost' : 'secondary'} onClick={() => setFit(false)}>
+        <Button
+          size="sm"
+          variant={fit ? 'ghost' : 'secondary'}
+          aria-pressed={!fit}
+          onClick={() => setFit(false)}
+        >
           100%
         </Button>
       </div>

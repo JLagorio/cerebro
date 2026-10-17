@@ -1,5 +1,6 @@
 import { createContext, useContext, useRef, useState } from 'react';
 import { FilePanel, useBlockNoteEditor, type FilePanelProps } from '@blocknote/react';
+import { filenameFromURL } from '@blocknote/core';
 import { FilePanelExtension } from '@blocknote/core/extensions';
 import { pickFiles } from '@/lib/ipc';
 import { Button } from '@/components/ui/Button';
@@ -42,7 +43,8 @@ export function AttachmentFilePanel({ blockId }: FilePanelProps) {
   };
   const embed = () => {
     if (!editor.isEditable || !url.trim() || editor.getBlock(blockId) === undefined) return;
-    editor.updateBlock(blockId, { props: { url: url.trim() } });
+    const source = url.trim();
+    editor.updateBlock(blockId, { props: { url: source, name: filenameFromURL(source) } });
     close();
   };
   return (

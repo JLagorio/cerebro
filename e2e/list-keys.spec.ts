@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
-import { boot, openKnowledgeTab, readMockFile, seedFileBeforeBoot } from './boot';
+import { boot, openKnowledgeTab, readMockFile, seedFileBeforeBoot, openDestination } from './boot';
 
 test('My work keys peek in place, type in the body, and close one thing per Escape', async ({
   page,
@@ -12,7 +12,7 @@ test('My work keys peek in place, type in the body, and close one thing per Esca
     `${readFileSync(`demo-vault/${bodyPath}`, 'utf8')}\nKeyboard body.\n`,
   );
   await boot(page);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'My work' }).click();
+  await openDestination(page, 'My work');
   const rows = page.getByRole('listbox', { name: 'My work' }).getByRole('option');
   const second = await rows.nth(1).getAttribute('data-cursor-key');
   const third = await rows.nth(2).getAttribute('data-cursor-key');
@@ -54,10 +54,7 @@ test('My work keys peek in place, type in the body, and close one thing per Esca
 
 test('Inbox j advances the capture and Enter opens its page', async ({ page }) => {
   await boot(page);
-  await page
-    .getByTestId('nav-surfaces')
-    .getByRole('button', { name: /^Inbox/ })
-    .click();
+  await openDestination(page, 'Inbox');
   await expect(page.getByText(/^1 of \d+$/)).toBeVisible();
   await page.evaluate(() => (document.activeElement as HTMLElement)?.blur());
   await page.keyboard.press('j');

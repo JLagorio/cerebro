@@ -1669,3 +1669,14 @@ pub const SCHEMA_V30: &str = "
     );
     CREATE INDEX agent_followups_by_due ON agent_followups (vault_id, state, due_at);
 ";
+
+/// M69.9b — local, vault-scoped dismissal of an address or company domain.
+pub const SCHEMA_V31: &str = "
+    CREATE TABLE mail_dismissals (
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        kind TEXT NOT NULL CHECK (kind IN ('address', 'domain')),
+        value TEXT NOT NULL CHECK (length(value) BETWEEN 3 AND 320 AND value = lower(value)),
+        dismissed_at TEXT NOT NULL CHECK (dismissed_at LIKE '____-__-__T%Z'),
+        PRIMARY KEY (vault_id, kind, value)
+    ) WITHOUT ROWID;
+";

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot } from './boot';
+import { boot, openDestination } from './boot';
 
 /** What the mock roots backend exposes for seeding (see src/lib/mockRoots.ts). */
 interface MockRootsWindow {
@@ -42,8 +42,8 @@ async function seedRepos(page: Page): Promise<void> {
 }
 
 async function openWorkspace(page: Page): Promise<void> {
-  // M43.10: the Work destination row died — the section's ↗ is the door.
-  await page.getByRole('button', { name: 'Open all repositories' }).click();
+  // The persistent rail opens Work; its Explorer lives in the contextual sidebar.
+  await openDestination(page, 'Work');
   await expect(page.getByTestId('workspace-page')).toBeVisible();
 }
 
@@ -354,7 +354,7 @@ test.describe('workspace git', () => {
     // ToastHost), so emptiness is the assertion that can actually fail; a
     // `getByTestId('toast')` count would pass whether or not one appeared.
     await expect(page.getByTestId('toast-host')).toBeEmpty();
-    await expect(page.getByTestId('tree-row').first()).toBeVisible();
+    await expect(page.getByTestId('root-tree').getByTestId('tree-row').first()).toBeVisible();
   });
 });
 

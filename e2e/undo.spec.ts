@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import YAML from 'yaml';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, showDatabases } from './boot';
 
 /**
  * Undo and redo of the person's own changes (M60.7), on the mock backend.
@@ -39,6 +39,7 @@ async function workItems(page: Page): Promise<Record<string, string>> {
 }
 
 async function openType(page: Page, name: string): Promise<void> {
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: name }).first().click();
   await expect(page.getByTestId('table-row').first()).toBeVisible();
 }

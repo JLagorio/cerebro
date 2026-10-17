@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, openDestination } from './boot';
 
 /**
  * Every block the `/` menu offers is written as a carrier, and opens again as
@@ -64,7 +64,7 @@ async function openSchedule(page: Page): Promise<void> {
 
 /** Leave the page for Home, so the next open reads the file again. */
 async function goHome(page: Page): Promise<void> {
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home' }).click();
+  await openDestination(page, 'Home');
 }
 
 /** Seed the page (the mock disk reseeds on reload, so "again" is never a reload) and open it. */
@@ -161,11 +161,11 @@ async function slash(page: Page, query: string, title: string): Promise<void> {
 }
 
 /** Embed a URL through the file panel `/image`, `/video`, `/audio` and `/file` open. */
-async function embed(page: Page, url: string, button: string): Promise<void> {
+async function embed(page: Page, url: string): Promise<void> {
   const tab = page.getByRole('tab', { name: 'Embed' });
   if (await tab.isVisible()) await tab.click();
-  await page.getByPlaceholder('Enter URL').fill(url);
-  await page.getByRole('button', { name: button }).click();
+  await page.getByRole('textbox', { name: 'File URL' }).fill(url);
+  await page.getByRole('button', { name: 'Embed', exact: true }).click();
 }
 
 test('/ inserts each block, writes it as its carrier, and opens it again as itself', async ({
@@ -176,13 +176,13 @@ test('/ inserts each block, writes it as its carrier, and opens it again as itse
   await expect(editor.getByText('We ship on Thursdays.')).toBeVisible();
 
   await slash(page, 'image', 'Image');
-  await embed(page, 'attachments/plan.png', 'Embed image');
+  await embed(page, 'attachments/plan.png');
   await slash(page, 'video', 'Video');
-  await embed(page, 'clips/demo.mp4', 'Embed video');
+  await embed(page, 'clips/demo.mp4');
   await slash(page, 'audio', 'Audio');
-  await embed(page, 'clips/standup.m4a', 'Embed audio');
+  await embed(page, 'clips/standup.m4a');
   await slash(page, 'file', 'File');
-  await embed(page, 'docs/contract.pdf', 'Embed file');
+  await embed(page, 'docs/contract.pdf');
   await slash(page, 'table', 'Table');
   await slash(page, 'toggle list', 'Toggle List');
   await page.keyboard.type('Open questions');
@@ -240,7 +240,11 @@ test('a list-item image keeps its relative url through a save', async ({ page })
   );
   const editor = page.getByTestId('markdown-editor');
   await expect(page.getByTestId('lossy-import-banner')).toHaveCount(0);
-  await expect(editor.locator('[data-content-type="image"]')).toHaveCount(1);
+  // Count document blocks, not the gated image renderer's nested wrapper.
+  await expect(
+    editor.locator('[data-node-type="blockContainer"] > [data-content-type="image"]'),
+  ).toHaveCount(1);
+  await expect(editor.getByRole('img', { name: 'Shot', exact: true })).toHaveCount(1);
   await editor.getByText('We ship on Thursdays.').click();
   await page.keyboard.press('End');
   await page.keyboard.type(' Edited.');

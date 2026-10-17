@@ -1,4 +1,11 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  PageNavigationContent,
+  usePageNavigationControls,
+  usePageNavigationSlot,
+} from '@/app/PageNavigation';
+import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import type { Selection } from '@/engine/types';
@@ -43,12 +50,15 @@ function ToggleRow({
  * reading surface split into as many panes as you ask for. Nothing on this
  * surface writes to a mounted folder.
  *
- * The nav column stays (M37.3 retired the SIDEBARLESS set) and this surface
- * brings its own tree beside it; collapsing the nav is the way to give a
- * wide repo the width back.
+ * The active pane lends this same Explorer to the contextual sidebar (M79).
+ * Standalone and inactive panes retain their local tree; the root store and
+ * keyboard owner remain this page in either presentation.
  */
 export function WorkspacePage({ selection }: { selection: Selection }) {
+  const navigationTarget = usePageNavigationSlot('workspace');
+  const navigation = usePageNavigationControls('workspace');
   const roots = useRootsStore((s) => s.roots);
+  const rootsLoaded = useRootsStore((s) => s.rootsLoaded);
   const loadRoots = useRootsStore((s) => s.loadRoots);
   const openFile = useRootsStore((s) => s.openFile);
   const fileIcons = useUiStore((s) => s.workspaceFileIcons);
@@ -78,82 +88,113 @@ export function WorkspacePage({ selection }: { selection: Selection }) {
     if (root !== undefined && path !== undefined) openFile(root, path);
   }, [selection, openFile]);
 
-  return (
-    <div className="relative flex min-h-0 min-w-0 flex-1" data-testid="workspace-page">
-      <aside className="flex w-60 flex-none flex-col border-r border-n-100 bg-n-25">
-        <div className="flex flex-none items-center gap-1.5 px-3 pb-1.5 pt-3">
-          <span className="text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
-            Explorer
-          </span>
-          <button
-            type="button"
-            data-testid="workspace-settings"
-            onClick={() => setSettingsOpen((v) => !v)}
-            aria-expanded={settingsOpen}
-            className="ml-auto border-0 bg-transparent p-0.5 text-n-500 hover:text-n-800"
-            aria-label="Explorer settings"
-          >
-            <Icon name="ellipsis" size={14} />
-          </button>
-          <button
-            type="button"
-            data-testid="mount-root"
-            onClick={() => setMounting(true)}
-            className="border-0 bg-transparent p-0.5 text-n-500 hover:text-n-800"
-            aria-label="Mount a folder"
-          >
-            <Icon name="plus" size={14} />
-          </button>
+  const explorer = (
+    <aside
+      className={`workspace-explorer${navigationTarget ? ' workspace-explorer-context' : ''}`}
+      aria-label="File explorer"
+    >
+      <div className="workspace-explorer-heading">
+        <span className="text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
+          Explorer
+        </span>
+        <button
+          type="button"
+          data-testid="workspace-settings"
+          onClick={() => setSettingsOpen((v) => !v)}
+          aria-expanded={settingsOpen}
+          className="ml-auto border-0 bg-transparent p-0.5 text-n-500 hover:text-n-800"
+          aria-label="Explorer settings"
+        >
+          <Icon name="ellipsis" size={14} />
+        </button>
+        <button
+          type="button"
+          data-testid="mount-root"
+          onClick={() => {
+            navigation?.hide();
+            setMounting(true);
+          }}
+          className="border-0 bg-transparent p-0.5 text-n-500 hover:text-n-800"
+          aria-label="Mount a folder"
+        >
+          <Icon name="plus" size={14} />
+        </button>
+      </div>
+      {settingsOpen && (
+        <div
+          data-testid="workspace-settings-menu"
+          role="menu"
+          className="mx-2 mb-1 rounded-md border border-n-200 bg-n-0 py-1 shadow-sm"
+        >
+          <ToggleRow
+            testId="toggle-file-icons"
+            label="File type icons"
+            checked={fileIcons}
+            onChange={setFileIcons}
+          />
+          <ToggleRow
+            testId="toggle-ignored"
+            label="Show ignored files"
+            checked={showIgnored}
+            onChange={setShowIgnored}
+          />
+          <ToggleRow
+            testId="toggle-line-numbers"
+            label="Line numbers"
+            checked={lineNumbers}
+            onChange={setLineNumbers}
+          />
+          <ToggleRow
+            testId="toggle-word-wrap"
+            label="Wrap long lines"
+            checked={wordWrap}
+            onChange={setWordWrap}
+          />
         </div>
-        {settingsOpen && (
-          <div
-            data-testid="workspace-settings-menu"
-            role="menu"
-            className="mx-2 mb-1 rounded-md border border-n-200 bg-n-0 py-1 shadow-sm"
-          >
-            <ToggleRow
-              testId="toggle-file-icons"
-              label="File type icons"
-              checked={fileIcons}
-              onChange={setFileIcons}
-            />
-            <ToggleRow
-              testId="toggle-ignored"
-              label="Show ignored files"
-              checked={showIgnored}
-              onChange={setShowIgnored}
-            />
-            <ToggleRow
-              testId="toggle-line-numbers"
-              label="Line numbers"
-              checked={lineNumbers}
-              onChange={setLineNumbers}
-            />
-            <ToggleRow
-              testId="toggle-word-wrap"
-              label="Wrap long lines"
-              checked={wordWrap}
-              onChange={setWordWrap}
+      )}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        {roots.length === 0 ? (
+          <div data-testid="workspace-empty" className="px-3 py-4">
+            <EmptyState
+              compact
+              icon="folder-plus"
+              title="No folders yet"
+              description="Mount a repository to browse its files and docs."
             />
           </div>
+        ) : (
+          <RootTree />
         )}
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          {roots.length === 0 ? (
-            <div data-testid="workspace-empty" className="px-3 py-4">
-              <EmptyState
-                compact
-                icon="folder-plus"
-                title="No folders yet"
-                description="Mount a repository to browse its files and docs."
-              />
-            </div>
-          ) : (
-            <RootTree />
-          )}
-        </div>
-      </aside>
+      </div>
+    </aside>
+  );
+
+  return (
+    <div className="relative flex min-h-0 min-w-0 flex-1" data-testid="workspace-page">
+      {navigationTarget
+        ? createPortal(<PageNavigationContent>{explorer}</PageNavigationContent>, navigationTarget)
+        : explorer}
       {mounting && <RootMountDialog onClose={() => setMounting(false)} />}
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {navigation && (
+          <div className="workspace-heading">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={(event) => navigation.show(event.currentTarget)}
+            >
+              <Icon name="panel-left" size={14} />
+              Files
+            </Button>
+            <span className="workspace-heading-divider" />
+            <h1>Work</h1>
+            {rootsLoaded && (
+              <span className="workspace-heading-meta">
+                {roots.length} {roots.length === 1 ? 'folder' : 'folders'}
+              </span>
+            )}
+          </div>
+        )}
         <EditorGroups />
       </main>
     </div>

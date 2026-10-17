@@ -21,6 +21,30 @@ pub fn parse_request(args: &Map<String, Value>) -> Result<Request<'_>, String> {
         .ok_or("edit_canvas needs `ops`, a list of operations")?;
     Ok(Request { ops })
 }
+pub fn parse_create_request(args: &Map<String, Value>) -> Result<Request<'_>, String> {
+    let ops = match args.get("ops") {
+        None => &[][..],
+        Some(value) => value
+            .as_array()
+            .map(Vec::as_slice)
+            .ok_or("create_canvas needs `ops`, a list of operations")?,
+    };
+    Ok(Request { ops })
+}
+pub fn plan_create(request: &Request<'_>, ctx: &mut Context<'_>) -> Result<Plan, String> {
+    let seed = write::empty_board();
+    if request.ops.is_empty() {
+        return Ok(Plan {
+            content: seed,
+            ops: vec![],
+            created: vec![],
+            warnings: vec![],
+        });
+    }
+    let hash = crate::ledger::sha256_hex(seed.as_bytes());
+    plan(&seed, &hash, request, ctx)
+        .map_err(|reason| reason.replacen("edit_canvas", "create_canvas", 1))
+}
 pub struct Context<'a> {
     pub limits: &'a EditLimits,
     pub web_schemes: &'a [String],
@@ -205,17 +229,16 @@ fn validate_fields(
             ));
         }
         match *key {
-            "color" => {
-                if !table().vocab["color_presets"].iter().any(|c| c == text)
-                    && !(text.len() == 7
+            "color"
+                if !(table().vocab["color_presets"].iter().any(|c| c == text)
+                    || (text.len() == 7
                         && text.starts_with('#')
-                        && text[1..].bytes().all(|b| b.is_ascii_hexdigit()))
-                {
-                    return Err(format!(
-                        "Op {n}: {} isn't a colour. Use a preset 1 to 6, or #rrggbb.",
-                        quote(text)
-                    ));
-                }
+                        && text[1..].bytes().all(|b| b.is_ascii_hexdigit()))) =>
+            {
+                return Err(format!(
+                    "Op {n}: {} isn't a colour. Use a preset 1 to 6, or #rrggbb.",
+                    quote(text)
+                ));
             }
             "file" => {
                 if text.is_empty()
@@ -232,10 +255,8 @@ fn validate_fields(
                     return Err(format!("Op {n}: a card can't show its own board."));
                 }
             }
-            "subpath" => {
-                if !text.starts_with('#') {
-                    return Err(format!("Op {n}: `subpath` must start with #."));
-                }
+            "subpath" if !text.starts_with('#') => {
+                return Err(format!("Op {n}: `subpath` must start with #."));
             }
             "url" => {
                 let valid = text.split_once("://").is_some_and(|(scheme, rest)| {
@@ -253,21 +274,17 @@ fn validate_fields(
                     ));
                 }
             }
-            "fromSide" | "toSide" => {
-                if !table().vocab["sides"].iter().any(|s| s == text) {
-                    return Err(format!(
-                        "Op {n}: {} isn't a side. Use top, right, bottom or left.",
-                        quote(text)
-                    ));
-                }
+            "fromSide" | "toSide" if !table().vocab["sides"].iter().any(|s| s == text) => {
+                return Err(format!(
+                    "Op {n}: {} isn't a side. Use top, right, bottom or left.",
+                    quote(text)
+                ));
             }
-            "fromEnd" | "toEnd" => {
-                if !table().vocab["ends"].iter().any(|s| s == text) {
-                    return Err(format!(
-                        "Op {n}: {} isn't an edge end. Use none or arrow.",
-                        quote(text)
-                    ));
-                }
+            "fromEnd" | "toEnd" if !table().vocab["ends"].iter().any(|s| s == text) => {
+                return Err(format!(
+                    "Op {n}: {} isn't an edge end. Use none or arrow.",
+                    quote(text)
+                ));
             }
             "fromNode" | "toNode" => id(text, n, ctx.limits)?,
             _ => {}
@@ -317,7 +334,19 @@ fn set(fields: &mut Fields, changes: Vec<(String, Option<Value>)>) -> Vec<String
     }
     changed
 }
-fn file_warning(fields: &Fields, id: &str, n: usize, ctx: &mut Context<'_>, warnings: &mut Vec<String>) -> Result<(), String> {
+fn ordered_new(fields: Fields, kind: &str) -> Fields {
+    table().key_order[kind]
+        .iter()
+        .filter_map(|key| fields.get(key).map(|value| (key.clone(), value.clone())))
+        .collect()
+}
+fn file_warning(
+    fields: &Fields,
+    id: &str,
+    n: usize,
+    ctx: &mut Context<'_>,
+    warnings: &mut Vec<String>,
+) -> Result<(), String> {
     let file = field_text(fields, "file");
     let words=match (ctx.target_state)(&file){
         Target::Missing=>Some(format!("The card {id} points at {file}, which is not in the vault; it keeps that path.")),
@@ -452,9 +481,9 @@ fn plan_with(
         let mut extras: Vec<_> = op
             .keys()
             .filter(|key| {
-                !allowed.contains(&key.as_str())
-                    && !matches!(key.as_str(), "op" | "id")
-                    && !(node && key.as_str() == "type")
+                !(allowed.contains(&key.as_str())
+                    || matches!(key.as_str(), "op" | "id")
+                    || node && key.as_str() == "type")
             })
             .collect();
         extras.sort();
@@ -484,6 +513,7 @@ fn plan_with(
             fields.insert("id".into(), raw(&Value::from(id.clone())));
             fields.insert("type".into(), raw(&Value::from(node_type)));
             set(&mut fields, changes);
+            let fields = ordered_new(fields, node_type);
             if node_type == "file" {
                 file_warning(&fields, &id, n, ctx, &mut warnings)?;
             }
@@ -506,6 +536,7 @@ fn plan_with(
             let mut fields = Fields::new();
             fields.insert("id".into(), raw(&Value::from(id.clone())));
             set(&mut fields, changes);
+            let fields = ordered_new(fields, "edge");
             check_ends(&fields, n, &node_ids)?;
             lines.push(format!(
                 "Added the edge {id} from {} to {}.",
@@ -594,4 +625,148 @@ fn plan_with(
         created,
         warnings,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    fn run(source: &str, hash: &str, ops: Value) -> Result<Plan, String> {
+        let args = json!({"ops":ops});
+        let request = parse_request(args.as_object().unwrap()).unwrap();
+        let mut target = |_: &str| Target::Missing;
+        plan(
+            source,
+            hash,
+            &request,
+            &mut Context {
+                limits: &super::super::agent_limits::table().edit,
+                web_schemes: &["http".into(), "https".into()],
+                target_state: &mut target,
+                board_path: "boards/plan.canvas",
+            },
+        )
+    }
+    #[test]
+    fn replays_the_shared_canvas_edit_cases() {
+        let cases: Value =
+            serde_json::from_str(include_str!("../../fixtures/canvas-edit-cases.json")).unwrap();
+        for case in cases["edits"].as_array().unwrap() {
+            let source = case["source"].as_str().unwrap();
+            let mut limits: Value =
+                serde_json::from_str(super::super::agent_limits::LIMITS_JSON).unwrap();
+            if let Some(overrides) = case["limits"].as_object() {
+                for (key, value) in overrides {
+                    limits["edit"][key] = value.clone();
+                }
+            }
+            let limits: EditLimits = serde_json::from_value(limits["edit"].clone()).unwrap();
+            let mut target = |path: &str| match case["targets"][path].as_str().unwrap_or("missing")
+            {
+                "exists" => Target::Exists,
+                "outside" => Target::Outside,
+                "unchecked" => Target::Unchecked,
+                _ => Target::Missing,
+            };
+            let request = parse_request(case.as_object().unwrap()).unwrap();
+            let answer = plan(
+                source,
+                &crate::ledger::sha256_hex(source.as_bytes()),
+                &request,
+                &mut Context {
+                    limits: &limits,
+                    web_schemes: &["http".into(), "https".into()],
+                    target_state: &mut target,
+                    board_path: "boards/plan.canvas",
+                },
+            );
+            if let Some(refusal) = case["refusal"].as_str() {
+                assert_eq!(answer.unwrap_err(), refusal, "{}", case["name"]);
+            } else {
+                let answer = answer.unwrap_or_else(|e| panic!("{}: {e}", case["name"]));
+                assert_eq!(
+                    answer.content,
+                    case["after"].as_str().unwrap(),
+                    "{}",
+                    case["name"]
+                );
+                assert_eq!(
+                    json!({"ops":answer.ops,"created":answer.created,"warnings":answer.warnings}),
+                    case["report"],
+                    "{}",
+                    case["name"]
+                );
+            }
+        }
+    }
+    #[test]
+    fn replays_the_create_cases() {
+        let cases: Value =
+            serde_json::from_str(include_str!("../../fixtures/canvas-edit-cases.json")).unwrap();
+        for case in cases["creates"].as_array().unwrap() {
+            let mut target = |_: &str| Target::Missing;
+            let result =
+                parse_create_request(case["args"].as_object().unwrap()).and_then(|request| {
+                    plan_create(
+                        &request,
+                        &mut Context {
+                            limits: &super::super::agent_limits::table().edit,
+                            web_schemes: &["http".into(), "https".into()],
+                            target_state: &mut target,
+                            board_path: case["path"].as_str().unwrap(),
+                        },
+                    )
+                });
+            if let Some(refusal) = case["refusal"].as_str() {
+                assert_eq!(result.unwrap_err(), refusal, "{}", case["name"]);
+            } else {
+                let answer = result.unwrap_or_else(|error| panic!("{}: {error}", case["name"]));
+                assert_eq!(
+                    answer.content,
+                    case["after"].as_str().unwrap(),
+                    "{}",
+                    case["name"]
+                );
+                assert_eq!(
+                    json!({"ops":answer.ops,"created":answer.created,"warnings":answer.warnings}),
+                    case["report"],
+                    "{}",
+                    case["name"]
+                );
+            }
+        }
+    }
+    #[test]
+    fn minted_ids_retry_collisions() {
+        let first = crate::ledger::sha256_hex(b"hash:1")[..16].to_string();
+        let next = crate::ledger::sha256_hex(b"hash:1:1")[..16].to_string();
+        let source =
+            json!({"nodes":[{"id":first,"type":"group","x":0,"y":0,"width":1,"height":1}]})
+                .to_string();
+        let answer = run(
+            &source,
+            "hash",
+            json!([{"op":"add_node","type":"group","x":0,"y":0,"width":1,"height":1}]),
+        )
+        .unwrap();
+        assert_eq!(answer.created, vec![Created { op: 1, id: next }]);
+    }
+    #[test]
+    fn a_readback_mismatch_is_refused() {
+        let args =
+            json!({"ops":[{"op":"add_node","type":"group","x":0,"y":0,"width":1,"height":1}]});
+        let request = parse_request(args.as_object().unwrap()).unwrap();
+        let mut target = |_: &str| Target::Missing;
+        let mut ctx = Context {
+            limits: &super::super::agent_limits::table().edit,
+            web_schemes: &[],
+            target_state: &mut target,
+            board_path: "boards/plan.canvas",
+        };
+        let answer = plan_with("{}", "hash", &request, &mut ctx, |_| "{}".into());
+        assert_eq!(
+            answer.unwrap_err(),
+            "The changed board would not read back as planned, so it was left as it is."
+        );
+    }
 }

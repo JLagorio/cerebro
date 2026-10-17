@@ -109,6 +109,11 @@ pub fn classify(url: &Url, dev_root: Option<&Url>) -> LinkVerdict {
     }
 }
 
+/// The same shipped web schemes the canvas edit planner accepts.
+pub(crate) fn external_schemes() -> &'static [String] {
+    &rule().external_schemes
+}
+
 fn is_external_scheme(url: &Url) -> bool {
     rule()
         .external_schemes

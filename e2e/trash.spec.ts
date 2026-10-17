@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { chooseSettingsSection, boot, readMockFile, openDestination, showPages } from './boot';
 
 /**
  * The vault's own Trash (M60.8), on the mock backend. A page deleted from the
@@ -49,6 +49,7 @@ const treeRow = (page: Page, path: string): Locator =>
   page.getByTestId('file-tree').locator(`[data-testid="tree-row"][data-path="${path}"]`);
 
 async function unfold(page: Page, name: string) {
+  await showPages(page);
   const folder = page.getByTestId('file-tree').getByTestId('tree-folder').filter({ hasText: name });
   if ((await folder.getAttribute('aria-expanded')) !== 'true') await folder.click();
 }
@@ -102,7 +103,8 @@ test('a deleted page waits in the vault Trash and Settings restores it byte for 
   expect(await pageTextHits(page, WORD)).toBe(0);
 
   // -- Settings → Recently deleted → Restore -------------------------------
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Settings' }).click();
+  await openDestination(page, 'Settings');
+  await chooseSettingsSection(page, 'Recently deleted');
   const section = page.getByTestId('settings-trash');
   await expect(section).toContainText('Recently deleted');
   const row = section.getByTestId('trash-item');

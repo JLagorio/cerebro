@@ -1,3 +1,4 @@
+import { neutralizeRemoteImages, stripRemoteImages } from './remoteImages';
 import { buildThemeVariables, DIAGRAM_FONT_CONFIG, themeSignature } from './theme';
 
 /**
@@ -152,14 +153,49 @@ async function renderUncached(
       mermaid.initialize({
         startOnLoad: false,
         securityLevel: 'strict',
+        secure: [
+          'securityLevel',
+          'startOnLoad',
+          'maxTextSize',
+          'maxEdges',
+          'suppressErrorRendering',
+          'themeCSS',
+          'themeVariables',
+          'fontFamily',
+          'altFontFamily',
+          'fontSize',
+          'dompurifyConfig',
+        ],
+        // Applied to source labels before live layout; diagram styles are generated separately.
+        dompurifyConfig: {
+          FORBID_TAGS: [
+            'style',
+            'img',
+            'image',
+            'iframe',
+            'object',
+            'embed',
+            'video',
+            'audio',
+            'source',
+            'link',
+          ],
+          FORBID_ATTR: ['style', 'src', 'srcset'],
+        },
         theme: 'base',
         themeVariables: vars,
         // Sequence and gantt read their text size from here rather than from
         // the theme's `fontSize` — see DIAGRAM_FONT_CONFIG.
         ...DIAGRAM_FONT_CONFIG,
       });
-      const { svg } = await mermaid.render(`cerebro-mermaid-${++seq}`, code);
-      return { ok: true, svg };
+      const { svg } = await mermaid.render(
+        `cerebro-mermaid-${++seq}`,
+        neutralizeRemoteImages(code),
+      );
+      const cleaned = stripRemoteImages(svg);
+      return cleaned === ''
+        ? { ok: false, message: 'The diagram returned invalid SVG.', line: null }
+        : { ok: true, svg: cleaned };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return { ok: false, message, line: extractErrorLine(message) };

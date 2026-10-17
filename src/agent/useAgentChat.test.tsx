@@ -929,11 +929,58 @@ describe('useAgentChat cannot be widened by who it is addressed to', () => {
     // A skill invoked while addressing an agent: two vault files each drawing
     // a boundary, and the answer is the narrower of the two.
     act(() =>
-      result.current.send('/audit @release-scout', 'AUDIT BODY', ['search_notes', 'create_note']),
+      result.current.send('/audit @release-scout', 'AUDIT BODY', {
+        allowedTools: ['search_notes', 'create_note'],
+      }),
     );
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
     expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1].allowedTools).toEqual(['search_notes']);
   });
+
+  it('intersects skill connector names and unions denials without widening the agent', async () => {
+    vi.mocked(agentIpc.runAgent).mockClear();
+    useVaultStore.setState({
+      vaultPath: '/vault',
+      entries: [
+        agentEntry({
+          connectors: ['gmail', 'github'],
+          'disallowed-tools': ['mcp__gmail__trash_thread'],
+        }),
+      ],
+    });
+    const { result } = renderHook(() =>
+      useAgentChat(turn('sys'), { shell: 'off', connectors: true }),
+    );
+    act(() =>
+      result.current.send('@release-scout draft', 'DRAFT', {
+        allowedTools: ['get_note'],
+        connectors: ['gmail', 'notion'],
+        disallowedTools: ['mcp__gmail__trash_thread', 'mcp__gmail__send_message'],
+      }),
+    );
+    await vi.waitFor(() => expect(agentIpc.runAgent).toHaveBeenCalledOnce());
+    expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1]).toMatchObject({
+      allowedTools: ['get_note'],
+      connectorNames: ['gmail'],
+      disallowedTools: ['mcp__gmail__trash_thread', 'mcp__gmail__send_message'],
+    });
+  });
+
+  it.each([{ names: ['gmail'] }, { names: [] }])(
+    'passes the skill connector narrowing %j on an ordinary turn',
+    async ({ names }) => {
+      vi.mocked(agentIpc.runAgent).mockClear();
+      useVaultStore.setState({ vaultPath: '/vault', entries: [] });
+      const { result } = renderHook(() =>
+        useAgentChat(turn('sys'), { shell: 'off', connectors: true }),
+      );
+      const connectors = [...names];
+      act(() => result.current.send('/draft-reply abc', 'DRAFT', { connectors }));
+      connectors.push('notion');
+      await vi.waitFor(() => expect(agentIpc.runAgent).toHaveBeenCalledOnce());
+      expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1].connectorNames).toEqual(names);
+    },
+  );
 
   it('hands the run the connectors the record named, and no others', async () => {
     vi.mocked(agentIpc.runAgent).mockClear();
@@ -1351,7 +1398,7 @@ describe('useAgentChat composes the prompt for the turn’s grant (M54.7)', () =
         connectors: false,
       }),
     );
-    act(() => result.current.send(text, options.message, options.allowedTools));
+    act(() => result.current.send(text, options.message, { allowedTools: options.allowedTools }));
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledOnce());
     expect(compose).toHaveBeenCalledOnce();
     return {
@@ -2116,7 +2163,7 @@ describe('useAgentChat stops, and sends a frozen turn (M57.5)', () => {
     const { result } = renderHook(() => useAgentChat(() => turnOf(now), opts));
     const frozen = turnOf('context: Roadmap');
     now = 'context: Settings';
-    act(() => result.current.send('queued earlier', undefined, null, frozen));
+    act(() => result.current.send('queued earlier', undefined, undefined, frozen));
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
     expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1].systemPrompt).toBe('context: Roadmap');
   });
@@ -2130,7 +2177,7 @@ describe('useAgentChat stops, and sends a frozen turn (M57.5)', () => {
     // Settings lowers the ceiling while the entry waits.
     shell = 'off';
     rerender();
-    act(() => result.current.send('queued earlier', undefined, null, frozen));
+    act(() => result.current.send('queued earlier', undefined, undefined, frozen));
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
     expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1].shell).toBe('off');
   });

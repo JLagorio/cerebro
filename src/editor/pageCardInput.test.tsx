@@ -27,6 +27,7 @@ async function saved(editor: CerebroEditor): Promise<string> {
 
 const clipboard = (data: Record<string, string>) => ({
   types: Object.keys(data),
+  files: [],
   getData: (type: string) => data[type] ?? '',
 });
 
@@ -98,8 +99,9 @@ describe('pasting a page link', () => {
       pageLinkPasteHandler({ event, editor, defaultPasteHandler });
       return defaultPasteHandler.mock.calls.length;
     };
-    expect(route('[[a]] [[b]]')).toBe(1);
-    expect(route('See [[a]].')).toBe(1);
+    expect(route('[[a]] [[b]]')).toBe(0);
+    expect(route('See [[a]].')).toBe(0);
+    expect(await saved(editor)).toContain('See [[a]].');
     // HTML leads, whatever plain text rides along with it.
     const html = {
       clipboardData: clipboard({ 'text/html': '<p>[[a]]</p>', 'text/plain': '[[a]]' }),
@@ -109,6 +111,15 @@ describe('pasting a page link', () => {
     pageLinkPasteHandler({ event: html, editor, defaultPasteHandler });
     expect(defaultPasteHandler).toHaveBeenCalledTimes(1);
     expect(types(editor)).not.toContain('pageCard');
+  });
+
+  it('keeps escaped pasted links literal beside live pasted links', async () => {
+    const editor = await open('Body.\n');
+    paste(editor, { 'text/plain': '[[Live]] \\[\\[Literal\\]\\]' });
+    const md = await saved(editor);
+    expect(md).toContain('[[Live]]');
+    expect(md).toContain('&#91;&#91;Literal&#93;&#93;');
+    expect(JSON.stringify(editor.document).match(/"type":"wikilink"/g)).toHaveLength(1);
   });
 
   it('keeps a citation paste’s markers', async () => {

@@ -1,5 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, openHistory, readMockFile, seedBeforeBoot, type E2eSeedCommit } from './boot';
+import {
+  boot,
+  openHistory,
+  readMockFile,
+  seedBeforeBoot,
+  type E2eSeedCommit,
+  openDestination,
+} from './boot';
 
 /**
  * History reads who changed what (M64.2): editing sessions, agent runs and
@@ -80,7 +87,7 @@ test('a failed activity read says so, and the checkpoints still render', async (
   await seedBeforeBoot(page, '__cerebroSeedGitHistory', [commit]);
   await boot(page);
   await page.evaluate(() => window.__cerebroFailNext('vault_activity'));
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'History' }).click();
+  await openDestination(page, 'History');
 
   const heatmap = page.getByTestId('history-heatmap');
   const feed = page.getByTestId('history-feed');

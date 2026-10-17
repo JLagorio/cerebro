@@ -16,6 +16,7 @@ import {
   bareToolName,
   clientToolsets,
   isConfirmable,
+  neverCallNames,
   parseToolsManifest,
   TOOLS,
   TOOLS_DIGEST_PATH,
@@ -730,7 +731,7 @@ describe('toolFacts', () => {
     expect(toolFacts('recheck_concept')?.renderer).toBe('concept');
   });
 
-  it('names exactly the note writers confirmable, with their titles (M57.4)', () => {
+  it('names exactly the page and board writers confirmable, with their titles (M57.4)', () => {
     expect(TOOLS.tools.filter((row) => row.confirmable).map((row) => row.name)).toEqual([
       'create_note',
       'update_frontmatter',
@@ -738,6 +739,8 @@ describe('toolFacts', () => {
       'append_to_note',
       'edit_note',
       'edit_sheet',
+      'create_canvas',
+      'edit_canvas',
     ]);
     expect(TOOLS.generated.confirmable).toBe(false);
     expect(toolFacts('mcp__cerebro__create_note')).toMatchObject({
@@ -853,18 +856,127 @@ describe('file targets (M66.8)', () => {
 });
 
 describe('canvas targets (M68.7)', () => {
-  it('a canvas target sits only on reads', () => {
+  it('a canvas target sits only on its read and write doors', () => {
     expect(tool(TOOLS, 'read_canvas').target?.kind).toBe('canvas');
     for (const [field, value] of [
       ['axis', 'write'],
       ['door', 'comment'],
     ] as const) {
       expect(refused((raw) => put(tool(raw, 'read_canvas'), field, value))).toContain(
-        'canvas targets require the read axis and door none',
+        'canvas targets require read with door none or read_write with door canvas',
       );
     }
     expect(refused((raw) => put(tool(raw, 'read_canvas').target!, 'arg', null))).toContain(
       'canvas needs an argument',
     );
   });
+});
+
+it('the canvas door cannot target notes or read-only canvas rows', () => {
+  expect(tool(TOOLS, 'edit_canvas')).toMatchObject({
+    door: 'canvas',
+    axis: 'read_write',
+    confirmable: true,
+    target: { kind: 'canvas' },
+  });
+  expect(refused((raw) => put(tool(raw, 'edit_canvas').target!, 'kind', 'note'))).toContain(
+    'door canvas needs a canvas target on read_write or a folder target on write',
+  );
+  expect(refused((raw) => put(tool(raw, 'edit_canvas'), 'door', 'note'))).toContain(
+    'canvas targets require read with door none or read_write with door canvas',
+  );
+});
+
+describe('connector never-call inventory', () => {
+  it('returns manifest order, with no local tool or missing source', () => {
+    expect(neverCallNames()).toEqual(TOOLS.never_call.tools.map((row) => row.name));
+    expect(neverCallNames()).toEqual([...neverCallNames()].sort());
+    expect(neverCallNames().length).toBeGreaterThan(0);
+    for (const row of TOOLS.never_call.tools) {
+      expect(row.source.trim()).not.toBe('');
+      expect(TOOLS.tools.some((tool) => tool.name === row.name)).toBe(false);
+    }
+  });
+
+  it('refuses each invalid fact in the same words as Rust', () => {
+    expect(
+      refused((raw) => {
+        raw.never_call.why = ' ';
+      }),
+    ).toBe(`${TOOLS_PATH}: never_call: \`why\` is empty`);
+    for (const name of ['', 'send mail', 'send,Read', 'send\n', 'é', 'x'.repeat(65)]) {
+      expect(
+        refused((raw) => {
+          raw.never_call.tools = [{ name, source: 'checked' }];
+        }),
+      ).toBe(`${TOOLS_PATH}: never_call tool ${name}: \`name\` must match [A-Za-z0-9_-]{1,64}`);
+    }
+    for (const [tools, subject, field, problem] of [
+      [[{ name: 'send', source: ' ' }], 'send', 'source', 'is empty'],
+      [
+        [
+          { name: 'send', source: 'a' },
+          { name: 'send', source: 'b' },
+        ],
+        'send',
+        'name',
+        'is repeated',
+      ],
+      [
+        [
+          { name: 'z', source: 'a' },
+          { name: 'a', source: 'b' },
+        ],
+        'a',
+        'name',
+        'must be in ASCII order',
+      ],
+      [[{ name: 'get_note', source: 'a' }], 'get_note', 'name', 'names a cerebro tool'],
+    ] as const) {
+      expect(
+        refused((raw) => {
+          raw.never_call.tools = tools.map((row) => ({ ...row }));
+        }),
+      ).toBe(`${TOOLS_PATH}: never_call tool ${subject}: \`${field}\` ${problem}`);
+    }
+  });
+
+  it('refuses unknown fields in the inventory and its rows', () => {
+    expect(refused((raw) => put(raw.never_call, 'allow', true))).toContain('allow');
+    expect(refused((raw) => put(raw.never_call.tools[0], 'alias', 'send'))).toContain('alias');
+    expect(refused((raw) => drop(raw.never_call.tools[0], 'source'))).toContain('source');
+  });
+
+  it('uses Rust whitespace for inventory why and source', () => {
+    for (const key of ['why', 'source']) {
+      const mutate = (raw: ToolsManifest, value: string) => {
+        if (key === 'why') raw.never_call.why = value;
+        else raw.never_call.tools[0].source = value;
+      };
+      expect(refused((raw) => mutate(raw, '\u0085'))).toContain(`\`${key}\` is empty`);
+      const raw = JSON.parse(RAW) as ToolsManifest;
+      mutate(raw, '\uFEFF');
+      expect(() => parseToolsManifest(raw)).not.toThrow();
+    }
+  });
+});
+
+it('permits an optional folder only with its declared empty string default', () => {
+  expect(tool(TOOLS, 'create_canvas')).toMatchObject({
+    kind: 'additive',
+    axis: 'write',
+    door: 'canvas',
+    target: { kind: 'folder' },
+    confirmable: true,
+  });
+  for (const value of [undefined, 'boards', null, 0])
+    expect(
+      refused((raw) => {
+        const schema = tool(raw, 'create_canvas').input_schema as {
+          properties: { folder: Record<string, unknown> };
+        };
+        if (value === undefined) delete schema.properties.folder.default;
+        else schema.properties.folder.default = value;
+      }),
+    ).toContain('input_schema must declare and require');
 });

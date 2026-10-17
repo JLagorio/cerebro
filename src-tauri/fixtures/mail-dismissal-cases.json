@@ -1,0 +1,96 @@
+{
+  "cases": [
+    { "kind": "address", "value": " Dana@Acme.Example ", "normalized": "dana@acme.example" },
+    { "kind": "address", "value": "mailto:<Dana@Acme.Example>", "normalized": "dana@acme.example" },
+    {
+      "kind": "address",
+      "value": "\u0085Dana@Acme.Example\u0085",
+      "normalized": "dana@acme.example"
+    },
+    {
+      "kind": "address",
+      "value": "\ufeffDana@Acme.Example",
+      "normalized": "\ufeffdana@acme.example"
+    },
+    {
+      "kind": "address",
+      "value": "dana",
+      "error": "Use a valid mail address with 3 to 320 characters."
+    },
+    {
+      "kind": "address",
+      "value": "dana@@acme.example",
+      "error": "Use a valid mail address with 3 to 320 characters."
+    },
+    { "kind": "domain", "value": " ACME.Example ", "normalized": "acme.example" },
+    { "kind": "domain", "value": "\ufeffACME.Example\ufeff", "normalized": "acme.example" },
+    {
+      "kind": "domain",
+      "value": "\u0085acme.example\u0085",
+      "error": "Use a valid mail domain with 3 to 320 characters."
+    },
+    {
+      "kind": "domain",
+      "value": "acme.\u0085example",
+      "error": "Use a valid mail domain with 3 to 320 characters."
+    },
+    { "kind": "domain", "value": "https://Acme.Example/about", "normalized": "acme.example" },
+    { "kind": "domain", "value": "https://Acme.Example.:443/about", "normalized": "acme.example" },
+    { "kind": "domain", "value": "https://bücher.example", "normalized": "xn--bcher-kva.example" },
+    {
+      "kind": "domain",
+      "value": "https://me@acme.example",
+      "error": "Use a valid mail domain with 3 to 320 characters."
+    },
+    {
+      "kind": "domain",
+      "value": "acme",
+      "error": "Use a valid mail domain with 3 to 320 characters."
+    },
+    {
+      "kind": "domain",
+      "value": "127.0.0.1",
+      "error": "Use a valid mail domain with 3 to 320 characters."
+    },
+    {
+      "kind": "domain",
+      "value": "https://[2001:db8::1]/",
+      "error": "Use a valid mail domain with 3 to 320 characters."
+    },
+    {
+      "kind": "domain",
+      "value": "-acme.example",
+      "error": "Use a valid mail domain with 3 to 320 characters."
+    },
+    {
+      "kind": "company",
+      "value": "acme.example",
+      "error": "Choose an address or domain to dismiss."
+    }
+  ],
+  "rows": [
+    { "vault": "one", "kind": "domain", "value": "ACME.example", "at": "2026-10-15T01:00:00Z" },
+    {
+      "vault": "one",
+      "kind": "address",
+      "value": "Dana@Acme.Example",
+      "at": "2026-10-15T02:00:00Z"
+    },
+    {
+      "vault": "one",
+      "kind": "address",
+      "value": "dana@acme.example",
+      "at": "2026-10-15T03:00:00Z"
+    },
+    {
+      "vault": "two",
+      "kind": "address",
+      "value": "lee@other.example",
+      "at": "2026-10-15T04:00:00Z"
+    }
+  ],
+  "one": [
+    { "kind": "address", "value": "dana@acme.example", "dismissedAt": "2026-10-15T02:00:00Z" },
+    { "kind": "domain", "value": "acme.example", "dismissedAt": "2026-10-15T01:00:00Z" }
+  ]
+}

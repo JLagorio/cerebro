@@ -83,7 +83,7 @@ function ImportRead({ onClose }: { onClose: () => void }) {
           {busy === 'reading' ? 'Reading the file…' : 'Choose a file…'}
         </Button>
         {problem && (
-          <p role="alert" data-testid="sheet-import-problem" className="text-sm text-red-600">
+          <p role="alert" data-testid="sheet-import-problem" className="text-sm text-warn-600">
             {problem}
           </p>
         )}

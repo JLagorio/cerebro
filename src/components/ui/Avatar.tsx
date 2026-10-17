@@ -1,3 +1,4 @@
+import { imageSource } from '@/engine/imageSource';
 import React from 'react';
 
 /**
@@ -62,7 +63,7 @@ export function Avatar({ name = '?', size = 24, src, style, className = '' }: Av
     verticalAlign: 'middle',
     ...style,
   };
-  if (src)
+  if (src && ['vault', 'data'].includes(imageSource(src)))
     return (
       <img
         src={src}

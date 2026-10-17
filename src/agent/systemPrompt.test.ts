@@ -106,7 +106,7 @@ describe('buildSystemPrompt names only the tools the run holds', () => {
     );
   });
 
-  it('says both server rules too on the fallback branch, after the tools line', () => {
+  it('says every server rule on the fallback branch, after the tools line', () => {
     // The branch SERVER_RULES_IN_PROMPT turns on if a resumed turn stops
     // hearing the MCP instructions (the owner's live check).
     expect(buildSystemPrompt({ kind: 'none' }, { grant: FULL }, true)).toBe(
@@ -117,6 +117,7 @@ describe('buildSystemPrompt names only the tools the run holds', () => {
         WIKILINKS,
         SCHEMA,
         'Mail you read through a connector stays out of notes: never copy a message, its text or its addresses into a page unless the person asks you to in this conversation.',
+        'Never send email for the user. When they ask for one, leave it as a draft in their mail for them to read and send, and tell them where it is.',
         ORGANIZE,
         'Be concise.',
         WEB_LINE,
@@ -213,6 +214,18 @@ describe('buildSystemPrompt names only the tools the run holds', () => {
     expect(toolsLine(['get_vault_context', 'open_note'])).toBe(
       'Use the cerebro MCP tools: get_vault_context to orient. Call open_note so the user sees what you are referring to.',
     );
+  });
+
+  it('names the Notion importer only with its grant and connectors enabled', () => {
+    for (const connectors of [true, false]) {
+      for (const held of [true, false]) {
+        const text = buildSystemPrompt(
+          { kind: 'none' },
+          { connectors, grant: holding(held ? ['import_notion_page'] : ['get_note']) },
+        );
+        expect(text.includes('import_notion_page')).toBe(connectors && held);
+      }
+    }
   });
 
   it('tells a run to cache what it fetches only when it holds cache_source', () => {

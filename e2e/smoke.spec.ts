@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, showDatabases, showPages, openDestination } from './boot';
 
 test('smoke: boot demo vault, list, board drag writes disk, rename, quick open', async ({
   page,
@@ -9,6 +9,7 @@ test('smoke: boot demo vault, list, board drag writes disk, rename, quick open',
 
   // -- M12: records live on their type screens, and a type keeps saved
   // views like a List — layout switching goes through the active tab's menu.
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
   await expect(page.getByTestId('table-view')).toBeVisible();
 
@@ -125,8 +126,8 @@ test('smoke v2: view tabs persist edits, page created in folder, BlockNote round
   });
   await page.goto('/');
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
-  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  const shell = page.getByTestId('app-rail');
+  await expect(demoButton.or(shell)).toBeVisible({ timeout: 10_000 });
   if (await demoButton.isVisible()) {
     await demoButton.click();
   }
@@ -134,7 +135,8 @@ test('smoke v2: view tabs persist edits, page created in folder, BlockNote round
   // This used to create a LIST here. M47 retired that lane: a saved view
   // belongs to the database it queries, so the `+` offers a page or a
   // database and nothing authors a `*.list.yml` any more.
-  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+  await expect(shell).toBeVisible({ timeout: 10_000 });
+  await showPages(page);
   const deliveryRow = page
     .getByTestId('collection-node-collection')
     .filter({ hasText: 'Delivery' });
@@ -164,6 +166,7 @@ test('smoke v2: view tabs persist edits, page created in folder, BlockNote round
     .toContain('type: board');
 
   // -- Pages: new folder, new page inside it (the standing tree, M38.3) ----
+  await showPages(page);
   await page.getByRole('button', { name: 'New folder' }).click();
   await page.getByPlaceholder('Folder name').fill('Notes');
   await page.getByRole('button', { name: 'Create', exact: true }).click();
@@ -200,9 +203,10 @@ test('smoke v2: view tabs persist edits, page created in folder, BlockNote round
     .toContain('Written by the smoke test.');
 
   // -- Navigate away and back through the Pages tree (disk round trip) -----
-  await page.getByRole('button', { name: 'Home' }).click();
+  await openDestination(page, 'Home');
   // The Notes folder was expanded during creation and expansion persists, so
   // the new page's row is already in the standing tree.
+  await showPages(page);
   const recent = page
     .getByTestId('file-tree')
     .getByRole('button', { name: 'Smoke Notes', exact: true });

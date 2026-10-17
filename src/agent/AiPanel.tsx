@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useLedgerReview, useQuarantine } from '@/stores/ledgerStore';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
@@ -17,7 +18,7 @@ import {
   resolveChips,
   type ContextChip,
 } from '@/agent/contextChips';
-import { ConversationSwitcher } from '@/agent/ConversationSwitcher';
+import { ConversationNavigation, ConversationSwitcher } from '@/agent/ConversationSwitcher';
 import { FailureNoticeCard } from '@/agent/FailureNoticeCard';
 import { InteractionCard } from '@/agent/InteractionCard';
 import { PermissionCard } from '@/agent/PermissionCard';
@@ -33,7 +34,12 @@ import { ReviewNotesDock } from '@/agent/ReviewNotesDock';
 import { useUpNext, type SkillResolution } from '@/agent/useUpNext';
 import { useUpNextStore } from '@/stores/upNextStore';
 import { type AgentStatus, type ChatMessage, type PrLink } from '@/agent/types';
-import { listSkills, matchSkillInvocation, skillPrompt } from '@/engine/skills';
+import {
+  listSkills,
+  matchSkillInvocation,
+  skillPrompt,
+  type SkillNarrowing,
+} from '@/engine/skills';
 import { buildSystemPrompt } from '@/agent/systemPrompt';
 import type { PromptGrant } from '@/engine/toolGrant';
 import { listAgents } from '@/engine/agents';
@@ -64,6 +70,7 @@ import { useNavStore } from '@/stores/navStore';
 import { dragCeiling, fitWidth } from '@/app/shellLayout';
 import { AI_WIDTH_MAX, AI_WIDTH_MIN, useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import './chat.css';
 
 /**
  * The AI side panel (M6).
@@ -81,12 +88,12 @@ function UserMessage({ text, addressed }: { text: string; addressed?: ChatMessag
   const [expanded, setExpanded] = useState(false);
   const long = text.length > LONG_PROMPT;
   return (
-    <div className="flex flex-col items-end gap-0.5" data-testid="chat-message" data-role="user">
+    <div className="cb-chat-user" data-testid="chat-message" data-role="user">
       <div
         // `whitespace-pre-wrap` (M15): a Shift+Enter multi-line question used
         // to come back as one run-on line in your own bubble.
         className={[
-          'max-w-[85%] whitespace-pre-wrap break-words rounded-xl rounded-br-xs bg-cortex-500 px-3 py-2 text-sm leading-[18px] text-n-0',
+          'cb-chat-user-bubble',
           long && !expanded ? 'max-h-[112px] overflow-hidden' : '',
         ].join(' ')}
       >
@@ -151,7 +158,11 @@ function Message({
   const cardDiff =
     onViewDiff === undefined ? undefined : (p: string) => onViewDiff(p, commitOf(message, p));
   return (
-    <div className="flex flex-col gap-1.5" data-testid="chat-message" data-role="assistant">
+    <div className="cb-chat-assistant" data-testid="chat-message" data-role="assistant">
+      <div className="cb-chat-speaker" aria-hidden="true">
+        <Icon name="sparkles" size={14} />
+        <span>Cerebro</span>
+      </div>
       {/* M56.8: rows by the tool manifest's renderer, consecutive reads
           folded into one; the message's streaming flag decides whether an
           unfinished call is running or interrupted, and a call a hook held
@@ -170,7 +181,7 @@ function Message({
           that wrote three paragraphs and then failed used to show only the red
           box, throwing away work that was still sitting in state. */}
       {message.text !== '' && (
-        <div className="whitespace-pre-wrap break-words text-sm leading-[19px] text-n-800">
+        <div className="cb-chat-answer">
           <MessageText text={message.text} onOpen={onOpen} />
         </div>
       )}
@@ -421,10 +432,19 @@ function pageSuggestions(page: Entry | null, concept: Concept | null): Suggestio
 
 export function AiPanel({
   room = null,
+  presentation = 'panel',
+  onTogglePresentation,
+  navigationTarget = null,
 }: {
   /** The widest the shell can draw the panel, measured; null until it has. */
   room?: number | null;
+  /** The shell keeps this same conversation mounted when it expands. */
+  presentation?: 'panel' | 'canvas';
+  onTogglePresentation?: () => void;
+  /** Sidebar slot owned by the shell; the conversation state stays here. */
+  navigationTarget?: HTMLElement | null;
 } = {}) {
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
   const shell = useUiStore((s) => s.agentShell);
   // M57.7: Web access, the second ceiling; the chat hook caps it by the
@@ -525,6 +545,11 @@ export function AiPanel({
   // thread's draft loads when it opens, saves 300 ms after typing stops, and
   // is flushed when the thread changes and when the panel closes.
   const activeConversation = conversations.activeId;
+  useEffect(() => {
+    // The canvas is a destination, including when this same mounted panel
+    // expands or changes thread. Docking must leave page navigation's focus alone.
+    if (presentation === 'canvas') composerRef.current?.focus({ preventScroll: true });
+  }, [presentation, activeConversation]);
   const draftOwner = useRef<string | null>(null);
   const draftNow = useRef(draft);
   draftNow.current = draft;
@@ -750,11 +775,11 @@ export function AiPanel({
     (
       text: string,
       message?: string | (() => Promise<string>),
-      allowedTools?: string[] | null,
+      narrowing?: SkillNarrowing,
       turn?: TurnContext,
     ) => {
       if (turn === undefined) anchorNow();
-      chatSend(text, message, allowedTools, turn);
+      chatSend(text, message, narrowing, turn);
     },
     [anchorNow, chatSend],
   );
@@ -772,7 +797,7 @@ export function AiPanel({
       const text = raw.trim();
       const invocation = raw.startsWith(' ') ? null : matchSkillInvocation(text, skills);
       if (invocation === null || vaultPath === null) {
-        return { text, skill: null, expand: null, allowedTools: null };
+        return { text, skill: null, expand: null, narrowing: {} };
       }
       const { skill, request } = invocation;
       return {
@@ -786,10 +811,12 @@ export function AiPanel({
               offsetMinutes: now.getTimezoneOffset(),
             });
           }),
-        // M17.8: a skill's `allowed-tools:` narrows THIS turn. Passed as data
-        // to Rust, which intersects it with the granted policy — a vault file
-        // may subtract from what Settings allowed and can never add to it.
-        allowedTools: skill.allowedTools,
+        // The invoked skill bounds this turn, including a turn queued for later.
+        narrowing: {
+          allowedTools: skill.allowedTools,
+          connectors: skill.connectors,
+          disallowedTools: skill.disallowedTools,
+        },
       };
     },
     [skills, vaultPath],
@@ -961,10 +988,18 @@ export function AiPanel({
     scrollToLatest(listRef.current);
   };
 
+  const welcoming =
+    chat.messages.length === 0 &&
+    conversations.transcript.state !== 'reading' &&
+    blocked === null &&
+    chat.interaction === null &&
+    !chat.streaming;
+
   return (
     <aside
       aria-label="AI panel"
       data-testid="ai-panel"
+      data-presentation={presentation}
       // `relative` hosts the drag handle. `flex-none`: beside a record the
       // RECORD gives ground, never this (M52). `max-w-full` is what makes it
       // give at all, against the frame App draws it in — the slot, less the
@@ -973,20 +1008,27 @@ export function AiPanel({
       // CSS, so it gives in the same layout pass as the window — sized from
       // a measurement it was a frame late, and for that frame the slot's
       // overflow cut off Send and the close button (M15 layout contract).
-      className="relative flex min-w-0 max-w-full flex-none flex-col border-l border-n-200 bg-n-0"
-      style={{ width }}
+      className="cb-chat relative flex min-w-0 max-w-full flex-col"
+      style={{ width: presentation === 'canvas' ? '100%' : width }}
     >
-      <ResizeHandle
-        label="Resize AI panel"
-        side="left"
-        width={drawn}
-        preferred={width}
-        min={AI_WIDTH_MIN}
-        max={dragCeiling(room, AI_WIDTH_MAX)}
-        onResize={setWidth}
-      />
-      <header className="flex flex-none items-center gap-2 border-b border-n-200 px-3 py-2">
-        <Icon name="sparkles" size={14} color="var(--synapse-500)" />
+      {presentation === 'canvas' &&
+        navigationTarget !== null &&
+        createPortal(<ConversationNavigation state={conversations} />, navigationTarget)}
+      {presentation === 'panel' && (
+        <ResizeHandle
+          label="Resize AI panel"
+          side="left"
+          width={drawn}
+          preferred={width}
+          min={AI_WIDTH_MIN}
+          max={dragCeiling(room, AI_WIDTH_MAX)}
+          onResize={setWidth}
+        />
+      )}
+      <header className="cb-chat-header">
+        <span className="cb-chat-header-mark">
+          <Icon name="sparkles" size={16} />
+        </span>
         {/* M9.5: conversations are kept and named, so this is a switcher
             rather than a label beside a button that erased the transcript. */}
         <ConversationSwitcher state={conversations} />
@@ -1003,256 +1045,338 @@ export function AiPanel({
           <span className="text-2xs text-warn-600">not installed</span>
         )}
         <span className="flex-1" />
+        {onTogglePresentation !== undefined && (
+          <IconButton
+            icon={presentation === 'canvas' ? 'panel-right' : 'expand'}
+            label={presentation === 'canvas' ? 'Dock conversation' : 'Expand conversation'}
+            onClick={onTogglePresentation}
+          />
+        )}
         <IconButton
           icon="square-pen"
           label="New conversation"
-          size="sm"
+          size="md"
           onClick={conversations.start}
         />
         <IconButton
           icon="x"
           label="Close AI panel"
-          size="sm"
+          size="md"
           onClick={() => setAiPanelOpen(false)}
         />
       </header>
 
-      <div
-        ref={listRef}
-        onScroll={onListScroll}
-        className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3"
-      >
-        {conversations.transcript.state === 'unavailable' && (
-          <TranscriptNotice
-            reason={conversations.transcript.reason}
-            retentionDays={conversations.transcript.retentionDays}
-            detail={conversations.transcript.detail}
-            cached={chat.messages.length > 0}
-          />
-        )}
-        {chat.messages.length === 0 && conversations.transcript.state === 'reading' ? (
-          <p data-testid="transcript-reading" className="m-0 pt-2 text-sm text-n-500">
-            Reading the transcript…
-          </p>
-        ) : chat.messages.length === 0 && blocked !== null ? null : chat.messages.length === 0 ? (
-          <div className="flex flex-col gap-2 pt-2">
-            <p className="m-0 text-sm leading-[18px] text-n-500">
-              {status?.installed === false
-                ? 'Claude Code was not found on this machine. Install it and reopen cerebro.'
-                : 'I can read and write this vault. What I learn goes into Knowledge, where you verify it.'}
-            </p>
-            {status?.installed !== false &&
-              suggestions.map((suggestion) => (
-                <button
-                  key={suggestion.label}
-                  type="button"
-                  data-testid="ai-suggestion"
-                  onClick={() => ask(suggestion.asked ?? suggestion.label, suggestion.prompt)}
-                  className="rounded-lg border border-n-200 bg-transparent px-2.5 py-1.5 text-left text-xs text-n-700 hover:border-n-300 hover:bg-n-25"
-                >
-                  {suggestion.label}
-                </button>
-              ))}
-          </div>
-        ) : (
-          chat.messages.map((message) => (
-            <Message
-              key={message.id}
-              message={message}
-              onOpen={openTarget}
-              onOpenPath={openPath}
-              onViewDiff={isRepo ? viewDiff : undefined}
-              history={historyOf(ready, isRepo)}
-              onRetry={
-                message.error !== undefined && blocked === null
-                  ? () => retry(message.id)
-                  : undefined
-              }
-              noticeActions={noticeActions}
-              waitingToolId={
-                chat.waiting && chat.interaction?.messageId === message.id
-                  ? chat.interaction.card.tool_id
-                  : null
-              }
-            />
-          ))
-        )}
-        {/* M57.1: the call the turn waits on, after the last message. An
+      {/* The transcript and composer keep their parents in both layouts. A
+          first turn changes spacing, never the input or live chat controller. */}
+      <div className="cb-chat-body" data-empty={welcoming}>
+        <div
+          ref={listRef}
+          onScroll={onListScroll}
+          data-testid="chat-scroll"
+          className="cb-chat-scroll"
+        >
+          <div className="cb-chat-thread">
+            {conversations.transcript.state === 'unavailable' && (
+              <TranscriptNotice
+                reason={conversations.transcript.reason}
+                retentionDays={conversations.transcript.retentionDays}
+                detail={conversations.transcript.detail}
+                cached={chat.messages.length > 0}
+              />
+            )}
+            {chat.messages.length === 0 && conversations.transcript.state === 'reading' ? (
+              <p data-testid="transcript-reading" className="m-0 pt-2 text-sm text-n-500">
+                Reading the transcript…
+              </p>
+            ) : welcoming ? (
+              <div className="cb-chat-welcome" data-testid="chat-welcome">
+                <p className="cb-chat-eyebrow">
+                  <Icon name="sparkles" size={14} />
+                  Your workspace, in conversation
+                </p>
+                <h2>
+                  {activeEntry === null
+                    ? 'What would you like to work on?'
+                    : 'A little help with this page?'}
+                </h2>
+                <p className="cb-chat-welcome-copy">
+                  {status?.installed === false
+                    ? 'Claude Code was not found on this machine. Install it and reopen cerebro.'
+                    : 'Find a connection, shape an idea, or work through what comes next.'}
+                </p>
+              </div>
+            ) : (
+              chat.messages.map((message) => (
+                <Message
+                  key={message.id}
+                  message={message}
+                  onOpen={openTarget}
+                  onOpenPath={openPath}
+                  onViewDiff={isRepo ? viewDiff : undefined}
+                  history={historyOf(ready, isRepo)}
+                  onRetry={
+                    message.error !== undefined && blocked === null
+                      ? () => retry(message.id)
+                      : undefined
+                  }
+                  noticeActions={noticeActions}
+                  waitingToolId={
+                    chat.waiting && chat.interaction?.messageId === message.id
+                      ? chat.interaction.card.tool_id
+                      : null
+                  }
+                />
+              ))
+            )}
+            {/* M57.1: the call the turn waits on, after the last message. An
             ask-first agent's page write draws as a write card (M57.4); the
             agent's questions as InteractionCard's question card (M57.3); any
             other tool-approval ask (one that names its family, M57.2) as a
             permission card with This conversation; any other as M57.1's. */}
-        {chat.interaction !== null &&
-          (chat.interaction.card.kind === 'write' ? (
-            <WriteApprovalCard interaction={chat.interaction} onAnswer={chat.answer} />
-          ) : chat.interaction.card.kind !== 'question' && chat.interaction.card.family != null ? (
-            <PermissionCard
-              interaction={chat.interaction}
-              onAnswer={chat.answer}
-              vaultPath={vaultPath}
-            />
-          ) : (
-            <InteractionCard interaction={chat.interaction} onAnswer={chat.answer} />
-          ))}
-        {chat.prLinks.length > 0 && <PrLinks links={chat.prLinks} />}
-      </div>
+            {chat.interaction !== null &&
+              (chat.interaction.card.kind === 'write' ? (
+                <WriteApprovalCard interaction={chat.interaction} onAnswer={chat.answer} />
+              ) : chat.interaction.card.kind !== 'question' &&
+                chat.interaction.card.family != null ? (
+                <PermissionCard
+                  interaction={chat.interaction}
+                  onAnswer={chat.answer}
+                  vaultPath={vaultPath}
+                />
+              ) : (
+                <InteractionCard interaction={chat.interaction} onAnswer={chat.answer} />
+              ))}
+            {chat.prLinks.length > 0 && <PrLinks links={chat.prLinks} />}
+          </div>
+        </div>
 
-      <div className="relative flex-none border-t border-n-200 p-2.5">
-        {/* Only offered when you have actually scrolled away — the transcript
+        <div className="cb-chat-dock">
+          <div className="cb-chat-composer" data-testid="chat-composer">
+            {/* Only offered when you have actually scrolled away — the transcript
             is sticky to the bottom the rest of the time. */}
-        {!atBottom && chat.messages.length > 0 && (
-          <button
-            type="button"
-            data-testid="jump-to-latest"
-            onClick={jumpToLatest}
-            className="absolute -top-8 left-1/2 z-10 -translate-x-1/2 rounded-full border border-n-200 bg-n-0 px-2.5 py-1 text-2xs text-n-600 shadow-[var(--shadow-lg)] hover:border-n-400"
-          >
-            Jump to latest
-          </button>
-        )}
-        {/* M17.6: what the agent is being told about, as things rather than as
+            {!atBottom && chat.messages.length > 0 && (
+              <button
+                type="button"
+                data-testid="jump-to-latest"
+                onClick={jumpToLatest}
+                className="absolute -top-8 left-1/2 z-10 -translate-x-1/2 rounded-full border border-n-200 bg-n-0 px-2.5 py-1 text-2xs text-n-600 shadow-[var(--shadow-lg)] hover:border-n-400"
+              >
+                Jump to latest
+              </button>
+            )}
+            <div className="cb-chat-context" data-testid="chat-context">
+              {/* M17.6: what the agent is being told about, as things rather than as
             a derivation. Removable, because the most useful thing a context
             control can do is take something OUT — an answer about the wrong
             record reads as the model being stupid until you can see that the
             app handed it the wrong page. */}
-        {chips.length > 0 && (
-          <div
-            data-testid="context-chips"
-            className="mb-1.5 flex flex-wrap items-center gap-1"
-            aria-label="Context"
-          >
-            {chips.map((chip) => (
-              <span
-                key={chipId(chip)}
-                data-testid="context-chip"
-                data-kind={chip.kind}
-                className="inline-flex max-w-full items-center gap-1 rounded-md border border-n-200 bg-n-25 py-0.5 pl-1.5 pr-0.5 text-2xs text-n-600"
-              >
-                <Icon
-                  name={chip.kind === 'place' ? 'map-pin' : 'file-text'}
-                  size={10}
-                  color="var(--n-400)"
-                />
-                <span className="min-w-0 truncate">{chip.label}</span>
-                <button
-                  type="button"
-                  aria-label={`Remove ${chip.label} from context`}
-                  onClick={() => removeChip(chip)}
-                  className="flex-none rounded-xs border-0 bg-transparent p-0.5 text-n-400 hover:text-n-800"
+              {chips.length > 0 && (
+                <div
+                  data-testid="context-chips"
+                  className="mb-1.5 flex flex-wrap items-center gap-1"
+                  aria-label="Context"
                 >
-                  <Icon name="x" size={9} />
-                </button>
-              </span>
-            ))}
-            {/* M50.4 — the Knowledge this turn carries: the concepts about,
+                  {chips.map((chip) => (
+                    <span
+                      key={chipId(chip)}
+                      data-testid="context-chip"
+                      data-kind={chip.kind}
+                      className="inline-flex max-w-full items-center gap-1 rounded-md border border-n-200 bg-n-25 py-0.5 pl-1.5 pr-0.5 text-2xs text-n-600"
+                    >
+                      <Icon
+                        name={chip.kind === 'place' ? 'map-pin' : 'file-text'}
+                        size={10}
+                        color="var(--n-400)"
+                      />
+                      <span className="min-w-0 truncate">{chip.label}</span>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${chip.label} from context`}
+                        onClick={() => removeChip(chip)}
+                        className="flex-none rounded-xs border-0 bg-transparent p-0.5 text-n-400 hover:text-n-800"
+                      >
+                        <Icon name="x" size={9} />
+                      </button>
+                    </span>
+                  ))}
+                  {/* M50.4 — the Knowledge this turn carries: the concepts about,
                 or learned from, what is in context. Not removable on its own
                 — it follows the chips above, and taking one of those out takes
                 its knowledge with it. Opens to the concepts, each one a page. */}
-            {standing.length > 0 && (
-              <button
-                type="button"
-                data-testid="context-knowledge"
-                aria-expanded={knowledgeOpen}
-                onClick={() => setKnowledgeOpen(!knowledgeOpen)}
-                className="inline-flex items-center gap-1 rounded-md border border-n-200 bg-n-25 px-1.5 py-0.5 text-2xs text-n-600 hover:border-n-300"
-              >
-                <Icon name="brain" size={10} color="var(--synapse-500)" />
-                Knowledge · {standing.length}
-              </button>
-            )}
-          </div>
-        )}
-        {knowledgeOpen && standing.length > 0 && (
-          <ul
-            data-testid="context-knowledge-list"
-            className="m-0 mb-1.5 flex list-none flex-col gap-px p-0"
-          >
-            {[...standing, ...replaced].map((k) => (
-              <li key={k.path}>
-                <button
-                  type="button"
-                  onClick={() => openPath(k.path)}
-                  className="flex w-full min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-0.5 text-left text-2xs text-n-700 hover:bg-n-50"
-                >
-                  <Icon name="lightbulb" size={10} color="var(--n-400)" />
-                  <span className="min-w-0 truncate">{k.title}</span>
-                  {k.supersededBy !== undefined ? (
-                    <span className="flex-none text-n-400">· replaced</span>
-                  ) : (
-                    k.review !== 'current' && (
-                      <span className="flex-none text-n-400">· unreviewed</span>
-                    )
+                  {standing.length > 0 && (
+                    <button
+                      type="button"
+                      data-testid="context-knowledge"
+                      aria-expanded={knowledgeOpen}
+                      onClick={() => setKnowledgeOpen(!knowledgeOpen)}
+                      className="inline-flex items-center gap-1 rounded-md border border-n-200 bg-n-25 px-1.5 py-0.5 text-2xs text-n-600 hover:border-n-300"
+                    >
+                      <Icon name="brain" size={10} color="var(--synapse-500)" />
+                      Knowledge · {standing.length}
+                    </button>
                   )}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        {/* M57.5: what this conversation holds for after its turn. */}
-        <UpNext upNext={upNext} />
-        <ReviewNotesDock
-          vault={vaultPath}
-          conversationId={conversations.activeId}
-          blocked={blocked !== null}
-          submit={upNext.submit}
-          onOpenNote={(note) => {
-            openPath(note.path);
-            openDiff(note.path, note.commit, {
-              conversationId: note.conversationId,
-              runId: note.runId,
-            });
-          }}
-        />
-        {blocked !== null ? (
-          <div data-testid="thread-blocked" className="flex flex-col items-start gap-2 px-1 py-1">
-            <p className="m-0 text-xs leading-[17px] text-n-600">
-              {blocked === 'elsewhere' ? BLOCKED_WORDS.elsewhere : BLOCKED_WORDS.gone}
-            </p>
-            <Button
-              variant="primary"
-              size="sm"
-              icon="square-pen"
-              testId="thread-start-new"
-              onClick={conversations.start}
-            >
-              Start a new conversation
-            </Button>
-          </div>
-        ) : (
-          <>
-            {/* M9.5: `[[` completes against the vault, and the note you name
+                </div>
+              )}
+              {knowledgeOpen && standing.length > 0 && (
+                <ul
+                  data-testid="context-knowledge-list"
+                  className="m-0 mb-1.5 flex list-none flex-col gap-px p-0"
+                >
+                  {[...standing, ...replaced].map((k) => (
+                    <li key={k.path}>
+                      <button
+                        type="button"
+                        onClick={() => openPath(k.path)}
+                        className="flex w-full min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-0.5 text-left text-2xs text-n-700 hover:bg-n-50"
+                      >
+                        <Icon name="lightbulb" size={10} color="var(--n-400)" />
+                        <span className="min-w-0 truncate">{k.title}</span>
+                        {k.supersededBy !== undefined ? (
+                          <span className="flex-none text-n-400">· replaced</span>
+                        ) : (
+                          k.review !== 'current' && (
+                            <span className="flex-none text-n-400">· unreviewed</span>
+                          )
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {/* M57.5: what this conversation holds for after its turn. */}
+              <UpNext upNext={upNext} />
+              <ReviewNotesDock
+                vault={vaultPath}
+                conversationId={conversations.activeId}
+                blocked={blocked !== null}
+                submit={upNext.submit}
+                onOpenNote={(note) => {
+                  openPath(note.path);
+                  openDiff(note.path, note.commit, {
+                    conversationId: note.conversationId,
+                    runId: note.runId,
+                  });
+                }}
+              />
+            </div>
+            {blocked !== null ? (
+              <div
+                data-testid="thread-blocked"
+                className="flex flex-col items-start gap-2 px-1 py-1"
+              >
+                <p className="m-0 text-xs leading-[17px] text-n-600">
+                  {blocked === 'elsewhere' ? BLOCKED_WORDS.elsewhere : BLOCKED_WORDS.gone}
+                </p>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  icon="square-pen"
+                  testId="thread-start-new"
+                  onClick={conversations.start}
+                >
+                  Start a new conversation
+                </Button>
+              </div>
+            ) : (
+              <>
+                {/* M9.5: `[[` completes against the vault, and the note you name
               travels into the snapshot with its content rather than as a word
               the agent has to go searching for. */}
-            <ChatInput
-              autoFocus
-              value={draft}
-              onChange={setDraft}
-              onSubmit={submit}
-              // M17.6b: `@` attaches. A chip re-added on purpose beats an earlier
-              // dismissal — see resolveChips.
-              onAttach={(chip) => {
-                const id = chipId(chip);
-                setDismissed((prev) => prev.filter((d) => d !== id));
-                setAdded((prev) => (prev.some((c) => chipId(c) === id) ? prev : [...prev, chip]));
-              }}
-              attached={attachedIds}
-            />
-            <div className="mt-1.5 flex items-center gap-2">
-              {/* M56.5: the model Claude Code last reported answering, as the
+                <ChatInput
+                  inputRef={composerRef}
+                  appearance="composer"
+                  autoFocus
+                  value={draft}
+                  onChange={setDraft}
+                  onSubmit={submit}
+                  // M17.6b: `@` attaches. A chip re-added on purpose beats an earlier
+                  // dismissal — see resolveChips.
+                  onAttach={(chip) => {
+                    const id = chipId(chip);
+                    setDismissed((prev) => prev.filter((d) => d !== id));
+                    setAdded((prev) =>
+                      prev.some((c) => chipId(c) === id) ? prev : [...prev, chip],
+                    );
+                  }}
+                  attached={attachedIds}
+                />
+                <div className="cb-chat-toolbar">
+                  <IconButton
+                    icon="plus"
+                    label="Add context"
+                    size="lg"
+                    onClick={() => {
+                      setDraft((text) => `${text}${text !== '' && !/\s$/.test(text) ? ' ' : ''}@`);
+                      requestAnimationFrame(() => {
+                        const input = composerRef.current;
+                        if (input === null) return;
+                        input.focus();
+                        // The action appended a token at the end. Focusing an
+                        // empty draft can otherwise restore its old caret at
+                        // zero and retire completion on the next render.
+                        input.setSelectionRange(input.value.length, input.value.length);
+                      });
+                    }}
+                  />
+                  {/* M56.5: the model Claude Code last reported answering, as the
                   fold named it, never the one asked for. */}
-              {chat.model !== null && (
-                <span
-                  data-testid="turn-model"
-                  className="max-w-[140px] flex-none truncate font-mono text-2xs text-n-500"
-                  title={chat.model}
-                >
-                  {chat.model}
-                </span>
-              )}
-              <span
-                data-testid="composer-status"
-                className="min-w-0 flex-1 truncate text-2xs text-n-400"
-              >
+                  <RunOptionsPicker
+                    key={conversations.activeId}
+                    value={{
+                      model: conversations.active?.model ?? null,
+                      effort: conversations.active?.effort ?? null,
+                    }}
+                    onChange={(choice) =>
+                      conversations.setRunOptions(conversations.activeId, choice)
+                    }
+                    open={runOptionsOpen}
+                    onOpenChange={setRunOptionsOpen}
+                    disabled={chat.streaming}
+                  />
+                  <span className="flex-1" />
+                  {chat.streaming || chat.stopping ? (
+                    <>
+                      <IconButton
+                        icon="list-plus"
+                        label="Add to Up next"
+                        size="sm"
+                        disabled={draft.trim() === ''}
+                        onClick={submit}
+                      />
+                      {/* Stop holds Up next until Resume (M57 Q23), then stops the
+                      turn, which ends once its run's Done has come. */}
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        icon="square"
+                        disabled={chat.stopping}
+                        onClick={() => {
+                          upNext.hold();
+                          chat.stop();
+                        }}
+                      >
+                        {chat.stopping ? 'Stopping…' : 'Stop'}
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      variant="primary"
+                      size="md"
+                      icon="arrow-up"
+                      className="cb-chat-send"
+                      disabled={draft.trim() === ''}
+                      onClick={submit}
+                    >
+                      <span className="sr-only">Send</span>
+                    </Button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+          {blocked === null && (
+            <div className="cb-chat-footer">
+              <span data-testid="composer-status">
                 {chat.waiting
                   ? 'Waiting for your answer'
                   : chat.stopping
@@ -1261,48 +1385,32 @@ export function AiPanel({
                       ? 'Working… · Enter adds to Up next'
                       : 'Enter to send · [[ to reference a note'}
               </span>
-              <RunOptionsPicker
-                key={conversations.activeId}
-                value={{
-                  model: conversations.active?.model ?? null,
-                  effort: conversations.active?.effort ?? null,
-                }}
-                onChange={(choice) => conversations.setRunOptions(conversations.activeId, choice)}
-                open={runOptionsOpen}
-                onOpenChange={setRunOptionsOpen}
-                disabled={chat.streaming}
-              />
-              {chat.streaming || chat.stopping ? (
-                <>
-                  <IconButton
-                    icon="list-plus"
-                    label="Add to Up next"
-                    size="sm"
-                    disabled={draft.trim() === ''}
-                    onClick={submit}
-                  />
-                  {/* Stop holds Up next until Resume (M57 Q23), then stops the
-                      turn, which ends once its run's Done has come. */}
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    icon="square"
-                    disabled={chat.stopping}
-                    onClick={() => {
-                      upNext.hold();
-                      chat.stop();
-                    }}
-                  >
-                    {chat.stopping ? 'Stopping…' : 'Stop'}
-                  </Button>
-                </>
-              ) : (
-                <Button variant="primary" size="sm" icon="send" onClick={submit}>
-                  Send
-                </Button>
+              {chat.model !== null && (
+                <span data-testid="turn-model" className="cb-chat-model" title={chat.model}>
+                  {chat.model}
+                </span>
               )}
             </div>
-          </>
+          )}
+        </div>
+        {welcoming && status?.installed !== false && (
+          <div className="cb-chat-starters" data-testid="chat-starters">
+            <div className="cb-chat-suggestions" aria-label="Conversation starters">
+              {suggestions.map((suggestion) => (
+                <button
+                  key={suggestion.label}
+                  type="button"
+                  data-testid="ai-suggestion"
+                  onClick={() => ask(suggestion.asked ?? suggestion.label, suggestion.prompt)}
+                  className="cb-chat-suggestion"
+                >
+                  <span>{suggestion.label}</span>
+                  <Icon name="arrow-up-right" size={14} />
+                </button>
+              ))}
+            </div>
+            <p className="cb-chat-welcome-note">Knowledge stays yours to verify.</p>
+          </div>
         )}
       </div>
     </aside>

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, showDatabases } from './boot';
 
 /**
  * M45.2 — the layout editor, strip to vault bytes.
@@ -36,6 +36,7 @@ test('layout editor: strip to vault bytes, inert preview, and the eye folds the 
   await boot(page);
 
   // -- Open a Work item in the record panel ----------------------------
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
   const row = page.getByTestId('table-row').first();
   await row.hover();
@@ -215,6 +216,7 @@ test('layout editor: the strip renames a tab, the + mints a section, both land i
   await boot(page);
 
   // -- Open an Epic in the record panel --------------------------------
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Epic' }).first().click();
   const row = page.getByTestId('table-row').first();
   await row.hover();
@@ -350,6 +352,7 @@ test('layout editor: the peek shows the strip, and a section stands above every 
   await boot(page);
 
   // -- Open an Epic in the record panel --------------------------------
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Epic' }).first().click();
   const row = page.getByTestId('table-row').first();
   await row.hover();

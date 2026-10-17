@@ -1,3 +1,4 @@
+import { PageHeader } from '@/components/PageHeader';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -59,10 +60,10 @@ import { VIEW_TAB_STRIP, viewTabClass } from '@/views/ViewTabs';
 
 type Tab = 'all' | 'review' | 'activity';
 
-/** A body that is read rather than scanned sits on the page's 20px edge; the
+/** A body that is read rather than scanned sits on the page's 24px edge; the
  * tables — Concepts, and Review's queue — run flush under the tab strip
  * instead, as a view's does. */
-const PADDED = 'px-5 pb-10 pt-4';
+const PADDED = 'px-6 pb-10 pt-6';
 
 /** Which tab a nav lights. A folder is a filter of Concepts; a subject and a
  * run deep link are no tab at all. */
@@ -394,80 +395,54 @@ function KnowledgeLists({ nav: asked }: { nav: KnowledgeNav | undefined }) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="knowledge-page">
-      {/* A type's page shell (M52.5): the title row padded like its header,
-          then the tab strip edge to edge with the page's one primary act at
-          its end, then the table flush beneath it. */}
-      {/* A container of its own (M52.5), so the byline steps aside before
-          the counts beside it are ever cut: "3 to verify · 3 pro…" was the
-          header giving up its one useful number for a name. */}
-      <header className="@container/khead flex flex-none px-5 pt-3.5">
-        <div className="mb-2.5 flex min-w-0 flex-1 items-center gap-2">
-          <span className="flex h-7 w-7 flex-none items-center justify-center">
-            <Icon name="brain" size={16} color="var(--n-600)" />
-          </span>
-          {/* `px-1` is the inset a type page's title has from its rename
-              button, so the two headings start at one x (M52.5). */}
-          <h1
-            className="m-0 min-w-0 flex-[0_1_auto] px-1 text-lg font-semibold leading-6 tracking-[-0.005em]"
-            data-testid="knowledge-heading"
-          >
-            {crumb === null ? (
-              'Knowledge'
-            ) : (
-              <span className="flex min-w-0 items-center gap-1.5">
+      <PageHeader
+        icon={<Icon name="brain" size={18} />}
+        headingTestId="knowledge-heading"
+        title={
+          crumb === null ? (
+            'Knowledge'
+          ) : (
+            <span className="flex min-w-0 flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => navigate({ kind: 'knowledge', nav: { tab: 'all' } })}
+                className="text-n-500 hover:text-n-800"
+              >
+                Knowledge
+              </button>
+              <Icon name="chevron-right" size={16} color="var(--n-400)" className="flex-none" />
+              <span>{crumb}</span>
+            </span>
+          )
+        }
+        metadata={
+          nav.tab !== 'entity' ? (
+            <span data-testid="knowledge-count">{counted.length}</span>
+          ) : undefined
+        }
+        description={
+          summary !== null && nav.tab !== 'entity' ? (
+            <div
+              data-testid="knowledge-summary"
+              className="flex flex-wrap items-center gap-x-3 gap-y-1"
+            >
+              <span>{summary}</span>
+              {maintainer !== null && (
                 <button
                   type="button"
-                  onClick={() => navigate({ kind: 'knowledge', nav: { tab: 'all' } })}
-                  className="border-0 bg-transparent p-0 text-lg font-semibold text-n-500 hover:text-n-800"
+                  data-testid="knowledge-maintainer"
+                  onClick={() => navigate({ kind: 'agents', actor: maintainer.actor })}
+                  className="inline-flex min-w-0 items-center gap-1.5 text-xs text-n-500 hover:text-n-800"
                 >
-                  Knowledge
+                  <Icon name="bot" size={13} color="var(--text-ai)" className="flex-none" />
+                  <span className="truncate">Maintained by {maintainer.title}</span>
                 </button>
-                <Icon name="chevron-right" size={14} color="var(--n-300)" className="flex-none" />
-                <span className="truncate">{crumb}</span>
-              </span>
-            )}
-          </h1>
-          {/* How many, as a view's header counts its records. */}
-          {nav.tab !== 'entity' && (
-            <span
-              data-testid="knowledge-count"
-              className="flex-none [font-family:var(--font-mono)] text-xs text-n-400"
-            >
-              {counted.length}
-            </span>
-          )}
-          {summary !== null && nav.tab !== 'entity' && (
-            <p
-              data-testid="knowledge-summary"
-              className="m-0 ml-1 flex min-w-0 items-center gap-1.5 text-xs text-n-500"
-            >
-              {/* Never cut: the counts are the header's reason to be. */}
-              <span className="flex-none whitespace-nowrap">{summary}</span>
-              {/* M35.3 — Knowledge's judgement has a face: the byline names
-                  the knowledge-capable agent and opens it on Agents (M50.3).
-                  With no such agent there is no byline — "Maintained by
-                  agents" named nobody. */}
-              {maintainer !== null && (
-                <>
-                  <span aria-hidden className="text-n-300 @max-[640px]/khead:hidden">
-                    ·
-                  </span>
-                  <button
-                    type="button"
-                    data-testid="knowledge-maintainer"
-                    onClick={() => navigate({ kind: 'agents', actor: maintainer.actor })}
-                    className="inline-flex min-w-0 cursor-pointer items-center gap-1 rounded-md border-0 bg-transparent p-0 text-xs text-n-500 hover:text-n-800 @max-[640px]/khead:hidden"
-                  >
-                    <Icon name="bot" size={12} color="var(--synapse-500)" className="flex-none" />
-                    <span className="truncate">Maintained by {maintainer.title}</span>
-                  </button>
-                </>
               )}
-            </p>
-          )}
-          {/* On a subject the subject itself is one click away — that link is
-              the whole point of anchoring knowledge to the vault. */}
-          {subject?.entry != null && (
+            </div>
+          ) : undefined
+        }
+        actions={
+          subject?.entry != null ? (
             <Button
               variant="ghost"
               size="sm"
@@ -476,36 +451,27 @@ function KnowledgeLists({ nav: asked }: { nav: KnowledgeNav | undefined }) {
             >
               Open page
             </Button>
-          )}
-          {/* And where there is nothing to open, the offer to write it (D7/D1):
-              a subject becomes a workspace record because a human clicked. The
-              dialog is the New menu's own, pre-filled. */}
-          {subject !== null && subject.entry === null && (
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                testId="promote-thread"
-                onClick={() => setPromoting(true)}
-              >
-                + Create page
-              </Button>
-              {promoting && (
-                <NewRecordDialog
-                  defaultTitle={subject.target}
-                  onClose={() => setPromoting(false)}
-                />
-              )}
-            </>
-          )}
-        </div>
-      </header>
+          ) : subject !== null ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              testId="promote-thread"
+              onClick={() => setPromoting(true)}
+            >
+              + Create page
+            </Button>
+          ) : undefined
+        }
+      />
+      {promoting && subject !== null && subject.entry === null && (
+        <NewRecordDialog defaultTitle={subject.target} onClose={() => setPromoting(false)} />
+      )}
       {/* A container of its own (M52.5): at 1100px with the Assistant open,
           Start review sat on top of the Activity tab. Narrow, the button
           keeps its glyph and count and its words go to screen readers only;
           narrower still, the tabs scroll under their own edge rather than
           under the button. */}
-      <div className={`${VIEW_TAB_STRIP} @container/ktabs px-5`}>
+      <div className={`${VIEW_TAB_STRIP} @container/ktabs px-6`}>
         <nav
           aria-label="Knowledge views"
           className="flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"

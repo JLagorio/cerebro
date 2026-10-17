@@ -40,14 +40,13 @@ pub fn window_for(vault_id: &str) -> Option<SessionWindow> {
 fn session_window(
     closed: super::catchup::ClosedInterval,
     now: chrono::DateTime<Utc>,
-    start: chrono::DateTime<Utc>,
+    current_session: &str,
 ) -> SessionWindow {
-    let cause =
-        if chrono::DateTime::parse_from_rfc3339(&closed.app_closed_at).is_ok_and(|at| at > start) {
-            "vault"
-        } else {
-            "app"
-        };
+    let cause = if closed.session_id == current_session {
+        "vault"
+    } else {
+        "app"
+    };
     SessionWindow {
         closed_at: closed.app_closed_at,
         precision: closed.precision.into(),
@@ -87,7 +86,6 @@ pub fn track(scope: &VaultScope) {
     let Ok(mut open) = current().lock() else {
         return;
     };
-    let start = *process_start();
     let now = Utc::now();
     if open.as_ref() == Some(&next) {
         super::sink::with_sink(|conn| heartbeat(conn, session_id(), &next.0, &next.1, now));
@@ -103,7 +101,7 @@ pub fn track(scope: &VaultScope) {
     if let Some(Ok(closed)) = opened {
         if let Ok(mut windows) = windows().lock() {
             if let Some(closed) = closed {
-                windows.insert(next.0.clone(), session_window(closed, now, start));
+                windows.insert(next.0.clone(), session_window(closed, now, session_id()));
             } else {
                 windows.remove(&next.0);
             }
@@ -148,20 +146,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn closure_cause_distinguishes_process_start_and_a_later_vault_switch() {
-        let start = "2026-07-28T12:00:00Z"
+    fn closure_cause_uses_recorded_identity_even_with_sub_millisecond_switches() {
+        let start = "2026-07-28T12:00:00.000500Z"
             .parse::<chrono::DateTime<Utc>>()
             .unwrap();
-        for (at, cause) in [
-            ("2026-07-28T11:00:00Z", "app"),
-            ("2026-07-28T12:01:00Z", "vault"),
-        ] {
+        // Both closes serialize to the same millisecond. The prior process
+        // still means app reopening; this process means a vault switch, even
+        // though its stored close sorts before the high-precision start.
+        for (owner, cause) in [("previous-process", "app"), ("current-process", "vault")] {
             let closed = super::super::catchup::ClosedInterval {
-                app_closed_at: at.into(),
+                session_id: owner.into(),
+                app_closed_at: "2026-07-28T12:00:00.000Z".into(),
                 precision: "clean_exact",
             };
             assert_eq!(
-                session_window(closed, start + chrono::Duration::hours(1), start).cause,
+                session_window(
+                    closed,
+                    start + chrono::Duration::microseconds(100),
+                    "current-process"
+                )
+                .cause,
                 cause
             );
         }

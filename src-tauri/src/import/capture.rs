@@ -3,7 +3,10 @@
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc, Condvar, Mutex, OnceLock,
+};
 use std::time::{Duration, Instant};
 
 const RUN_CAP: usize = 8;
@@ -17,6 +20,18 @@ pub struct Capture {
     pub is_error: bool,
     pub truncated: bool,
     key: Option<Key>,
+    _permit: Option<Arc<Permit>>,
+}
+/// Shared by the slot and every in-flight reader. Eviction or run teardown
+/// cannot return its budget while a converter still owns the retained bytes.
+struct Permit {
+    bytes: usize,
+    used: Arc<AtomicUsize>,
+}
+impl Drop for Permit {
+    fn drop(&mut self) {
+        self.used.fetch_sub(self.bytes, Ordering::Relaxed);
+    }
 }
 #[derive(Clone, PartialEq, Eq)]
 struct Key {
@@ -31,6 +46,7 @@ impl Capture {
             is_error,
             truncated,
             key: None,
+            _permit: None,
         }
     }
 }
@@ -60,12 +76,12 @@ struct Run {
 struct Book {
     generation: u64,
     runs: HashMap<String, Run>,
-    bytes: usize,
 }
 #[derive(Default)]
 struct Store {
     book: Mutex<Book>,
     changed: Condvar,
+    bytes: Arc<AtomicUsize>,
 }
 fn global() -> &'static Arc<Store> {
     static STORE: OnceLock<Arc<Store>> = OnceLock::new();
@@ -168,9 +184,7 @@ impl Store {
             return None;
         }
         let mut book = self.book.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(old) = book.runs.remove(run) {
-            book.bytes -= slot_bytes(&old);
-        }
+        book.runs.remove(run);
         book.generation += 1;
         let generation = book.generation;
         book.runs.insert(
@@ -199,8 +213,7 @@ impl Store {
             .get(run)
             .is_some_and(|state| state.generation == generation)
         {
-            let removed = book.runs.remove(run).expect("checked run");
-            book.bytes -= slot_bytes(&removed);
+            book.runs.remove(run);
             self.changed.notify_all();
         }
     }
@@ -231,13 +244,6 @@ impl Store {
         }
     }
 }
-fn slot_bytes(run: &Run) -> usize {
-    run.slots
-        .iter()
-        .filter_map(|slot| slot.answer.as_ref())
-        .map(|answer| answer.text.len())
-        .sum()
-}
 impl Handle {
     pub fn begin(&self, name: &str, call: &str, input: Option<&Value>) {
         let Some(input) = input else { return };
@@ -263,15 +269,12 @@ impl Handle {
         {
             return;
         }
-        let released = if run.slots.len() == RUN_CAP {
+        if run.slots.len() == RUN_CAP {
             let old = run.slots.remove(0);
             if !run.slots.iter().any(|slot| slot.page == old.page) {
                 run.composable.remove(&old.page);
             }
-            old.answer.map_or(0, |answer| answer.text.len())
-        } else {
-            0
-        };
+        }
         run.composable.remove(&page);
         run.next += 1;
         run.slots.push(Slot {
@@ -280,11 +283,12 @@ impl Handle {
             page,
             answer: None,
         });
-        book.bytes -= released;
     }
     pub fn put(&self, call: &str, text: &str, is_error: bool) {
         let mut book = self.store.book.lock().unwrap_or_else(|e| e.into_inner());
-        let budget = TOTAL_CAP.saturating_sub(book.bytes).min(CAPTURE_CAP);
+        let budget = TOTAL_CAP
+            .saturating_sub(self.store.bytes.load(Ordering::Relaxed))
+            .min(CAPTURE_CAP);
         let Some(run) = book
             .runs
             .get_mut(&self.run)
@@ -303,16 +307,20 @@ impl Handle {
         while !text.is_char_boundary(end) {
             end -= 1;
         }
+        self.store.bytes.fetch_add(end, Ordering::Relaxed);
         slot.answer = Some(Capture {
             text: Arc::from(&text[..end]),
             is_error,
             truncated: end < text.len(),
+            _permit: Some(Arc::new(Permit {
+                bytes: end,
+                used: self.store.bytes.clone(),
+            })),
             key: Some(Key {
                 generation: self.generation,
                 sequence: slot.sequence,
             }),
         });
-        book.bytes += end;
         self.store.changed.notify_all();
     }
 }
@@ -345,7 +353,7 @@ mod tests {
         drop(lease);
         assert!(store.find("run", PAGE, Duration::ZERO).is_none());
         handle.put("call", "late", false);
-        assert_eq!(store.book.lock().unwrap().bytes, 0);
+        assert_eq!(store.bytes.load(Ordering::Relaxed), 0);
     }
     #[test]
     fn waits_only_for_a_matching_pending_call_then_gives_up() {
@@ -371,6 +379,33 @@ mod tests {
         assert!(store.find("run", PAGE, Duration::ZERO).unwrap().is_error);
     }
     #[test]
+    fn in_flight_snapshots_keep_their_budget_after_run_teardown() {
+        let (store, lease, handle) = setup();
+        let mut readers = Vec::new();
+        let content = "x".repeat(CAPTURE_CAP);
+        for i in 0..4 {
+            let call = i.to_string();
+            begin(&handle, &call);
+            handle.put(&call, &content, false);
+            readers.push(store.find("run", PAGE, Duration::ZERO).unwrap());
+        }
+        drop(lease);
+        assert_eq!(store.bytes.load(Ordering::Relaxed), TOTAL_CAP);
+        let next = store.arm("next", vec![TOOL.into()]).unwrap();
+        let handle = next.handle();
+        begin(&handle, "blocked");
+        handle.put("blocked", "new", false);
+        let blocked = store.find("next", PAGE, Duration::ZERO).unwrap();
+        assert!(blocked.truncated && blocked.text.is_empty());
+        drop(readers);
+        begin(&handle, "ready");
+        handle.put("ready", "new", false);
+        assert_eq!(
+            &*store.find("next", PAGE, Duration::ZERO).unwrap().text,
+            "new"
+        );
+    }
+    #[test]
     fn bounds_each_capture_the_run_and_all_runs() {
         let (store, _lease, handle) = setup();
         let big = "é".repeat(CAPTURE_CAP);
@@ -382,7 +417,7 @@ mod tests {
         let book = store.book.lock().unwrap();
         let run = &book.runs["run"];
         assert_eq!(run.slots.len(), RUN_CAP);
-        assert_eq!(book.bytes, TOTAL_CAP);
+        assert_eq!(store.bytes.load(Ordering::Relaxed), TOTAL_CAP);
         assert!(run
             .slots
             .iter()

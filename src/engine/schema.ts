@@ -41,6 +41,7 @@ import { parseRepeat, describeRepeat } from './recurrence';
 import { checkFormula, evaluateFormula, type CheckedFormula } from './formula';
 import { parseTabList, parseViewList } from './views';
 import { resolveTarget } from './wikilink';
+import { correspondenceRollup, getCorrespondenceIndex } from './correspondents';
 
 /** The statuses a record falls back to when neither its project nor its type
  * declares any: `default_statuses` in shared/schema/field-kinds.v1.json,
@@ -92,6 +93,7 @@ function parseFieldDef(name: string, spec: unknown): FieldDef {
   const s = spec as Record<string, unknown>;
   const def: FieldDef = { name, kind: asFieldKind(s.kind) };
   if (typeof s.formula === 'string') def.formula = s.formula;
+  if (s.source === 'correspondence') def.source = s.source;
   if (Array.isArray(s.options)) {
     def.options = s.options.map(parseOption).filter((o): o is FieldOption => o !== null);
   }
@@ -331,7 +333,14 @@ export function buildSchema(entries: Entry[]): Schema {
     const fields = parseFields((e.properties as Record<string, unknown>).fields);
     const deadline =
       typeof e.properties.deadline === 'string' ? e.properties.deadline.trim() : null;
+    const emailDomain =
+      typeof e.properties.email_domain === 'string' ? e.properties.email_domain.trim() : null;
     types.set(e.title, {
+      emailDomain: fields.some(
+        (f) => f.name === emailDomain && (f.kind === 'text' || f.kind === 'url'),
+      )
+        ? emailDomain
+        : null,
       deadline: fields.some(
         (field) => field.name === deadline && (field.kind === 'date' || field.kind === 'daterange'),
       )
@@ -458,6 +467,8 @@ export function buildSchema(entries: Entry[]): Schema {
       return checked === null ? undefined : evaluateFormula(checked, (name) => fieldValue(e, name));
     }
     if (def?.kind === 'rollup') {
+      if (def.source === 'correspondence')
+        return correspondenceRollup(e, def, getCorrespondenceIndex(entries, { types }));
       const computed = computeRollup(e, def, entries, relations, {
         fieldDef: declaredDef,
         statuses: statusSetFor,
@@ -512,6 +523,21 @@ export function buildSchema(entries: Entry[]): Schema {
       };
     }
     if (def?.kind === 'rollup') {
+      if (def.source === 'correspondence') {
+        const value = fieldValue(e, field);
+        return {
+          def,
+          raw: value,
+          display:
+            typeof value === 'string'
+              ? formatTimestamp(value)
+              : typeof value === 'number'
+                ? formatNumber(value, def)
+                : '',
+          color: null,
+          ghost: false,
+        };
+      }
       const computed = computeRollup(e, def, entries, relations, {
         fieldDef: declaredDef,
         statuses: statusSetFor,

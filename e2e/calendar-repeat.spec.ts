@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, showDatabases } from './boot';
 
 const SERIES = 'records/standups/daily-standup.md';
 const ODD = 'records/standups/odd-sync.md';
@@ -106,6 +106,7 @@ test('Repeat reads in words, edits a preset, keeps unknown raw text and clears t
 });
 
 async function calendar(page: Page) {
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Standup' }).click();
   const tab = page.getByTestId('view-tabs').getByRole('tab', { name: 'Calendar', exact: true });
   if ((await tab.getAttribute('aria-selected')) !== 'true') await tab.click();

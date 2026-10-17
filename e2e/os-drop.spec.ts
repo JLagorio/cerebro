@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { boot } from './boot';
+import { boot, showDatabases, openDestination } from './boot';
 import type { DroppedSeed } from '../src/lib/mockDropped';
 
 async function drop(page: Page, zone: Locator, files: DroppedSeed[], hold = false) {
@@ -10,11 +10,16 @@ async function drop(page: Page, zone: Locator, files: DroppedSeed[], hold = fals
   const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
   await page.evaluate((input) => window.__cerebroMockDrop(input), { at, files, hold });
 }
-test('OS paths show hover, capture text, name skipped folders, and refuse unsupported targets', async ({ page }) => {
+test('OS paths show hover, capture text, name skipped folders, and refuse unsupported targets', async ({
+  page,
+}) => {
   await boot(page);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: /^Inbox/ }).click();
+  await openDestination(page, 'Inbox');
   const inbox = page.getByTestId('inbox-page');
-  const files = [{ path: '/outside/Native capture.md', content: 'A note dropped from Finder.' }, { path: '/outside/folder', folder: true }];
+  const files = [
+    { path: '/outside/Native capture.md', content: 'A note dropped from Finder.' },
+    { path: '/outside/folder', folder: true },
+  ];
   await drop(page, inbox, files, true);
   await expect(page.getByTestId('inbox-dropzone')).toBeVisible();
   await page.evaluate(() => window.__cerebroMockDragLeave());
@@ -29,12 +34,19 @@ test('OS paths show hover, capture text, name skipped folders, and refuse unsupp
   expect(saved).not.toContain('/outside/');
   await page.screenshot({ path: '/private/tmp/cerebro-os-drop-inbox.png', animations: 'disabled' });
   const before = await page.evaluate(() => window.__cerebroMockWrites.length);
-  await drop(page, page.getByTestId('nav-surfaces').first(), [{ path: '/outside/no-zone.txt', content: 'No write' }]);
-  await expect(page.getByTestId('toast-host')).toContainText('Drop files on the Inbox, a Files property, or a page.');
+  await drop(page, page.getByTestId('nav-surfaces').first(), [
+    { path: '/outside/no-zone.txt', content: 'No write' },
+  ]);
+  await expect(page.getByTestId('toast-host')).toContainText(
+    'Drop files on the Inbox, a Files property, or a page.',
+  );
   expect(await page.evaluate(() => window.__cerebroMockWrites.length)).toBe(before);
 });
-test('a Files property copies dropped bytes into attachments and keeps the relative reference', async ({ page }) => {
+test('a Files property copies dropped bytes into attachments and keeps the relative reference', async ({
+  page,
+}) => {
   await boot(page);
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
   await page.getByTestId('add-column').click();
   const panel = page.getByTestId('add-property-panel');
@@ -44,7 +56,15 @@ test('a Files property copies dropped bytes into attachments and keeps the relat
   await expect(field).toBeVisible();
   await drop(page, field, [{ path: '/outside/Drop brief.pdf', base64: 'JVBERi0xLjcK' }]);
   await expect(field.getByRole('button', { name: 'Open Drop brief.pdf' })).toBeVisible();
-  expect(await page.evaluate(() => window.__cerebroMockFs.has('attachments/Drop brief.pdf'))).toBe(true);
-  expect(await page.evaluate(() => [...window.__cerebroMockFs.values()].some((text) => text.includes('attachments/Drop brief.pdf')))).toBe(true);
+  expect(await page.evaluate(() => window.__cerebroMockFs.has('attachments/Drop brief.pdf'))).toBe(
+    true,
+  );
+  expect(
+    await page.evaluate(() =>
+      [...window.__cerebroMockFs.values()].some((text) =>
+        text.includes('attachments/Drop brief.pdf'),
+      ),
+    ),
+  ).toBe(true);
   await page.screenshot({ path: '/private/tmp/cerebro-os-drop-files.png', animations: 'disabled' });
 });

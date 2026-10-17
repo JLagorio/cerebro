@@ -329,6 +329,9 @@ pub fn apply(
 /// How the previous session ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClosedInterval {
+    /// The process that owned the interval. A vault switch is identified by
+    /// this record, never inferred from timestamps rounded to milliseconds.
+    pub session_id: String,
     /// When the app was last known to hold this vault open.
     pub app_closed_at: String,
     /// `clean_exact` when a close was stamped; `heartbeat_lower_bound`
@@ -417,7 +420,7 @@ fn last_closure(
     store_uuid: &str,
 ) -> Result<Option<ClosedInterval>, String> {
     let result = conn.query_row(
-        "SELECT clean_closed_at, last_heartbeat_at, close_precision FROM app_sessions \
+        "SELECT clean_closed_at, last_heartbeat_at, close_precision, session_id FROM app_sessions \
          WHERE vault_id = ?1 AND store_uuid = ?2 ORDER BY last_heartbeat_at DESC LIMIT 1",
         rusqlite::params![vault_id, store_uuid],
         |row| {
@@ -425,15 +428,18 @@ fn last_closure(
                 row.get::<_, Option<String>>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
             ))
         },
     );
     match result {
-        Ok((Some(clean), _, _)) => Ok(Some(ClosedInterval {
+        Ok((Some(clean), _, _, session_id)) => Ok(Some(ClosedInterval {
+            session_id,
             app_closed_at: clean,
             precision: "clean_exact",
         })),
-        Ok((None, heartbeat, _)) => Ok(Some(ClosedInterval {
+        Ok((None, heartbeat, _, session_id)) => Ok(Some(ClosedInterval {
+            session_id,
             app_closed_at: heartbeat,
             precision: "heartbeat_lower_bound",
         })),
@@ -1099,6 +1105,7 @@ mod tests {
         };
         declare(&conn, "store", &contract, at("2026-08-01T00:00:00Z")).unwrap();
         let interval = ClosedInterval {
+            session_id: "previous-process".into(),
             app_closed_at: "2026-08-02T09:30:00.000Z".into(),
             precision: "heartbeat_lower_bound",
         };
@@ -1147,6 +1154,7 @@ mod tests {
             "episode-1",
             "never-declared",
             &ClosedInterval {
+                session_id: "previous-process".into(),
                 app_closed_at: "2026-08-02T09:30:00.000Z".into(),
                 precision: "clean_exact",
             },

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot } from './boot';
+import { boot, openDestination } from './boot';
 
 const log = (page: Page) =>
   page.evaluate(
@@ -11,6 +11,7 @@ const log = (page: Page) =>
       }[],
   );
 async function openScout(page: Page) {
+  await openDestination(page, 'Agents');
   await page
     .getByTestId('sidebar')
     .getByRole('button', { name: 'Release scout', exact: true })
@@ -43,7 +44,7 @@ test('Run now works with Learn off, and both pause doors refuse it without anoth
   await page.screenshot({ path: testInfo.outputPath('run-now-paused.png'), fullPage: true });
   await page.getByTestId('agent-duty-toggle').click();
   await expect(page.getByTestId('agent-duty-toggle')).toHaveText('Pause');
-  await page.getByRole('button', { name: 'Open all agents', exact: true }).click();
+  await openDestination(page, 'Agents');
   const row = page.getByTestId('agent-row').filter({ hasText: 'Release scout' });
   await row.locator('..').getByTestId('agent-pause').click();
   await expect(page.getByText('Release scout paused', { exact: true })).toBeVisible();

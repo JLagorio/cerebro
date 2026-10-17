@@ -11,6 +11,7 @@ pub struct CanvasLimits {
     pub format: u64,
     pub artifact_version: u64,
     pub read: ReadLimits,
+    pub edit: EditLimits,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -18,6 +19,17 @@ pub struct ReadLimits {
     pub nodes: usize,
     pub bytes: usize,
     pub ids: usize,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EditLimits {
+    pub ops: usize,
+    pub id_chars: usize,
+    pub text_chars: usize,
+    pub label_chars: usize,
+    pub file_chars: usize,
+    pub subpath_chars: usize,
+    pub url_chars: usize,
 }
 fn keys(value: &Value, expected: &[&str], path: &str) -> Result<(), String> {
     if !value.as_object().is_some_and(|o| {
@@ -44,11 +56,28 @@ pub fn parse(source: &str) -> Result<CanvasLimits, String> {
     if value.get("format").and_then(Value::as_f64) != Some(1.0) {
         return Err("Canvas agent limits format must be 1.".into());
     }
-    keys(&value, &["format", "artifact_version", "read"], "root")?;
+    keys(
+        &value,
+        &["format", "artifact_version", "read", "edit"],
+        "root",
+    )?;
     positive(&mut value["artifact_version"], "artifact_version")?;
     keys(&value["read"], &["nodes", "bytes", "ids"], "read")?;
     for field in ["nodes", "bytes", "ids"] {
         positive(&mut value["read"][field], &format!("read.{field}"))?;
+    }
+    let edit = [
+        "ops",
+        "id_chars",
+        "text_chars",
+        "label_chars",
+        "file_chars",
+        "subpath_chars",
+        "url_chars",
+    ];
+    keys(&value["edit"], &edit, "edit")?;
+    for field in edit {
+        positive(&mut value["edit"][field], &format!("edit.{field}"))?;
     }
     value["format"] = Value::from(1);
     serde_json::from_value(value).map_err(|_| "Canvas agent limits could not be read.".into())
@@ -72,7 +101,7 @@ mod tests {
             std::fs::read_to_string(repo(DIGEST_PATH)).unwrap().trim()
         );
         assert_eq!(table().format, 1);
-        assert_eq!(table().artifact_version, 1);
+        assert_eq!(table().artifact_version, 2);
     }
     #[test]
     #[ignore = "deliberate artifact edit: regenerates the shared digest"]

@@ -1678,10 +1678,9 @@ pub(crate) fn build_args(
     // list ends with the table's path rules closing the Trash. An ask meets the gate
     // (M57.1) and rides neither list; so does an ask-first agent's page
     // write (M57.4), which leaves `tools` above with the gate's asks and
-    // still lands only on an Allow dispatch takes. The denials go in ONE flag, with the
-    // record's connector denials (M54.9): whether the CLI merges a repeated
-    // --disallowedTools or keeps only the last is not something a boundary
-    // should depend on.
+    // still lands only on an Allow dispatch takes. One deny flag carries the
+    // table's built-ins and path rules, record connector denials, unattended
+    // mail readers and the manifest's never-call connector senders.
     args.push("--permission-mode".into());
     args.push(approval.permission_mode.clone());
     let mut denied: Vec<&str> = approval.disallowed.iter().map(String::as_str).collect();
@@ -1702,7 +1701,21 @@ pub(crate) fn build_args(
     } else {
         vec![]
     };
-    for denial in &mail_denials {
+    let send_denials: Vec<String> = if req.internal {
+        vec![]
+    } else {
+        connectors
+            .servers
+            .iter()
+            .flat_map(|(_, cli)| {
+                crate::policy::tools::never_call_names()
+                    .map(move |tool| format!("mcp__{cli}__{tool}"))
+            })
+            .collect()
+    };
+    // Record, unattended-read and never-call denials share one flag. A
+    // record's allow can name a sender, but cannot subtract this denial.
+    for denial in mail_denials.iter().chain(&send_denials) {
         if !denied.contains(&denial.as_str()) {
             denied.push(denial);
         }
@@ -3126,6 +3139,15 @@ mod tests {
         head.iter().copied().chain(TRASH).collect()
     }
 
+    /// Unattended mail rules precede the shared Trash rules (M69.7b).
+    fn then_unattended_paths(head: &[&str]) -> Vec<String> {
+        head.iter()
+            .map(|value| (*value).to_owned())
+            .chain(crate::policy::tool_approval::table().unattended_path_rules())
+            .chain(TRASH.map(String::from))
+            .collect()
+    }
+
     // --- Ask-first page writes (M57.4) -------------------------------------
 
     fn ask_first_request(attended: bool) -> AgentRequest {
@@ -3234,7 +3256,12 @@ mod tests {
             } else {
                 assert_eq!(
                     denied,
-                    then_trash(&["WebFetch", "WebSearch", "AskUserQuestion", "ExitPlanMode"])
+                    then_unattended_paths(&[
+                        "WebFetch",
+                        "WebSearch",
+                        "AskUserQuestion",
+                        "ExitPlanMode"
+                    ])
                 );
             }
         }
@@ -3423,7 +3450,8 @@ mod tests {
     // denied in argv where no gate sits and matched by the gate where one
     // does (which refuses the plan tool and asks the questions, M57.3), and
     // since M57.7 the web tools, denied while Web access is off, and since
-    // M60.8b the Trash's Read and Edit path rules.
+    // M60.8b the Trash's Read and Edit path rules, plus M69.7b's mail
+    // path rules when nobody is attending.
     #[test]
     fn off_keeps_its_argv() {
         let granted = cerebro_tools().join(",");
@@ -3436,12 +3464,14 @@ mod tests {
                 // M57.7: Web access Off denies the web tools too, so the
                 // seated deny list now ends WebFetch,WebSearch; M60.8b then
                 // closes the Trash to Read and Edit on every such run.
+                // M69.7b also closes cached mail on unattended runs.
                 let denied = if seated {
                     "Write,Edit,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,\
                      Read(./.trash/**),Edit(./.trash/**)"
                 } else {
                     "Write,Edit,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch,AskUserQuestion,\
-                     ExitPlanMode,Read(./.trash/**),Edit(./.trash/**)"
+                     ExitPlanMode,Read(./sources/mail/**),Edit(./sources/mail/**),\
+                     Read(./.trash/**),Edit(./.trash/**)"
                 };
                 let mut expected = vec![
                     "-p",
@@ -3559,6 +3589,7 @@ mod tests {
     #[test]
     fn the_cli_lists_are_the_approval_table() {
         let cli = crate::policy::tools::cli_names(|_| true);
+        let unattended_paths = crate::policy::tool_approval::table().unattended_path_rules();
         for shell in [None]
             .into_iter()
             .chain(ShellCeiling::ALL.into_iter().map(Some))
@@ -3578,7 +3609,9 @@ mod tests {
                             let in_cli = |list: Vec<String>| -> Vec<String> {
                                 list.into_iter()
                                     .filter(|t| {
-                                        cli.contains(&t.as_str()) || TRASH.contains(&t.as_str())
+                                        cli.contains(&t.as_str())
+                                            || TRASH.contains(&t.as_str())
+                                            || unattended_paths.contains(t)
                                     })
                                     .collect()
                             };
@@ -5492,13 +5525,13 @@ mod tests {
         req.allowed_tools = Some(smuggled.clone());
         req.disallowed_tools = Some(smuggled);
         let args = build_args(&req, Path::new("/tmp/x.json"), true, &reach);
+        let unattended_paths = crate::policy::tool_approval::table().unattended_path_rules();
         for flag in ["--allowedTools", "--disallowedTools"] {
-            // The Trash's path rules (M60.8b) are the table's, never a
-            // record's, so they are the one shape beside a bare name.
-            for entry in flag_entries(&args, flag)
-                .into_iter()
-                .filter(|entry| !TRASH.contains(&entry.as_str()))
-            {
+            // Hidden-folder path rules are the table's, never a record's,
+            // so they are the one shape beside a bare name.
+            for entry in flag_entries(&args, flag).into_iter().filter(|entry| {
+                !TRASH.contains(&entry.as_str()) && !unattended_paths.contains(entry)
+            }) {
                 assert!(
                     entry
                         .bytes()
@@ -5523,7 +5556,16 @@ mod tests {
         for attended in [true, false] {
             let mut req = panel_style_request();
             req.attended = Some(attended);
-            let args = build_args(&req, Path::new("/tmp/x.json"), true, &reach);
+            // Unlike the legacy argv helper, the attended control has its seat.
+            let args = super::build_args(
+                &req,
+                Path::new("/tmp/x.json"),
+                &plan_for(&req, attended),
+                None,
+                true,
+                &reach,
+                &CliSession::New(TEST_SESSION.into()),
+            );
             assert_eq!(
                 args.iter()
                     .filter(|arg| *arg == "--disallowedTools")
@@ -5544,6 +5586,123 @@ mod tests {
             for rule in crate::policy::tool_approval::table().unattended_path_rules() {
                 assert_eq!(denied.contains(&rule), !attended, "{rule}");
             }
+        }
+    }
+
+    #[test]
+    fn a_connector_run_is_denied_every_send_tool_by_name() {
+        let servers = owned(&["gmail", "linear"]);
+        let reach = run_connectors(&servers, None, None);
+        for attended in [true, false] {
+            let mut req = panel_style_request();
+            req.attended = Some(attended);
+            let args = build_args(&req, Path::new("/tmp/x.json"), true, &reach);
+            assert_eq!(
+                args.iter()
+                    .filter(|arg| *arg == "--disallowedTools")
+                    .count(),
+                1
+            );
+            let denied = flag_entries(&args, "--disallowedTools");
+            for (_, cli) in &reach.servers {
+                for tool in crate::policy::tools::never_call_names() {
+                    let name = format!("mcp__{cli}__{tool}");
+                    assert_eq!(
+                        denied.iter().filter(|value| **value == name).count(),
+                        1,
+                        "{name}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn send_denials_follow_the_clis_server_spelling() {
+        let reach = run_connectors(&owned(&["my.gmail"]), None, None);
+        let args = build_args(
+            &panel_style_request(),
+            Path::new("/tmp/x.json"),
+            true,
+            &reach,
+        );
+        let denied = flag_entries(&args, "--disallowedTools");
+        for tool in crate::policy::tools::never_call_names() {
+            assert!(denied.contains(&format!("mcp__my_gmail__{tool}")));
+            assert!(!denied.contains(&format!("mcp__my.gmail__{tool}")));
+        }
+    }
+
+    #[test]
+    fn a_record_cannot_grant_a_send_tool_back() {
+        for tool in crate::policy::tools::never_call_names() {
+            let name = format!("mcp__gmail__{tool}");
+            let reach = run_connectors(&owned(&["gmail"]), Some(std::slice::from_ref(&name)), None);
+            let args = build_args(
+                &panel_style_request(),
+                Path::new("/tmp/x.json"),
+                true,
+                &reach,
+            );
+            assert!(flag_entries(&args, "--allowedTools").contains(&name));
+            assert!(flag_entries(&args, "--disallowedTools").contains(&name));
+        }
+    }
+
+    #[test]
+    fn internal_runs_get_no_send_denials() {
+        let mut req = panel_style_request();
+        req.internal = true;
+        let args = build_args(
+            &req,
+            Path::new("/tmp/x.json"),
+            true,
+            &run_connectors(&owned(&["gmail"]), None, None),
+        );
+        assert!(flag_entries(&args, "--disallowedTools")
+            .iter()
+            .all(|name| !name.starts_with("mcp__gmail")));
+        assert!(flag_entries(&args, "--allowedTools")
+            .iter()
+            .all(|name| !name.starts_with("mcp__gmail")));
+    }
+
+    #[test]
+    fn one_disallowed_flag_still_carries_every_denial() {
+        let mut req = panel_style_request();
+        req.attended = Some(false);
+        let reach = run_connectors(
+            &owned(&["gmail"]),
+            None,
+            Some(&owned(&[
+                "mcp__gmail__send_email",
+                "mcp__gmail__get_thread",
+                "mcp__gmail__delete_draft",
+            ])),
+        );
+        let args = build_args(&req, Path::new("/tmp/x.json"), true, &reach);
+        assert_eq!(
+            args.iter()
+                .filter(|arg| *arg == "--disallowedTools")
+                .count(),
+            1
+        );
+        let denied = flag_entries(&args, "--disallowedTools");
+        assert_eq!(
+            denied
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            denied.len()
+        );
+        for name in &reach.deny {
+            assert!(denied.contains(name));
+        }
+        for tool in &crate::policy::mail::table().unattended_denied_tools {
+            assert!(denied.contains(&format!("mcp__gmail__{tool}")));
+        }
+        for tool in crate::policy::tools::never_call_names() {
+            assert!(denied.contains(&format!("mcp__gmail__{tool}")));
         }
     }
 
@@ -5576,7 +5735,13 @@ mod tests {
                 "{label}"
             );
             let denied = flag_entries(&args, "--disallowedTools");
-            assert!(denied.ends_with(&reach.deny), "{label}: {denied:?}");
+            assert!(
+                reach
+                    .deny
+                    .iter()
+                    .all(|name| denied.iter().filter(|entry| *entry == name).count() == 1),
+                "{label}: {denied:?}"
+            );
         }
     }
 
@@ -5587,7 +5752,16 @@ mod tests {
         req.disallowed_tools = Some(owned(&["mcp__gmail", "mcp__gmail__trash_thread"]));
         let (args, loaded) = reached(&vault, &req);
         assert_eq!(loaded, ["slack"]);
-        assert!(!args.join(" ").contains("gmail"), "{args:?}");
+        // Another server's mandatory sender denials may include the word
+        // gmail in a tool name; no grant or denial may name the removed server.
+        for flag in ["--allowedTools", "--disallowedTools"] {
+            assert!(
+                !flag_entries(&args, flag)
+                    .iter()
+                    .any(|entry| entry == "mcp__gmail" || entry.starts_with("mcp__gmail__")),
+                "{args:?}"
+            );
+        }
         assert_eq!(connector_grants(&args), ["mcp__slack"]);
     }
 
@@ -6504,6 +6678,44 @@ mod tests {
         let (gated_events, refusals) = gated(true, &lines);
         assert_eq!(refusals, 0);
         assert_eq!(gated_events.len(), events.len());
+    }
+
+    #[test]
+    fn the_reader_hands_over_captures_only_while_its_run_is_alive() {
+        use crate::import::capture;
+        let page = "11111111111111111111111111111111";
+        let name = "mcp__notion-toy__notion-fetch";
+        let run = crate::ledger::new_run_id();
+        let lease = capture::arm(&run, vec![name.into()]).unwrap();
+        let handle = lease.handle();
+        let lines = [
+            json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"fetch","name":name,"input":{"id":page}}]}}),
+            json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"fetch","content":"Captured page"}]}}),
+        ];
+        let stream: String = lines.iter().map(|line| format!("{line}\n")).collect();
+        let mut saw_capture = false;
+        read_stream_with_capture(
+            stream.as_bytes(),
+            InitGate::new(1, false),
+            &mut no_connectors(),
+            &mut |event| {
+                if matches!(event, AgentEvent::ToolDone { .. }) {
+                    assert_eq!(
+                        &*capture::find(&run, page, std::time::Duration::ZERO)
+                            .unwrap()
+                            .text,
+                        "Captured page"
+                    );
+                    saw_capture = true;
+                }
+            },
+            &mut || {},
+            Some(lease),
+        );
+        assert!(saw_capture);
+        assert!(capture::find(&run, page, std::time::Duration::ZERO).is_none());
+        handle.put("fetch", "Late", false);
+        assert!(capture::find(&run, page, std::time::Duration::ZERO).is_none());
     }
 
     #[test]

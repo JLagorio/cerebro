@@ -1,12 +1,12 @@
 import { expect, test } from '@playwright/test';
-import { boot } from './boot';
+import { boot, openDestination } from './boot';
 
 // M59.1 — one destination table feeds the nav, ⌘K and the window title.
 test('the window title names the place, and ⌘K speaks the nav’s words', async ({ page }) => {
   await boot(page);
   await expect(page).toHaveTitle('Home — Cerebro');
 
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'History' }).click();
+  await openDestination(page, 'History');
   await expect(page).toHaveTitle('History — Cerebro');
 
   // An untyped page is a Page, and opening it titles the window with it.
@@ -22,9 +22,11 @@ test('the window title names the place, and ⌘K speaks the nav’s words', asyn
   // The places say History; nothing says Pulse.
   await page.keyboard.press('ControlOrMeta+k');
   await input.fill('history');
-  await expect(
-    page.getByTestId('quick-open-result').filter({ hasText: /^HistoryGo to$/ }),
-  ).toHaveCount(1);
+  const history = page
+    .getByTestId('quick-open-result')
+    .filter({ has: page.getByText('History', { exact: true }) })
+    .filter({ has: page.getByText('Go to', { exact: true }) });
+  await expect(history).toHaveCount(1);
   await input.fill('pulse');
   await expect(page.getByTestId('quick-open-result').filter({ hasText: /^Pulse/ })).toHaveCount(0);
 });

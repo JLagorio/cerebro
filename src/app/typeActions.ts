@@ -80,6 +80,7 @@ export const RESERVED = new Set([
   'icon',
   'cover',
   'color',
+  'email_domain',
   'fields',
   'statuses',
   'folder',
@@ -329,7 +330,7 @@ const KIND_KEYS: Record<string, string[]> = {
   // wiring survives a relation ⇄ person conversion instead of being silently
   // dropped and leaving the picker pointing at nothing.
   person: ['target', 'limit', 'from'],
-  rollup: ['relation', 'property', 'calculate', 'from', 'format', 'precision'],
+  rollup: ['source', 'relation', 'property', 'calculate', 'from', 'format', 'precision'],
   formula: ['formula', 'format', 'precision'],
   number: ['format', 'precision'],
   date: ['dateFormat', 'timeFormat', 'remind'],
@@ -468,6 +469,8 @@ export async function changeFieldKind(
     kind !== 'daterange'
   )
     patch.deadline = null;
+  if (ctx.schema.types.get(typeName)?.emailDomain === actual && kind !== 'text' && kind !== 'url')
+    patch.email_domain = null;
   if (preview.stripped > 0) {
     const typeViews = ctx.schema.types.get(typeName)?.views ?? [];
     patch.views = serializeViewList(stripMisfitTests(typeViews, actual, kind).views);
@@ -650,6 +653,7 @@ export async function removeFieldFromType(typeName: string, fieldName: string): 
   delete fields[actual];
   const patch: Record<string, unknown> = { fields };
   if (getSchema(entries).types.get(typeName)?.deadline === actual) patch.deadline = null;
+  if (getSchema(entries).types.get(typeName)?.emailDomain === actual) patch.email_domain = null;
   if (isKnowledgePath(doc.path)) return patchFrontmatter(doc.path, patch);
   const label = deletedPropertyLabel(humanize(actual));
   return (await applyBatch([patchOp(doc, patch)], { undo: label })) !== null;

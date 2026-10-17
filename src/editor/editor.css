@@ -41,6 +41,34 @@
   font-family: var(--font-mono);
 }
 
+/* A fenced block owns its canvas and syntax palette. The global inline-code
+   chip must not paint a pale strip beneath its dark-theme syntax colours. */
+.cerebro-editor .bn-block-content[data-content-type='codeBlock'] code {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+}
+
+/* Ordinary document titles share the page reading scale. Compact embeds and
+   record section editors keep their intentionally smaller heading hierarchy. */
+.cb-document-content
+  .cerebro-editor:not(.cerebro-editor-compact):not(.cerebro-editor-sections)
+  .bn-block-content[data-content-type='heading']
+  h1 {
+  font-size: var(--fs-3xl);
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.025em;
+}
+.cb-document-content
+  .cerebro-editor:not(.cerebro-editor-compact):not(.cerebro-editor-sections)
+  .bn-block-content[data-content-type='heading']
+  h2 {
+  font-size: var(--fs-2xl);
+  line-height: 1.4;
+}
+
 /* Table polish (M2.x docs polish): quiet grid, header band, roomy cells —
    closer to Notion/ClickUp tables than the mantine defaults. */
 .cerebro-editor .bn-block-content[data-content-type='table'] table {

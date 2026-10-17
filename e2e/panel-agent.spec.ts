@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { boot } from './boot';
+import { boot, openAssistantPanel, openDestination } from './boot';
 
 /**
  * Who answers in the panel (M56.6): Settings binds this vault's panel to an
@@ -12,13 +12,13 @@ test('panel agent: binding Release scout names it in the header, and unbinding r
   page,
 }) => {
   await boot(page);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Settings' }).click();
+  await openDestination(page, 'Settings');
   const select = page.getByRole('combobox', { name: 'Panel assistant' });
   await expect(select).toHaveValue('');
   await select.selectOption({ label: 'Release scout' });
   await expect(select).toHaveValue('release-scout');
 
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   const panel = page.getByTestId('ai-panel');
   await expect(panel).toBeVisible();
   const label = panel.getByTestId('panel-agent');

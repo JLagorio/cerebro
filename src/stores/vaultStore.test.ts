@@ -1261,14 +1261,12 @@ describe('human filing inherits in its one write (M63.4)', () => {
     expect(mockFsDisk().get(before.path)).toBe(saved);
   });
   it('createItem adds inherited agents after the caller supplies its host link', async () => {
-    const path = await useVaultStore
-      .getState()
-      .createItem({
-        folder: 'work-items',
-        slug: 'inherited',
-        frontmatter: { type: 'Work item', project: ['[[guided-onboarding-ga]]'] },
-        body: '# Inherited',
-      });
+    const path = await useVaultStore.getState().createItem({
+      folder: 'work-items',
+      slug: 'inherited',
+      frontmatter: { type: 'Work item', project: ['[[guided-onboarding-ga]]'] },
+      body: '# Inherited',
+    });
     expect(ipc.createNote).toHaveBeenCalledWith(
       '/demo-vault',
       'work-items',

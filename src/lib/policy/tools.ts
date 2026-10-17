@@ -4,7 +4,7 @@
  * The SAME FILE the Rust core compiles in with `include_str!`, imported
  * verbatim by vite. Every tool cerebro's loopback serves is a row in it, the
  * generated `propose_<op>` tools share one `generated` block, and the CLI's
- * own built-ins are one list. No tool is listed here. What lives in this
+ * own built-ins and the connector never-call inventory are data too. What lives in this
  * module is the strict load the Rust loader performs, refusal for refusal and
  * in the same words, and `toolFacts`: what a call writes, how a transcript
  * draws it and folds a run of it (M56.8), its icon, its title, the argument
@@ -24,6 +24,7 @@
  */
 
 import rawTools from '../../../shared/policy/tools.v1.json';
+import { rustTrim } from '@/engine/comments';
 import { agentFacingOps, POLICY } from './table';
 
 export const TOOLS_PATH = 'shared/policy/tools.v1.json';
@@ -228,6 +229,8 @@ export interface ToolsManifest {
   generated: Generated;
   /** In argv order, which is meaning too. */
   cli_tools: CliTool[];
+  /** Exact connector send spellings, in ASCII order, with checked sources. */
+  never_call: { why: string; tools: { name: string; source: string }[] };
 }
 
 /** A refusal, naming what it is about and the field that is wrong, in the
@@ -405,6 +408,10 @@ const MANIFEST_SHAPE = struct({
     fold: { option: FOLD },
     icon: text,
   }),
+  never_call: struct({
+    why: text,
+    tools: named('never_call tool', 'name', { name: text, source: text }),
+  }),
 });
 
 // --- What validation refuses, as tools.rs refuses it -----------------------
@@ -548,8 +555,31 @@ function checkUnique(manifest: ToolsManifest): void {
 
 /** The rules a row and the generated block both answer to. */
 function checkFacts(manifest: ToolsManifest, subject: string, facts: Facts): void {
-  if (facts.target?.kind === 'canvas' && (facts.axis !== 'read' || facts.door !== 'none')) {
-    throw refusal(subject, 'target', 'canvas targets require the read axis and door none');
+  if (
+    facts.target?.kind === 'canvas' &&
+    !(
+      (facts.axis === 'read' && facts.door === 'none') ||
+      (facts.axis === 'read_write' && facts.door === 'canvas')
+    )
+  ) {
+    throw refusal(
+      subject,
+      'target',
+      'canvas targets require read with door none or read_write with door canvas',
+    );
+  }
+  if (
+    facts.door === 'canvas' &&
+    !(
+      (facts.axis === 'read_write' && facts.target?.kind === 'canvas') ||
+      (facts.axis === 'write' && facts.target?.kind === 'folder')
+    )
+  ) {
+    throw refusal(
+      subject,
+      'target',
+      'door canvas needs a canvas target on read_write or a folder target on write',
+    );
   }
   if (facts.target?.kind === 'file' && (facts.axis !== 'read' || facts.door !== 'none')) {
     throw refusal(subject, 'target', 'file targets require the read axis and door none');
@@ -581,8 +611,8 @@ function checkFacts(manifest: ToolsManifest, subject: string, facts: Facts): voi
   if (facts.axis === 'write' && target?.kind !== 'note' && target?.kind !== 'folder') {
     throw refusal(subject, 'target', 'must name a note or folder argument on the write axis');
   }
-  if (facts.axis === 'read_write' && target?.kind !== 'note') {
-    throw refusal(subject, 'target', 'must name a note argument on the read_write axis');
+  if (facts.axis === 'read_write' && target?.kind !== 'note' && target?.kind !== 'canvas') {
+    throw refusal(subject, 'target', 'must name a note or canvas argument on the read_write axis');
   }
   if (
     facts.axis === 'read' &&
@@ -686,7 +716,16 @@ function checkRow(manifest: ToolsManifest, row: ToolRow): void {
   const root = schemaRoot(row.input_schema);
   if (typeof root === 'string') throw refusal(subject, 'input_schema', root);
   const arg = row.target?.arg ?? null;
-  if (arg !== null && (!root.properties.has(arg) || !root.required.has(arg))) {
+  const property =
+    arg === null
+      ? null
+      : (row.input_schema as { properties: Record<string, unknown> }).properties[arg];
+  const rootFolder =
+    row.target?.kind === 'folder' &&
+    isRecord(property) &&
+    property.type === 'string' &&
+    property.default === '';
+  if (arg !== null && (!root.properties.has(arg) || (!root.required.has(arg) && !rootFolder))) {
     throw refusal(subject, 'target', `names ${arg}, which input_schema must declare and require`);
   }
   const texts: [string, string[]][] = [
@@ -782,6 +821,24 @@ function checkCli(tool: CliTool): void {
   }
 }
 
+function checkNeverCall(manifest: ToolsManifest): void {
+  if (!rustTrim(manifest.never_call.why)) throw refusal('never_call', 'why', 'is empty');
+  const seen = new Set<string>();
+  let previous = '';
+  for (const row of manifest.never_call.tools) {
+    const subject = `never_call tool ${row.name}`;
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(row.name) || /\s/.test(row.name))
+      throw refusal(subject, 'name', 'must match [A-Za-z0-9_-]{1,64}');
+    if (seen.has(row.name)) throw refusal(subject, 'name', 'is repeated');
+    if (previous > row.name) throw refusal(subject, 'name', 'must be in ASCII order');
+    if (manifest.tools.some((tool) => tool.name === row.name))
+      throw refusal(subject, 'name', 'names a cerebro tool');
+    if (!rustTrim(row.source)) throw refusal(subject, 'source', 'is empty');
+    seen.add(row.name);
+    previous = row.name;
+  }
+}
+
 function checkClients(manifest: ToolsManifest): void {
   const clients = manifest.clients;
   if (!clients.why.trim()) throw refusal('clients', 'why', 'is empty');
@@ -850,6 +907,7 @@ function validate(manifest: ToolsManifest): void {
   for (const row of manifest.tools) checkRow(manifest, row);
   checkGenerated(manifest);
   checkClients(manifest);
+  checkNeverCall(manifest);
   // Sorted, as the BTreeMap the Rust loader holds them in iterates.
   for (const token of Object.keys(manifest.tokens).sort()) {
     const marker = `{{${token}}}`;
@@ -887,6 +945,11 @@ export function parseToolsManifest(value: unknown): ToolsManifest {
 
 /** The shipped manifest, validated once at module load. */
 export const TOOLS: ToolsManifest = parseToolsManifest(rawTools);
+
+/** Exact names, read from the manifest rather than inferred from a tool's prose. */
+export function neverCallNames(): string[] {
+  return TOOLS.never_call.tools.map((row) => row.name);
+}
 
 /** Personal-token grants are tool facts, never a second list in Settings. */
 export function clientToolsets(): { default: Toolset; grantable: Toolset[]; why: string } {

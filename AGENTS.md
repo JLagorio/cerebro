@@ -66,40 +66,44 @@ enforced: `.github/workflows/mac-app.yml`
   title (`knowledge/ConceptReviewBar.tsx`, which alone may Verify), and its
   evidence is the side panel's Details tab, closed until asked.
   `ReviewPage`, `PipelinePage` and `EpistemicStatusPage` are all gone.
-  **The shell is ONE nav column that
-  IS the chrome** (M37.3 flattened the rail and per-surface sidebar into
-  `app/Sidebar.tsx`; M43 dissolved the Topbar into it): header (vault tile ·
-  wordmark · Assistant zap · search · collapse), the New button, then the
-  STANDALONE destinations (Inbox, Home, My work, Studio, History, Library —
-  M37.2 spent the locked names, M38.3 retired Docs for the standing **Pages**
-  tree, M40 added Studio, M43 added My work and moved Library up; the
-  selection KINDS stay `knowledge`/`workspace`, labels only, plus M43's
-  `mywork`), then the sections — Collections, Pages, **Work** (M43.10: each
-  mounted repo is a row; ↗ opens the surface; empty says "No repositories
-  mounted"), **Knowledge** (M50.5 renamed Base; M51: `KnowledgeNav`'s rows
-  are the bundle's folders, then Review; ↗ opens Concepts), Agents (M43 turned M41's destination into a roster
-  section whose ↗ opens the fleet; each row opens that agent's page), **Databases** (M39 — the label; `type:`
-  and every internal identifier keep the old word), and Favorites (pinned
-  paths, `cerebro.favorites`, pruned when a pointer dies) — all wearing
-  `app/SectionHeader.tsx`'s one anatomy, then the footer (SyncBadge · Theme ·
-  Settings). No destination owns nested rows anymore — M42.2's group chevrons
-  retired with M43.10; section fold state rides the closed set
-  (`cerebro.navClosed`; Databases keeps `typesOpen`). The chrome is the DS's:
-  sunken sidebar, `--surface-selected` + cortex ink for the current row,
-  quiet mono counts — never a filled pill (M42.1). The main canvas holds up
-  to four page panes (M65.9), each with its own history and editor. Modified
-  clicks and Shift+Enter open beside; a narrow row parks the least recently
-  focused panes behind tabs while keeping them mounted.
-  The destination names are asserted in `app/Sidebar.test.tsx`, and every
-  destination is one row of `engine/destinations.ts` (M59.1): the sidebar
-  rows and doors, each destination's `g` chord, ⌘K Go to, the window title,
-  thread labels and navigate's `to` read it, and `destinations.test.ts` holds `tools.v1.json`'s navigate
-  list to it. Specs scope destination clicks to `nav-surfaces` (nested rows
-  live OUTSIDE those containers precisely because they share accessible
-  names with destinations). Sections are addressed by `data-section`, never
-  by a per-section testid, and the `KnowledgeNav` selection type carries the
-  tab (plus `run`, for one fleet detail) so a tab is a place the back button
-  returns to.
+  **The shell design is a persistent icon rail plus contextual sidebar**
+  (M71–M79; see
+  `docs/superpowers/plans/2026-10-16-m71-m74-visual-redesign.md`). The owner
+  explicitly superseded M37.3/M43's one-column geometry on 2026-10-16. The
+  shell has a 54px rail, a 240px default resizable/collapsible context
+  sidebar and a broad canvas. Global navigation stays available when the
+  context sidebar closes. The assistant has panel and roomy canvas
+  presentations of one instance; presentation changes preserve its thread,
+  draft, streaming turn and pending approvals. `app/PageNavigation.tsx` lets
+  Inbox, Settings, Work and open Studio projects lend their existing navigation
+  to the active pane's context sidebar; Assistant canvas takes priority.
+  Inactive panes retain local navigation. Narrow drawers restore focus to an
+  explicit opener and retain the owning page's key scope. Verification and
+  outstanding native acceptance are tracked in the plan.
+  Keep Cerebro's Instrument Sans/IBM Plex Mono and cortex/synapse tokens,
+  readable selection/focus and light/dark themes.
+  All existing places remain reachable: Inbox, Home, My work, Studio,
+  History, Library and Settings, plus Collections, Pages, Work repositories,
+  Knowledge folders/review, Agents, Databases and Favorites. The selection
+  KINDS keep their existing names (`knowledge`, `workspace`, `mywork`, etc.);
+  this redesign does not rename stored navigation or MCP vocabulary. Vault
+  identity, New, search, assistant, actionable sync status and theme controls
+  remain accessible as the chrome moves. Section fold preferences and saved
+  widths are preserved or explicitly migrated; no section silently vanishes.
+  The main canvas still holds up to four page panes (M65.9), each with its
+  own history and editor. Modified clicks and Shift+Enter open beside; narrow
+  layouts park panes while keeping their editing state. The new rail must be
+  counted once in the shell's sizing rules so page details and the assistant
+  remain usable together.
+  Every destination remains a row of `engine/destinations.ts` (M59.1): shell
+  navigation, each destination's `g` chord, ⌘K Go to, window/thread labels and
+  navigate's `to` use it. Tests assert the destination contract while updating
+  the old one-column geometry deliberately. Global destination controls stay
+  distinct from same-named nested pages in navigation test scopes. Sections
+  retain their `data-section` identity, and `KnowledgeNav` selection still
+  carries its tab (plus `run` for one fleet detail), so Back returns to the
+  actual place. M37/M43 remain historical decisions, not a prohibition on
+  the owner's new shell.
 - **Home is pull-only** (M64.4). Quiet lanes follow the order in
   `engine/homeLanes.ts` (`HOME_LANES`). Empty lanes stay silent, each failed
   read says so on its own, and Home carries no sidebar count.
@@ -157,7 +161,9 @@ enforced: `.github/workflows/mac-app.yml`
   formula prefixes. Both save outside the vault through a native dialog (M67.4b).
   CSV uses `readCsvText` and the existing raw-record reader. Choosing a file
   writes nothing; Import creates one root page in one undoable human batch,
-  `git/`, `mcp.rs`
+  `git/`, `forge.rs` (the human page's read-only GitHub PR state, through the
+  person's own `gh`, with bounded children and an in-memory cache; shared
+  `pr-urls.json` and `pr-cases.json` hold its frontend contract, M69.11), `mcp.rs`
   (the runs' loopback MCP server), `client_access.rs` (the optional second
   loopback listener for other apps, authenticated by personal tokens; token
   metadata and SHA-256 fingerprints live in `runtime/client_tokens.rs`,
@@ -209,7 +215,8 @@ enforced: `.github/workflows/mac-app.yml`
   words for the retired model that none of it may say (M54.8, CV-20).
 - `shared/starter/` — the explicitly offered kit for an empty vault (M64.8):
   byte-identical markdown installed create-only in one batch. Its two agents
-  start paused; its two read-only recipes remain editable Skill pages (M64.9).
+  start paused; its three editable recipes include Draft reply, which writes
+  only a draft through an approved connector (M64.9, M69.10b).
   `.cerebro/starter.json` records an added or declined offer.
 - `shared/files/` — what a file is (M66.1): `kinds.v1.json` gives each
   extension its kind, MIME, viewer, extractor, ingest rule, Shiki language,
@@ -222,6 +229,9 @@ enforced: `.github/workflows/mac-app.yml`
   `vault/batch.rs` serializes imports before its path locks, then journals
   their creates and checked replacements as one undoable change. Edited
   copies stay as they are, and every request gets an explicit outcome.
+  `import/capture.rs` holds connector results only for their live run;
+  `notion.rs` converts them into editor carriers, and `notion_door.rs` is
+  the guarded MCP import door with checked relinking (M69.5, CV-60).
 - `src/engine/csv.ts` is the frontend RFC 4180 reader and writer (M61.5).
   CSV import, export and migrations reuse it; Rust `sheet/fence.rs` is its
   sheet-fence twin, held by `src-tauri/fixtures/sheet-fence-cases.json` (M67.2).
@@ -674,7 +684,8 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
   enforced: `src-tauri/src/vault/write.rs::replays_the_shared_attachment_names`, `src-tauri/src/vault/write.rs::attachment_candidates_and_the_folder_never_follow_symlinks`, `src-tauri/src/vault/write.rs::importing_and_pasting_the_same_bytes_reuses_without_changing_the_file`, `src/editor/attachments.test.ts::places a batch after its captured block in one undo step, with root-anchored durable media lines`
 
 - **CV-57 Outside bytes are parsed only behind limits** (M66.7). Office
-  archives open only in `src-tauri/src/files/extract/`: `package.rs` caps the
+  archives open only in `src-tauri/src/files/extract/package.rs`, including
+  Figma previews and sheet import. The package reader caps the
   file, its entry count and each inflated part before XML or workbook parsing.
   A DOCTYPE is refused, workbook reads remain sparse, and allocation-driving
   shared-string counts and formula indices are checked before calamine opens.
@@ -688,9 +699,10 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
   `shared/import/sources.v1.json` names the guarded keys. Every agent note
   door compares their presence and YAML value under the file's write lock,
   after the governed-type checks, including queued or approved writes.
-  `cache_source` and `write_concept` stamp their own output; ordinary note
+  `cache_source`, `write_concept` and `import_notion_page` (the import
+  writer's own door) stamp their own output; ordinary note
   tools cannot add, change or remove those stamps. Human edits remain free.
-  enforced: `src-tauri/src/import/stamps.rs::replays_the_stamp_guard_cases`, `src/engine/importSources.test.ts::replays the stamp guard cases`, `src-tauri/src/import/door_tests.rs::no_agent_write_door_changes_a_stamped_key`, `src-tauri/src/import/door_tests.rs::every_note_door_is_covered_by_the_stamp_guard`
+  enforced: `src-tauri/src/import/stamps.rs::replays_the_stamp_guard_cases`, `src/engine/importSources.test.ts::replays the stamp guard cases`, `src-tauri/src/import/door_tests.rs::no_agent_write_door_changes_a_stamped_key`, `src-tauri/src/import/door_tests.rs::every_note_door_is_covered_by_the_stamp_guard`, `src-tauri/src/import/door_tests.rs::a_notion_reimport_stamps_while_other_doors_refuse`
 
 - **CV-59 Mail and its comments stay out of git** (M69.7).
   `shared/policy/mail.v1.json` names the kept-out paths and the default-closed
@@ -702,7 +714,15 @@ when only review holds it. `scripts/conventions.test.ts` resolves every pointer.
   cannot read mail through Cerebro; ambient ingestion skips it, unattended
   CLI readers and the declared connector readers are denied, and mail URLs
   never enter the web cache (M69.7b).
-  enforced: `src-tauri/src/git/commit.rs::gitignore_keeps_mail_and_its_comments_out`, `src-tauri/src/git/commit.rs::a_tracked_digest_is_untracked_even_when_ignore_rows_exist`, `src-tauri/src/git/changeset.rs::a_run_that_wrote_only_digests_commits_nothing_and_counts_them`, `src-tauri/src/policy/mail.rs::the_gate_opens_only_after_the_pack_is_accepted`, `src/engine/mailPolicy.test.ts::the Gmail pack names its gate and kinds, and an open gate requires owner acceptance`, `src-tauri/src/mcp.rs::an_unattended_run_and_a_token_client_cannot_read_a_digest`, `src-tauri/src/mcp.rs::cache_source_refuses_mail_as_a_web_page`, `src-tauri/src/runtime/catchup.rs::ambient_ingest_never_reads_mail`, `src-tauri/src/agent/mod.rs::an_unattended_run_is_denied_mail_reading_connector_tools`
+  Only `cache_source` writes mail digests among agent doors.
+  enforced: `src-tauri/src/git/commit.rs::gitignore_keeps_mail_and_its_comments_out`, `src-tauri/src/git/commit.rs::a_tracked_digest_is_untracked_even_when_ignore_rows_exist`, `src-tauri/src/git/changeset.rs::a_run_that_wrote_only_digests_commits_nothing_and_counts_them`, `src-tauri/src/policy/mail.rs::the_gate_opens_only_after_the_pack_is_accepted`, `src/engine/mailPolicy.test.ts::the Gmail pack names its gate and kinds, and an open gate requires owner acceptance`, `src-tauri/src/mcp.rs::an_unattended_run_and_a_token_client_cannot_read_a_digest`, `src-tauri/src/mcp.rs::cache_source_refuses_mail_as_a_web_page`, `src-tauri/src/runtime/catchup.rs::ambient_ingest_never_reads_mail`, `src-tauri/src/agent/mod.rs::an_unattended_run_is_denied_mail_reading_connector_tools`, `src-tauri/src/mcp.rs::the_closed_gate_refuses_a_thread_and_writes_nothing`
+- **CV-60 Imported page bytes come from a capture, never from the model**
+  (M69.5). `import_notion_page` writes what the person's connector returned,
+  normalized by code. A body the agent composed is admitted only after a
+  composable refusal and stamped `import_method: agent_composed`. Captures
+  are bounded, memory-only and owned by one live run; relinks compare the
+  citing import's current bytes and stay inside that run's reach.
+  enforced: `src-tauri/src/import/notion_door.rs::an_import_never_takes_page_text_from_the_model_unmarked`, `src-tauri/src/agent/mod.rs::the_reader_hands_over_captures_only_while_its_run_is_alive`, `src/lib/mockIpc.notion.test.ts::requires a composable refusal and marks an explicitly seeded fallback as composed`
 
 ## Verifying UI work
 
@@ -777,6 +797,22 @@ a different branch's app and producing confident, wrong failures. Set
 `CEREBRO_E2E_REUSE=1` only when the running server is yours, or
 `PORT=<free> pnpm e2e` to isolate. CI is unaffected (`CI=true` already
 disabled reuse there).
+
+- **CV-61 Remote images wait for a click** (M66.9b). Only FileImage,
+  FileThumb, RemoteImage and Avatar draw JSX images. HTTPS images have a
+  session-only exact-URL permission; HTTP never loads. The editor gates its
+  native image node and exports inert lazy images without changing markdown.
+  Diagrams neutralize image resources before layout and strip external SVG
+  references afterward. Image requests carry no referrer; Rust makes none.
+  enforced: `scripts/lint-rails.test.ts::only the image components draw <img>`, `src/components/RemoteImage.test.tsx::draws no img until Load and sends no referrer`, `e2e/remote-images.spec.ts`
+
+- **CV-62 Drafts only, never send** (D15, M69.10). No cerebro tool sends
+  mail. Every run holding configured connectors denies each `never_call` tool
+  in `shared/policy/tools.v1.json` by its exact CLI name on every server it
+  holds; record and skill allows cannot remove one. Foreign calls show their
+  server and never claim a vault diff. SECURITY.md records the exact-name and
+  inherited-connector limits.
+  enforced: `src-tauri/src/agent/mod.rs::a_connector_run_is_denied_every_send_tool_by_name`, `src-tauri/src/policy/tools.rs::no_tool_reaches_outside_the_app`
 
 ## Dev skills
 

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot } from './boot';
+import { boot, openDestination } from './boot';
 import { makePdf } from '../src/test/makePdf';
 
 async function openPdf(page: Page, name: 'report.pdf' | 'scan.pdf') {
@@ -25,7 +25,7 @@ async function openPdf(page: Page, name: 'report.pdf' | 'scan.pdf') {
       scan: [...makePdf({ pages: 3, text: false })],
     },
   );
-  await page.getByRole('button', { name: 'Open all repositories' }).click();
+  await openDestination(page, 'Work');
   await page
     .getByTestId('root-tree')
     .getByTestId('tree-row')

@@ -27,6 +27,19 @@ afterEach(() => {
   vi.restoreAllMocks();
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
 });
+it.each(['attachments/plan.png', 'clips/demo.mp4', 'clips/standup.m4a', 'docs/contract.pdf'])(
+  'keeps the filename as the embedded block name for %s',
+  (url) => {
+    render(<AttachmentFilePanel blockId="image" />);
+    fireEvent.change(screen.getByRole('textbox', { name: 'File URL' }), {
+      target: { value: ` ${url} ` },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Embed' }));
+    expect(editor.updateBlock).toHaveBeenLastCalledWith('image', {
+      props: { url, name: url.split('/').at(-1) },
+    });
+  },
+);
 it('states the cap and captures its placeholder before opening the browser picker', async () => {
   const accept = vi.fn(async () => {});
   const prepare = vi.fn(() => accept);

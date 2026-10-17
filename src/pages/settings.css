@@ -1,0 +1,138 @@
+/* Settings keeps the same controls in a calm, focused reading column. */
+.cb-settings {
+  container-type: inline-size;
+  background: var(--surface-app);
+}
+.cb-settings-content {
+  width: 100%;
+  max-width: 840px;
+  margin: 0 auto;
+  padding: 48px 48px 64px;
+}
+.cb-settings .cb-settings-header {
+  padding: 0;
+  margin-bottom: 32px;
+}
+.cb-settings-eyebrow {
+  margin: 0 0 12px;
+  color: var(--n-500);
+  font-size: 12px;
+  font-weight: 500;
+}
+.cb-settings-nav-group {
+  margin: 24px 10px 8px;
+  color: var(--n-500);
+  font-size: 11px;
+  font-weight: 500;
+}
+.cb-settings-nav > div:first-child .cb-settings-nav-group {
+  margin-top: 8px;
+}
+.cb-settings-nav button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 10px;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--n-600);
+  font-size: 13px;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+}
+.cb-settings-nav button svg {
+  flex: none;
+  color: var(--n-500);
+}
+.cb-settings-nav button:hover {
+  background: var(--n-100);
+  color: var(--n-900);
+}
+.cb-settings-nav button[aria-current='page'] {
+  background: var(--surface-selected);
+  color: var(--cortex-600);
+  font-weight: 500;
+}
+.cb-settings-nav button[aria-current='page'] svg {
+  color: currentColor;
+}
+.cb-settings-nav button:focus-visible {
+  outline: 2px solid var(--cortex-500);
+  outline-offset: 2px;
+}
+.cb-settings-nav-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--n-200);
+}
+.cb-settings-nav-inline .cb-settings-nav-group {
+  display: none;
+}
+.cb-settings-nav-inline button {
+  width: auto;
+}
+.cb-settings-panel > section {
+  margin: 0;
+  padding: 24px 0;
+  border: 0;
+  border-bottom: 1px solid var(--n-200);
+  border-radius: 0;
+}
+.cb-settings-panel > section:first-child {
+  padding-top: 0;
+}
+.cb-settings-panel > section:last-child {
+  border-bottom: 0;
+}
+.cb-settings-panel > section > h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+}
+.cb-settings-panel[data-single='true'] > section > h2:first-child,
+.cb-settings-panel[data-single='true'] > section > section > h2:first-child {
+  /* The selected detail's h1 already supplies this same heading. */
+  display: none;
+}
+.cb-settings-panel .text-xs {
+  font-size: 13px;
+  line-height: 20px;
+}
+.cb-settings-panel > section > p {
+  line-height: 22px;
+}
+.cb-settings-panel .cb-setting-row {
+  gap: 24px;
+  padding: 18px 0;
+}
+.cb-settings-panel .cb-setting-row + .cb-setting-row {
+  border-top: 1px solid var(--n-100);
+}
+.cb-settings-panel .cb-setting-row > :last-child {
+  flex-shrink: 0;
+}
+@container (max-width: 560px) {
+  .cb-settings-content {
+    padding: 28px 24px 48px;
+  }
+  .cb-settings-panel .cb-setting-row {
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .cb-settings-panel .cb-setting-row > .flex {
+    flex-wrap: wrap;
+  }
+  .cb-settings-panel .cb-setting-row > .flex > .flex-1 {
+    min-width: min(100%, 220px);
+  }
+  .cb-settings-panel .cb-setting-row > :first-child {
+    min-width: min(100%, 220px);
+  }
+}

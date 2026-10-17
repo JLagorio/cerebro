@@ -276,6 +276,7 @@ export const LIST_TAB_SOURCE_KEYS = {
 
 /** `name` is the `fields:` key itself. */
 export const FIELD_DEF_KEYS = {
+  source: 'nothing',
   formula: 'formula',
   name: 'field',
   kind: 'nothing',
@@ -301,6 +302,7 @@ export const FIELD_FROM_KEYS = {
 
 /** `name` is the type's own name, its identity rather than a reference. */
 export const TYPE_DEF_KEYS = {
+  emailDomain: 'field',
   deadline: 'field',
   name: 'nothing',
   icon: /* a glyph name, not an Icon call site */ 'nothing',
@@ -588,6 +590,7 @@ export function ruleAt(view: ViewDefinition, ref: ViewRef): FilterRule | null {
 
 /** Where outside a view's presentation a name is stored. */
 export type SchemaPosition =
+  | 'emailDomain'
   | 'deadline'
   | 'formulaRef'
   | 'fieldName'
@@ -617,6 +620,8 @@ const inView = (view: ViewDefinition): StoredRef[] =>
 /** Every name a parsed Type doc stores, in walk order. */
 export function typeDefRefs(def: TypeDef): StoredRef[] {
   const out: StoredRef[] = [];
+  if (def.emailDomain != null)
+    out.push({ name: def.emailDomain, holds: 'field', position: 'emailDomain' });
   if (def.deadline != null) out.push({ name: def.deadline, holds: 'field', position: 'deadline' });
   for (const f of def.fields) {
     const at = { field: f.name };
@@ -629,14 +634,14 @@ export function typeDefRefs(def: TypeDef): StoredRef[] {
     if (f.target !== undefined) {
       out.push({ name: f.target, holds: 'type', position: 'fieldTarget', ...at });
     }
-    if (f.relation !== undefined) {
+    if (f.source !== 'correspondence' && f.relation !== undefined) {
       out.push({ name: f.relation, holds: 'field', position: 'rollupRelation', ...at });
     }
-    if (f.from !== undefined) {
+    if (f.source !== 'correspondence' && f.from !== undefined) {
       out.push({ name: f.from.type, holds: 'type', position: 'fromType', ...at });
       out.push({ name: f.from.field, holds: 'field', position: 'fromField', ...at });
     }
-    if (f.property !== undefined) {
+    if (f.source !== 'correspondence' && f.property !== undefined) {
       out.push({ name: f.property, holds: 'field', position: 'rollupProperty', ...at });
     }
   }
@@ -829,8 +834,14 @@ function renamedFields(
       if (renamed === null) flag('formula', name);
       else if (formulaReads(f.formula, def?.fields ?? [])?.includes(from)) next.formula = renamed;
     }
-    if (f.kind === 'rollup' && f.relation === from && own) next.relation = to;
-    if (f.kind === 'rollup' && f.from === undefined && f.relation !== undefined) {
+    if (f.source !== 'correspondence' && f.kind === 'rollup' && f.relation === from && own)
+      next.relation = to;
+    if (
+      f.source !== 'correspondence' &&
+      f.kind === 'rollup' &&
+      f.from === undefined &&
+      f.relation !== undefined
+    ) {
       const rel = declared(f.relation);
       const target = rel === undefined ? undefined : relationTargetOf(rel);
       if (f.property === from && target === type) next.property = to;
@@ -838,9 +849,10 @@ function renamedFields(
         flag('untargetedRollup', name);
       }
     }
-    if (f.from !== undefined && f.from.type === type) {
+    if (f.source !== 'correspondence' && f.from !== undefined && f.from.type === type) {
       if (f.from.field === from) next.from = { ...asObject(obj.from), field: to };
-      if (f.kind === 'rollup' && f.property === from) next.property = to;
+      if (f.source !== 'correspondence' && f.kind === 'rollup' && f.property === from)
+        next.property = to;
     }
     if (JSON.stringify(next) !== JSON.stringify(obj)) changed = true;
     out[key] = next;
@@ -928,6 +940,7 @@ export function planFieldRename(req: RenameRequest, vault: RenameVault): RenameP
     );
     if (fields !== null) set.fields = fields;
     if (isOwn && def?.deadline === from) set.deadline = to;
+    if (isOwn && def?.emailDomain === from) set.email_domain = to;
 
     const stored = def?.views ?? [];
     let viewsChanged = 0;

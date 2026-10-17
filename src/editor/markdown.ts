@@ -159,6 +159,128 @@ const isPlainTextNode = (item: unknown): item is TextNode =>
 const isUnstyled = (node: TextNode): boolean =>
   node.styles === undefined || Object.keys(node.styles).length === 0;
 
+// Parsing decodes markdown escapes before chip enrichment. Retain that
+// provenance until enrichment has finished, so imported literal [[text]] is
+// still ordinary text. Tokens live only within one parse/save, never on disk.
+const MARKDOWN_ESCAPE = /\\[!-/:-@[-`{-~]|&(?:#[xX][\da-fA-F]+|#\d+|[A-Za-z][A-Za-z\d]+);/g;
+const ENTITY = /&(?:#[xX][\da-fA-F]+|#\d+|[A-Za-z][A-Za-z\d]+);/g;
+let entityDecoder: HTMLTextAreaElement | undefined;
+
+function decodeEntity(entity: string): string {
+  // The input is one entity token, never an HTML element or attribute.
+  const text = (entityDecoder ??= document.createElement('textarea'));
+  text.innerHTML = entity;
+  return text.value;
+}
+
+function escapeBook() {
+  // Fixed-width tokens keep a table serializer's column padding stable across
+  // saves even though every operation uses a fresh collision-resistant nonce.
+  const prefix = `cerebro-escape-${Math.random().toString(36).slice(2, 13).padEnd(11, '0')}-`;
+  const values = new Map<string, { text: string; raw: string }>();
+  const pattern = new RegExp(`${prefix}\\d+z`, 'g');
+  const add = (text: string, raw = text): string => {
+    const token = `${prefix}${String(values.size).padStart(10, '0')}z`;
+    values.set(token, { text, raw });
+    return token;
+  };
+  const restore = (text: string, raw = false): string =>
+    text.replace(pattern, (token) => values.get(token)?.[raw ? 'raw' : 'text'] ?? token);
+  return { values, pattern, add, restore };
+}
+
+type EscapeBook = ReturnType<typeof escapeBook>;
+
+function shieldChipEscapes(markdown: string, book: EscapeBook): string {
+  return markdown.replace(MARKDOWN_ESCAPE, (raw) => {
+    // A backslash does not escape a code span's closing backtick. Leave that
+    // delimiter to the parser rather than changing where its span ends.
+    if (raw === '\\`') return raw;
+    const text = raw.startsWith('\\') ? raw.slice(1) : decodeEntity(raw);
+    return text === raw ? raw : book.add(text, raw);
+  });
+}
+
+/** Walk text and link contents, tables and nested blocks. Code restores the
+ * original spelling because markdown never decodes escapes inside code. */
+function walkChipText(
+  value: unknown,
+  visit: (node: TextNode, code: boolean) => void,
+  code = false,
+): void {
+  if (Array.isArray(value)) {
+    value.forEach((child) => walkChipText(child, visit, code));
+    return;
+  }
+  if (typeof value !== 'object' || value === null) return;
+  const node = value as Record<string, unknown>;
+  const inCode =
+    code || node.type === 'codeBlock' || (isTextNode(node) && node.styles?.code === true);
+  if (isTextNode(node)) visit(node, inCode);
+  for (const key of ['content', 'children', 'rows', 'cells'])
+    if (key in node) walkChipText(node[key], visit, inCode);
+}
+
+function shieldParsedChips(blocks: PartialBlock[], book: EscapeBook): void {
+  // Rich fences (database/sheet/etc.) must see their original code before
+  // promotion reads the carrier. Escapes in code have no markdown meaning.
+  const restoreCode = (nested: PartialBlock[]): void => {
+    for (const block of nested) {
+      if (block.type === 'codeBlock') restoreChipEscapes(block, book, true);
+      if (Array.isArray(block.children)) restoreCode(block.children);
+    }
+  };
+  restoreCode(blocks);
+  walkChipText(blocks, (node, code) => {
+    if (code) {
+      node.text = book.restore(node.text, true);
+      return;
+    }
+    if (!isUnstyled(node)) return;
+    const escaped: { start: number; end: number }[] = [];
+    let decoded = '',
+      at = 0;
+    for (const match of node.text.matchAll(book.pattern)) {
+      decoded += node.text.slice(at, match.index);
+      const text = book.values.get(match[0])?.text ?? match[0];
+      escaped.push({ start: decoded.length, end: decoded.length + text.length });
+      decoded += text;
+      at = match.index + match[0].length;
+    }
+    decoded += node.text.slice(at);
+    node.text = decoded.replace(CHIP_PATTERN, (match, ...parts: unknown[]) => {
+      const start = parts.at(-2) as number;
+      return escaped.some((span) => span.start < start + match.length && span.end > start)
+        ? book.add(match)
+        : match;
+    });
+  });
+}
+
+function restoreChipEscapes<T>(value: T, book: EscapeBook, code = false): T {
+  if (typeof value === 'string') return book.restore(value, code) as T;
+  if (Array.isArray(value)) return value.map((child) => restoreChipEscapes(child, book, code)) as T;
+  if (typeof value !== 'object' || value === null) return value;
+  const node = value as Record<string, unknown>;
+  const inCode =
+    code || node.type === 'codeBlock' || (isTextNode(node) && node.styles?.code === true);
+  for (const key of Object.keys(node)) node[key] = restoreChipEscapes(node[key], book, inCode);
+  return value;
+}
+
+function inertChipMarkdown(text: string): string {
+  return Array.from(text, (char) =>
+    /[!-/:-@[-`{-~\n\r]/.test(char) || char === '📅' ? `&#${char.codePointAt(0)};` : char,
+  ).join('');
+}
+
+function shieldLiteralChipText(blocks: PartialBlock[], book: EscapeBook): void {
+  walkChipText(blocks, (node, code) => {
+    if (!code && isUnstyled(node))
+      node.text = node.text.replace(CHIP_PATTERN, (text) => book.add(inertChipMarkdown(text)));
+  });
+}
+
 function splitTextNode(node: TextNode): unknown[] {
   // Styled text is not even split into pieces. Measured: two italic pieces
   // handed to the serializer come back `*a claim**[^id]*`, one emphasis run
@@ -904,11 +1026,18 @@ function readLiftedSummaries(editor: AnyEditor, lifted: LiftedLines): void {
       entry.content = [];
       continue;
     }
-    const blocks = enrichChips(
-      normalizeParsedBlocks(
-        editor.tryParseMarkdownToBlocks(protectFootnotes(entry.summary)) as PartialBlock[],
-      ),
-    ) as { type?: string; content?: unknown; children?: unknown[] }[];
+    const book = escapeBook();
+    const parsed = normalizeParsedBlocks(
+      editor.tryParseMarkdownToBlocks(
+        protectFootnotes(shieldChipEscapes(entry.summary, book)),
+      ) as PartialBlock[],
+    );
+    shieldParsedChips(parsed, book);
+    const blocks = restoreChipEscapes(enrichChips(parsed), book) as {
+      type?: string;
+      content?: unknown;
+      children?: unknown[];
+    }[];
     const [only] = blocks;
     if (blocks.length === 0) entry.content = [];
     else if (
@@ -1825,16 +1954,21 @@ export function markdownToBlocksNow(editor: AnyEditor, markdown: string): AnyBlo
   // (see `tightenColumnMarkers`).
   const { text, lifted } = liftMarkers(markdown);
   readLiftedSummaries(editor, lifted);
-  const source = protectFootnotes(loosenColumnMarkers(text));
+  const book = escapeBook();
+  const source = protectFootnotes(shieldChipEscapes(loosenColumnMarkers(text), book));
   const parsed = restorePlaceholders(
     normalizeParsedBlocks(editor.tryParseMarkdownToBlocks(source) as PartialBlock[]),
     lifted,
     'code',
   );
-  return restorePlaceholders(
-    promoteContainers(promoteMedia(promoteRichBlocks(enrichChips(parsed)), lifted), lifted),
-    lifted,
-    'text',
+  shieldParsedChips(parsed, book);
+  return restoreChipEscapes(
+    restorePlaceholders(
+      promoteContainers(promoteMedia(promoteRichBlocks(enrichChips(parsed)), lifted), lifted),
+      lifted,
+      'text',
+    ),
+    book,
   ) as AnyBlocks;
 }
 
@@ -1852,6 +1986,8 @@ export function blocksToMarkdownNow(editor: AnyEditor, blocks?: PartialBlock[]):
   // the serializer renders whatever is left — and inside the unmount flush
   // nothing renders (see `demoteChips`).
   const copy = JSON.parse(JSON.stringify(source)) as PartialBlock[];
+  const book = escapeBook();
+  shieldLiteralChipText(copy, book);
   const setAside: SetAside = {
     prefix: placeholderPrefix(),
     lines: new Map(),
@@ -1860,13 +1996,15 @@ export function blocksToMarkdownNow(editor: AnyEditor, blocks?: PartialBlock[]):
   const demoted = demoteChips(
     demoteRichBlocks(demoteContainers(copy, BASE_MARKER_DEPTH, setAside), setAside),
   );
-  return tightenOpeners(
-    tightenColumnMarkers(
-      restoreSetAside(
-        escapeMarkerLines(
-          restoreFootnotes(unescapeChipMarkdown(editor.blocksToMarkdownLossy(demoted))),
+  return book.restore(
+    tightenOpeners(
+      tightenColumnMarkers(
+        restoreSetAside(
+          escapeMarkerLines(
+            restoreFootnotes(unescapeChipMarkdown(editor.blocksToMarkdownLossy(demoted))),
+          ),
+          setAside,
         ),
-        setAside,
       ),
     ),
   );
@@ -1914,7 +2052,55 @@ export function spliceTitleIntoBlocks(editor: AnyEditor, title: string): void {
   editor.insertBlocks([{ type: 'heading', props: { level: 1 }, content: title }], first, 'before');
 }
 
-const significantChars = (s: string): string => s.normalize('NFC').replace(/[^\p{L}\p{N}]/gu, '');
+/** Entities are spelling in code and characters in prose. Comparing the
+ * visible prose permits a harmless entity spelling change without hiding a
+ * changed code sample. */
+function decodedProse(markdown: string): string {
+  const read = fenceReader();
+  const lines = markdown.split('\n');
+  let prose: string[] = [];
+  const out: string[] = [];
+  const flush = (): void => {
+    const source = prose.join('\n');
+    const ticks = [...source.matchAll(/`+/g)];
+    const next = new Map<number, number>();
+    const byLength = new Map<number, number>();
+    for (let i = ticks.length - 1; i >= 0; i--) {
+      const length = ticks[i][0].length;
+      const later = byLength.get(length);
+      if (later !== undefined) next.set(i, later);
+      byLength.set(length, i);
+    }
+    let at = 0;
+    let text = '';
+    for (let i = 0; i < ticks.length; i++) {
+      const opening = ticks[i];
+      const closing = next.get(i);
+      if (closing === undefined) continue;
+      const end = ticks[closing].index + ticks[closing][0].length;
+      text += source.slice(at, opening.index).replace(ENTITY, decodeEntity);
+      text += source.slice(opening.index, end);
+      at = end;
+      i = closing;
+    }
+    out.push(text + source.slice(at).replace(ENTITY, decodeEntity));
+    prose = [];
+  };
+  for (const line of lines) {
+    if (read(line) === 'text') prose.push(line);
+    else {
+      if (prose.length > 0) flush();
+      out.push(line);
+    }
+  }
+  if (prose.length > 0) flush();
+  return out.join('\n');
+}
+
+const significantChars = (s: string): string =>
+  decodedProse(s)
+    .normalize('NFC')
+    .replace(/[^\p{L}\p{N}]/gu, '');
 
 const CONTAINER_NAME = /^(\\?:{3,})(?:columns|column|ai|toggle-heading|toggle|indent)/;
 

@@ -8,11 +8,12 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M58. House style and rails: the 
 
 ## Status
 
-- **Precondition:** M53–M57 and M70 are closed: gates green, roadmap statuses updated, M56.1's D4 record written. Today they are being built, unstaged, in this checkout, in that order (fc510e6 plus drafts). This plan names their finished functions, never today's lines.
-- **Built:** nothing. All 6 roadmap parts were scouted against the six plans and today's tree; all build. M58.1 splits by its own bullet ("NULL renders not recorded") into .1 (record) and .1b (read).
+- **Dependencies:** M53–M57 and M70. Implementation is present; milestone closure still requires the outstanding acceptance below.
+- **Implementation (2026-10-15):** All seven split parts have implementations: write receipts and attribution reads, ordered rescans, per-run changesets, prose history/Restore, review notes and page access explanations. The final integration also repairs nested-vault automatic commits with a private index; the roadmap records the separate repository-history decision.
+- **Integrated evidence:** see the [roadmap execution update](2026-10-12-macro-port-roadmap.md#execution-update--2026-10-15) for the final unit, coverage, browser, native and static gates, plus their limits. These results do not substitute for packaged or authenticated live acceptance.
 - **Effort:** 1 S + 3 M + 3 L ≈ 4.8 L; the roadmap said ≈3.8 L. Re-measured: .1 L → L + M (.1b); .4 M → L.
 - **Crash risk:** .1 (every writer; schema step), .3 (the reader commits before Done; bounded git spawns), .4 (schema step).
-- **Packaged checks:** .1, .3, .4. **Live checks** (CLI 2.1.250, the owner's isolated login, the end-of-build step): .3; .5 optional.
+- **Packaged acceptance still outstanding:** .1, .3, .4. **Live acceptance still outstanding** (CLI 2.1.250, the owner's isolated login, the end-of-build step): .3; .5 optional.
 - **Transport facts:** none new. .3 reads the CLI's Write and Edit paths from the argument M57.2's subjects name (derived from the 2.1.250 bundle, live run owed); a flipped fact changes only that manifest row. No part waits on a live run.
 - **Closes left-open items:** M57.6's "a turn that finished before re-attach isn't checkpointed" (.3 commits in Rust at run end); M55 Q9's revisit (.3's run commits and .4's Restore put an agent's edit one Restore away in a git vault; without git, unchanged); M49.10's unbounded `vault_writes` growth slows (.1 coalesces; retention stays later).
 

@@ -1,5 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, openKnowledgeTab, seedBeforeBoot, type E2eSeedCommit } from './boot';
+import {
+  boot,
+  openKnowledgeTab,
+  seedBeforeBoot,
+  type E2eSeedCommit,
+  openDestination,
+} from './boot';
 
 /**
  * A page's History merges its versions, its edits and its Knowledge changes
@@ -129,7 +135,7 @@ test.describe("a page's History (M64.2b)", () => {
     ).toHaveText('You edited it', { timeout: 10_000 });
 
     // Another editor changes the file while the page is closed.
-    await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home' }).click();
+    await openDestination(page, 'Home');
     await expect(page.getByTestId('markdown-editor')).toHaveCount(0);
     await page.evaluate(
       ([path]) =>

@@ -1,7 +1,8 @@
 import { BlockNoteEditor } from '@blocknote/core';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_COLUMN_WIDTH } from '@/engine/pageColumns';
-import { leaveAiAnswer } from './blocks';
+import { GatedImageBlock, leaveAiAnswer } from './blocks';
+import { clearRemoteImages } from '@/lib/remoteImages';
 import { cerebroSchema } from './MarkdownEditor';
 
 /**
@@ -352,4 +353,46 @@ describe('the whiteboard block as it leaves the app', () => {
       expect(html).not.toContain('whiteboard-embed');
     },
   );
+});
+
+describe('the gated image block', () => {
+  it('a remote image waits for a native DOM click', async () => {
+    clearRemoteImages();
+    const editor = BlockNoteEditor.create({
+      schema: cerebroSchema,
+      initialContent: [{ type: 'image', props: { url: 'https://images.example/click.png' } }],
+    });
+    const node = GatedImageBlock().implementation.render.call(
+      {},
+      editor.document[0] as never,
+      editor as never,
+    );
+    expect(node.dom.querySelector('img')).toBeNull();
+    expect(node.dom.textContent).toContain('images.example');
+    node.dom.querySelector('button')!.click();
+    await Promise.resolve();
+    const image = node.dom.querySelector('img');
+    expect(image?.getAttribute('src')).toBe('https://images.example/click.png');
+    expect(image?.referrerPolicy).toBe('no-referrer');
+    node.destroy?.();
+  });
+  it('a relative image renders through BlockNote and export images are lazy', async () => {
+    const editor = BlockNoteEditor.create({
+      schema: cerebroSchema,
+      initialContent: [{ type: 'image', props: { url: 'attachments/a.png' } }],
+    });
+    const node = GatedImageBlock().implementation.render.call(
+      {},
+      editor.document[0] as never,
+      editor as never,
+    );
+    expect(node.dom.querySelector('img')).toBeTruthy();
+    node.destroy?.();
+    const html = await editor.blocksToHTMLLossy([
+      { type: 'image', props: { url: 'https://images.example/export.png' } },
+    ]);
+    const image = new DOMParser().parseFromString(html, 'text/html').querySelector('img');
+    expect(image?.getAttribute('loading')).toBe('lazy');
+    expect(image?.getAttribute('src')).toBe('https://images.example/export.png');
+  });
 });

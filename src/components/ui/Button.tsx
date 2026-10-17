@@ -41,7 +41,9 @@ export interface ButtonProps {
   children?: React.ReactNode;
   fullWidth?: boolean;
   disabled?: boolean;
-  onClick?: () => void;
+  'aria-pressed'?: React.AriaAttributes['aria-pressed'];
+  title?: string;
+  onClick?: React.MouseEventHandler<HTMLButtonElement>;
   type?: 'button' | 'submit';
   style?: React.CSSProperties;
   className?: string;
@@ -62,6 +64,8 @@ export function Button({
   children,
   fullWidth,
   disabled,
+  'aria-pressed': pressed,
+  title,
   onClick,
   type = 'button',
   style,
@@ -73,6 +77,8 @@ export function Button({
     <button
       type={type}
       disabled={disabled}
+      aria-pressed={pressed}
+      title={title}
       onClick={onClick}
       className={`cb-btn cb-btn-${size} cb-btn-${variant} ${className}`}
       style={{ width: fullWidth ? '100%' : undefined, ...style }}

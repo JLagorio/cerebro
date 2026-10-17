@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, showDatabases } from './boot';
 
 async function editProperty(page: Page, name: string) {
   await page.getByRole('button', { name: `${name} column menu`, exact: true }).click();
@@ -16,6 +16,7 @@ test('formulas compute on read, follow renames, protect inputs and count skipped
 }) => {
   await page.setViewportSize({ width: 2400, height: 1080 });
   await boot(page);
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Key result' }).first().click();
   await page.getByTestId('add-column').click();
   await page.getByTestId('show-column-current_value').click();

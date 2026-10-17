@@ -325,5 +325,46 @@ mod tests {
         oriented.extend_from_slice(&jpeg[2..]);
         let result = prepare(&oriented).unwrap();
         assert_eq!((result.width, result.height), (4, 8));
+        let thumb = thumbnail(&oriented, 128, false).unwrap();
+        assert_eq!((thumb.width, thumb.height), (4, 8));
+    }
+
+    #[test]
+    fn thumbnails_never_upscale_and_output_stays_under_its_cap() {
+        let small = thumbnail(&png(8, 4, true), 512, false).unwrap();
+        assert_eq!((small.width, small.height), (8, 4));
+        let picture = DynamicImage::ImageRgba8(image::RgbaImage::from_fn(512, 512, |x, y| {
+            image::Rgba([
+                (x * 17 + y * 31) as u8,
+                (x * 3 + y * 7) as u8,
+                (x * 11 + y * 13) as u8,
+                (x * 7 + y * 19) as u8,
+            ])
+        }));
+        let mut bytes = Cursor::new(Vec::new());
+        picture.write_to(&mut bytes, ImageFormat::Png).unwrap();
+        let result = thumbnail(bytes.get_ref(), 512, false).unwrap();
+        assert!(result.bytes.len() <= 512 * 1024);
+        assert!(result.width <= 512);
+        assert_eq!(result.mime, "image/png");
+    }
+
+    #[test]
+    fn a_bomb_header_is_too_large_without_allocating() {
+        let mut bytes = png(1, 1, false);
+        bytes[16..20].copy_from_slice(&100_000_u32.to_be_bytes());
+        bytes[20..24].copy_from_slice(&100_000_u32.to_be_bytes());
+        let mut crc = 0xffff_ffff_u32;
+        for b in &bytes[12..29] {
+            crc ^= u32::from(*b);
+            for _ in 0..8 {
+                crc = (crc >> 1) ^ if crc & 1 == 1 { 0xedb8_8320 } else { 0 };
+            }
+        }
+        bytes[29..33].copy_from_slice(&(!crc).to_be_bytes());
+        assert_eq!(
+            thumbnail(&bytes, 128, false).unwrap_err(),
+            Failure::TooLarge
+        );
     }
 }

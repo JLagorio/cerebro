@@ -7,7 +7,8 @@ import { useUiStore } from '@/stores/uiStore';
 import { resetMockFs } from '@/lib/mockIpc';
 vi.mock('@/pages/HomePage', () => ({ SECTION_HEADING: '' }));
 vi.mock('@/stores/ledgerStore', () => ({ useLedgerReview: () => ({}), useQuarantine: () => ({}) }));
-vi.mock('@/engine/okf', () => ({
+vi.mock('@/engine/okf', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/engine/okf')>()),
   listConcepts: () => [
     {
       entry: { path: 'knowledge/concept.md' },

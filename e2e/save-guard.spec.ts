@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, openDestination } from './boot';
 
 test('a stale Home tick refreshes and the next click checks the relocated task', async ({
   page,
 }) => {
   await boot(page);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home', exact: true }).click();
+  await openDestination(page, 'Home');
   await page
     .locator('[data-lane="mywork"]')
     .getByRole('button', { name: /Show all/ })
@@ -39,10 +39,7 @@ test('a stale Home tick refreshes and the next click checks the relocated task',
 test('Library keeps an outside edit and offers to load its new version', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await boot(page);
-  await page
-    .getByTestId('nav-surfaces')
-    .getByRole('button', { name: 'Library', exact: true })
-    .click();
+  await openDestination(page, 'Library');
   await page.getByTestId('library-card').filter({ hasText: 'Weekly review' }).click();
   const instructions = page.getByLabel('Instructions', { exact: true });
   await expect(instructions).toBeVisible();

@@ -19,7 +19,7 @@ async function stage(page: Page, file: StagedSheetFile) {
 async function open(page: Page) {
   await page.setViewportSize({ width: 1450, height: 1100 });
   await boot(page);
-  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByTestId('app-rail').getByRole('button', { name: 'New', exact: true }).click();
   await page.getByRole('option', { name: /Sheet from file/ }).click();
   await expect(page.getByTestId('sheet-import-dialog')).toBeVisible();
 }

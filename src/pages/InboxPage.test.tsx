@@ -55,6 +55,21 @@ const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
 // The real create, put back before each case, since the paste case stubs it.
 const realCreateItem = useVaultStore.getState().createItem;
 
+it('folding Organize preserves the current editor and property control instances', async () => {
+  render(<InboxPage />);
+  const editor = await screen.findByTestId('body-editor');
+  const type = screen.getByRole('combobox');
+  const toggle = screen.getByRole('button', { name: 'Organize' });
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(type.closest('aside')?.hidden).toBe(true);
+  expect(screen.getByTestId('body-editor')).toBe(editor);
+  fireEvent.click(toggle);
+  expect(screen.getByRole('combobox')).toBe(type);
+  expect(type.closest('aside')?.hidden).toBe(false);
+  expect(patchFrontmatter).not.toHaveBeenCalled();
+});
+
 beforeEach(() => {
   patchFrontmatter.mockClear();
   useVaultStore.setState({

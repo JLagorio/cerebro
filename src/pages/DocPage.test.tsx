@@ -46,6 +46,17 @@ describe('DocPage', () => {
   });
   afterEach(cleanup);
 
+  it('shows body PR state on an ordinary page, independently of the editor', async () => {
+    const path = 'notes/pr-page.md';
+    fs().set(path, '# A linked change\n\nhttps://github.com/acme/notes/pull/42\n');
+    await useVaultStore.getState().rescan();
+    render(<DocPage selection={{ kind: 'doc', path }} />);
+    const chip = await screen.findByTestId('pr-chip');
+    await waitFor(() => expect(chip.dataset.state).toBe('gh_missing'));
+    expect(chip.textContent).toContain('checks unknown');
+    expect(fs().get(path)).toBe('# A linked change\n\nhttps://github.com/acme/notes/pull/42\n');
+  });
+
   it('shows imported provenance on a plain page without exposing its stamp keys', async () => {
     const path = 'notes/imported-copy.md';
     fs().set(

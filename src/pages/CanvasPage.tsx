@@ -14,6 +14,7 @@ import {
 } from '@/whiteboard/CanvasFaces';
 import { useCanvasFile } from '@/whiteboard/useCanvasFile';
 import { WhiteboardAncestry } from '@/whiteboard/ancestry';
+import '@/whiteboard/canvasChrome.css';
 
 /** The file page owns persistence; its renderer consumes the same editor.
  * Hosts key the page on its path. */
@@ -37,29 +38,30 @@ export function CanvasPage({ selection }: { selection: Extract<Selection, { kind
     : null;
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="canvas-page">
-      <div className="flex h-11 flex-none items-center gap-1.5 border-b border-n-200 px-3">
-        <Icon name="presentation" size={14} color="var(--n-500)" />
-        <span className="truncate text-sm font-medium text-n-900" data-testid="canvas-title">
-          {title}
+      <header className="canvas-page-heading">
+        <span className="canvas-page-icon">
+          <Icon name="presentation" size={18} />
         </span>
-        <span className="flex-none text-xs uppercase tracking-[0.05em] text-n-500">Whiteboard</span>
+        <h1 className="canvas-page-title" data-testid="canvas-title">
+          {title}
+        </h1>
+        <span className="canvas-page-kind">Whiteboard</span>
         {summary && (
-          <span data-testid="canvas-summary" className="ml-2 truncate text-xs text-n-500">
+          <span data-testid="canvas-summary" className="canvas-page-summary">
             {summary}
           </span>
         )}
-        <span className="flex-1" />
+
         {ready && SAVE_LABEL[ready.saveState] !== null && (
           <span
             data-testid="canvas-save-state"
-            className={
-              ready.saveState === 'failed' ? 'text-xs text-danger-600' : 'text-xs text-n-500'
-            }
+            className="canvas-page-save"
+            data-failed={ready.saveState === 'failed' || undefined}
           >
             {SAVE_LABEL[ready.saveState]}
           </span>
         )}
-      </div>
+      </header>
       {file.state === 'loading' && <CanvasLoading />}
       {file.state === 'missing' && <CanvasMissing onHome={() => navigate({ kind: 'home' })} />}
       {file.state === 'unavailable' && (

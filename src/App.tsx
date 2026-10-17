@@ -26,6 +26,7 @@ import {
   sidebarCeiling,
 } from '@/app/shellLayout';
 import { Sidebar } from '@/app/Sidebar';
+import { PageNavigationProvider, type PageNavigationControls } from '@/app/PageNavigation';
 import { StatusBar } from '@/app/StatusBar';
 import { QuickOpen } from '@/app/QuickOpen';
 import { CreateLauncher } from '@/app/CreateLauncher';
@@ -75,13 +76,9 @@ function useMediaQuery(query: string): boolean {
   );
 }
 
-/**
- * Below this a full-width sidebar, a right-hand panel and a readable canvas
- * cannot all fit: 264 (sidebar default) + 400 (canvas floor) + 320 (panel
- * floor) = 984, with slack for the window chrome. M37.3 retired the rail's
- * 56px from this arithmetic when the shell flattened to one nav column.
- */
-const SHELL_NARROW_MAX = 1048;
+/** M71: the contextual sidebar becomes a drawer below this width. The
+ * application rail remains, and panels retain their measured floors. */
+const SHELL_NARROW_BELOW = 1048;
 
 /**
  * Above this BOTH right-hand panels are drawn beside a sidebar column (M17.2).
@@ -168,8 +165,21 @@ function App() {
   const openVault = useVaultStore((s) => s.openVault);
   const [booted, setBooted] = useState(false);
   const aiPanelOpen = useUiStore((s) => s.aiPanelOpen);
+  const aiPanelPresentation = useUiStore((s) => s.aiPanelPresentation);
+  const setAiPanelPresentation = useUiStore((s) => s.setAiPanelPresentation);
+  const chatCanvas = aiPanelOpen && aiPanelPresentation === 'canvas';
+  const [assistantNavigationTarget, setAssistantNavigationTarget] = useState<HTMLDivElement | null>(
+    null,
+  );
+  const [pageNavigationTarget, setPageNavigationTarget] = useState<HTMLDivElement | null>(null);
+  const pageNavigationRef = useRef<PageNavigationControls | null>(null);
+  const [pageNavigationControls] = useState<PageNavigationControls>(() => ({
+    show: (opener) => pageNavigationRef.current?.show(opener),
+    hide: () => pageNavigationRef.current?.hide(),
+  }));
+  const activePane = useNavStore((state) => state.active);
   const detailPath = useUiStore((s) => s.detailPath);
-  const narrow = useMediaQuery(`(max-width: ${SHELL_NARROW_MAX}px)`);
+  const narrow = useMediaQuery(`(width < ${SHELL_NARROW_BELOW}px)`);
   // M17.2: the record panel and the assistant are independent again, so both
   // can be open at once. The room decides whether both are DRAWN — the one
   // that loses is hidden, never unmounted, because unmounting the assistant is
@@ -194,8 +204,12 @@ function App() {
   // request is the newer intent. The sidebar steps down to its rail before it
   // comes to that (M52). A parked assistant keeps streaming behind the record,
   // its tab says so, and closing the record brings it back intact.
-  const shell = { detail: detailOpen, assistant: aiPanelOpen, collapsed: sidebarCollapsed };
-  // The rail, once showing, stays below 1084 rather than growing back into a
+  const shell = {
+    detail: detailOpen && !chatCanvas,
+    assistant: aiPanelOpen,
+    collapsed: sidebarCollapsed || narrow,
+  };
+  // The rail, once showing, stays below 1094 rather than growing back into a
   // column as the window shrinks (shellLayout `nextRailLatch`). Adjusted
   // during render, so the classes below never draw a frame of the old value.
   const [railLatched, setRailLatched] = useState(false);
@@ -211,6 +225,14 @@ function App() {
   // for that panel's width as well — beside the assistant it was the page's
   // reading column that gave instead, down to a title one letter a line.
   const selection = useNavStore((s) => s.selection);
+  const pageNavigationKind =
+    !chatCanvas &&
+    (selection.kind === 'inbox' ||
+      selection.kind === 'settings' ||
+      selection.kind === 'workspace' ||
+      (selection.kind === 'studio' && selection.project !== undefined))
+      ? selection.kind
+      : null;
   const pagePath =
     selection.kind === 'doc'
       ? selection.path
@@ -235,11 +257,11 @@ function App() {
   // The main column's floor, with the assistant drawn and with it parked;
   // `park.floor` picks between them in CSS.
   const drawnFloor = {
-    detail: detailOpen,
-    assistant: aiPanelOpen,
+    detail: detailOpen && !chatCanvas,
+    assistant: aiPanelOpen && !chatCanvas,
     assistantWidth: aiWidth,
-    pageAside,
-    panes: paneCount,
+    pageAside: pageAside && !chatCanvas,
+    panes: chatCanvas ? 1 : paneCount,
   };
   const parkedFloor = { ...drawnFloor, assistant: false, parked: true };
   // M52: the sidebar's drag stops at what can be drawn beside that floor.
@@ -250,6 +272,20 @@ function App() {
   );
 
   useEffect(retainOsDropRouter, []);
+  // A selected page is the latest navigation intent, including an agent's
+  // open_note and Back/Forward. Dock the same conversation; never remount it.
+  useEffect(
+    () =>
+      useNavStore.subscribe((state, before) => {
+        if (
+          state.selection !== before.selection &&
+          useUiStore.getState().aiPanelPresentation === 'canvas'
+        ) {
+          useUiStore.getState().setAiPanelPresentation('panel');
+        }
+      }),
+    [],
+  );
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -279,51 +315,70 @@ function App() {
   }
 
   return (
-    <div
-      ref={shellRef}
-      className="flex h-screen overflow-hidden bg-n-0 text-sm leading-5 text-n-900"
+    <PageNavigationProvider
+      value={{
+        kind: pageNavigationKind,
+        paneId: activePane,
+        target: pageNavigationTarget,
+        controls: pageNavigationControls,
+      }}
     >
-      {/* The whole sidebar tree sits between the top of the tab order and the
-          content, which in a real vault is dozens of stops. */}
-      <button
-        type="button"
-        onClick={() => document.getElementById('main')?.focus()}
-        className="sr-only rounded-md bg-cortex-500 px-3 py-1.5 text-xs font-medium text-n-0 focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50"
+      <div
+        ref={shellRef}
+        data-chat-canvas={chatCanvas || undefined}
+        className="m71-shell flex h-screen overflow-hidden text-sm leading-5 text-n-900"
       >
-        Skip to content
-      </button>
-      <Sidebar
-        narrow={narrow}
-        rail={plan.sidebar === 'rail'}
-        railBand={bands.rail}
-        maxWidth={sidebarMax}
-      />
-      {/* M15: the floor that makes the sidebar yield first. Without a minimum
+        {/* The whole sidebar tree sits between the top of the tab order and the
+          content, which in a real vault is dozens of stops. */}
+        <button
+          type="button"
+          onClick={() =>
+            chatCanvas
+              ? document
+                  .querySelector<HTMLTextAreaElement>('[aria-label="Message the assistant"]')
+                  ?.focus()
+              : document.getElementById('main')?.focus()
+          }
+          className="sr-only rounded-md bg-cortex-500 px-3 py-1.5 text-xs font-medium text-n-0 focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50"
+        >
+          Skip to content
+        </button>
+        <Sidebar
+          narrow={narrow}
+          rail={plan.sidebar === 'rail'}
+          railBand={bands.rail}
+          maxWidth={sidebarMax}
+          onAssistantNavigationTarget={setAssistantNavigationTarget}
+          pageNavigationKind={pageNavigationKind}
+          onPageNavigationTarget={setPageNavigationTarget}
+          pageNavigationRef={pageNavigationRef}
+        />
+        {/* M15: the floor that makes the sidebar yield first. Without a minimum
           here the main column shrinks to nothing and the canvas absorbs every
           pixel of a narrow window; with it, flex has to take the shortfall out
           of the sidebar (which is shrinkable down to SIDEBAR_WIDTH_MIN).
           M52: the assistant counts at its whole width, and a page's own side
           panel at its own, so the sidebar gives before either does — and the
           parked tab instead of the assistant under the width it parks at. */}
-      <div
-        data-testid="main-column"
-        className={`flex min-w-[var(--shell-floor)] flex-1 flex-col ${park.floor}`}
-        style={
-          {
-            '--shell-floor': mainColumnFloor(drawnFloor),
-            '--shell-floor-parked': mainColumnFloor(parkedFloor),
-          } as React.CSSProperties
-        }
-      >
-        {/* M49.2: "Not recording" — visible whenever this process holds no
+        <div
+          data-testid="main-column"
+          className={`m71-main flex min-w-[var(--shell-floor)] flex-1 flex-col ${park.floor}`}
+          style={
+            {
+              '--shell-floor': mainColumnFloor(drawnFloor),
+              '--shell-floor-parked': mainColumnFloor(parkedFloor),
+            } as React.CSSProperties
+          }
+        >
+          {/* M49.2: "Not recording" — visible whenever this process holds no
             ledger writer for the vault (never in the browser mock). It also
             refreshes the ledger status both banners read.
             M23.7: the divergence circuit breaker's banner — visible while
             the ledger's reconciliation mode is open, or while any file is
             quarantined (M49.5: divergence is per path). */}
-        <RecordingBanner vault={vaultPath} />
-        <ReconciliationBanner vault={vaultPath} />
-        {/* M11: the record panel is a COLUMN here, beside the canvas, rather
+          <RecordingBanner vault={vaultPath} />
+          <ReconciliationBanner vault={vaultPath} />
+          {/* M11: the record panel is a COLUMN here, beside the canvas, rather
             than a fixed overlay on top of it. That is what lets a table keep
             its full horizontal scroll while a record is open.
             M15: the assistant moved in here too. As a sibling of the whole main
@@ -331,23 +386,25 @@ function App() {
             the canvas. `overflow-hidden` is the box nothing may paint outside,
             and `@container/canvas` gives the single pane its full row width.
             With multiple panes each frame supplies its own canvas container. */}
-        <div
-          ref={canvasRowRef}
-          className="@container/canvas flex min-h-0 min-w-0 flex-1 overflow-hidden bg-n-0"
-        >
-          <main
-            id="main"
-            // -1 so the skip link can put focus here; no ring, because a ring
-            // around the entire canvas reads as an error state.
-            tabIndex={-1}
-            className="flex flex-1 outline-none"
-            // The floor itself. NOT `min-w-0` — that is exactly what made
-            // content absorb 100% of any shortfall.
-            style={{ minWidth: CANVAS_MIN_WIDTH }}
+          <div
+            ref={canvasRowRef}
+            className="@container/canvas flex min-h-0 min-w-0 flex-1 overflow-hidden bg-n-0"
           >
-            <PaneRow />
-          </main>
-          {/* Capped against the CANVAS ROW rather than the viewport — a vw cap
+            <main
+              id="main"
+              // -1 so the skip link can put focus here; no ring, because a ring
+              // around the entire canvas reads as an error state.
+              tabIndex={-1}
+              className="m71-page-canvas flex flex-1 outline-none"
+              inert={chatCanvas}
+              aria-hidden={chatCanvas || undefined}
+              // The floor itself. NOT `min-w-0` — that is exactly what made
+              // content absorb 100% of any shortfall.
+              style={{ minWidth: CANVAS_MIN_WIDTH }}
+            >
+              <PaneRow />
+            </main>
+            {/* Capped against the CANVAS ROW rather than the viewport — a vw cap
               resolves against a box the panel does not live in, so it never
               engaged. M17.2: the record sits inboard of the assistant, so a
               turn that opens a note slides the record in beside the answer
@@ -356,18 +413,24 @@ function App() {
               the record's floor, so the two never add up to more than the
               cap — which clipped the assistant whenever they did — and CSS
               works it out in the same layout pass as the window. */}
-          {(detailOpen || aiPanelOpen) && (
-            <div
-              data-testid="right-panel-slot"
-              className="flex min-w-0 flex-none overflow-hidden"
-              style={{ maxWidth: `calc(100% - ${CANVAS_MIN_WIDTH}px)` }}
-            >
-              {detailOpen && (
-                <PaneContext value={detailPane}>
-                  <DetailPanel room={rooms?.detail ?? null} besideAssistant={showAssistant} />
-                </PaneContext>
-              )}
-              {/* One mount, drawn or parked, so crossing the width it parks
+            {(detailOpen || aiPanelOpen) && (
+              <div
+                data-testid="right-panel-slot"
+                className="m71-panel-slot flex min-w-0 flex-none overflow-hidden"
+                style={{ maxWidth: `calc(100% - ${CANVAS_MIN_WIDTH}px)` }}
+              >
+                {detailOpen && (
+                  <PaneContext value={detailPane}>
+                    <div
+                      className="m71-detail-frame flex min-w-0"
+                      inert={chatCanvas}
+                      aria-hidden={chatCanvas || undefined}
+                    >
+                      <DetailPanel room={rooms?.detail ?? null} besideAssistant={showAssistant} />
+                    </div>
+                  </PaneContext>
+                )}
+                {/* One mount, drawn or parked, so crossing the width it parks
                   at never remounts it (M17.2): a remount detaches the
                   panel from its turn and reads the thread back, which a
                   resize has no business costing (M57.6). Parked is
@@ -379,73 +442,82 @@ function App() {
                   the old vault's runs as the new vault opens
                   (`stop_other_vaults`), and keyed by the vault, the remount
                   only lets go of them. */}
-              {aiPanelOpen && (
-                <div
-                  data-testid="ai-panel-frame"
-                  data-parked={parked || undefined}
-                  inert={parked}
-                  className={`flex min-w-0 flex-none ${park.frame}`}
-                  style={{
-                    maxWidth: detailOpen ? `calc(100% - ${RIGHT_PANEL_MIN_WIDTH}px)` : '100%',
-                  }}
-                >
-                  <AiPanel key={vaultPath} room={rooms?.assistant ?? null} />
-                </div>
-              )}
-              {/* M52: parked, and saying so. The sidebar's zap stayed pressed
+                {aiPanelOpen && (
+                  <div
+                    data-testid="ai-panel-frame"
+                    data-parked={parked || undefined}
+                    inert={parked}
+                    className={`m71-chat-frame flex min-w-0 flex-none ${park.frame}`}
+                    style={{
+                      maxWidth: detailOpen ? `calc(100% - ${RIGHT_PANEL_MIN_WIDTH}px)` : '100%',
+                    }}
+                  >
+                    <AiPanel
+                      key={vaultPath}
+                      room={rooms?.assistant ?? null}
+                      presentation={aiPanelPresentation}
+                      onTogglePresentation={() =>
+                        setAiPanelPresentation(chatCanvas ? 'panel' : 'canvas')
+                      }
+                      navigationTarget={chatCanvas ? assistantNavigationTarget : null}
+                    />
+                  </div>
+                )}
+                {/* M52: parked, and saying so. The sidebar's zap stayed pressed
                   with nothing on screen to say where the assistant went or
                   why. The tab is the way back, and the way back is the
                   record's close. Inside the slot, so the record gives it its
                   strip in the same pass it parks in. */}
-              {bands.park !== 'never' && (
-                <button
-                  type="button"
-                  data-testid="ai-parked-tab"
-                  aria-label="Assistant hidden — close the record to show it"
-                  title="Assistant hidden — close the record to show it"
-                  onClick={closeDetail}
-                  className={`${park.tab} flex-none cursor-pointer flex-col items-center gap-2 border-0 border-l border-solid border-n-200 bg-surface-sunken py-3 text-n-500 hover:bg-n-50 hover:text-n-800`}
-                  style={{ width: PARKED_TAB_WIDTH }}
-                >
-                  <Icon name="zap" size={14} color="var(--synapse-500)" />
-                  <span className="text-xs font-medium [writing-mode:vertical-rl]">
-                    Assistant hidden
-                  </span>
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-        {/* M9.7 — everything ambient about the vault in one strip, and every
+                {bands.park !== 'never' && (
+                  <button
+                    type="button"
+                    data-testid="ai-parked-tab"
+                    aria-label="Assistant hidden — close the record to show it"
+                    title="Assistant hidden — close the record to show it"
+                    onClick={closeDetail}
+                    className={`${park.tab} flex-none cursor-pointer flex-col items-center gap-2 border-0 border-l border-solid border-n-200 bg-surface-sunken py-3 text-n-500 hover:bg-n-50 hover:text-n-800`}
+                    style={{ width: PARKED_TAB_WIDTH }}
+                  >
+                    <Icon name="zap" size={14} color="var(--synapse-500)" />
+                    <span className="text-xs font-medium [writing-mode:vertical-rl]">
+                      Assistant hidden
+                    </span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          {/* M9.7 — everything ambient about the vault in one strip, and every
             segment of it is a control rather than a readout. */}
-        <StatusBar />
-      </div>
-      <QuickOpen />
-      <CreateLauncher />
-      {/* M45.2 — one mount, one signal: three menus raise uiStore.layoutEditor
+          <StatusBar />
+        </div>
+        <QuickOpen />
+        <CreateLauncher />
+        {/* M45.2 — one mount, one signal: three menus raise uiStore.layoutEditor
           and this single App-level dialog is the only reader. */}
-      <LayoutEditorDialog />
-      <ToastHost />
-      <ChordHint />
-      <RenameLinksHost />
-      <RemindersHost />
-      <CheckpointHost />
-      {/* M8.6/M13.2 — the base reads filed captures and edited notes on its
+        <LayoutEditorDialog />
+        <ToastHost />
+        <ChordHint />
+        <RenameLinksHost />
+        <RemindersHost />
+        <CheckpointHost />
+        {/* M8.6/M13.2 — the base reads filed captures and edited notes on its
           own, and scheduled skills fire, from one background runner. Mounted
           at the root rather than in the AI panel (the panel unmounts when
           closed, and a knowledge base that only grows while a panel is open
           is not one), and as a HOST so its minute tick re-renders nothing. */}
-      <JobRunnerHost />
-      <AgentActions />
-      <PaneLayoutHost />
-      {/* M59.1 — the window title names the place; the chooser keeps
+        <JobRunnerHost />
+        <AgentActions />
+        <PaneLayoutHost />
+        {/* M59.1 — the window title names the place; the chooser keeps
           index.html's own title, since this branch is the vault's. */}
-      <WindowTitle />
-      {/* M57.6 — a chat turn outlives its panel, so what its end does to
+        <WindowTitle />
+        {/* M57.6 — a chat turn outlives its panel, so what its end does to
           the vault (end its run record, rescan, checkpoint) is settled here,
           once, whether or not the assistant is open. */}
-      <ChatTurnsHost />
-    </div>
+        <ChatTurnsHost />
+      </div>
+    </PageNavigationProvider>
   );
 }
 

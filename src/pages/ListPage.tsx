@@ -1,3 +1,4 @@
+import { PageHeader } from '@/components/PageHeader';
 import { useEntryState } from '@/app/useEntryState';
 import type { TimeSlot } from '@/engine/timeGrid';
 import { useEffect, useMemo, useState } from 'react';
@@ -265,54 +266,32 @@ export function ListPage({ selection }: { selection: ListSelection }) {
   return (
     <div className="flex min-h-0 min-w-0 flex-1" data-testid="collection-page">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex-none px-5 pb-2 pt-3.5">
-          <div className="flex min-w-0 items-center gap-2">
-            {/* M12.8: the icon and the name ARE the edit affordance (Notion's
-                header). Both open view settings, where "This list" renames. */}
+        <PageHeader
+          title={
             <button
               type="button"
               data-testid="list-title-edit"
               title="Edit list name & settings"
               onClick={() => setSettingsOpen(true)}
-              className="flex min-w-0 items-center gap-2 rounded-md border-0 bg-transparent px-1 py-0.5 hover:bg-n-50"
+              className="flex max-w-full items-center gap-3 rounded-md px-1 text-left hover:bg-n-50"
             >
               <Icon
                 name={list.definition.icon ?? 'layout-list'}
-                size={16}
-                color={list.definition.color ?? 'var(--n-600)'}
+                size={20}
+                color={list.definition.color ?? 'var(--text-secondary)'}
+                className="flex-none"
               />
-              <h1 className="m-0 min-w-0 truncate text-lg font-semibold leading-6 tracking-[-0.005em]">
-                {list.definition.name}
-              </h1>
+              <span className="min-w-0 [overflow-wrap:anywhere]">{list.definition.name}</span>
             </button>
-            {/* M16.31: `sortedEntries`, which is filtered AND searched — not
-                `surface.entries`, which is only filtered. Typing in "Search
-                this view" narrowed the canvas and flipped the chip to
-                "· filtered" while this number stayed where it was, so one
-                header told two different stories about one screen depending
-                on which control you had narrowed with. NOT `shownEntries`: a
-                load limit is truncation, and how much of how much is showing
-                is what ViewLimitNotice says under the records. */}
-            <span
-              data-testid="view-count"
-              className="flex-none [font-family:var(--font-mono)] text-xs text-n-400"
-            >
-              {sortedEntries.length}
-            </span>
-            <span className="hidden flex-none items-center gap-1 rounded-full border border-n-200 px-2 py-0.5 text-2xs text-n-500 sm:inline-flex">
+          }
+          metadata={<span data-testid="view-count">{sortedEntries.length}</span>}
+          actions={
+            <span className="inline-flex items-center gap-1 rounded-full border border-n-200 px-2 py-0.5 text-2xs text-n-500">
               {sourceLabel}
               {filtered && ' · filtered'}
             </span>
-            <span className="flex-1" />
-            {/* M15: Delete list no longer sits here. It was the ONLY control in
-                this gutter — a 24px unlabelled glyph roughly 55px above the
-                toolbar's "+ New" and directly below the shell's, so the corner
-                read New / Delete-list / New with the destructive one in the
-                middle and no visual distinction. It lives where the rest of the
-                list's configuration lives: view settings, which this title
-                button opens, alongside "This list". */}
-          </div>
-        </div>
+          }
+        />
         {/* M11: the tab row IS the layout control. There is no pill strip in
             the toolbar below, because pressing one used to overwrite the view
             you had configured rather than open a different one. */}

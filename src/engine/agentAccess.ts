@@ -1,3 +1,4 @@
+import { isWhiteboardPath } from './fileKinds';
 import { scheduleText } from './skills';
 /**
  * Who can change a page, and why (M58.6).
@@ -69,11 +70,11 @@ const READ_DOOR = 'none';
 const CONCEPT_DOOR = 'concept';
 const SOURCE_DOOR = 'source';
 
-/** Tools that change a page already on disk: the note door's rows aimed at a
- * note. create_note's target is a folder, so it never changes an existing
- * page. */
+/** Writers of existing pages and boards; folder-target creates never change one. */
 const PAGE_WRITERS: readonly ToolRow[] = TOOLS.tools.filter(
-  (row) => row.door === NOTE_DOOR && row.target?.kind === 'note',
+  (row) =>
+    (row.door === NOTE_DOOR && row.target?.kind === 'note') ||
+    (row.door === 'canvas' && row.target?.kind === 'canvas'),
 );
 
 /** Tools that read pages: the read door's rows, less the bundle's reader. */
@@ -306,7 +307,12 @@ interface RowSeed {
 function deriveRow(seed: RowSeed, input: PageAccessInput, page: PageKind): AccessRow {
   const { axes } = seed;
   const held = grantedTools(axes.allowedTools);
-  const heldWriters = PAGE_WRITERS.filter((row) => held.has(row.name));
+  const whiteboard = isWhiteboardPath(input.path);
+  const heldWriters = PAGE_WRITERS.filter(
+    (row) =>
+      held.has(row.name) &&
+      (whiteboard ? row.target?.kind === 'canvas' : row.target?.kind !== 'canvas'),
+  );
   const inScope = scopeAdmits(axes.scope, input.path);
   const readable = scopeAdmits(axes.readScope, input.path);
   const needsRead = heldWriters
@@ -314,7 +320,7 @@ function deriveRow(seed: RowSeed, input: PageAccessInput, page: PageKind): Acces
     .map((row) => row.title);
   const reaching = heldWriters.filter((row) => row.axis !== 'read_write' || readable);
   const doorWriters =
-    page.bundle === null || page.governed !== null
+    page.bundle === null || page.governed !== null || page.mail
       ? []
       : DOOR_WRITERS[page.bundle].filter((row) => held.has(row.name));
   const ownNotes =
@@ -334,7 +340,8 @@ function deriveRow(seed: RowSeed, input: PageAccessInput, page: PageKind): Acces
     if (kind === 'attended') attendedPlan = approval;
     const viaDoor = strongest(...doorWriters.map((row) => writerReach(approval, row)));
     let tools: Reach;
-    if (page.knowledge) tools = viaDoor;
+    if (page.mail) tools = 'none';
+    else if (page.knowledge) tools = viaDoor;
     else if (page.governed !== null) tools = ownNotes ? 'own-notes' : 'none';
     else if (inScope) {
       tools = strongest(viaDoor, ...reaching.map((row) => writerReach(approval, row)));
@@ -349,7 +356,11 @@ function deriveRow(seed: RowSeed, input: PageAccessInput, page: PageKind): Acces
   const attended = strongest(reach.attended, shell.attended);
   const unattended = strongest(reach.unattended, shell.unattended);
 
-  const readers = PAGE_READERS.some((row) => held.has(row.name));
+  const readers = PAGE_READERS.some(
+    (row) =>
+      held.has(row.name) &&
+      (whiteboard ? row.target?.kind === 'canvas' : row.target?.kind !== 'canvas'),
+  );
   const fileRead =
     attendedPlan?.decisions.some(
       (d) => READING_FAMILIES.has(d.family) && d.decision !== 'deny' && d.decision !== 'refuse',
@@ -368,7 +379,9 @@ function deriveRow(seed: RowSeed, input: PageAccessInput, page: PageKind): Acces
     inScope,
     heldWriters: heldWriters.map((row) => row.title),
     writers: [
-      ...(page.knowledge || page.governed !== null ? [] : reaching.map((row) => row.title)),
+      ...(page.knowledge || page.governed !== null || page.mail
+        ? []
+        : reaching.map((row) => row.title)),
       ...doorWriters.map((row) => row.title),
     ],
     doorWriters: doorWriters.map((row) => row.title),
@@ -524,7 +537,9 @@ export function accessLines(row: AccessRow): AccessLines {
   else if (row.inScope) reasons.push(`Inside its write scope: ${folderWords(axes.scope)}.`);
   else reasons.push(`Outside its write scope: ${folderWords(axes.scope)}.`);
   // Tools.
-  if (row.heldWriters.length === 0 && row.doorWriters.length === 0) {
+  if (row.page.mail) {
+    reasons.push('Only cache_source writes mail digests.');
+  } else if (row.heldWriters.length === 0 && row.doorWriters.length === 0) {
     reasons.push('None of its tools change a page.');
   } else if (row.heldWriters.length > 0) {
     const usable = row.heldWriters.filter((title) => !row.needsRead.includes(title));

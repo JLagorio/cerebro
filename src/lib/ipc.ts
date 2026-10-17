@@ -104,6 +104,16 @@ export function scanVault(vault: string): Promise<Entry[]> {
     : faulted('scan_vault', () => mock.scanVault(vault));
 }
 
+export interface MailGateRead {
+  state: 'closed' | 'other_vault' | 'open';
+  kinds: string[];
+}
+export function mailGateRead(vault: string): Promise<MailGateRead> {
+  return inTauri()
+    ? invokeTauri('mail_gate_read', { vault })
+    : faulted('mail_gate_read', () => mock.mailGateRead(vault));
+}
+
 export function readNote(vault: string, path: string): Promise<string> {
   return inTauri()
     ? invokeTauri('read_note', { vault, path })
@@ -117,7 +127,7 @@ export function readNoteSource(
 ): Promise<{ content: string; hash: string }> {
   return inTauri()
     ? invokeTauri('read_note_source', { vault, path })
-    : faulted('read_note', () => mock.readNoteSource(vault, path));
+    : faulted('read_note_source', () => mock.readNoteSource(vault, path));
 }
 
 import type { ExcerptPart, VaultHit, VaultSearch } from './mockIpc';
@@ -367,7 +377,9 @@ export function saveConnectors(vault: string, json: string): Promise<void> {
  * (M54.11). Rejects when the runtime database or the list cannot be read,
  * which Settings shows as unavailable, never as "not observed yet". */
 export function connectorStatus(vault: string): Promise<ConnectorStatusRow[]> {
-  return inTauri() ? invokeTauri('connector_status', { vault }) : mock.connectorStatus(vault);
+  return inTauri()
+    ? invokeTauri('connector_status', { vault })
+    : faulted('connector_status', () => mock.connectorStatus(vault));
 }
 
 // --- Vault format v2 file operations (M2 Task 3) ---
@@ -1683,4 +1695,30 @@ export function exportSheetXlsx(defaultName: string, page: string): Promise<stri
   return inTauri()
     ? invokeTauri('export_sheet_xlsx', { defaultName, page })
     : mock.exportSheetXlsx(defaultName, page);
+}
+
+export function mailDismissalsRead(
+  vault: string,
+): Promise<import('@/engine/unfiled').MailDismissal[]> {
+  return inTauri()
+    ? invokeTauri('mail_dismissals_read', { vault })
+    : faulted('mail_dismissals_read', () => mock.mailDismissalsRead(vault));
+}
+export function mailDismiss(
+  vault: string,
+  kind: import('@/engine/unfiled').DismissalKind,
+  value: string,
+): Promise<void> {
+  return inTauri()
+    ? invokeTauri('mail_dismiss', { vault, kind, value })
+    : mock.mailDismiss(vault, kind, value);
+}
+export function mailUndismiss(
+  vault: string,
+  kind: import('@/engine/unfiled').DismissalKind,
+  value: string,
+): Promise<void> {
+  return inTauri()
+    ? invokeTauri('mail_undismiss', { vault, kind, value })
+    : mock.mailUndismiss(vault, kind, value);
 }

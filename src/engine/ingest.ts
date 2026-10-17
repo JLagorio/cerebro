@@ -1,4 +1,4 @@
-import { isMailUrl } from './mailPolicy';
+import { MAIL, isMailUrl } from './mailPolicy';
 /**
  * Outside material enters through transcript/text or kept document capture in Inbox, fetched
  * source caches, or the batch import writer (M69.3). Imports become stamped
@@ -412,7 +412,7 @@ export function parseIssuePrefixes(raw: string): string[] {
 
 /** What a cached copy is a copy of: the `kind` `cache_source` takes and
  * stamps as `source_kind`. */
-export type SourceKind = 'issue' | 'web';
+export type SourceKind = 'issue' | 'web' | 'thread';
 
 export const SOURCE_KINDS: readonly SourceKind[] = CACHE_KINDS as readonly SourceKind[];
 
@@ -442,6 +442,7 @@ const lowerAscii = (text: string): string => text.replace(/[A-Z]+/g, (run) => ru
  */
 export function canonicalSourceId(kind: SourceKind, id: string): string {
   const trimmed = id.replace(/^[\t\n\f\r ]+|[\t\n\f\r ]+$/g, '');
+  if (kind === MAIL.kinds.thread) return trimmed;
   if (kind === 'issue') return trimmed.toLowerCase();
   const scheme = ['https://', 'http://'].find(
     (prefix) => lowerAscii(trimmed.slice(0, prefix.length)) === prefix,
@@ -453,6 +454,7 @@ export function canonicalSourceId(kind: SourceKind, id: string): string {
 }
 
 function cachePathOf(kind: SourceKind, canonical: string): string {
+  if (kind === MAIL.kinds.thread) return `${MAIL.folder}/${canonical}.md`;
   if (kind === 'issue') return `${SOURCES_DIR}/issues/${canonical}.md`;
   const readable = canonical
     .replace(/[^A-Za-z0-9._-]/gu, '-')

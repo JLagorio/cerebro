@@ -164,12 +164,41 @@ pub fn run_bounded_with_input(
     input: Option<&[u8]>,
     limit: Duration,
 ) -> Result<String, GitFailure> {
+    let mut cmd = git_at(dir);
+    cmd.args(args);
+    run_bounded_command(cmd, input, limit).map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// A scoped checkpoint's private index, selected here after the inherited
+/// repository variables have been scrubbed. Never changes the process env.
+pub(super) fn run_bounded_with_index(
+    dir: &Path,
+    index: &Path,
+    args: &[&str],
+    input: Option<&[u8]>,
+) -> Result<String, GitFailure> {
+    let mut cmd = git_at(dir);
+    cmd.env("GIT_INDEX_FILE", index).args(args);
+    run_bounded_command(cmd, input, LOCAL_TIMEOUT)
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// Byte-exact bounded output for Git index/tree path streams.
+pub(super) fn run_bounded_bytes(dir: &Path, args: &[&str]) -> Result<Vec<u8>, GitFailure> {
+    let mut cmd = git_at(dir);
+    cmd.args(args);
+    run_bounded_command(cmd, None, LOCAL_TIMEOUT)
+}
+
+fn run_bounded_command(
+    mut cmd: Command,
+    input: Option<&[u8]>,
+    limit: Duration,
+) -> Result<Vec<u8>, GitFailure> {
     let failed = |e: std::io::Error| GitFailure {
         stderr: format!("could not run git: {e}"),
         code: None,
     };
-    let mut cmd = git_at(dir);
-    cmd.args(args);
     if input.is_some() {
         cmd.stdin(Stdio::piped());
     }
@@ -185,24 +214,12 @@ pub fn run_bounded_with_input(
             });
     }
     let read = Arc::new(Mutex::new(Vec::new()));
-    let (closed, drained) = std::sync::mpsc::sync_channel::<()>(1);
+    let (closed, drained) = std::sync::mpsc::sync_channel::<std::io::Result<()>>(1);
     let sink = read.clone();
     let reader = std::thread::Builder::new()
         .name("cerebro-git-stdout".into())
         .spawn(move || {
-            let mut chunk = [0u8; 8 * 1024];
-            loop {
-                match stdout.read(&mut chunk) {
-                    Ok(0) => break,
-                    Ok(n) => sink
-                        .lock()
-                        .unwrap_or_else(|p| p.into_inner())
-                        .extend_from_slice(&chunk[..n]),
-                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                    Err(_) => break,
-                }
-            }
-            let _ = closed.send(());
+            let _ = closed.send(read_stdout(&mut stdout, &sink));
         });
     let handle = supervised.handle();
     if let Err(e) = reader {
@@ -221,7 +238,7 @@ pub fn run_bounded_with_input(
         }
         std::thread::sleep(Duration::from_millis(25));
     };
-    let _ = drained.recv_timeout(STDOUT_WAIT);
+    let drained = drained.recv_timeout(STDOUT_WAIT);
     let (status, tail) = supervised.finish(STDOUT_WAIT);
     if timed_out {
         return Err(GitFailure {
@@ -229,13 +246,40 @@ pub fn run_bounded_with_input(
             code: None,
         });
     }
-    let out = String::from_utf8_lossy(&read.lock().unwrap_or_else(|p| p.into_inner())).to_string();
+    // Index/tree snapshots must be complete. A successful Git exit does not
+    // prove its stdout reader reached EOF, and a partial index stream could
+    // silently drop paths from a checkpoint's tree.
+    drained
+        .map_err(|_| GitFailure {
+            stderr: "could not read git output completely before the deadline".into(),
+            code: None,
+        })?
+        .map_err(|error| GitFailure {
+            stderr: format!("could not read git output completely: {error}"),
+            code: None,
+        })?;
+    let out = std::mem::take(&mut *read.lock().unwrap_or_else(|p| p.into_inner()));
     match status {
         Some(status) if status.success() => Ok(out),
         status => Err(GitFailure {
             stderr: tail.text(),
             code: status.and_then(|s| s.code()),
         }),
+    }
+}
+
+fn read_stdout(reader: &mut impl Read, sink: &Mutex<Vec<u8>>) -> std::io::Result<()> {
+    let mut chunk = [0u8; 8 * 1024];
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(0) => return Ok(()),
+            Ok(n) => sink
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .extend_from_slice(&chunk[..n]),
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
     }
 }
 
@@ -378,6 +422,25 @@ mod env_tests {
             std::fs::canonicalize(scratch.join(".git")).unwrap(),
             "GIT_DIR outranked the working directory: git opened the decoy repository"
         );
+    }
+
+    #[test]
+    fn a_partial_stdout_read_never_becomes_a_successful_index_snapshot() {
+        struct BrokenRead(bool);
+        impl Read for BrokenRead {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if self.0 {
+                    return Err(std::io::Error::other("broken pipe"));
+                }
+                self.0 = true;
+                buf[..4].copy_from_slice(b"path");
+                Ok(4)
+            }
+        }
+        let sink = Mutex::new(Vec::new());
+        let error = read_stdout(&mut BrokenRead(false), &sink).unwrap_err();
+        assert_eq!(error.to_string(), "broken pipe");
+        assert_eq!(*sink.lock().unwrap(), b"path");
     }
 
     /// Every Cerebro-spawned git carries the M32.10 protocol pins.

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, showDatabases } from './boot';
 
 /**
  * Hover previews (M59.7). A page link in a record's body, opened in the peek,
@@ -28,6 +28,7 @@ test('a page link previews its page on hover, and Escape closes only the card', 
   await boot(page);
 
   // -- Seed the first Work item's body with four links, then peek it --------
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
   const row = page.getByTestId('table-row').first();
   const path = await row.getAttribute('data-path');

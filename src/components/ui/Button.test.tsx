@@ -45,4 +45,21 @@ describe('Button', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
     expect(onClickDisabled).not.toHaveBeenCalled();
   });
+
+  it('exposes an optional pressed state for toggle actions', () => {
+    const { rerender } = render(<Button aria-pressed={true}>Fit</Button>);
+    expect(screen.getByRole('button', { name: 'Fit', pressed: true })).toBeTruthy();
+    rerender(<Button aria-pressed={false}>Fit</Button>);
+    expect(screen.getByRole('button', { name: 'Fit', pressed: false })).toBeTruthy();
+    rerender(<Button>Fit</Button>);
+    expect(screen.getByRole('button', { name: 'Fit' }).hasAttribute('aria-pressed')).toBe(false);
+  });
+
+  it('forwards the click event so a drawer can restore its actual opener', () => {
+    const openers: HTMLButtonElement[] = [];
+    render(<Button onClick={(event) => openers.push(event.currentTarget)}>Files</Button>);
+    const button = screen.getByRole('button', { name: 'Files' });
+    fireEvent.click(button);
+    expect(openers).toEqual([button]);
+  });
 });

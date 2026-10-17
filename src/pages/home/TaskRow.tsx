@@ -20,7 +20,7 @@ export function TaskRow({ task, onToggle }: { task: DocTask; onToggle: (done: bo
   return (
     <div
       data-testid="home-task"
-      className="group flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 hover:bg-n-50"
+      className="cb-home-task group flex min-w-0 items-center gap-2 rounded-md hover:bg-n-50"
     >
       <button
         type="button"

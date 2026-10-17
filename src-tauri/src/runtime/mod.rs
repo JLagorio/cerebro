@@ -51,6 +51,7 @@ pub mod governance;
 pub mod health;
 pub mod import;
 pub mod job_ledger;
+pub mod mail_dismissals;
 pub mod normalize;
 pub mod operational;
 pub mod parked;
@@ -129,7 +130,8 @@ pub const OPEN_MARKER: &str = "runtime.db.open";
 /// M62.5 adds personal token fingerprints and the client cause at 28.
 /// M63.2 records wake authors and run ancestry at 29.
 /// M63.8 adds an agent's durable self-followups at 30.
-pub const USER_VERSION: i64 = 30;
+/// M69.9b adds vault-scoped correspondent dismissals at 31.
+pub const USER_VERSION: i64 = 31;
 
 pub fn runtime_db_path(data_dir: &Path) -> PathBuf {
     data_dir.join(RUNTIME_DB)
@@ -367,7 +369,38 @@ const MIGRATIONS: &[Migration] = &[
         sql: schema::SCHEMA_V30,
         validate: validate_v30,
     },
+    Migration {
+        to: 31,
+        sql: schema::SCHEMA_V31,
+        validate: validate_v31,
+    },
 ];
+
+fn validate_v31(conn: &Connection) -> Result<(), String> {
+    conn.prepare("SELECT vault_id,kind,value,dismissed_at FROM mail_dismissals")
+        .map_err(|e| format!("validating mail_dismissals: {e}"))?;
+    let sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='mail_dismissals'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("validating mail_dismissals: {e}"))?;
+    for clause in [
+        "REFERENCES vault_registry (vault_id)",
+        "kind IN ('address', 'domain')",
+        "length(value) BETWEEN 3 AND 320",
+        "value = lower(value)",
+        "dismissed_at LIKE '____-__-__T%Z'",
+        "PRIMARY KEY (vault_id, kind, value)",
+        "WITHOUT ROWID",
+    ] {
+        if !sql.contains(clause) {
+            return Err(format!("mail_dismissals was created without {clause}"));
+        }
+    }
+    Ok(())
+}
 
 fn validate_v30(conn: &Connection) -> Result<(), String> {
     conn.prepare("SELECT followup_id,vault_id,actor,note,due_at,requested_at,requested_by_run,state,claimed_at,run_id,ended_at,cancel_reason FROM agent_followups")
@@ -2977,6 +3010,91 @@ mod tests {
             drop(conn);
             let conn = open(&dir).unwrap();
             validate_v30(&conn).unwrap();
+            drop(conn);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn a_previous_version_gains_mail_dismissals_and_keeps_history() {
+        let (dir, _) = at_version_with_a_run("runtime-mail-dismissals-upgrade", 30);
+        let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+        assert!(validate_v31(&conn).is_err());
+        drop(conn);
+        let conn = open(&dir).unwrap();
+        validate_v31(&conn).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), USER_VERSION);
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM runs WHERE run_id='before-causes'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM mail_dismissals", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        drop(conn);
+        let conn = open(&dir).unwrap();
+        validate_v31(&conn).unwrap();
+        drop(conn);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn validate_v31_refuses_mail_dismissals_without_their_checks() {
+        for clause in [
+            "CHECK (kind IN ('address', 'domain'))",
+            "CHECK (length(value) BETWEEN 3 AND 320 AND value = lower(value))",
+            "CHECK (dismissed_at LIKE '____-__-__T%Z')",
+            "REFERENCES vault_registry (vault_id)",
+            "WITHOUT ROWID",
+        ] {
+            let (dir, _) = at_version_with_a_run("runtime-mail-dismissals-validator", 30);
+            let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+            conn.execute_batch(&schema::SCHEMA_V31.replace(clause, ""))
+                .unwrap();
+            assert!(validate_v31(&conn).is_err(), "{clause}");
+            drop(conn);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn a_kill_at_every_mail_dismissal_migration_boundary_keeps_history() {
+        for (suffix, expected) in [
+            ("begun", 30),
+            ("ddl", 30),
+            ("validated", 30),
+            ("committed", 31),
+        ] {
+            let (dir, _) = at_version_with_a_run("runtime-mail-dismissals-kill", 30);
+            let status = testutil::run_crash_scenario(
+                "runtime::tests::crash_scenario_migrate",
+                &format!("runtime-db-migration-31-{suffix}"),
+                &dir,
+            );
+            assert!(!status.success());
+            let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+            assert_eq!(user_version(&conn).unwrap(), expected);
+            assert_eq!(
+                conn.query_row(
+                    "SELECT count(*) FROM runs WHERE run_id='before-causes'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                1
+            );
+            assert_eq!(validate_v31(&conn).is_ok(), expected == 31);
+            drop(conn);
+            let conn = open(&dir).unwrap();
+            validate_v31(&conn).unwrap();
             drop(conn);
             let _ = std::fs::remove_dir_all(dir);
         }

@@ -60,6 +60,13 @@ Labels, icons and seeds (`KIND_UI` in `src/engine/properties.ts`), the
 catalog order, display settings (`format`, `dateFormat`, `visibility`) and
 the rollup and formula labels are UI, and Rust draws nothing.
 
+Both field-definition readers preserve exactly `source: correspondence` (M69.9),
+with positive, unknown-source and non-string cases. Cached-mail rollups are
+renderer-only: they aggregate recorded header instants or thread counts.
+Without cached mail every result is absent, including count. A Type doc's
+`email_domain:` is also renderer-only and must name one of its declared text
+or URL fields. It never gives Rust another writer or source of authority.
+
 Rollup evaluation also stays in TypeScript. `percent_done` (M61.11b)
 counts a status in its record's own status set: done enters the numerator;
 closed leaves the denominator; active, unknown and empty stay in the

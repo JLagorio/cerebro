@@ -77,140 +77,350 @@ mod tests {
     use super::*;
     use crate::files::extract::testdocs::{self, TempDir, PNG};
     use std::cell::Cell;
-    struct Fake { calls: Cell<usize>, answer: Result<Vec<u8>, Reason> }
+    struct Fake {
+        calls: Cell<usize>,
+        answer: Result<Vec<u8>, Reason>,
+    }
     impl QuickLook for Fake {
-        fn run(&self, _bytes: &[u8], _ext: &str, _size: u32, _cache: &Path) -> Result<Vec<u8>, Reason> {
-            self.calls.set(self.calls.get()+1); self.answer.clone()
+        fn run(
+            &self,
+            _bytes: &[u8],
+            _ext: &str,
+            _size: u32,
+            _cache: &Path,
+        ) -> Result<Vec<u8>, Reason> {
+            self.calls.set(self.calls.get() + 1);
+            self.answer.clone()
         }
     }
-    fn fake(answer: Result<Vec<u8>, Reason>) -> Fake { Fake { calls: Cell::new(0), answer } }
-    fn read_at(root: &Path, cache: &Path, path: &str, ql: &dyn QuickLook) -> Result<Preview, Reason> {
-        read(bytes::open_in(root, "0", path).map_err(|_| Reason::NotFound)?, cache, 128, ql)
+    fn fake(answer: Result<Vec<u8>, Reason>) -> Fake {
+        Fake {
+            calls: Cell::new(0),
+            answer,
+        }
+    }
+    fn read_at(
+        root: &Path,
+        cache: &Path,
+        path: &str,
+        ql: &dyn QuickLook,
+    ) -> Result<Preview, Reason> {
+        read(
+            bytes::open_in(root, "0", path).map_err(|_| Reason::NotFound)?,
+            cache,
+            128,
+            ql,
+        )
     }
     #[test]
     fn replays_thumbnail_cases() {
-        let cases: serde_json::Value = serde_json::from_str(include_str!("../../fixtures/thumbnail-cases.json")).unwrap();
-        for case in cases["sizes"].as_array().unwrap() { assert_eq!(u64::from(snap(case["input"].as_u64().unwrap() as u32)), case["expected"].as_u64().unwrap()); }
+        let cases: serde_json::Value =
+            serde_json::from_str(include_str!("../../fixtures/thumbnail-cases.json")).unwrap();
+        for case in cases["sizes"].as_array().unwrap() {
+            assert_eq!(
+                u64::from(snap(case["input"].as_u64().unwrap() as u32)),
+                case["expected"].as_u64().unwrap()
+            );
+        }
         for reason in cases["reasons"].as_array().unwrap() {
             let decoded: Reason = serde_json::from_value(reason.clone()).unwrap();
-            assert_eq!(decoded.cached(), cases["cached"].as_array().unwrap().contains(reason));
+            assert_eq!(
+                decoded.cached(),
+                cases["cached"].as_array().unwrap().contains(reason)
+            );
             assert_eq!(serde_json::to_value(decoded).unwrap(), *reason);
         }
-        for source in cases["sources"].as_array().unwrap() { let parsed: Source = serde_json::from_value(source.clone()).unwrap(); assert_eq!(serde_json::to_value(parsed).unwrap(), *source); }
+        for source in cases["sources"].as_array().unwrap() {
+            let parsed: Source = serde_json::from_value(source.clone()).unwrap();
+            assert_eq!(serde_json::to_value(parsed).unwrap(), *source);
+        }
     }
     #[test]
     fn a_truncated_image_is_cached_as_corrupt_and_not_retried() {
-        let root = TempDir::new(); let cache = TempDir::new();
+        let root = TempDir::new();
+        let cache = TempDir::new();
         fs::write(root.path().join("bad.png"), &PNG[..40]).unwrap();
         let ql = fake(Ok(PNG.to_vec()));
-        assert_eq!(read_at(root.path(), cache.path(), "bad.png", &ql).unwrap_err(), Reason::Corrupt);
+        assert_eq!(
+            read_at(root.path(), cache.path(), "bad.png", &ql).unwrap_err(),
+            Reason::Corrupt
+        );
         let opened = bytes::open_in(root.path(), "0", "bad.png").unwrap();
         let hash = key(&opened, &opened.file.metadata().unwrap(), 128).unwrap();
-        assert_eq!(cached(&cache.path().join("thumbs/v1"), &hash).unwrap().unwrap_err(), Reason::Corrupt);
-        assert_eq!(read_at(root.path(), cache.path(), "bad.png", &ql).unwrap_err(), Reason::Corrupt);
+        assert_eq!(
+            cached(&cache.path().join("thumbs/v1"), &hash)
+                .unwrap()
+                .unwrap_err(),
+            Reason::Corrupt
+        );
+        assert_eq!(
+            read_at(root.path(), cache.path(), "bad.png", &ql).unwrap_err(),
+            Reason::Corrupt
+        );
         assert_eq!(ql.calls.get(), 0);
     }
     #[test]
     fn a_changed_file_misses_the_cache() {
-        let root = TempDir::new(); let cache = TempDir::new(); let ql = fake(Ok(PNG.to_vec()));
+        let root = TempDir::new();
+        let cache = TempDir::new();
+        let ql = fake(Ok(PNG.to_vec()));
         fs::write(root.path().join("a.png"), &PNG[..40]).unwrap();
-        assert_eq!(read_at(root.path(), cache.path(), "a.png", &ql).unwrap_err(), Reason::Corrupt);
+        assert_eq!(
+            read_at(root.path(), cache.path(), "a.png", &ql).unwrap_err(),
+            Reason::Corrupt
+        );
         fs::write(root.path().join("a.png"), PNG).unwrap();
-        assert_eq!(read_at(root.path(), cache.path(), "a.png", &ql).unwrap().picture.width, 1);
+        assert_eq!(
+            read_at(root.path(), cache.path(), "a.png", &ql)
+                .unwrap()
+                .picture
+                .width,
+            1
+        );
     }
     #[test]
     fn a_fig_zip_preview_is_read_within_its_cap() {
-        let ql = fake(Err(Reason::NoPreview)); let cache = TempDir::new();
-        let preview = build(&testdocs::package(&[("thumbnail.png", PNG)]), "design.fig", 128, false, &ql, cache.path()).unwrap();
-        assert_eq!(preview.source, Source::Fig); assert_eq!((preview.picture.width, preview.picture.height), (1,1));
+        let ql = fake(Err(Reason::NoPreview));
+        let cache = TempDir::new();
+        let preview = build(
+            &testdocs::package(&[("thumbnail.png", PNG)]),
+            "design.fig",
+            128,
+            false,
+            &ql,
+            cache.path(),
+        )
+        .unwrap();
+        assert_eq!(preview.source, Source::Fig);
+        assert_eq!((preview.picture.width, preview.picture.height), (1, 1));
     }
     #[test]
     fn a_fig_entry_over_the_cap_is_too_large() {
-        let ql = fake(Err(Reason::NoPreview)); let cache = TempDir::new();
+        let ql = fake(Err(Reason::NoPreview));
+        let cache = TempDir::new();
         let bytes = testdocs::package(&[("thumbnail.png", &vec![0; PREVIEW_CAP as usize + 1])]);
-        assert_eq!(build(&bytes, "a.fig", 128, false, &ql, cache.path()).unwrap_err(), Reason::TooLarge);
+        assert_eq!(
+            build(&bytes, "a.fig", 128, false, &ql, cache.path()).unwrap_err(),
+            Reason::TooLarge
+        );
     }
     #[test]
     fn a_legacy_fig_reads_its_third_chunk() {
         let mut bytes = b"fig-kiwi\x01\0\0\0".to_vec();
-        for chunk in [b"schema".as_slice(), b"data".as_slice(), PNG] { bytes.extend((chunk.len() as u32).to_le_bytes()); bytes.extend(chunk); }
+        for chunk in [b"schema".as_slice(), b"data".as_slice(), PNG] {
+            bytes.extend((chunk.len() as u32).to_le_bytes());
+            bytes.extend(chunk);
+        }
         assert_eq!(legacy_fig(&bytes).unwrap(), Some(PNG));
-        bytes.pop(); assert_eq!(legacy_fig(&bytes), Err(Reason::Corrupt));
+        bytes.pop();
+        assert_eq!(legacy_fig(&bytes), Err(Reason::Corrupt));
     }
     fn psd(id: u16, jpeg: &[u8]) -> Vec<u8> {
         let mut data = Vec::new();
-        for value in [1_u32, 1, 1, 4, 4, jpeg.len() as u32] { data.extend(value.to_be_bytes()); }
-        data.extend([0,24,0,1]); data.extend(jpeg);
-        let mut resource = b"8BIM".to_vec(); resource.extend(id.to_be_bytes()); resource.extend([0,0]); resource.extend((data.len() as u32).to_be_bytes()); resource.extend(&data); if data.len()%2 == 1 { resource.push(0); }
-        let mut bytes = b"8BPS\0\x01".to_vec(); bytes.resize(26,0); bytes.extend(0_u32.to_be_bytes()); bytes.extend((resource.len() as u32).to_be_bytes()); bytes.extend(resource); bytes
+        for value in [1_u32, 1, 1, 4, 4, jpeg.len() as u32] {
+            data.extend(value.to_be_bytes());
+        }
+        data.extend([0, 24, 0, 1]);
+        data.extend(jpeg);
+        let mut resource = b"8BIM".to_vec();
+        resource.extend(id.to_be_bytes());
+        resource.extend([0, 0]);
+        resource.extend((data.len() as u32).to_be_bytes());
+        resource.extend(&data);
+        if data.len() % 2 == 1 {
+            resource.push(0);
+        }
+        let mut bytes = b"8BPS\0\x01".to_vec();
+        bytes.resize(26, 0);
+        bytes.extend(0_u32.to_be_bytes());
+        bytes.extend((resource.len() as u32).to_be_bytes());
+        bytes.extend(resource);
+        bytes
     }
     #[test]
     fn a_psd_1036_preview_is_read() {
-        let jpg = images::thumbnail(PNG,128,true).unwrap().bytes;
-        let bytes = psd(1036,&jpg); assert_eq!(psd_preview(&bytes).unwrap(), Some((jpg.as_slice(),false)));
-        assert_eq!(build(&bytes,"a.psd",128,false,&fake(Err(Reason::NoPreview)),Path::new("unused")).unwrap().source,Source::Psd);
+        let jpg = images::thumbnail(PNG, 128, true).unwrap().bytes;
+        let bytes = psd(1036, &jpg);
+        assert_eq!(psd_preview(&bytes).unwrap(), Some((jpg.as_slice(), false)));
+        assert_eq!(
+            build(
+                &bytes,
+                "a.psd",
+                128,
+                false,
+                &fake(Err(Reason::NoPreview)),
+                Path::new("unused")
+            )
+            .unwrap()
+            .source,
+            Source::Psd
+        );
     }
     #[test]
     fn a_psd_1033_preview_swaps_red_and_blue() {
-        let jpg = images::thumbnail(PNG,128,true).unwrap().bytes;
-        let old = psd(1033,&jpg); assert_eq!(psd_preview(&old).unwrap(),Some((jpg.as_slice(),true)));
-        let old = build(&old,"a.psd",128,false,&fake(Err(Reason::NoPreview)),Path::new("unused")).unwrap();
-        let new = build(&psd(1036,&jpg),"a.psd",128,false,&fake(Err(Reason::NoPreview)),Path::new("unused")).unwrap();
+        let jpg = images::thumbnail(PNG, 128, true).unwrap().bytes;
+        let old = psd(1033, &jpg);
+        assert_eq!(psd_preview(&old).unwrap(), Some((jpg.as_slice(), true)));
+        let old = build(
+            &old,
+            "a.psd",
+            128,
+            false,
+            &fake(Err(Reason::NoPreview)),
+            Path::new("unused"),
+        )
+        .unwrap();
+        let new = build(
+            &psd(1036, &jpg),
+            "a.psd",
+            128,
+            false,
+            &fake(Err(Reason::NoPreview)),
+            Path::new("unused"),
+        )
+        .unwrap();
         assert_ne!(old.picture.bytes, new.picture.bytes);
     }
     #[test]
     fn a_psd_with_a_lying_length_is_corrupt_not_a_panic() {
-        let mut bytes = psd(1036,&[255,216,255]); bytes[30..34].copy_from_slice(&u32::MAX.to_be_bytes());
-        assert_eq!(psd_preview(&bytes),Err(Reason::Corrupt));
-        for end in 0..bytes.len() { assert!(psd_preview(&bytes[..end]).is_err()); }
+        let mut bytes = psd(1036, &[255, 216, 255]);
+        bytes[30..34].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert_eq!(psd_preview(&bytes), Err(Reason::Corrupt));
+        for end in 0..bytes.len() {
+            assert!(psd_preview(&bytes[..end]).is_err());
+        }
     }
     #[test]
     fn quick_look_runs_only_for_listed_kinds() {
         let ql = fake(Ok(PNG.to_vec()));
-        for ext in QUICK_EXTS { assert!(build(b"plain",&format!("file.{ext}"),128,false,&ql,Path::new("unused")).is_ok()); }
-        assert_eq!(ql.calls.get(),QUICK_EXTS.len());
-        assert_eq!(build(b"plain","file.zip",128,false,&ql,Path::new("unused")).unwrap_err(),Reason::Unsupported);
-        assert_eq!(ql.calls.get(),QUICK_EXTS.len());
+        for ext in QUICK_EXTS {
+            assert!(build(
+                b"plain",
+                &format!("file.{ext}"),
+                128,
+                false,
+                &ql,
+                Path::new("unused")
+            )
+            .is_ok());
+        }
+        assert_eq!(ql.calls.get(), QUICK_EXTS.len());
+        assert_eq!(
+            build(b"plain", "file.zip", 128, false, &ql, Path::new("unused")).unwrap_err(),
+            Reason::Unsupported
+        );
+        assert_eq!(ql.calls.get(), QUICK_EXTS.len());
     }
     #[test]
     fn every_quick_look_extension_is_a_known_kind_that_may_open() {
-        for ext in QUICK_EXTS.iter().chain([&"psd"]) { let kind=kinds::lookup(&format!("x.{ext}")); assert_eq!(kind.ext,*ext); assert_ne!(kind.open,kinds::OpenPolicy::Deny); }
+        for ext in QUICK_EXTS.iter().chain([&"psd"]) {
+            let kind = kinds::lookup(&format!("x.{ext}"));
+            assert_eq!(kind.ext, *ext);
+            assert_ne!(kind.open, kinds::OpenPolicy::Deny);
+        }
     }
     #[test]
     fn deny_kinds_never_reach_quick_look() {
-        let ql=fake(Ok(PNG.to_vec()));
-        assert_eq!(build(b"%PDF-1.7","x.pdf",128,true,&ql,Path::new("unused")).unwrap_err(),Reason::Unsupported);
-        assert_eq!(ql.calls.get(),0);
+        let ql = fake(Ok(PNG.to_vec()));
+        assert_eq!(
+            build(b"%PDF-1.7", "x.pdf", 128, true, &ql, Path::new("unused")).unwrap_err(),
+            Reason::Unsupported
+        );
+        assert_eq!(ql.calls.get(), 0);
     }
     #[test]
     fn a_quick_look_timeout_is_timed_out_and_not_cached() {
-        let root=TempDir::new(); let cache=TempDir::new(); let ql=fake(Err(Reason::TimedOut));
-        fs::write(root.path().join("a.pdf"),b"%PDF-1.7").unwrap();
-        for _ in 0..2 { assert_eq!(read_at(root.path(),cache.path(),"a.pdf",&ql).unwrap_err(),Reason::TimedOut); }
-        assert_eq!(ql.calls.get(),2);
-        assert!(!cache.path().join("thumbs/v1").exists() || fs::read_dir(cache.path().join("thumbs/v1")).unwrap().next().is_none());
+        let root = TempDir::new();
+        let cache = TempDir::new();
+        let ql = fake(Err(Reason::TimedOut));
+        fs::write(root.path().join("a.pdf"), b"%PDF-1.7").unwrap();
+        for _ in 0..2 {
+            assert_eq!(
+                read_at(root.path(), cache.path(), "a.pdf", &ql).unwrap_err(),
+                Reason::TimedOut
+            );
+        }
+        assert_eq!(ql.calls.get(), 2);
+        assert!(
+            !cache.path().join("thumbs/v1").exists()
+                || fs::read_dir(cache.path().join("thumbs/v1"))
+                    .unwrap()
+                    .next()
+                    .is_none()
+        );
     }
     #[test]
     fn a_path_outside_the_root_is_not_found() {
-        let root=TempDir::new(); let cache=TempDir::new();
-        assert_eq!(read_at(root.path(),cache.path(),"../outside.png",&fake(Ok(PNG.to_vec()))).unwrap_err(),Reason::NotFound);
+        let root = TempDir::new();
+        let cache = TempDir::new();
+        assert_eq!(
+            read_at(
+                root.path(),
+                cache.path(),
+                "../outside.png",
+                &fake(Ok(PNG.to_vec()))
+            )
+            .unwrap_err(),
+            Reason::NotFound
+        );
     }
     #[test]
     fn the_cache_prunes_oldest_past_its_cap() {
-        let root=TempDir::new();
-        for (name,seconds) in [("old.png",1),("new.png",2)] {
-            let file=fs::File::create(root.path().join(name)).unwrap(); file.set_len(10).unwrap();
-            file.set_times(fs::FileTimes::new().set_modified(UNIX_EPOCH+std::time::Duration::from_secs(seconds))).unwrap();
+        let root = TempDir::new();
+        for (name, seconds) in [("old.png", 1), ("new.png", 2)] {
+            let file = fs::File::create(root.path().join(name)).unwrap();
+            file.set_len(10).unwrap();
+            file.set_times(
+                fs::FileTimes::new()
+                    .set_modified(UNIX_EPOCH + std::time::Duration::from_secs(seconds)),
+            )
+            .unwrap();
         }
-        prune(root.path(),10);
-        assert!(!root.path().join("old.png").exists()); assert!(root.path().join("new.png").exists());
+        prune(root.path(), 10);
+        assert!(!root.path().join("old.png").exists());
+        assert!(root.path().join("new.png").exists());
     }
     #[test]
-    #[cfg(target_os="macos")]
+    #[cfg(unix)]
+    fn stale_quick_look_work_is_removed_without_following_links() {
+        use std::os::unix::fs::symlink;
+        use std::time::{Duration, SystemTime};
+        let work = TempDir::new();
+        let outside = TempDir::new();
+        fs::write(outside.path().join("keep"), b"original").unwrap();
+        let old = work.path().join("old-job");
+        let fresh = work.path().join("fresh-job");
+        fs::create_dir(&old).unwrap();
+        fs::create_dir(&fresh).unwrap();
+        fs::write(old.join("preview.docx"), b"private copy").unwrap();
+        symlink(outside.path(), old.join("nested-link")).unwrap();
+        symlink(outside.path(), work.path().join("job-link")).unwrap();
+        let now = SystemTime::now() + Duration::from_secs(120);
+        fs::File::open(&fresh)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(now))
+            .unwrap();
+        prune_work(work.path(), now);
+        assert!(!old.exists());
+        assert!(fs::symlink_metadata(work.path().join("job-link")).is_err());
+        assert!(fresh.is_dir());
+        assert_eq!(fs::read(outside.path().join("keep")).unwrap(), b"original");
+    }
+    #[test]
+    #[cfg(target_os = "macos")]
     #[ignore = "opt-in native Quick Look proof against a generated file, outside the vault"]
     fn real_quick_look_makes_a_png() {
-        let cache=TempDir::new(); let data=testdocs::docx();
-        let result=NativeQuickLook.run(&data,"docx",128,cache.path()).unwrap();
+        let cache = TempDir::new();
+        // This fixture must be an actual OPC document: the extraction fixtures
+        // deliberately use abbreviated namespaces that Quick Look cannot read.
+        let data = testdocs::package(&[
+            ("[Content_Types].xml", br#"<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#),
+            ("_rels/.rels", br#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>"#),
+            ("word/document.xml", br#"<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Cerebro preview proof</w:t></w:r></w:p><w:sectPr><w:pgSz w:w="12240" w:h="15840"/></w:sectPr></w:body></w:document>"#),
+        ]);
+        let result = NativeQuickLook
+            .run(&data, "docx", 128, cache.path())
+            .unwrap();
         assert!(result.starts_with(b"\x89PNG\r\n\x1a\n"));
     }
 }
@@ -647,6 +857,37 @@ trait QuickLook {
     fn run(&self, bytes: &[u8], ext: &str, size: u32, cache: &Path) -> Result<Vec<u8>, Reason>;
 }
 struct NativeQuickLook;
+#[cfg(any(test, target_os = "macos"))]
+fn prune_work(parent: &Path, now: std::time::SystemTime) {
+    // A worker is killed after five seconds. Leave a full minute for its
+    // ordinary cleanup; only crashed jobs survive that window. Both metadata
+    // and removal leave symlinks' targets alone, including nested links.
+    if !fs::symlink_metadata(parent).is_ok_and(|meta| meta.is_dir()) {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(parent) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(meta) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if meta
+            .modified()
+            .ok()
+            .and_then(|modified| now.duration_since(modified).ok())
+            .is_none_or(|age| age.as_secs() < 60)
+        {
+            continue;
+        }
+        if meta.is_dir() {
+            let _ = fs::remove_dir_all(path);
+        } else if meta.is_symlink() {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
 fn quick_picture(
     bytes: &[u8],
     ext: &str,
@@ -677,6 +918,7 @@ impl QuickLook for NativeQuickLook {
         use std::os::unix::fs::DirBuilderExt;
         let parent = cache.join("thumbs/work");
         fs::create_dir_all(&parent).map_err(|_| Reason::NoPreview)?;
+        prune_work(&parent, std::time::SystemTime::now());
         let path = parent.join(crate::ledger::new_run_id());
         fs::DirBuilder::new()
             .mode(0o700)

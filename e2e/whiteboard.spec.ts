@@ -6,13 +6,14 @@ declare global {
   }
 }
 
-import { boot } from './boot';
+import { boot, showDatabases } from './boot';
 
 /** Open the Delivery schedule view of the Work item database. */
 async function openDeliverySchedule(page: Page): Promise<void> {
   // M47.5: "Delivery schedule" was a `*.list.yml` in the Delivery collection
   // and is a saved VIEW of the Work item database now. Same view, same
   // presentation, reached through the database that owns it.
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
   const tab = page.getByTestId('view-tabs').getByRole('tab', { name: 'Delivery schedule' });
   await expect(tab).toBeVisible();

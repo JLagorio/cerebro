@@ -6,6 +6,8 @@ import * as ipc from '@/lib/ipc';
 import { emptyMockVault, resetMockFs } from '@/lib/mockIpc';
 import type { Entry } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
+import { useUiStore } from '@/stores/uiStore';
+import { useLauncherStore } from '@/stores/launcherStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { greetingForHour, HomePage } from './HomePage';
 
@@ -71,6 +73,12 @@ describe('greetingForHour', () => {
 
 describe('HomePage', () => {
   beforeEach(() => {
+    useUiStore.setState({
+      aiPanelOpen: false,
+      aiPanelPresentation: 'panel',
+      quickOpenVisible: false,
+    });
+    useLauncherStore.setState({ flow: null });
     useVaultStore.setState({
       vaultPath: '/demo-vault',
       entriesVault: '/demo-vault',
@@ -122,5 +130,25 @@ describe('HomePage', () => {
     });
     expect(read).not.toHaveBeenCalled();
     expect(screen.queryByTestId('starter-offer')).toBeNull();
+  });
+
+  it('opens the assistant canvas and the existing create and search flows', async () => {
+    await act(async () => {
+      render(<HomePage />);
+    });
+    fireEvent.click(screen.getByRole('button', { name: /What would you like to work on/ }));
+    expect(useUiStore.getState()).toMatchObject({
+      aiPanelOpen: true,
+      aiPanelPresentation: 'canvas',
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'New page' }));
+    expect(useLauncherStore.getState().flow).toMatchObject({ id: 'page', vault: '/demo-vault' });
+    fireEvent.click(screen.getByRole('button', { name: 'New whiteboard' }));
+    expect(useLauncherStore.getState().flow).toMatchObject({
+      id: 'whiteboard',
+      vault: '/demo-vault',
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Find something' }));
+    expect(useUiStore.getState().quickOpenVisible).toBe(true);
   });
 });

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, openDestination } from './boot';
 
 /**
  * Studio (M40): a prototype is a folder of pages under studio/, built with
@@ -12,7 +12,7 @@ test('studio: create a prototype, preview it live, hand the build to the assista
 }) => {
   await boot(page);
 
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Studio' }).click();
+  await openDestination(page, 'Studio');
   await expect(page.getByTestId('studio-page')).toBeVisible();
   await expect(page.getByText('Nothing on the bench')).toBeVisible();
 
@@ -38,8 +38,8 @@ test('studio: create a prototype, preview it live, hand the build to the assista
   });
   // The distiller is off in specs, so nudge the scanner the way the watcher
   // would: open the page fresh via Back/forward through the nav.
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home' }).click();
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Studio' }).click();
+  await openDestination(page, 'Home');
+  await openDestination(page, 'Studio');
   await page.getByTestId('studio-project').filter({ hasText: 'Pricing page' }).click();
   await expect(page.getByTestId('studio-preview')).toContainText('Three tiers, annual default.');
 

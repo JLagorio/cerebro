@@ -38,7 +38,14 @@ export default defineConfig({
     // another branch's 24 test files and running them against THIS tree —
     // hundreds of failures owned by nobody, and a pre-push hook that could
     // only be satisfied by deleting the worktree or bypassing the hook.
-    exclude: [...configDefaults.exclude, 'docs/**', '**/tolaria-main/**', 'e2e/**', '.claude/**'],
+    exclude: [
+      ...configDefaults.exclude,
+      'docs/**',
+      '**/tolaria-main/**',
+      'e2e/**',
+      '.claude/**',
+      'src-tauri/.bundle-resources/**',
+    ],
     // setup.ts grants waitFor 5s for shared CI runners, but vitest's default
     // testTimeout is ALSO 5s — so a slow-but-passing waitFor loses the race to
     // the test-level clock (MarkdownEditor's debounce test died exactly this
@@ -62,6 +69,12 @@ export default defineConfig({
         '**/tolaria-main/**',
         'e2e/**',
         '.claude/**',
+        // Cargo embeds copies of the built web bundle under target/. They
+        // are generated output, already outside the lint/format source set;
+        // counting them here charges the same app a second time at zero hits.
+        'src-tauri/target/**',
+        'src-tauri/.bundle-resources/**',
+        'scripts/sheet-values/target/**',
       ],
       // RATCHET floors (M14.4): set a hair under measured reality
       // (49.45 / 59.15 / 81.8 on 2026-08-01) so they can only move UP.

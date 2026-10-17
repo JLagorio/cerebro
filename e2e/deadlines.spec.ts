@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, showDatabases, openDestination } from './boot';
 
 test('declared deadlines place open work before databases and the switch removes that capability', async ({
   page,
@@ -24,10 +24,7 @@ test('declared deadlines place open work before databases and the switch removes
     seed();
   });
   await boot(page);
-  await page
-    .getByTestId('nav-surfaces')
-    .getByRole('button', { name: /^My work/ })
-    .click();
+  await openDestination(page, 'My work');
   const overdue = page.locator('[data-testid="mywork-section"][data-bucket="overdue"]');
   await expect(overdue.getByTestId('mywork-row')).toHaveCount(7);
   const coaching = overdue
@@ -47,6 +44,8 @@ test('declared deadlines place open work before databases and the switch removes
   await expect(page.getByTestId('detail-title')).toHaveValue('Blank-state coaching copy');
   await page.keyboard.press('Escape');
 
+  await showDatabases(page);
+
   await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
   await expect(
     page.locator('[data-testid="board-column"][data-group-key="rel:overdue"]'),
@@ -62,10 +61,7 @@ test('declared deadlines place open work before databases and the switch removes
   await page.getByTestId('property-deadline').getByText('Deadline', { exact: true }).click();
   await expect.poll(() => readMockFile(page, 'types/work-item.md')).not.toMatch(/\ndeadline:/);
   await page.keyboard.press('Escape');
-  await page
-    .getByTestId('nav-surfaces')
-    .getByRole('button', { name: /^My work/ })
-    .click();
+  await openDestination(page, 'My work');
   await expect(page.locator('[data-testid="mywork-section"][data-bucket="overdue"]')).toHaveCount(
     0,
   );

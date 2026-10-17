@@ -1,6 +1,13 @@
 import { createHash } from 'node:crypto';
 import { expect, test } from '@playwright/test';
-import { boot, readMockFile, seedBeforeBoot, seedFileBeforeBoot } from './boot';
+import {
+  chooseSettingsSection,
+  boot,
+  readMockFile,
+  seedBeforeBoot,
+  seedFileBeforeBoot,
+  openDestination,
+} from './boot';
 const vault = '/demo-vault';
 const token = (date: string) => `📅 ${date} ((remind:0d))`;
 const chip = (date: string) =>
@@ -62,7 +69,7 @@ test('reminders missed while closed are claimed once alongside a due reminder', 
     )
     .toEqual(['fired', 'missed', 'missed']);
   await page.reload();
-  await expect(page.getByTestId('sidebar-type').first()).toBeVisible();
+  await expect(page.getByTestId('app-rail')).toBeVisible();
   await expect(page.getByText(/^⏰/)).toHaveCount(0);
 });
 test('a wiped webview keeps a durable claim quiet while an unclaimed chip fires', async ({
@@ -108,7 +115,8 @@ test('browser permission is unknown, with no request on opening Settings', async
   page,
 }, testInfo) => {
   await boot(page);
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await openDestination(page, 'Settings');
+  await chooseSettingsSection(page, 'Reminders');
   const permission = page.getByTestId('notification-permission');
   await expect(permission).toHaveAttribute('data-state', 'unknown');
   await expect(permission).toHaveText(

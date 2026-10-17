@@ -90,3 +90,24 @@ test('two words apart find the project by name', async ({ page }) => {
     results(page).filter({ hasText: 'Phoenix warehouse rollout' }).first(),
   ).toContainText('Project');
 });
+
+test('moving the pointer deliberately can select Ask before Enter', async ({ page }) => {
+  await boot(page);
+  await openPalette(page);
+  await page.getByTestId('quick-open-input').fill('settings');
+  const ask = page.getByTestId('quick-open-ask');
+  await expect(results(page).filter({ hasText: 'Settings' }).first()).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  await ask.hover();
+  await expect(ask).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('quick-open-input')).toBeHidden();
+  await expect(
+    page
+      .getByTestId('ai-panel')
+      .getByTestId('chat-message')
+      .filter({ hasText: /^settings$/ }),
+  ).toHaveCount(1);
+});

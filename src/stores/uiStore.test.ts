@@ -8,6 +8,7 @@ function reset() {
   useUiStore.setState({
     detailPath: null,
     aiPanelOpen: false,
+    aiPanelPresentation: 'panel',
     quickOpenVisible: false,
     toasts: [],
   });
@@ -21,6 +22,36 @@ describe('uiStore', () => {
     expect(useUiStore.getState().detailPath).toBe('items/fld-7.md');
     useUiStore.getState().closeDetail();
     expect(useUiStore.getState().detailPath).toBeNull();
+  });
+
+  it('expands and docks the same assistant without losing the page or conversation request', () => {
+    const ui = useUiStore.getState();
+    ui.openDetail('notes/context.md');
+    ui.showConversation('existing-thread');
+    ui.openAssistantCanvas();
+    expect(useUiStore.getState()).toMatchObject({
+      aiPanelOpen: true,
+      aiPanelPresentation: 'canvas',
+      detailPath: 'notes/context.md',
+      panelConversation: 'existing-thread',
+    });
+    ui.setAiPanelPresentation('panel');
+    expect(useUiStore.getState()).toMatchObject({
+      aiPanelOpen: true,
+      aiPanelPresentation: 'panel',
+      panelConversation: 'existing-thread',
+    });
+    ui.openAssistantCanvas();
+    ui.openDetail('notes/referenced.md');
+    expect(useUiStore.getState()).toMatchObject({
+      aiPanelOpen: true,
+      aiPanelPresentation: 'panel',
+      detailPath: 'notes/referenced.md',
+    });
+    ui.openAssistantCanvas();
+    ui.setAiPanelOpen(false);
+    ui.setAiPanelOpen(true);
+    expect(useUiStore.getState().aiPanelPresentation).toBe('panel');
   });
 
   // M15: one right-hand slot. As independent flags they stacked, and two

@@ -47,7 +47,9 @@
       "mcp__cerebro__set_fields": "queue",
       "mcp__cerebro__append_to_note": "queue",
       "mcp__cerebro__edit_note": "queue",
-      "mcp__cerebro__edit_sheet": "queue"
+      "mcp__cerebro__edit_sheet": "queue",
+      "mcp__cerebro__create_canvas": "queue",
+      "mcp__cerebro__edit_canvas": "queue"
     }
   }
 }

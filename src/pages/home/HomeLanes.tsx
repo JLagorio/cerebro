@@ -75,6 +75,7 @@ export function HomeLanes({ only }: { only?: HomeLaneId }) {
         }}
         role="listbox"
         aria-label="Home lanes"
+        className="cb-home-lanes"
       >
         {HOME_LANES.map(({ id }) => {
           if (only !== undefined && only !== id) return null;

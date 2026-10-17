@@ -2,7 +2,7 @@ import * as ipc from '@/lib/ipc';
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useState } from 'react';
+import { StrictMode, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildSchema } from '@/engine/schema';
 import type { Entry, Presentation, Schema } from '@/engine/types';
@@ -235,6 +235,57 @@ describe('WhiteboardView', () => {
     );
     const seed = fs().get('delivery/whiteboards/launch-map.canvas')!;
     expect(JSON.parse(seed)).toMatchObject({ nodes: [], edges: [] });
+  });
+
+  it('StrictMode creates one file and persists its pointer once after effect replay', async () => {
+    const change = vi.fn();
+    render(
+      <StrictMode>
+        <WhiteboardView
+          entries={entries}
+          presentation={base}
+          schema={schema}
+          host={host}
+          onPresentationChange={change}
+        />
+      </StrictMode>,
+    );
+    await waitFor(() =>
+      expect(change).toHaveBeenCalledExactlyOnceWith({
+        ...base,
+        whiteboard: { file: 'delivery/whiteboards/map.canvas' },
+      }),
+    );
+    expect([...fs().keys()].filter((path) => path.endsWith('.canvas'))).toEqual([
+      'delivery/whiteboards/map.canvas',
+    ]);
+  });
+
+  it('an actual unmount retires an unfinished pointer publication', async () => {
+    let settle!: (value: ipc.CanvasResult<{ path: string; hash: string | null }>) => void;
+    const create = vi.spyOn(ipc, 'createCanvasFile').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          settle = resolve;
+        }),
+    );
+    const change = vi.fn();
+    try {
+      const rendered = render(
+        <WhiteboardView
+          entries={entries}
+          presentation={base}
+          schema={schema}
+          host={host}
+          onPresentationChange={change}
+        />,
+      );
+      rendered.unmount();
+      await act(async () => settle({ ok: true, path: 'old.canvas', hash: 'saved' }));
+      expect(change).not.toHaveBeenCalled();
+    } finally {
+      create.mockRestore();
+    }
   });
 
   it('a root-level list creates under whiteboards/ with no leading slash', async () => {

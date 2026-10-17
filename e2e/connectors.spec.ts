@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, seedBeforeBoot } from './boot';
+import { chooseSettingsSection, boot, seedBeforeBoot, openDestination } from './boot';
 
 /**
  * Connector status in Settings (M54.11), and the presets (M69.1). The
@@ -11,7 +11,8 @@ import { boot, seedBeforeBoot } from './boot';
 const GMAIL_URL = 'https://gmail.example.test/mcp';
 
 async function openConnectors(page: Page) {
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Settings' }).click();
+  await openDestination(page, 'Settings');
+  await chooseSettingsSection(page, 'Assistant');
   const toggle = page.getByRole('switch', { name: 'Connectors', exact: true });
   if (!(await toggle.isChecked())) {
     // The checkbox itself is 0×0 by design; the label is what a user clicks.

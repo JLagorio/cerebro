@@ -15,7 +15,7 @@ export function EventRow({
   children?: ReactNode;
 }) {
   return (
-    <div className="flex items-start gap-2 py-1">
+    <div className="cb-home-event flex items-start gap-2 py-1">
       <button
         type="button"
         disabled={onOpen === undefined}

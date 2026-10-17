@@ -31,7 +31,7 @@ export function KeyboardShortcutsSettings() {
                 <span className="flex items-center gap-2 text-n-700">
                   {row.label}
                   {row.desktopOnly && (
-                    <span className="rounded bg-n-100 px-1.5 py-0.5 text-2xs text-n-500">
+                    <span className="rounded-sm bg-n-100 px-1.5 py-0.5 text-2xs text-n-500">
                       Desktop app
                     </span>
                   )}

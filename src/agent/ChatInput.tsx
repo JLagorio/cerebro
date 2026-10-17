@@ -1,5 +1,5 @@
 import { formatWikilink, linkTargetOf } from '@/engine/wikilink';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { useEscapeLayer } from '@/components/ui/Popover';
 import { rankNames } from '@/lib/nameRank';
@@ -86,6 +86,8 @@ export function ChatInput({
   autoFocus = false,
   onAttach,
   attached,
+  inputRef,
+  appearance = 'standalone',
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -99,13 +101,16 @@ export function ChatInput({
   onAttach?: (chip: ContextChip) => void;
   /** Chip ids already attached, so `@` does not offer them again. */
   attached?: readonly string[];
+  inputRef?: RefObject<HTMLTextAreaElement | null>;
+  appearance?: 'standalone' | 'composer';
 }) {
   const entries = useVaultStore((s) => s.entries);
   const views = useVaultStore((s) => s.views);
   const collections = useVaultStore((s) => s.collections);
   const schema = useSchema();
   const recency = useRecency();
-  const ref = useRef<HTMLTextAreaElement>(null);
+  const ownRef = useRef<HTMLTextAreaElement>(null);
+  const ref = inputRef ?? ownRef;
   const menuRef = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState(0);
   // Escape dismisses the MENU, not the draft (M15). The draft is never
@@ -115,19 +120,32 @@ export function ChatInput({
 
   useEffect(() => {
     if (autoFocus) ref.current?.focus();
-  }, [autoFocus]);
+  }, [autoFocus, ref]);
+
+  useLayoutEffect(() => {
+    const input = ref.current;
+    if (appearance !== 'composer' || input === null) return;
+    input.style.height = 'auto';
+    input.style.height = `${input.scrollHeight}px`;
+  }, [value, appearance, ref]);
 
   // The open `[[` immediately before the caret, if any. Anchored to the end
   // so a completed link earlier in the message does not reopen the menu.
+  // A programmatic append can render before React updates the focused DOM
+  // value. Its old caret is not a position in the new draft. Native typing
+  // already changed the DOM value, so it keeps its real in-text caret.
+  const caret =
+    ref.current !== null && ref.current === document.activeElement && ref.current.value === value
+      ? ref.current.selectionStart
+      : value.length;
   const query = useMemo(() => {
-    const caret = ref.current?.selectionStart ?? value.length;
     const before = value.slice(0, caret);
     const open = before.lastIndexOf('[[');
     if (open === -1) return null;
     const fragment = before.slice(open + 2);
     if (fragment.includes(']') || fragment.includes('\n')) return null;
     return { fragment, start: open };
-  }, [value]);
+  }, [value, caret]);
 
   // M13.1: `/` at the start of the message completes against the vault's
   // skills. The menu lives only while the WHOLE draft is the slash token —
@@ -145,7 +163,6 @@ export function ChatInput({
   // behind, so it does not need a closing token — the fragment ends at the
   // first space.
   const at = useMemo(() => {
-    const caret = ref.current?.selectionStart ?? value.length;
     const before = value.slice(0, caret);
     const open = before.lastIndexOf('@');
     if (open === -1) return null;
@@ -154,7 +171,7 @@ export function ChatInput({
     const fragment = before.slice(open + 1);
     if (/[\s\n]/.test(fragment)) return null;
     return { fragment: fragment.toLowerCase(), start: open, end: caret };
-  }, [value]);
+  }, [value, caret]);
 
   const complete = (entry: Entry) => {
     if (query === null) return;
@@ -368,8 +385,37 @@ export function ChatInput({
     if (active !== 0) setActive(0);
   }
 
+  const menuOpen = menu !== null;
+  useLayoutEffect(() => {
+    const anchor = ref.current?.parentElement;
+    const surface = menuRef.current;
+    const boundary = anchor?.closest('.cb-chat-body');
+    if (appearance !== 'composer' || !menuOpen || !anchor || !surface || !boundary) return;
+    // The empty conversation centers this input. Its completion menu must
+    // fit above that new position rather than disappear behind the header.
+    const fit = () => {
+      const frame = boundary.getBoundingClientRect();
+      if (frame.height === 0) return;
+      const available = anchor.getBoundingClientRect().top - frame.top - 8;
+      surface.style.maxHeight = `${Math.max(0, Math.min(240, available))}px`;
+    };
+    fit();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(fit);
+    observer?.observe(anchor);
+    observer?.observe(boundary);
+    const composer = anchor.closest('.cb-chat-composer');
+    if (composer) observer?.observe(composer);
+    boundary.addEventListener('scroll', fit, { passive: true });
+    window.addEventListener('resize', fit);
+    return () => {
+      observer?.disconnect();
+      boundary.removeEventListener('scroll', fit);
+      window.removeEventListener('resize', fit);
+    };
+  }, [appearance, menuOpen, ref]);
+
   return (
-    <div className="relative">
+    <div className={`relative${appearance === 'composer' ? ' cb-chat-input' : ''}`}>
       {menu !== null && (
         <MenuLayer
           // Dismiss the menu and NOTHING else. This used to append `]]` to the
@@ -451,7 +497,11 @@ export function ChatInput({
             onSubmit();
           }
         }}
-        className="w-full resize-none rounded-lg border border-n-200 bg-n-0 px-2.5 py-2 text-sm leading-[18px] text-n-900 outline-none placeholder:text-n-400 focus-visible:border-cortex-400"
+        className={
+          appearance === 'composer'
+            ? 'cb-chat-textarea'
+            : 'w-full resize-none rounded-lg border border-n-200 bg-n-0 px-2.5 py-2 text-sm leading-[18px] text-n-900 outline-none placeholder:text-n-400 focus-visible:border-cortex-400'
+        }
       />
     </div>
   );

@@ -101,11 +101,9 @@ describe('bulk actions', () => {
 });
 
 it('bulk Set files each row with inherited agents in that same patch and Undo removes both', async () => {
-  await useVaultStore
-    .getState()
-    .patchFrontmatter('records/projects/guided-onboarding-ga.md', {
-      agents: ['[[release-scout]]'],
-    });
+  await useVaultStore.getState().patchFrontmatter('records/projects/guided-onboarding-ga.md', {
+    agents: ['[[release-scout]]'],
+  });
   const selected = useVaultStore
     .getState()
     .entries.filter(

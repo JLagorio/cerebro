@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Icon } from '@/components/ui/Icon';
 import { addRecipes, missingRecipes } from '@/lib/recipes';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -36,12 +37,19 @@ export function RecipesOffer() {
   if (!missing.length) return null;
   return (
     <section
-      className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-n-200 bg-n-50 p-4"
+      className="mb-5 flex flex-wrap items-center gap-4 rounded-xl bg-n-50 px-5 py-4"
       data-testid="recipes-offer"
     >
-      <p className="m-0 flex-1 text-sm text-n-600">
-        Add {missing.map((recipe) => recipe.title).join(' and ')} as editable, read-only recipes.
-      </p>
+      <Icon name="sparkles" size={20} color="var(--text-ai)" className="flex-none" />
+      <div className="min-w-0 flex-1 basis-64">
+        <p className="m-0 mb-1 text-sm font-medium text-n-800">A few useful starting points</p>
+        <p className="m-0 text-xs leading-relaxed text-n-600">
+          Add {missing.map((recipe) => recipe.title).join(', ')} as editable recipes. They only read
+          your vault.
+          {missing.some((recipe) => recipe.slug === 'draft-reply') &&
+            ' Draft reply leaves a draft in Gmail for you to send.'}
+        </p>
+      </div>
       <Button size="sm" disabled={busy} onClick={() => void add()}>
         {missing.length === 1 ? 'Add recipe' : 'Add recipes'}
       </Button>

@@ -15,6 +15,7 @@ import { UnknownViewer } from './UnknownViewer';
 
 const ipc = vi.hoisted(() => ({
   fileUrl: vi.fn(),
+  fileThumbnail: vi.fn(),
   desktopFileActions: vi.fn(),
   openFileOutside: vi.fn(),
   revealFile: vi.fn(),
@@ -41,6 +42,7 @@ const probe: FileProbe = {
 beforeEach(() => {
   vi.resetAllMocks();
   ipc.fileUrl.mockResolvedValue('data:image/png;base64,AQI=');
+  ipc.fileThumbnail.mockResolvedValue({ state: 'none', reason: 'unsupported' });
   ipc.desktopFileActions.mockReturnValue(false);
   useUiStore.setState({ toasts: [] });
 });
@@ -207,4 +209,20 @@ describe('desktop file actions', () => {
     expect(useUiStore.getState().toasts).toHaveLength(count);
     expect(ipc.saveFileCopy).toHaveBeenCalledWith('r', 'logo.png');
   });
+});
+
+it('an unknown viewer displays the stored preview without claiming it is unavailable', async () => {
+  ipc.fileThumbnail.mockResolvedValue({
+    state: 'ready',
+    dataUrl: 'data:image/png;base64,AQI=',
+    width: 1,
+    height: 1,
+    source: 'psd',
+  });
+  render(<UnknownViewer rootId="0" path="art.psd" probe={probe} />);
+  expect(await screen.findByText('Preview stored in the file')).toBeTruthy();
+  expect(screen.getByRole('img', { name: 'art.psd' }).getAttribute('src')).toContain(
+    'data:image/png',
+  );
+  expect(screen.queryByText('No preview is available for this kind of file.')).toBeNull();
 });

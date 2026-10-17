@@ -160,7 +160,8 @@ describe('TranscriptRows', () => {
     const [unknown, connector] = screen.getAllByTestId('action-card');
     expect(unknown.getAttribute('data-renderer')).toBe('step');
     expect(unknown.textContent).toContain('SomethingNew');
-    expect(connector.textContent).toContain('gmail · search threads');
+    expect(connector.textContent).toContain('search threads');
+    expect(within(connector).getByTestId('action-server').textContent).toBe('gmail');
   });
 
   it('keeps action-card, data-tool and data-write on every single row', () => {

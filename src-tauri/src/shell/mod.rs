@@ -113,7 +113,7 @@ mod tests {
     fn the_csp_names_each_source_it_allows() {
         let config: serde_json::Value =
             serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
-        assert_eq!(config["app"]["security"]["csp"].as_str(), Some("default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data: cerebro-file:; media-src 'self' cerebro-file:; font-src 'self'"));
+        assert_eq!(config["app"]["security"]["csp"].as_str(), Some("default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data: cerebro-file: https:; media-src 'self' cerebro-file:; font-src 'self'"));
     }
 
     /// The shipped `tauri.conf.json`, parsed by tauri's own `Config`. Its

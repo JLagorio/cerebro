@@ -1,3 +1,4 @@
+import { usePageNavigationControls } from '@/app/PageNavigation';
 import { Icon } from '@/components/ui/Icon';
 import type { OpenTab } from '@/engine/editorGroups';
 import { useRootsStore } from '@/stores/rootsStore';
@@ -14,6 +15,7 @@ import { lookFor } from './fileIcons';
  * honestly offer for a folder it cannot open in a pane.
  */
 export function Breadcrumb({ tab }: { tab: OpenTab }) {
+  const navigation = usePageNavigationControls('workspace');
   const roots = useRootsStore((s) => s.roots);
   const reveal = useRootsStore((s) => s.reveal);
   const fileIcons = useUiStore((s) => s.workspaceFileIcons);
@@ -37,7 +39,10 @@ export function Breadcrumb({ tab }: { tab: OpenTab }) {
       <button
         type="button"
         data-testid="crumb-root"
-        onClick={() => void reveal(tab.rootId, '')}
+        onClick={(event) => {
+          navigation?.show(event.currentTarget);
+          void reveal(tab.rootId, '');
+        }}
         className="flex-none border-0 bg-transparent p-0 text-2xs text-n-500 hover:text-n-800"
       >
         {rootLabel}
@@ -50,7 +55,10 @@ export function Breadcrumb({ tab }: { tab: OpenTab }) {
             data-testid="crumb-dir"
             // Reveal takes a FILE path and expands everything above it, so a
             // directory is revealed by naming something notional inside it.
-            onClick={() => void reveal(tab.rootId, `${dirPath(i)}/.`)}
+            onClick={(event) => {
+              navigation?.show(event.currentTarget);
+              void reveal(tab.rootId, `${dirPath(i)}/.`);
+            }}
             className="border-0 bg-transparent p-0 text-2xs text-n-500 hover:text-n-800"
           >
             {segment}

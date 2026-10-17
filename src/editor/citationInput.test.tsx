@@ -242,6 +242,7 @@ describe('pasting a citation', () => {
 
   const clipboard = (data: Record<string, string>) => ({
     types: Object.keys(data),
+    files: [],
     getData: (type: string) => data[type] ?? '',
   });
 
@@ -265,7 +266,7 @@ describe('pasting a citation', () => {
 
   it('pastes text without a marker, and every other format, the way BlockNote does', async () => {
     const editor = await open('Body.\n');
-    const pasteMarkdown = vi.spyOn(editor, 'pasteMarkdown');
+    const pasteHTML = vi.spyOn(editor, 'pasteHTML');
     const route = (data: Record<string, string>) => {
       const defaultPasteHandler = vi.fn(() => true);
       const event = { clipboardData: clipboard(data) } as unknown as ClipboardEvent;
@@ -278,9 +279,11 @@ describe('pasting a citation', () => {
     expect(route({ 'blocknote/html': '<p>x</p>', 'text/plain': PASTED })).toBe(1);
     expect(route({ 'text/html': '<p>x</p>', 'text/plain': PASTED })).toBe(1);
     expect(route({ 'text/plain': 'No marker here.' })).toBe(1);
-    expect(pasteMarkdown).not.toHaveBeenCalled();
+    expect(pasteHTML).not.toHaveBeenCalled();
     expect(route({ 'text/plain': PASTED })).toBe(0);
-    expect(pasteMarkdown).toHaveBeenCalledWith('Pasted claim.\\[^pp]\n\n\\[^pp]: Pasted source');
+    expect(pasteHTML).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(editor.document)).toContain('"type":"citation"');
+    expect(await saved(editor)).toContain('Pasted claim.[^pp]');
   });
 
   it('pastes into a code block as the code block takes it', async () => {

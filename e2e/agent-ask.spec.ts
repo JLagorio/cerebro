@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, openAssistantPanel } from './boot';
 
 /**
  * A run can stop and wait for the person (M57.1), against the browser's ask
@@ -19,7 +19,7 @@ async function openPanel(page: Page) {
   await page.evaluate(() => {
     (window as unknown as { __cerebroMockAsk?: string[] }).__cerebroMockAsk = ['append_to_note'];
   });
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   const panel = page.getByTestId('ai-panel');
   await expect(panel).toBeVisible();
   return panel;

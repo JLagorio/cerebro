@@ -362,7 +362,17 @@ it('keeps mail out of a run and a checkpoint while preserving its page', async (
   files.set('sources/mail/one.md', '# Private\n');
   const stamp = { actor: 'claude-code', runId: 'mail-only' };
   beginMockRun(stamp.runId, stamp.actor);
-  await agentAppend('/v', 'sources/mail/one.md', 'Seen.', undefined, stamp);
+  // Seed the native cache door's outcome; ordinary agent note doors cannot
+  // write this folder. This test exercises git's treatment of its receipt.
+  files.set('sources/mail/one.md', '# Private\n\nSeen.\n');
+  (window as unknown as { __cerebroMockWrites: MockWrite[] }).__cerebroMockWrites.push({
+    kind: 'vault.write',
+    path: 'sources/mail/one.md',
+    to: null,
+    actor: stamp.actor,
+    runId: stamp.runId,
+    approvedBy: null,
+  });
   expect(settleMockRun(stamp.runId, stamp.actor, null)).toMatchObject({
     state: 'nothing',
     kept_out_of_git: 1,
@@ -370,4 +380,23 @@ it('keeps mail out of a run and a checkpoint while preserving its page', async (
   endMockRun(stamp.runId);
   expect(await gitCommit('/v', 'checkpoint')).toBeNull();
   expect(files.get('sources/mail/one.md')).toContain('Seen.');
+});
+
+// M69.11: gh reads are ephemeral and cannot alter git or vault bytes.
+describe('mock pull requests', () => {
+  it('refuses malformed URLs, reports missing gh, and clones seeded reads', async () => {
+    const { pullRequestState, seedPullRequests } = await import('./mockGit');
+    const url = 'https://github.com/acme/notes/pull/1';
+    seedPullRequests({});
+    expect((await pullRequestState(url)).state).toBe('gh_missing');
+    expect((await pullRequestState('https://github.com.evil.test/a/b/pull/1')).state).toBe(
+      'invalid_url',
+    );
+    seedPullRequests({ [url]: { state: 'offline', checkedAt: 'before' } });
+    const result = await pullRequestState(url + '/files', true);
+    result.checkedAt = 'changed';
+    expect((await pullRequestState(url)).checkedAt).toBe('before');
+    resetMockGit();
+    expect((await pullRequestState(url)).state).toBe('gh_missing');
+  });
 });

@@ -70,7 +70,7 @@ export function Keycaps({ command, keys, className = '', mac = IS_MAC }: Keycaps
                 {parts.map((part, index) => (
                   <kbd
                     key={index}
-                    className="min-w-4 rounded border border-n-200 bg-transparent px-1 py-0.5 text-center font-mono text-xs leading-none"
+                    className="min-w-4 rounded-sm border border-n-200 bg-transparent px-1 py-0.5 text-center font-mono text-xs leading-none"
                   >
                     {part}
                   </kbd>

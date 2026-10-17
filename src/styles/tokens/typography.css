@@ -41,11 +41,8 @@
   --lh-2xl: 32px;
   --fs-3xl: 32px;
   --lh-3xl: 40px; /* display */
-  /* Editorial display, one tier above the UI scale (M16.37). The document
-     title input in DocPage sets type at this size; it is the largest thing a
-     user ever reads in the app and the only place the 8-step UI scale did not
-     reach. Snapping it down to 3xl would have shrunk the title by 10px, which
-     is a redesign rather than a rounding — so the scale grows a step instead. */
+  /* Editorial display retained for authored content. M73's redesigned page
+     titles use the 3xl reading scale; the token remains available to content. */
   --fs-4xl: 42px;
   --lh-4xl: 63px;
   /* weights */

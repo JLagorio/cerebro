@@ -1,5 +1,5 @@
 import type { BlockNoteEditor, BlockNoteEditorOptions } from '@blocknote/core';
-import { protectFootnotes } from './markdown';
+import { markdownToBlocksNow } from './markdown';
 
 /**
  * Typing a citation (M52.1).
@@ -197,14 +197,15 @@ export function pastedMarkdown(clipboard: DataTransfer | null): string | null {
  *
  * BlockNote reads pasted markdown — and plain text, which it reads as markdown
  * — with the GFM parser, which rewrites `[^id]` into a numbered link and its
- * definition into a generated "Footnotes" list: the rewrite `protectFootnotes`
- * stops on load (markdown.ts). A paste whose format BlockNote would read as
- * markdown, and that holds a marker, goes through the same escape. Everything
+ * definition into a generated "Footnotes" list: the reader in markdown.ts
+ * stops that on load. A paste whose format BlockNote would read as markdown,
+ * and that holds a chip marker, goes through that same reader. Everything
  * else is BlockNote's own — HTML, a VS Code copy, the editor's own clipboard,
  * and anything pasted into a code block. Files run through attachments first.
  *
- * The pasted markers stay text until the page is next loaded. The bytes they
- * save are the citation either way; the chip is the next load's.
+ * Plain markers become chips immediately, while escaped markers remain text.
+ * Internal BlockNote HTML carries that distinction through its ordinary paste
+ * transaction, keeping inline insertion and Undo without a second document edit.
  */
 export function citationPasteHandler({
   event,
@@ -214,7 +215,7 @@ export function citationPasteHandler({
   const { $from, $to } = editor.prosemirrorState.selection;
   if ($from.parent.type.spec.code || $to.parent.type.spec.code) return defaultPasteHandler();
   const data = pastedMarkdown(event.clipboardData);
-  if (data === null || !/\[\^[^\]\s]+\]/.test(data)) return defaultPasteHandler();
-  editor.pasteMarkdown(protectFootnotes(data));
+  if (data === null || !/\[\[|\[\^|📅/u.test(data)) return defaultPasteHandler();
+  editor.pasteHTML(editor.blocksToFullHTML(markdownToBlocksNow(editor, data)), true);
   return true;
 }

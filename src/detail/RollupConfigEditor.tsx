@@ -1,5 +1,6 @@
 import { Dropdown } from '@/components/ui/Dropdown';
 import { humanize } from '@/engine/schema';
+import { CORRESPONDENCE_PROPERTIES } from '@/engine/correspondents';
 import {
   FIELD_FORMATS,
   ROLLUP_CALCS,
@@ -10,12 +11,14 @@ import { useVaultStore } from '@/stores/vaultStore';
 import type { FieldDef, Schema } from '@/engine/types';
 
 const NONE = '__none__';
+const MAIL = '__mail__';
+const REVERSE = '__reverse__';
 
 const row = 'flex items-center gap-2';
 const label = 'w-[86px] flex-none text-xs text-n-500';
 
 /**
- * Rollup wiring: read and aggregate a property on related records. A
+ * Rollup wiring: aggregate a property on related records or cached mail. A
  * declared reverse source already names the records linking here; a forward
  * source picks one of this type's relation fields.
  */
@@ -31,7 +34,10 @@ export function RollupConfigEditor({
   onChange: (config: Record<string, unknown>) => void;
 }) {
   const entries = useVaultStore((s) => s.entries);
-  const ownFields = schema.types.get(typeName)?.fields ?? [];
+  const own = schema.types.get(typeName);
+  const ownFields = own?.fields ?? [];
+  const mail = def.source === 'correspondence';
+  const offersMail = own?.emailDomain != null || ownFields.some((field) => field.kind === 'email');
   const relationFields = ownFields.filter((f) => f.kind === 'relation' || f.kind === 'person');
 
   const relationDef = relationFields.find((f) => f.name === def.relation) ?? null;
@@ -44,13 +50,15 @@ export function RollupConfigEditor({
   const targetFields = targetType === null ? [] : (schema.types.get(targetType)?.fields ?? []);
   const calc = rollupCalcMeta(def.calculate);
   const percentDone = calc.calc === 'percent_done';
-  const offeredFields = percentDone
-    ? targetFields.filter((field) => field.kind === 'status' || field.kind === 'checkbox')
-    : targetFields;
+  const offeredFields = mail
+    ? CORRESPONDENCE_PROPERTIES.map((name) => ({ name }))
+    : percentDone
+      ? targetFields.filter((field) => field.kind === 'status' || field.kind === 'checkbox')
+      : targetFields;
 
   return (
     <div className="flex flex-col gap-2">
-      {def.from === undefined ? (
+      {def.from === undefined || mail || offersMail ? (
         <div className={row}>
           <span className={label}>Follow</span>
           <Dropdown
@@ -59,13 +67,35 @@ export function RollupConfigEditor({
             width={200}
             options={[
               { value: NONE, label: 'Pick a relation…' },
+              ...(def.from === undefined || mail
+                ? []
+                : [
+                    {
+                      value: REVERSE,
+                      label: `${def.from.type} → ${humanize(def.from.field)}`,
+                    },
+                  ]),
+              ...(offersMail || mail ? [{ value: MAIL, label: 'Cached mail' }] : []),
               ...relationFields.map((f) => ({
                 value: f.name,
                 label: `${humanize(f.name)}${f.target !== undefined ? ` → ${f.target}` : ''}`,
               })),
             ]}
-            value={def.relation ?? NONE}
-            onChange={(v) => onChange({ relation: v === NONE ? null : v })}
+            value={mail ? MAIL : def.from !== undefined ? REVERSE : (def.relation ?? NONE)}
+            onChange={(v) => {
+              if (v === REVERSE) return;
+              onChange(
+                v === MAIL
+                  ? {
+                      source: 'correspondence',
+                      relation: null,
+                      from: null,
+                      property: 'last_message_at',
+                      calculate: 'latest',
+                    }
+                  : { source: null, from: null, relation: v === NONE ? null : v },
+              );
+            }}
           />
         </div>
       ) : (
@@ -73,7 +103,7 @@ export function RollupConfigEditor({
           {def.from.type} records linking here through {humanize(def.from.field)}.
         </p>
       )}
-      {def.from === undefined && relationFields.length === 0 && (
+      {!mail && !offersMail && def.from === undefined && relationFields.length === 0 && (
         <p className="m-0 pl-[94px] text-xs leading-4 text-n-400">
           This type has no relation property yet — add one first, then point the rollup at it.
         </p>
@@ -84,7 +114,9 @@ export function RollupConfigEditor({
           size="sm"
           label="Calculation"
           width={200}
-          options={ROLLUP_CALCS.map((c) => ({ value: c.calc, label: c.label }))}
+          options={ROLLUP_CALCS.filter(
+            (c) => !mail || ['latest', 'earliest', 'count'].includes(c.calc),
+          ).map((c) => ({ value: c.calc, label: c.label }))}
           value={def.calculate ?? 'count'}
           onChange={(v) => onChange({ calculate: v })}
         />
@@ -100,9 +132,9 @@ export function RollupConfigEditor({
               {
                 value: NONE,
                 label:
-                  relationDef === null && def.from === undefined
+                  !mail && relationDef === null && def.from === undefined
                     ? 'Pick a relation first'
-                    : targetType === null
+                    : !mail && targetType === null
                       ? 'That relation targets any record'
                       : 'Pick a property…',
               },
@@ -118,13 +150,13 @@ export function RollupConfigEditor({
           Percent done needs a status or checkbox property on {targetType}.
         </p>
       )}
-      {calc.needsProperty && relationDef !== null && targetType === null && (
+      {!mail && calc.needsProperty && relationDef !== null && targetType === null && (
         <p className="m-0 pl-[94px] text-xs leading-4 text-n-400">
           Give <strong className="font-medium">{humanize(relationDef.name)}</strong> a target type
           and its properties will be listed here.
         </p>
       )}
-      <FormatRow def={def} onChange={onChange} />
+      {(!mail || def.calculate === 'count') && <FormatRow def={def} onChange={onChange} />}
     </div>
   );
 }

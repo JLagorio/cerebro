@@ -391,7 +391,8 @@ pub fn guard_human_write(path: &str) -> Result<HumanCleared, String> {
 /// `create_note` could author one pre-stamped, and `append_to_note` could
 /// grow a body with no provenance at all, as `edit_note` (M55.5) could
 /// rewrite one, `set_fields` (M60.4) could set its fields, and `edit_sheet`
-/// (M67.2b) could change spreadsheet blocks in it.
+/// (M67.2b) could change spreadsheet blocks in it. `edit_canvas` shares
+/// the guard so whiteboards cannot become an alternate Knowledge writer.
 pub fn guard_agent_write(path: &str) -> Result<(), String> {
     if is_knowledge_path(path) {
         return Err(refuse("agent_write", AGENT_USE_WRITE_CONCEPT));

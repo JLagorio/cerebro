@@ -1,5 +1,14 @@
 import { test, expect, type Page } from '@playwright/test';
-import { boot, openKnowledgeTab, readMockFile, showConceptDetails } from './boot';
+import {
+  boot,
+  openKnowledgeTab,
+  readMockFile,
+  showConceptDetails,
+  openAssistantPanel,
+  openDestination,
+  showDatabases,
+  showPages,
+} from './boot';
 
 const CONCEPT = 'knowledge/metrics/sync-error-rate.md';
 
@@ -203,11 +212,11 @@ test('knowledge: a verified concept revised later shows the predating notice (M2
 
 test("knowledge: the bundle navigates by its own axes, not by Home's", async ({ page }) => {
   await boot(page);
-  await page.getByRole('button', { name: 'Open Knowledge' }).click();
+  await openDestination(page, 'Knowledge');
 
   // M51: the section's rows are the bundle's folders, then Review — and the
   // page opens on every concept, filed under the same folders.
-  await expect(page.getByTestId('sidebar-type').first()).toBeVisible();
+  await expect(page.getByTestId('sidebar-type').first()).toBeHidden();
   const nav = page.getByTestId('knowledge-nav-row');
   await expect(nav.first()).toHaveAttribute('data-tab', 'section');
   await expect(nav.last()).toHaveAttribute('data-tab', 'review');
@@ -399,7 +408,7 @@ test('knowledge: a wrapped title keeps its Open pill off its words', async ({ pa
   await openKnowledgeTab(page, 'all');
   // The Assistant beside it leaves the table too narrow for the longest
   // titles, with Updated already gone: they wrap.
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   const table = page.getByTestId('concept-list');
   await expect(table.getByRole('columnheader', { name: 'Updated' })).toHaveCount(0);
   const wrapped = table.locator('[data-testid="concept-row"]').filter({
@@ -443,7 +452,7 @@ test('knowledge: a wrapped title keeps its Open pill off its words', async ({ pa
 // into another folder, were the bundle's numbers under a folder's name.
 test("knowledge: a folder's view counts the folder and walks only it", async ({ page }) => {
   await boot(page);
-  await page.getByRole('button', { name: 'Open Knowledge' }).click();
+  await openDestination(page, 'Knowledge');
   await page.getByTestId('knowledge-nav-row').filter({ hasText: 'Systems' }).click();
   await expect(page.getByTestId('knowledge-heading')).toContainText('Systems');
   // The crumb names the folder: no band repeats it, and no tab counts the
@@ -465,6 +474,7 @@ test("knowledge: a folder's view counts the folder and walks only it", async ({ 
 
 test('knowledge: the Knowledge section carries no review badge', async ({ page }) => {
   await boot(page);
+  await openDestination(page, 'Knowledge');
 
   // A count in the chrome is the app nagging you to drain a queue. The same
   // number lives on the Review row, where it describes a destination.
@@ -482,6 +492,7 @@ test('knowledge: the bundle stays out of the surfaces you author', async ({ page
 
   // OKF concept types are the agent's vocabulary, not the vault's schema —
   // they must not appear as ghost types in the sidebar.
+  await showDatabases(page);
   const types = page.getByTestId('sidebar-type');
   await expect(types.filter({ hasText: 'Metric' })).toHaveCount(0);
   await expect(types.filter({ hasText: 'Playbook' })).toHaveCount(0);
@@ -489,6 +500,7 @@ test('knowledge: the bundle stays out of the surfaces you author', async ({ page
   // Not in the Pages tree: the bundle is not yours to edit, so `docsOnly`
   // prunes its files and the knowledge/ folder with them (M38.3 — the tree
   // is the standing pages nav now that the Docs surface is gone).
+  await showPages(page);
   const tree = page.getByTestId('file-tree');
   await expect(tree.getByTestId('tree-row').first()).toBeVisible();
   const docPaths = await tree
@@ -498,10 +510,7 @@ test('knowledge: the bundle stays out of the surfaces you author', async ({ page
   expect(docPaths.some((p) => p.startsWith('knowledge'))).toBe(false);
 
   // Not in the Inbox either, despite carrying no `_organized` flag.
-  await page
-    .getByTestId('nav-surfaces')
-    .getByRole('button', { name: /^Inbox/ })
-    .click();
+  await openDestination(page, 'Inbox');
   // Asserted on PATHS, not row text: a capture in the demo vault is itself
   // about the sync error rate, so matching on title text would pass or fail
   // for reasons that have nothing to do with the bundle.

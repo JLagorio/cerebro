@@ -1,16 +1,20 @@
 import { seedBytes, reset as resetBytes } from '@/lib/mockBytes';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, afterEach, describe, expect, it } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { makeEntry } from '@/engine/testHelpers';
 import { useVaultStore } from '@/stores/vaultStore';
 import { EntryIcon, PageIconGlyph } from './PageIcon';
 
-beforeEach(resetBytes);
+beforeEach(() => {
+  resetBytes();
+  vi.stubGlobal('IntersectionObserver', undefined);
+});
 
 const ROCKET = '\u{1F680}';
 const FALLBACK = { name: 'file-text' };
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   act(() => {
     useVaultStore.setState({ entries: [] });
   });
@@ -23,12 +27,12 @@ describe('PageIconGlyph', () => {
   });
 
   it('draws a file through the byte door and falls back on decode failure', async () => {
-    seedBytes('0', 'attachments/i.png', { bytes: [1, 2] });
+    seedBytes('0', 'attachments/i.png', { bytes: [137, 80, 78, 71, 13, 10, 26, 10] });
     const { container } = render(
       <PageIconGlyph icon={{ kind: 'file', path: 'attachments/i.png' }} fallback={FALLBACK} />,
     );
     const image = await screen.findByRole('img', { name: 'i.png' });
-    expect(image.getAttribute('src')).toBe('data:image/png;base64,AQI=');
+    expect(image.getAttribute('src')).toBe('data:image/png;base64,iVBORw0KGgo=');
     fireEvent.error(image);
     await waitFor(() => expect(container.querySelector('[data-icon="image"]')).not.toBeNull());
     expect(container.querySelector('img')).toBeNull();

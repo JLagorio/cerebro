@@ -1591,6 +1591,39 @@ it('reports a refused suggestion from its first problem and never claims a card'
 });
 
 describe('skill invocation dispatch', () => {
+  const draftPrompt = (
+    signature: string,
+    request = 'https://mail.google.com/mail/u/0/#inbox/abc',
+  ) =>
+    `The user invoked the skill "Draft reply" (records/skills/draft-reply.md). Follow its instructions:\n## Signature\n\n\`\`\`text\n${signature}\n\`\`\`\n\nThe user's input for this run: ${request}`;
+  it('leaves a signed plain-text draft with thread recipients and no vault action', async () => {
+    const { events, actions } = await drain(draftPrompt('Thanks,\nAvery'));
+    expect(toolNames(events)).toEqual(['mcp__gmail__get_thread', 'mcp__gmail__create_draft']);
+    expect(JSON.parse(toolInputs(events)[0])).toEqual({
+      threadId: 'abc',
+      messageFormat: 'PLAIN_TEXT',
+    });
+    const input = JSON.parse(toolInputs(events)[1]);
+    expect(input).toMatchObject({
+      to: ['teammate@example.com'],
+      subject: 'Re: Next steps',
+      replyToMessageId: 'mock-newest-incoming',
+    });
+    expect(input.body).toMatch(/Thanks,\nAvery$/);
+    expect(input).not.toHaveProperty('htmlBody');
+    expect(input).not.toHaveProperty('bcc');
+    expect(actions).toEqual([]);
+    expect(replyOf(events)).toContain('https://mail.google.com/mail/u/0/#drafts/mock-draft');
+    expect(replyOf(events)).toContain('Nothing was sent.');
+  });
+  it('omits an unedited signature and asks for a missing thread before any call', async () => {
+    const placeholder = await drain(draftPrompt('YOUR SIGNATURE HERE'));
+    expect(JSON.parse(toolInputs(placeholder.events)[1]).body).not.toContain('YOUR SIGNATURE');
+    expect(replyOf(placeholder.events)).toContain('no signature');
+    const missing = await drain(draftPrompt('Avery', ''));
+    expect(toolNames(missing.events)).toEqual([]);
+    expect(replyOf(missing.events)).toContain('Which Gmail thread');
+  });
   it('reads a recipe that mentions the Inbox without proposing a filing', async () => {
     const { events, actions } = await drain(
       'The user invoked the skill "Catch me up" (records/skills/catch-me-up.md). Follow its instructions:\nRead the Inbox with list_inbox and read_activity.',
@@ -1628,5 +1661,153 @@ describe('follow-up booking script', () => {
       is_error: true,
     });
     expect(replyOf(result.events)).toContain('I could not book that follow-up');
+  });
+});
+
+describe('the canvas edit script', () => {
+  const path = 'boards/risk.canvas';
+  const ops = [{ op: 'update_node', id: 'goals', text: 'Organize the inbox' }];
+  const gated = globalThis as { __cerebroAgentWriteGate?: Promise<void> };
+  afterEach(() => {
+    delete gated.__cerebroAgentWriteGate;
+  });
+  function edit(onEditCanvas?: NonNullable<Parameters<typeof runMockAgent>[2]>['onEditCanvas']) {
+    const events: AgentStreamEvent[] = [],
+      actions: UiAction[] = [];
+    return new Promise<{ events: AgentStreamEvent[]; actions: UiAction[] }>((resolve) => {
+      runMockAgent(
+        `edit canvas ${path}: ${JSON.stringify(ops)}`,
+        (event) => {
+          events.push(event);
+          if (event.kind === 'Done') resolve({ events, actions });
+        },
+        { delayMs: 0, onEditCanvas, onUiAction: (action) => actions.push(action) },
+      );
+    });
+  }
+  it('passes the raw operations through the write gate before announcing the board', async () => {
+    let release = () => {};
+    gated.__cerebroAgentWriteGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const writer = vi.fn(async () => '{"wrote":true}');
+    const result = edit(writer);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(writer).not.toHaveBeenCalled();
+    release();
+    const { events, actions } = await result;
+    expect(writer).toHaveBeenCalledWith(path, { ops });
+    expect(toolNames(events)).toEqual(['edit_canvas']);
+    expect(JSON.parse(toolInputs(events)[0])).toEqual({ path, ops });
+    expect(actions).toEqual([{ action: 'vault_changed', paths: [path] }]);
+    expect(replyOf(events)).toBe(`I edited the whiteboard ${path}.`);
+  });
+  it('reports the first refusal line, retaining the full error without announcing a change', async () => {
+    const refusal = 'Op 1: no node with id "goals" on this board.\nNothing was written.';
+    const { events, actions } = await edit(async () => {
+      throw new Error(refusal);
+    });
+    expect(actions).toEqual([]);
+    expect(events.find((event) => event.kind === 'ToolDone')).toMatchObject({
+      is_error: true,
+      output: refusal,
+    });
+    expect(replyOf(events)).toBe(
+      `I could not edit the whiteboard ${path}: ${refusal.split('\n')[0]}`,
+    );
+  });
+  it('never claims success when the canvas door is not held', async () => {
+    const { events, actions } = await edit();
+    expect(actions).toEqual([]);
+    expect(replyOf(events)).toBe(
+      `I could not edit the whiteboard ${path}: edit_canvas is not available here`,
+    );
+  });
+});
+
+describe('the Notion import script', () => {
+  const page = '11111111111111111111111111111111';
+  async function importPage(
+    onImportNotion?: NonNullable<Parameters<typeof runMockAgent>[2]>['onImportNotion'],
+  ) {
+    const events: AgentStreamEvent[] = [];
+    const actions: UiAction[] = [];
+    await new Promise<void>((resolve) => {
+      runMockAgent(
+        `import notion ${page} to notion`,
+        (event) => {
+          events.push(event);
+          if (event.kind === 'Done') resolve();
+        },
+        { delayMs: 0, onImportNotion, onUiAction: (action) => actions.push(action) },
+      );
+    });
+    return { events, actions };
+  }
+  it('passes only the page identity and folder, and repeats the door’s honest outcome', async () => {
+    const reply = 'Imported “Toy page” from Notion to notion/toy-page.md.';
+    const write = vi.fn(async () => ({ path: 'notion/toy-page.md', reply, wrote: true }));
+    const { events, actions } = await importPage(write);
+    expect(write).toHaveBeenCalledWith({ page, folder: 'notion' });
+    expect(toolNames(events)).toEqual(['import_notion_page']);
+    expect(JSON.parse(toolInputs(events)[0])).toEqual({ page, folder: 'notion' });
+    expect(replyOf(events)).toBe(reply);
+    expect(actions).toEqual([{ action: 'vault_changed', paths: ['notion/toy-page.md'] }]);
+  });
+  it('an unchanged import announces no write and a refusal never claims success', async () => {
+    const reply = 'notion/toy-page.md already holds this page, unchanged since its import.';
+    const unchanged = await importPage(async () => ({
+      path: 'notion/toy-page.md',
+      reply,
+      wrote: false,
+    }));
+    expect(unchanged.actions).toEqual([]);
+    expect(replyOf(unchanged.events)).toBe(reply);
+    const refused = await importPage(async () => {
+      throw new Error('import_refused: database_first — Fetch one page. Nothing was written.');
+    });
+    expect(refused.actions).toEqual([]);
+    expect(replyOf(refused.events)).toMatch(/^import_refused: database_first/);
+    expect(refused.events.find((event) => event.kind === 'ToolDone')).toMatchObject({
+      is_error: true,
+    });
+  });
+});
+
+describe('the canvas create script', () => {
+  function create(
+    onCreateCanvas?: NonNullable<Parameters<typeof runMockAgent>[2]>['onCreateCanvas'],
+  ) {
+    const events: AgentStreamEvent[] = [],
+      actions: UiAction[] = [];
+    return new Promise<{ events: AgentStreamEvent[]; actions: UiAction[] }>((resolve) =>
+      runMockAgent(
+        'create canvas plan in boards',
+        (event) => {
+          events.push(event);
+          if (event.kind === 'Done') resolve({ events, actions });
+        },
+        { delayMs: 0, onCreateCanvas, onUiAction: (action) => actions.push(action) },
+      ),
+    );
+  }
+  it('announces the chosen name, including a suffix, only after the door lands', async () => {
+    const writer = vi.fn(async () => ({
+      path: 'boards/plan-2.canvas',
+      reply: '{"path":"boards/plan-2.canvas"}',
+    }));
+    const { events, actions } = await create(writer);
+    expect(writer).toHaveBeenCalledWith({ slug: 'plan', folder: 'boards' });
+    expect(toolNames(events)).toEqual(['create_canvas']);
+    expect(replyOf(events)).toBe('I created boards/plan-2.canvas.');
+    expect(actions).toEqual([{ action: 'vault_changed', paths: ['boards/plan-2.canvas'] }]);
+  });
+  it('reports a refusal and makes no creation claim', async () => {
+    const { events, actions } = await create(async () => {
+      throw new Error('Op 1: bad.\nNothing was created.');
+    });
+    expect(actions).toEqual([]);
+    expect(replyOf(events)).toBe('I could not create the whiteboard: Op 1: bad.');
+    expect(events.find((event) => event.kind === 'ToolDone')).toMatchObject({ is_error: true });
   });
 });

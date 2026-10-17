@@ -891,6 +891,13 @@ mod tests {
         let dst = testutil::temp_vault(label);
         for entry in walkdir::WalkDir::new(src)
             .into_iter()
+            // Opening the demo in a native app may create local ledger state.
+            // A fresh test corpus must not inherit that session's writer
+            // identity or repository history; authored sidecars still copy.
+            .filter_entry(|entry| {
+                entry.depth() == 0
+                    || !matches!(entry.file_name().to_str(), Some(".cerebro" | ".git"))
+            })
             .filter_map(Result::ok)
         {
             let rel = entry.path().strip_prefix(src).unwrap();

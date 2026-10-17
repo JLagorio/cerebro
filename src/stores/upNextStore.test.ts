@@ -6,7 +6,7 @@ const entry = (id: string, vault = '/vault'): UpNextEntry => ({
   id,
   text: `message ${id}`,
   skill: null,
-  allowedTools: null,
+  narrowing: {},
   turn: { systemPrompt: () => '', place: null, conversationId: null },
   vault,
   queuedAt: 0,
@@ -92,7 +92,7 @@ describe('Up next per conversation (M57.5)', () => {
   it('edits a typed entry and refuses a handoff’s', () => {
     store().enqueue('c-1', entry('a'));
     store().enqueue('c-1', { ...entry('h'), prompt: 'the long prompt' });
-    const none = { skill: null, allowedTools: null };
+    const none = { skill: null, narrowing: {} };
     expect(store().edit('c-1', 'a', 'new words', none)).toBe(true);
     expect(store().queues['c-1']?.entries[0].text).toBe('new words');
     expect(store().edit('c-1', 'h', 'new words', none)).toBe(false);

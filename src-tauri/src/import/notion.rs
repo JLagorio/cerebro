@@ -225,9 +225,9 @@ fn name_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_')
 }
 fn decode(text: &str) -> Result<String, Refusal> {
-    quick_xml::escape::unescape(text)
-        .map(|v| v.into_owned())
-        .map_err(|_| markup("entity"))
+    // Keep entity decoding behind the same outside-bytes boundary as Office
+    // XML. The captured envelope is bounded before this scanner runs.
+    crate::files::extract::xml::unescape(text).map_err(|_| markup("entity"))
 }
 /// A small quote-aware tag scanner. Ordinary comparisons and autolinks stay
 /// text; real but unsupported tags get a typed refusal during rendering.
@@ -426,25 +426,50 @@ fn nodes(text: &str) -> Result<Vec<Node>, Refusal> {
     Ok(out)
 }
 
+/// One bounded ordinary Markdown link. A new bracket or line ends this
+/// candidate; an existing wikilink can never borrow a later link's closer.
+fn markdown_link(text: &str, start: usize) -> Option<(usize, usize, &str)> {
+    let mut pos = start + 1;
+    while pos < text.len() {
+        let c = text[pos..].chars().next()?;
+        match c {
+            '[' | '\n' | '\r' | '`' => return None,
+            '\\' => {
+                pos += 1;
+                pos += text[pos..].chars().next()?.len_utf8();
+            }
+            ']' => {
+                if text.as_bytes().get(pos + 1) != Some(&b'(') {
+                    return None;
+                }
+                let tail = &text[pos + 2..];
+                let end = tail.find([')', '\n', '\r'])?;
+                if tail.as_bytes()[end] != b')' {
+                    return None;
+                }
+                return Some((pos, pos + 2 + end, &tail[..end]));
+            }
+            _ => pos += c.len_utf8(),
+        }
+    }
+    None
+}
+
 fn inline_media(text: &str, count: &mut usize) -> String {
     let mut out = String::new();
     let mut pos = 0;
     while pos < text.len() {
         if text[pos..].starts_with("![") && (pos == 0 || text.as_bytes()[pos - 1] != b'\\') {
-            if let Some(mid) = text[pos + 2..].find("](") {
-                let mid = pos + 2 + mid;
-                if let Some(end) = text[mid + 2..].find(')') {
-                    let end = mid + 2 + end;
-                    if let Some(url) = safe_url(&text[mid + 2..end]) {
-                        let label = &text[pos + 2..mid];
-                        out.push_str(&format!(
-                            "[{}]({url})",
-                            if label.is_empty() { "Image" } else { label }
-                        ));
-                        *count += 1;
-                        pos = end + 1;
-                        continue;
-                    }
+            if let Some((mid, end, raw)) = markdown_link(text, pos + 1) {
+                if let Some(url) = safe_url(raw) {
+                    let label = &text[pos + 2..mid];
+                    out.push_str(&format!(
+                        "[{}]({url})",
+                        if label.is_empty() { "Image" } else { label }
+                    ));
+                    *count += 1;
+                    pos = end + 1;
+                    continue;
                 }
             }
         }
@@ -874,17 +899,12 @@ pub fn relink(body: &str, links: &HashMap<String, String>, count: &mut usize) ->
             continue;
         }
         if body.as_bytes()[pos] == b'[' && (pos == 0 || body.as_bytes()[pos - 1] != b'!') {
-            if let Some(mid) = body[pos + 1..].find("](") {
-                let mid = pos + 1 + mid;
-                if let Some(end) = body[mid + 2..].find(')') {
-                    let end = mid + 2 + end;
-                    let url = &body[mid + 2..end];
-                    if let Some(stem) = notion_id(url).and_then(|id| links.get(&id)) {
-                        out.push_str(&format!("[[{stem}]]"));
-                        *count += 1;
-                        pos = end + 1;
-                        continue;
-                    }
+            if let Some((_, end, url)) = markdown_link(body, pos) {
+                if let Some(stem) = notion_id(url).and_then(|id| links.get(&id)) {
+                    out.push_str(&format!("[[{stem}]]"));
+                    *count += 1;
+                    pos = end + 1;
+                    continue;
                 }
             }
         }
@@ -1113,6 +1133,23 @@ mod tests {
         assert!(output.starts_with("[[other-page]]\n"));
         assert!(output.contains(&format!("`{valid}`")));
         assert!(notion_id(&format!("http://notion.so/{OTHER}")).is_none());
+    }
+    #[test]
+    fn an_existing_wikilink_never_consumes_a_later_link_or_code() {
+        let links = HashMap::from([(OTHER.into(), "other-page".into())]);
+        for prefix in ["[[already]]", "[unclosed", "![unclosed", "[\\]escaped]"] {
+            let source = format!("{prefix}\n\n`[Code](https://notion.so/{OTHER})`");
+            let mut count = 0;
+            assert_eq!(relink(&source, &links, &mut count), source);
+            assert_eq!(count, 0);
+        }
+        let mut count = 0;
+        let source = format!("[[already]] and [Other](https://notion.so/{OTHER})");
+        assert_eq!(
+            relink(&source, &links, &mut count),
+            "[[already]] and [[other-page]]"
+        );
+        assert_eq!(count, 1);
     }
     #[test]
     fn every_refusal_has_a_typed_reason_and_only_three_allow_composition() {

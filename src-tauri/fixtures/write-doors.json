@@ -588,6 +588,10 @@
         },
         {
           "kind": "vault.create",
+          "path": "records/skills/draft-reply.md"
+        },
+        {
+          "kind": "vault.create",
           "path": "records/skills/what-i-did.md"
         },
         {
@@ -951,6 +955,262 @@
         "run_id": "run-door-case"
       },
       "refused": "knowledge/ is written only through write_concept"
+    },
+    {
+      "door": "import_notion_page",
+      "notion_case": "callout and nested columns",
+      "args": {
+        "page": "11111111111111111111111111111111",
+        "folder": "door-cases"
+      },
+      "stamp": {
+        "actor": "process:notion-import",
+        "run_id": "run-notion-import"
+      },
+      "records": {
+        "kind": "vault.create",
+        "path": "door-cases/toy-page.md"
+      }
+    },
+    {
+      "door": "edit_canvas",
+      "seed": {
+        "door-cases/plan.canvas": "{}"
+      },
+      "args": {
+        "path": "door-cases/plan.canvas",
+        "ops": [
+          {
+            "op": "add_node",
+            "id": "a",
+            "type": "text",
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1,
+            "text": "A"
+          }
+        ]
+      },
+      "stamp": {
+        "actor": "claude-code",
+        "run_id": "run-door-case"
+      },
+      "records": {
+        "kind": "vault.write",
+        "path": "door-cases/plan.canvas"
+      }
+    },
+    {
+      "door": "edit_canvas",
+      "args": {
+        "path": "knowledge/plan.canvas",
+        "ops": [
+          {
+            "op": "add_node",
+            "id": "a",
+            "type": "text",
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1,
+            "text": "A"
+          }
+        ]
+      },
+      "stamp": {
+        "actor": "claude-code",
+        "run_id": "run-door-case"
+      },
+      "refused": "knowledge/ is written only through write_concept"
+    },
+    {
+      "door": "create_canvas",
+      "args": {
+        "folder": "door-cases",
+        "slug": "new"
+      },
+      "stamp": {
+        "actor": "claude-code",
+        "run_id": "run-door-case"
+      },
+      "records": {
+        "kind": "vault.create",
+        "path": "door-cases/new.canvas"
+      }
+    },
+    {
+      "door": "create_canvas",
+      "args": {
+        "folder": "knowledge",
+        "slug": "new"
+      },
+      "stamp": {
+        "actor": "claude-code",
+        "run_id": "run-door-case"
+      },
+      "refused": "knowledge/ is written only through write_concept"
+    },
+    {
+      "door": "create_canvas",
+      "args": {
+        "folder": "boards",
+        "slug": "new",
+        "ops": [
+          {
+            "op": "delete_node"
+          }
+        ]
+      },
+      "stamp": {
+        "actor": "claude-code",
+        "run_id": "run-door-case"
+      },
+      "refused": "Nothing was created."
+    },
+    {
+      "door": "create_note",
+      "args": {
+        "folder": "sources/mail",
+        "slug": "fresh",
+        "body": "# Fresh\n"
+      },
+      "stamp": {
+        "actor": "process:release-scout",
+        "run_id": "run-door-case"
+      },
+      "records": null,
+      "refused": "sources/mail/ holds mail digests, which only cache_source writes."
+    },
+    {
+      "door": "append_to_note",
+      "seed": {
+        "sources/mail/a.md": "# A\n"
+      },
+      "args": {
+        "path": "sources/mail/a.md",
+        "content": "Appended."
+      },
+      "stamp": {
+        "actor": "process:release-scout",
+        "run_id": "run-door-case"
+      },
+      "records": null,
+      "refused": "sources/mail/ holds mail digests, which only cache_source writes."
+    },
+    {
+      "door": "edit_note",
+      "seed": {
+        "sources/mail/a.md": "# A\n\nThe body.\n"
+      },
+      "args": {
+        "path": "sources/mail/a.md",
+        "edits": [
+          {
+            "old": "The body.",
+            "new": "The edited body."
+          }
+        ]
+      },
+      "stamp": {
+        "actor": "claude-code",
+        "run_id": "run-door-case"
+      },
+      "records": null,
+      "refused": "sources/mail/ holds mail digests, which only cache_source writes."
+    },
+    {
+      "door": "edit_sheet",
+      "seed": {
+        "sources/mail/a.md": "# A\n\nThe body.\n"
+      },
+      "args": {
+        "path": "sources/mail/a.md",
+        "ops": [
+          {
+            "op": "add_sheet",
+            "name": "Budget"
+          }
+        ]
+      },
+      "stamp": {
+        "actor": "claude-code",
+        "run_id": "run-door-case"
+      },
+      "records": null,
+      "refused": "sources/mail/ holds mail digests, which only cache_source writes."
+    },
+    {
+      "door": "set_fields",
+      "seed": {
+        "door-cases/types/task.md": "---\ntype: Type\nfields:\n  status: { kind: status }\n---\n\n# Task\n",
+        "sources/mail/a.md": "---\ntype: Task\nstatus: todo\n---\n\n# A\n"
+      },
+      "args": {
+        "path": "sources/mail/a.md",
+        "set": {
+          "status": "In Progress"
+        }
+      },
+      "stamp": {
+        "actor": "process:release-scout",
+        "run_id": "run-door-case"
+      },
+      "records": null,
+      "refused": "sources/mail/ holds mail digests, which only cache_source writes."
+    },
+    {
+      "door": "edit_canvas",
+      "seed": {
+        "sources/mail/plan.canvas": "{}"
+      },
+      "args": {
+        "path": "sources/mail/plan.canvas",
+        "ops": [
+          {
+            "op": "add_node",
+            "id": "a",
+            "type": "text",
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1,
+            "text": "A"
+          }
+        ]
+      },
+      "stamp": {
+        "actor": "claude-code",
+        "run_id": "run-door-case"
+      },
+      "records": null,
+      "refused": "sources/mail/ holds mail digests, which only cache_source writes."
+    },
+    {
+      "door": "create_canvas",
+      "args": {
+        "folder": "sources/mail",
+        "slug": "new"
+      },
+      "stamp": {
+        "actor": "claude-code",
+        "run_id": "run-door-case"
+      },
+      "records": null,
+      "refused": "sources/mail/ holds mail digests, which only cache_source writes."
+    },
+    {
+      "door": "create_canvas",
+      "args": {
+        "folder": "Sources/Mail",
+        "slug": "new"
+      },
+      "stamp": {
+        "actor": "claude-code",
+        "run_id": "run-door-case"
+      },
+      "records": null,
+      "refused": "sources/mail/ holds mail digests, which only cache_source writes."
     }
   ]
 }

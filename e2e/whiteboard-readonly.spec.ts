@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, openDestination } from './boot';
 const PATH = 'studio/maps/sketch.canvas';
 const KNOWLEDGE = 'knowledge/maps/flow.canvas';
 const SOURCE = JSON.stringify({
@@ -28,7 +28,7 @@ test('Studio previews a board fence and a canvas file; Open reaches its page wit
     { path: PATH, source: SOURCE, body: BODY },
   );
   await scan(page);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Studio' }).click();
+  await openDestination(page, 'Studio');
   await page.getByTestId('studio-project').filter({ hasText: 'Maps' }).click();
   const embed = page.getByTestId('whiteboard-embed');
   await expect(embed).toHaveAttribute('data-state', 'ready');
@@ -41,7 +41,7 @@ test('Studio previews a board fence and a canvas file; Open reaches its page wit
   await embed.getByRole('button', { name: 'Open', exact: true }).click();
   await expect(page.getByTestId('canvas-title')).toHaveText('Sketch');
   await expect(page.getByTestId('wb-input')).toBeVisible();
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home' }).click();
+  await openDestination(page, 'Home');
   expect(await readMockFile(page, PATH)).toBe(SOURCE);
   expect(await readMockFile(page, 'studio/maps/index.md')).toBe(BODY);
   expect(
@@ -98,7 +98,7 @@ test('a missing embed retains its pointer and a changed file refreshes the read-
   await boot(page);
   await page.evaluate((body) => window.__cerebroMockFs.set('studio/maps/index.md', body), BODY);
   await scan(page);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Studio' }).click();
+  await openDestination(page, 'Studio');
   await page.getByTestId('studio-project').filter({ hasText: 'Maps' }).click();
   await expect(page.getByTestId('whiteboard-embed')).toHaveAttribute('data-state', 'missing');
   await expect(page.getByTestId('whiteboard-embed')).toContainText(`No whiteboard at ${PATH}`);

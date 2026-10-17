@@ -1,5 +1,7 @@
 /** Mail policy is shared data. The accepted pack is a build-time tripwire;
  * the artifact's scoped flag alone controls runtime admission. */
+import './whatwgUrl.types';
+import { parseURL } from 'whatwg-url';
 import raw from '../../shared/policy/mail.v1.json';
 export const MAIL_PATH = 'shared/policy/mail.v1.json';
 export const MAIL_DIGEST_PATH = 'shared/policy/mail.v1.sha256';
@@ -18,8 +20,27 @@ export interface MailPolicy {
   folder: string;
   kept_out_of_git: string[];
   gate: MailGate;
+  kinds: { thread: string; text: string };
+  limits: {
+    messages: number;
+    addresses_per_message: number;
+    participants: number;
+    subject_chars: number;
+    name_chars: number;
+    body_chars: number;
+    bodies_chars_per_call: number;
+  };
+  address_cases: { raw: string; address: string | null }[];
+  mailbox_cases: { raw: string; address: string | null; name: string | null }[];
   mail_hosts: string[];
   unattended_denied_tools: string[];
+  sweep: {
+    window_days: number;
+    max_threads: number;
+    page_size: number;
+    read_tools: string[];
+    denied_tools: string[];
+  };
   host_cases: { url: string; mail: boolean }[];
   path_cases: { path: string; kept: boolean }[];
   gate_cases: {
@@ -61,22 +82,49 @@ export function parseMailPolicy(value: unknown): MailPolicy {
     'folder',
     'kept_out_of_git',
     'gate',
+    'kinds',
+    'limits',
+    'address_cases',
+    'mailbox_cases',
     'mail_hosts',
     'unattended_denied_tools',
+    'sweep',
     'host_cases',
     'path_cases',
     'gate_cases',
     'refusals',
   ]);
   const gate = shape(row.gate, ['registry', 'connector', 'kinds', 'open', 'scope', 'pack']);
+  const kinds = shape(row.kinds, ['thread', 'text']);
+  const sweep = shape(row.sweep, [
+    'window_days',
+    'max_threads',
+    'page_size',
+    'read_tools',
+    'denied_tools',
+  ]);
+  const limits = shape(row.limits, [
+    'messages',
+    'addresses_per_message',
+    'participants',
+    'subject_chars',
+    'name_chars',
+    'body_chars',
+    'bodies_chars_per_call',
+  ]);
   if (
     typeof row.format !== 'number' ||
     typeof row.artifact_version !== 'number' ||
     typeof row.rule_version !== 'string' ||
     typeof row.folder !== 'string' ||
+    Object.values(kinds).some((value) => typeof value !== 'string') ||
+    Object.values(limits).some((value) => typeof value !== 'number') ||
     !strings(row.kept_out_of_git) ||
     !strings(row.mail_hosts) ||
     !strings(row.unattended_denied_tools) ||
+    ['window_days', 'max_threads', 'page_size'].some((key) => typeof sweep[key] !== 'number') ||
+    !strings(sweep.read_tools) ||
+    !strings(sweep.denied_tools) ||
     !strings(gate.kinds) ||
     typeof gate.registry !== 'string' ||
     typeof gate.connector !== 'string' ||
@@ -85,8 +133,29 @@ export function parseMailPolicy(value: unknown): MailPolicy {
     typeof gate.pack !== 'string'
   )
     fail('mail: invalid shape');
-  for (const key of ['path_cases', 'gate_cases', 'host_cases', 'refusals'])
+  for (const key of [
+    'path_cases',
+    'gate_cases',
+    'host_cases',
+    'refusals',
+    'address_cases',
+    'mailbox_cases',
+  ])
     if (!Array.isArray(row[key])) fail('mail: invalid shape');
+  for (const key of ['address_cases', 'mailbox_cases']) {
+    for (const value of row[key] as unknown[]) {
+      const c = shape(
+        value,
+        key === 'address_cases' ? ['raw', 'address'] : ['raw', 'address', 'name'],
+      );
+      if (
+        typeof c.raw !== 'string' ||
+        (c.address !== null && typeof c.address !== 'string') ||
+        (key === 'mailbox_cases' && c.name !== null && typeof c.name !== 'string')
+      )
+        fail('mail: invalid shape');
+    }
+  }
   for (const value of row.host_cases as unknown[]) {
     const c = shape(value, ['url', 'mail']);
     if (typeof c.url !== 'string' || typeof c.mail !== 'boolean') fail('mail: invalid shape');
@@ -142,6 +211,27 @@ export function parseMailPolicy(value: unknown): MailPolicy {
   )
     fail('mail.unattended_denied_tools must contain unique tool-part names');
   if (table.gate.registry !== 'R14') fail('mail.gate.registry must be R14');
+  const s = table.sweep;
+  if (
+    [s.window_days, s.max_threads, s.page_size].some(
+      (n) => !Number.isInteger(n) || n < 1 || n > 1_000_000,
+    ) ||
+    s.page_size > 50 ||
+    s.page_size > s.max_threads
+  )
+    fail(
+      'mail.sweep limits must be positive integers, with page_size at most 50 and no greater than max_threads',
+    );
+  if (
+    [s.read_tools, s.denied_tools].some(
+      (names) =>
+        !names.length ||
+        new Set(names).size !== names.length ||
+        names.some((name) => !/^[A-Za-z0-9_-]{1,64}$/.test(name)),
+    ) ||
+    s.read_tools.some((name) => s.denied_tools.includes(name))
+  )
+    fail('mail.sweep tools must be nonempty unique tool-part names and disjoint');
   if (!/^[a-z0-9-]{1,40}$/.test(table.gate.connector))
     fail('mail.gate.connector must be a lowercase connector id');
   if (
@@ -157,6 +247,19 @@ export function parseMailPolicy(value: unknown): MailPolicy {
   )
     fail('an open mail gate must name one vault_store scope');
   if (!table.gate.open && table.gate.scope !== null) fail('a closed mail gate must have no scope');
+  if (
+    Object.values(table.kinds).some((kind) => !/^[a-z_]{1,40}$/.test(kind)) ||
+    table.kinds.thread === table.kinds.text
+  )
+    fail('mail.kinds must name distinct lowercase thread and text kinds');
+  if (table.gate.kinds.some((kind) => !Object.values(table.kinds).includes(kind)))
+    fail('mail.gate.kinds must be declared in mail.kinds');
+  if (
+    Object.values(table.limits).some(
+      (limit) => !Number.isInteger(limit) || limit < 1 || limit > 1_000_000,
+    )
+  )
+    fail('mail.limits must be positive integers at most 1000000');
   if (
     !plain(table.gate.pack) ||
     !table.gate.pack.startsWith('docs/superpowers/evidence/triggers/R14/') ||
@@ -186,43 +289,14 @@ export function gateOpens(
   );
 }
 
-/** HTTP(S) authority parsing without DOM globals. Only the hostname is
- * matched; userinfo, path, query and fragments never identify a mail host.
- * Shared cases hold this to Rust's URL reader, including URL whitespace,
- * backslashes, escaped host bytes, port bounds and Unicode dot variants. */
+/** A pure WHATWG parser supplies the same decoded/IDNA host as Rust's URL
+ * reader. Userinfo, ports, paths and queries can never impersonate the host. */
 export function isMailUrl(value: string, table: MailPolicy = MAIL): boolean {
-  const stripped = value.replace(/[\t\r\n]/g, '');
-  let from = 0;
-  let to = stripped.length;
-  while (from < to && stripped.charCodeAt(from) <= 32) from++;
-  while (to > from && stripped.charCodeAt(to - 1) <= 32) to--;
-  const text = stripped.slice(from, to);
-  const prefix = /^https?:/i.exec(text);
-  if (!prefix) return false;
-  const authority = text
-    .slice(prefix[0].length)
-    .replace(/^[/\\]+/, '')
-    .split(/[/\\?#]/, 1)[0];
-  const address = authority.slice(authority.lastIndexOf('@') + 1);
-  const parts = address.split(':');
-  if (
-    parts.length > 2 ||
-    (parts.length === 2 && (!/^\d*$/.test(parts[1]) || Number(parts[1]) > 65535))
-  )
+  const url = parseURL(value);
+  if (!url || (url.scheme !== 'http' && url.scheme !== 'https') || typeof url.host !== 'string')
     return false;
-  try {
-    const host = decodeURIComponent(parts[0]).normalize('NFKC').toLowerCase().replace(/\.$/, '');
-    if (
-      !host ||
-      [...host].some(
-        (c) => c.charCodeAt(0) <= 32 || c.charCodeAt(0) === 127 || '#%/:<>?@[]\\^|'.includes(c),
-      )
-    )
-      return false;
-    return table.mail_hosts.some((mail) => host === mail || host.endsWith(`.${mail}`));
-  } catch {
-    return false;
-  }
+  const host = url.host.replace(/\.$/, '');
+  return table.mail_hosts.some((mail) => host === mail || host.endsWith(`.${mail}`));
 }
 export function isMailPath(path: string, table: MailPolicy = MAIL): boolean {
   const normalized = path.replace(/^(?:\.\/|\/)+/, '').replace(/[A-Z]/g, (c) => c.toLowerCase());

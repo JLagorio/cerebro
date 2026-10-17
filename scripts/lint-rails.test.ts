@@ -56,6 +56,17 @@ describe('the roadmap acceptance cases', () => {
 });
 
 describe('engine/ imports only its allowlist', () => {
+  it('admits only the pure consumer-domain data leaf', async () => {
+    expect(
+      await railMessages(
+        'src/engine/probe.ts',
+        "export { isConsumerDomain } from '@/lib/consumerDomains';",
+      ),
+    ).toEqual([]);
+    expect(
+      await railMessages('src/engine/probe.ts', "export { default } from 'free-email-domains';"),
+    ).toHaveLength(1);
+  });
   it('admits the shared pure structural equality leaf', async () => {
     expect(
       await railMessages('src/engine/probe.ts', "export { deepEqual } from '@/lib/deepEqual';"),
@@ -74,6 +85,7 @@ describe('engine/ imports only its allowlist', () => {
     ['a policy module off the list', "import '@/lib/policy/verdict';"],
     ['an rrule subpath', "import 'rrule/dist/esm/index';"],
     ['a yaml subpath', "import 'yaml/util';"],
+    ['a URL parser internal subpath', "import 'whatwg-url/lib/URL';"],
     ['shared/policy code rather than a table', "import '../../shared/policy/table.ts';"],
     ['shared/schema code rather than a table', "import '../../shared/schema/kinds.ts';"],
     ['a shared/calendar file that is not JSON', "import '../../shared/calendar/README.md';"],
@@ -93,6 +105,7 @@ describe('engine/ imports only its allowlist', () => {
       "import type { Entry } from '@/engine/types';",
       "import 'yaml';",
       "import 'rrule';",
+      "import 'whatwg-url';",
       "import '@/lib/slug';",
       "import '@/lib/templates';",
       "import '@/lib/sha256';",
@@ -345,5 +358,26 @@ describe('only the pdf loader and *.pdf.test.ts load pdfjs-dist', () => {
         await railMessages('src/pages/Probe.tsx', "import 'pdfjs-dist/legacy/web/pdf_viewer.mjs';")
       )[0],
     ).toContain('PDF loader');
+  });
+});
+
+describe('only the image components draw <img>', () => {
+  const code = 'export const Picture = () => <img src="https://images.example/a.png" alt="a" />;';
+  it.each([
+    'src/pages/Probe.tsx',
+    'src/detail/Probe.tsx',
+    'src/editor/Probe.tsx',
+    'src/components/Probe.tsx',
+    'src/engine/Probe.tsx',
+  ])('refuses a raw image in %s', async (path) => {
+    expect(await railMessages(path, code)).toEqual([expect.stringContaining('Only FileImage')]);
+  });
+  it.each([
+    'src/components/FileImage.tsx',
+    'src/components/FileThumb.tsx',
+    'src/components/RemoteImage.tsx',
+    'src/components/ui/Avatar.tsx',
+  ])('allows the reviewed boundary %s', async (path) => {
+    expect(await railMessages(path, code)).toEqual([]);
   });
 });

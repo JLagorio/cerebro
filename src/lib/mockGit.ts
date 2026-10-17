@@ -1,6 +1,7 @@
+import { parsePullRequestUrl } from '@/engine/pullRequest';
 import { isKeptOutOfGit } from '@/engine/mailPolicy';
 /**
- * In-memory git backend for the browser, vitest, and Playwright (M9.4).
+ * In-memory git and read-only gh backend for the browser, vitest, and Playwright.
  *
  * Mirrors the Rust command surface closely enough that every git-aware
  * component renders and behaves outside a packaged build. It models a small
@@ -163,6 +164,7 @@ function state(): MockState {
 
 /** Test hook: reset to the seeded repository. */
 export function resetMockGit(patch: Partial<MockState> = {}): MockState {
+  pullRequests.clear();
   const next = { ...seed(), ...patch };
   if (typeof window === 'undefined') {
     nodeState = next;
@@ -826,4 +828,39 @@ export async function gitProviderStatus(): Promise<GitProviderStatus> {
     },
     distributions: [],
   };
+}
+
+// The PR reader has no disk or git effects. A browser spec may seed outcomes;
+// absent gh is unavailable, never an empty successful check rollup.
+const pullRequests = new Map<string, import('@/engine/pullRequest').PrRead>();
+export function seedPullRequests(rows: Record<string, import('@/engine/pullRequest').PrRead>) {
+  pullRequests.clear();
+  for (const [url, read] of Object.entries(rows)) {
+    const parsed = parsePullRequestUrl(url);
+    if (parsed !== null) pullRequests.set(parsed.key, structuredClone(read));
+  }
+}
+export async function pullRequestState(
+  url: string,
+  _refresh = false,
+): Promise<import('@/engine/pullRequest').PrRead> {
+  const parsed = parsePullRequestUrl(url);
+  if (parsed === null) return { state: 'invalid_url', checkedAt: new Date().toISOString() };
+  const seeded = pullRequests.get(parsed.key);
+  if (
+    seeded?.state === 'read' &&
+    (seeded.pr.number !== parsed.number || parsePullRequestUrl(seeded.pr.url)?.key !== parsed.key)
+  )
+    return { state: 'unreadable', checkedAt: new Date().toISOString() };
+  return seeded === undefined
+    ? { state: 'gh_missing', checkedAt: new Date().toISOString() }
+    : structuredClone(seeded);
+}
+if (typeof window !== 'undefined') {
+  const host = window as unknown as {
+    __cerebroSeedPullRequests: typeof seedPullRequests;
+    __cerebroPullRequests?: Parameters<typeof seedPullRequests>[0];
+  };
+  host.__cerebroSeedPullRequests = seedPullRequests;
+  if (host.__cerebroPullRequests !== undefined) seedPullRequests(host.__cerebroPullRequests);
 }

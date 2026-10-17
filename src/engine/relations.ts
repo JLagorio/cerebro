@@ -90,11 +90,12 @@ export function childrenAt(
 }
 
 /**
- * The records a rollup aggregates over. Forward form is `relation: <field>`;
+ * The relation records a rollup aggregates over; cached mail has no ChildrenSpec. Forward form is `relation: <field>`;
  * reverse form is `from: { type, field }` — which is what lets a parent roll
  * up children that point at IT, with no duplicate link on the parent.
  */
 export function rollupSpec(def: FieldDef): ChildrenSpec | null {
+  if (def.source === 'correspondence') return null;
   if (def.from !== undefined && def.from.type !== '' && def.from.field !== '') {
     return { direction: 'reverse', type: def.from.type, field: def.from.field };
   }

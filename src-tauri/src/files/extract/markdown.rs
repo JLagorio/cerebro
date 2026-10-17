@@ -16,6 +16,7 @@ pub fn inert_line(text: &str) -> String {
             }
             ':' => out.push_str("&#58;"),
             '@' => out.push_str("&#64;"),
+            '📅' => out.push_str("&#128197;"),
             _ => out.push(c),
         }
     }

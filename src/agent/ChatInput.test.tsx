@@ -133,6 +133,31 @@ describe('ChatInput slash completion (M13.1)', () => {
     expect(screen.queryByTestId('attach-menu')).toBeNull();
   });
 
+  it('an external context append ignores the focused textarea caret from its previous value', () => {
+    const props = { onChange: vi.fn(), onSubmit: vi.fn(), onAttach: vi.fn() };
+    const { rerender } = render(<ChatInput {...props} value="Help me with" />);
+    box().focus();
+    box().setSelectionRange(0, 0);
+    // Add context appends to the draft; focus may return before React commits
+    // the new value. That old caret cannot identify a token in the new text.
+    rerender(<ChatInput {...props} value="Help me with @" />);
+    expect(screen.getByTestId('attach-menu')).toBeTruthy();
+    expect(box().value).toBe('Help me with @');
+  });
+
+  it('native typing completes context at its actual caret without consuming later prose', () => {
+    const onAttach = vi.fn();
+    render(<Harness onAttach={onAttach} />);
+    box().focus();
+    fireEvent.change(box(), {
+      target: { value: 'Please @risk tomorrow', selectionStart: 12, selectionEnd: 12 },
+    });
+    expect(screen.getByTestId('attach-menu')).toBeTruthy();
+    fireEvent.keyDown(box(), { key: 'Enter' });
+    expect(onAttach).toHaveBeenCalledTimes(1);
+    expect(box().value).toBe('Please  tomorrow');
+  });
+
   it('a highlight arrowed in the slash menu cannot leak into the wikilink menu', () => {
     render(<Harness />);
     fireEvent.change(box(), { target: { value: '/' } });

@@ -36,6 +36,8 @@ export function FileActions({
   return (
     <div
       className="file-actions"
+      role="group"
+      aria-label="File actions"
       data-testid="file-actions"
       title={desktop ? undefined : 'Desktop app only'}
     >

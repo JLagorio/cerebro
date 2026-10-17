@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, showDatabases } from './boot';
 
 async function operator(page: Page, label: string) {
   await page.getByTestId('filter-rule').getByRole('button', { name: 'Filter operator' }).click();
@@ -24,6 +24,7 @@ test('relative due filters show the named days and save tokens as plain strings'
 }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await boot(page);
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
   await page.getByTestId('view-control-filter').click();
   await page.getByLabel('Filter by…').fill('Due');

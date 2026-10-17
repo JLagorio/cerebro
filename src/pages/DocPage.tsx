@@ -1,3 +1,5 @@
+import { PullRequestStrip } from '@/detail/PullRequestStrip';
+import './pages.css';
 import { PageRunsTab } from '@/detail/PageRunsTab';
 import { PageAgentsTab } from '@/detail/PageAgentsTab';
 import { keycapText } from '@/components/ui/Keycaps';
@@ -26,6 +28,7 @@ import { PageCommentsContext } from '@/editor/PageCommentsContext';
 import { InlineDiff } from '@/git/InlineDiff';
 import { HeadingProperties, stripCells } from '@/detail/HeadingProperties';
 import { RecordProperties } from '@/detail/RecordProperties';
+import { CorrespondenceSection } from '@/detail/CorrespondenceSection';
 import { ImportProvenance } from '@/detail/ImportProvenance';
 import { RecordTabs, recordTabSet } from '@/detail/RecordTabs';
 import { TabSections } from '@/detail/TabSections';
@@ -122,7 +125,7 @@ export function isBlankBody(editor: CerebroEditor): boolean {
  * the editor's own H1 metrics so it reads as the document's first line rather
  * than as page chrome, and committing it writes a real H1 into the body.
  *
- * A textarea, not an input: at 42px in an 820px column real titles wrap, and
+ * A textarea, not an input: at 32px in a reading column real titles wrap, and
  * an input would clip its own text with no way to read the rest.
  */
 function UntitledDocHeading({
@@ -180,7 +183,7 @@ function UntitledDocHeading({
       }}
       // 45 + 1px border + 8px padding = the editor's 54px block gutter, so the
       // heading and the first paragraph share one left edge.
-      className="mb-1 ml-[45px] block w-[calc(100%-45px)] resize-none overflow-hidden rounded-lg border border-transparent bg-transparent px-2 py-0 text-4xl font-bold leading-[63px] text-n-900 outline-none hover:border-n-200 focus-visible:border-cortex-500 focus-visible:shadow-[var(--ring)]"
+      className="mb-1 ml-[45px] block w-[calc(100%-45px)] resize-none overflow-hidden rounded-lg border border-transparent bg-transparent px-2 py-0 text-3xl font-semibold leading-[43px] text-n-900 outline-none hover:border-n-200 focus-visible:border-cortex-500 focus-visible:shadow-[var(--ring)]"
     />
   );
 }
@@ -818,8 +821,8 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   );
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="doc-page">
-      <div className="flex h-11 flex-none items-center gap-0.5 border-b border-n-200 px-3">
+    <div className="cb-document flex min-h-0 min-w-0 flex-1 flex-col" data-testid="doc-page">
+      <div className="cb-document-toolbar flex flex-none items-center gap-0.5 px-3">
         {knowledgeFile
           ? crumb('Knowledge', {
               icon: 'brain',
@@ -991,7 +994,11 @@ export function DocPage({ selection }: { selection: DocSelection }) {
             <PageCoverBand entry={entry} editable={!knowledgeFile} />
             <div
               data-testid="doc-content"
-              className={fullWidth ? 'px-6 pt-6' : 'mx-auto w-full max-w-[820px] px-6 pt-6'}
+              className={
+                fullWidth
+                  ? 'cb-document-content px-6'
+                  : 'cb-document-content mx-auto w-full max-w-[900px] px-6'
+              }
             >
               {/* M55.11 — the page's icon above its title, and the hover row
                   that adds one; outside the diff lens, so both show there. */}
@@ -1058,6 +1065,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                       onToggleDetails={() => setDetails({ path: entry.path, shown: !detailsShown })}
                     />
                   )}
+                  {!knowledgeFile && <PullRequestStrip entry={entry} schema={schema} />}
                   {/* M44.5 — the record canvas swaps by the open tab: the
                       body, the tab's free text, or its database. An untyped
                       doc knows nothing of tabs and keeps its document form. */}
@@ -1103,6 +1111,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                           />
                         </div>
                       )}
+                      <CorrespondenceSection key={entry.path} entry={entry} schema={schema} />
                       <ImportProvenance entry={entry} />
                       {/* M44.5, re-placed by M46.1 — the tab strip divides
                           the record's own blocks from the ONE tab's content,

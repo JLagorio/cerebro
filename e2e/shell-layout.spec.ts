@@ -22,6 +22,10 @@ async function peekBesideAssistant(
   page: Page,
   record?: string,
 ): Promise<{ peek: Locator; assistant: Locator }> {
+  await page
+    .getByTestId('app-rail')
+    .getByRole('button', { name: 'Databases', exact: true })
+    .click();
   await page.getByTestId('sidebar-type').filter({ hasText: 'Epic' }).first().click();
   const rows = page.getByTestId('table-row');
   const row = (record === undefined ? rows : rows.filter({ hasText: record })).first();
@@ -29,7 +33,7 @@ async function peekBesideAssistant(
   await row.getByRole('button', { name: /^Open / }).click();
   const peek = page.getByTestId('detail-panel');
   await expect(peek).toBeVisible();
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await page.keyboard.press('ControlOrMeta+j');
   const assistant = page.getByTestId('ai-panel');
   await expect(assistant).toBeVisible();
   return { peek, assistant };
@@ -62,7 +66,7 @@ async function openPage(page: Page, title: string) {
 }
 
 async function openAssistant(page: Page): Promise<Locator> {
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await page.keyboard.press('ControlOrMeta+j');
   const assistant = page.getByTestId('ai-panel');
   await expect(assistant).toBeVisible();
   return assistant;
@@ -231,7 +235,7 @@ test.describe('shell layout (M52)', () => {
     expect(await storedWidth(page, 'cerebro.detailWidth')).toBe(560);
 
     // With the assistant closed the room comes back, and so does the 560.
-    await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+    await page.keyboard.press('ControlOrMeta+j');
     await expect(assistant).toHaveCount(0);
     await expect.poll(async () => Math.round((await box(peek)).width)).toBe(560);
 
@@ -255,7 +259,7 @@ test.describe('shell layout (M52)', () => {
     const sidebar = page.getByTestId('sidebar');
     const s = await box(sidebar);
     expect(Math.round(s.width)).toBe(180);
-    for (const name of ['Assistant', 'Search', 'Hide sidebar']) {
+    for (const name of ['Hide sidebar']) {
       const b = await box(sidebar.getByRole('button', { name, exact: true }));
       expect(b.x + b.width).toBeLessThanOrEqual(s.x + s.width);
     }
@@ -362,7 +366,7 @@ test.describe('shell layout (M52)', () => {
     expect(badFrames(log)).toEqual([]);
   });
 
-  test('below 1220 the sidebar steps down to its rail, and the assistant stays', async ({
+  test('below 1274 the sidebar steps down to its rail, and the assistant stays', async ({
     page,
   }) => {
     // It used to park the moment the window was under 1220 — the zap still
@@ -371,7 +375,7 @@ test.describe('shell layout (M52)', () => {
     await page.setViewportSize({ width: 1150, height: 800 });
     await boot(page);
     const { peek, assistant } = await peekBesideAssistant(page);
-    const rail = page.getByTestId('sidebar-rail');
+    const rail = page.getByTestId('app-rail');
     await expect(rail).toBeVisible();
     await expect(page.getByTestId('sidebar')).toBeHidden();
     await expectInsideViewport(page, assistant);
@@ -414,7 +418,7 @@ test.describe('shell layout (M52)', () => {
     await expect(peek).toHaveCount(0);
     await expect(assistant).toBeVisible();
     await expectInsideViewport(page, assistant);
-    await expect(page.getByTestId('sidebar')).toBeVisible();
+    await expect(page.getByTestId('sidebar')).toBeHidden();
   });
 
   test('below the rail width the assistant parks without costing the sidebar', async ({ page }) => {
@@ -422,6 +426,10 @@ test.describe('shell layout (M52)', () => {
     // sidebar from 264 to its 44px rail and parked the assistant anyway.
     await page.setViewportSize({ width: 1050, height: 800 });
     await boot(page);
+    await page
+      .getByTestId('app-rail')
+      .getByRole('button', { name: 'Databases', exact: true })
+      .click();
     await page.getByTestId('sidebar-type').filter({ hasText: 'Epic' }).first().click();
     const row = page.getByTestId('table-row').first();
     await row.hover();
@@ -431,9 +439,9 @@ test.describe('shell layout (M52)', () => {
     const sidebar = page.getByTestId('sidebar');
     const before = Math.round((await box(sidebar)).width);
 
-    await sidebar.getByRole('button', { name: 'Assistant' }).click();
+    await page.keyboard.press('ControlOrMeta+j');
     await expect(page.getByTestId('ai-parked-tab')).toBeVisible();
-    await expect(page.getByTestId('sidebar-rail')).toBeHidden();
+    await expect(page.getByTestId('app-rail')).toBeVisible();
     await expect(sidebar).toBeVisible();
     expect(Math.round((await box(sidebar)).width)).toBe(before);
     await expectInsideViewport(page, peek);
@@ -453,7 +461,7 @@ test.describe('shell layout (M52)', () => {
     await page.mouse.up();
 
     const drawn = Math.round((await box(sidebar)).width);
-    expect(drawn).toBe(1440 - (400 + 320 + 380));
+    expect(drawn).toBe(1440 - 54 - (400 + 320 + 380));
     await expect.poll(() => storedWidth(page, 'cerebro.sidebarWidth')).toBe(drawn);
     await expect(handle).toHaveAttribute('aria-valuenow', String(drawn));
     await expectInsideViewport(page, assistant);
@@ -481,10 +489,10 @@ test.describe('shell layout (M52)', () => {
 
     expect(Math.round((await box(sidebar)).width)).toBe(180);
     // Untouched, or written back as it was — never the 180 it was drawn at.
-    expect((await stored(page, 'cerebro.sidebarWidth')) ?? '264').toBe('264');
+    expect((await stored(page, 'cerebro.sidebarWidth')) ?? '240').toBe('240');
     await peek.getByRole('button', { name: 'Close', exact: true }).click();
     await expect(peek).toHaveCount(0);
-    await expect.poll(async () => Math.round((await box(sidebar)).width)).toBe(264);
+    await expect.poll(async () => Math.round((await box(sidebar)).width)).toBe(240);
   });
 
   test("a relation keeps its chevron on the first chip's line at the peek's floor", async ({
@@ -659,13 +667,17 @@ test.describe('shell layout (M52)', () => {
       // 900, so the assistant was parked behind a tab nobody could see.
       await page.setViewportSize({ width, height: 800 });
       await boot(page);
+      await page
+        .getByTestId('app-rail')
+        .getByRole('button', { name: 'Databases', exact: true })
+        .click();
       await page.getByTestId('sidebar-type').filter({ hasText: 'Epic' }).first().click();
       const row = page.getByTestId('table-row').first();
       await row.hover();
       await row.getByRole('button', { name: /^Open / }).click();
       const peek = page.getByTestId('detail-panel');
       await expect(peek).toBeVisible();
-      await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+      await page.keyboard.press('ControlOrMeta+j');
 
       const tab = page.getByTestId('ai-parked-tab');
       await expect(tab).toBeVisible();
@@ -673,14 +685,14 @@ test.describe('shell layout (M52)', () => {
       expect(Math.round((await box(tab)).width)).toBe(32);
       await expectInsideViewport(page, peek);
       // The rail makes the room, and the user's flag is not what did it.
-      await expect(page.getByTestId('sidebar-rail')).toBeVisible();
+      await expect(page.getByTestId('app-rail')).toBeVisible();
       await expect(page.getByTestId('sidebar')).toBeHidden();
       expect(await stored(page, 'cerebro.sidebarCollapsed')).toBeNull();
 
       // Where the column and the tab both fit, the column comes back.
-      await page.setViewportSize({ width: 932, height: 800 });
+      await page.setViewportSize({ width: 1048, height: 800 });
       await expect(page.getByTestId('sidebar')).toBeVisible();
-      await expect(page.getByTestId('sidebar-rail')).toBeHidden();
+      await expect(page.getByTestId('app-rail')).toBeVisible();
       await expectInsideViewport(page, tab);
     });
   }
@@ -691,6 +703,10 @@ test.describe('shell layout (M52)', () => {
     await page.addInitScript(() => window.localStorage.setItem('cerebro.aiPanelWidth', '720'));
     await boot(page);
     for (const type of ['Key result', 'Work item']) {
+      await page
+        .getByTestId('app-rail')
+        .getByRole('button', { name: 'Databases', exact: true })
+        .click();
       await page.getByTestId('sidebar-type').filter({ hasText: type }).first().click();
       const row = page.getByTestId('table-row').first();
       await row.hover();
@@ -725,6 +741,10 @@ test.describe('shell layout (M52)', () => {
     // chevron dropped under the values, or sat between two lines of them.
     await page.addInitScript(() => window.localStorage.setItem('cerebro.aiPanelWidth', '720'));
     await boot(page);
+    await page
+      .getByTestId('app-rail')
+      .getByRole('button', { name: 'Databases', exact: true })
+      .click();
     await page.getByTestId('sidebar-type').filter({ hasText: 'Decision' }).first().click();
     const row = page.getByTestId('table-row').filter({ hasText: 'Supervisors get a web console' });
     await row.first().hover();
@@ -792,13 +812,17 @@ test.describe('shell layout (M52)', () => {
   test('a type view marks only its own row current', async ({ page }) => {
     // Home kept aria-current and its selected fill beside the Epic row.
     await boot(page);
+    await page
+      .getByTestId('app-rail')
+      .getByRole('button', { name: 'Databases', exact: true })
+      .click();
     await page.getByTestId('sidebar-type').filter({ hasText: 'Epic' }).first().click();
     await expect(page.getByTestId('table-row').first()).toBeVisible();
     const current = page.getByTestId('sidebar').locator('[aria-current="page"]');
     await expect(current).toHaveCount(1);
     await expect(current).toHaveAttribute('data-testid', 'sidebar-type');
     await expect(current).toContainText('Epic');
-    await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home' }).click();
+    await page.getByTestId('app-rail').getByRole('button', { name: 'Home', exact: true }).click();
     await expect(current).toHaveCount(1);
     await expect(current).toHaveAccessibleName('Home');
   });

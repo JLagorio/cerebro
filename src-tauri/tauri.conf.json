@@ -24,7 +24,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data: cerebro-file:; media-src 'self' cerebro-file:; font-src 'self'"
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data: cerebro-file: https:; media-src 'self' cerebro-file:; font-src 'self'"
     }
   },
   "bundle": {
@@ -44,7 +44,7 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../demo-vault": "demo-vault"
+      ".bundle-resources/demo-vault": "demo-vault"
     },
     "macOS": {
       "minimumSystemVersion": "14.0"

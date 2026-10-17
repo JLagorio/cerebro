@@ -93,8 +93,8 @@ function Offer({ vault }: { vault: string }) {
         <>
           <h2 className="mb-2 text-lg font-semibold">A place to start</h2>
           <p className="mb-4 text-sm text-n-500">
-            Add Getting started, a Tasks database with three tasks, two paused agents, and two
-            read-only recipes. Nothing is overwritten.
+            Add Getting started, a Tasks database with three tasks, two paused agents, and three
+            editable recipes. Nothing is overwritten.
           </p>
           <div className="flex gap-2">
             <Button size="sm" disabled={busy} onClick={() => void act(true)}>

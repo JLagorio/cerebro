@@ -735,3 +735,22 @@ describe('whiteboard IPC', () => {
     });
   });
 });
+
+it('passes mail dismissal scope and normalized input through literal commands', async () => {
+  (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+  const { mailDismissalsRead, mailDismiss, mailUndismiss } = await import('./ipc');
+  await mailDismissalsRead('/vault');
+  expect(invokeSpy).toHaveBeenLastCalledWith('mail_dismissals_read', { vault: '/vault' });
+  await mailDismiss('/vault', 'address', 'Dana@Acme.example');
+  expect(invokeSpy).toHaveBeenLastCalledWith('mail_dismiss', {
+    vault: '/vault',
+    kind: 'address',
+    value: 'Dana@Acme.example',
+  });
+  await mailUndismiss('/vault', 'domain', 'acme.example');
+  expect(invokeSpy).toHaveBeenLastCalledWith('mail_undismiss', {
+    vault: '/vault',
+    kind: 'domain',
+    value: 'acme.example',
+  });
+});

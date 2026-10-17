@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile, type E2eCommentAnchor } from './boot';
+import { boot, readMockFile, type E2eCommentAnchor, openDestination } from './boot';
 
 /**
  * Comment anchors drawn in a real browser (M70.1), through the browser-mode
@@ -133,7 +133,7 @@ test('a comment anchor is drawn outside the page, survives a reopen and edits, a
   expect(await highlights(page)).toEqual(drawn);
 
   // Home and back: a fresh editor, the same highlights.
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home' }).click();
+  await openDestination(page, 'Home');
   await expect(editor).toHaveCount(0);
   await openSchedule(page);
   await show(page, threads);

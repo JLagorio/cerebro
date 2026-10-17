@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, showDatabases } from './boot';
 
 async function drag(page: Page, card: Locator, target: Locator) {
   const start = await card.boundingBox();
@@ -36,6 +36,7 @@ test('date bands create on days, preserve date moves, and refuse ambiguous perio
     seed();
   });
   await boot(page);
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
   await expect(page.getByTestId('view-tab-by-due')).toHaveAttribute('aria-selected', 'true');
   const column = (label: string) =>

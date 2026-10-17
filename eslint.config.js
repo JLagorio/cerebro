@@ -29,7 +29,7 @@ const ENGINE_IMPORTS = new RegExp(
     'rrule$',
     // Pure leaves: no DOM, no store, no IPC. tsconfig.engine.json typechecks
     // them through these imports, which is the only check that reaches them.
-    '@/lib/(?:deepEqual|slug|templates|sha256|policy/(?:table|tools|toolApproval))$',
+    '@/lib/(?:consumerDomains|deepEqual|slug|templates|sha256|policy/(?:table|tools|toolApproval))$',
     // viewTab.ts's one edge into views, deliberate: capability data over
     // engine types with no React in it (its comment says why).
     '@/views/viewKinds$',
@@ -44,10 +44,17 @@ const ENGINE_IMPORTS = new RegExp(
     // loads each (ink.ts, order.ts).
     'perfect-freehand$',
     'fractional-indexing$',
+    // Pure WHATWG parsing: no DOM/global URL, held to Rust by mail host cases.
+    'whatwg-url$',
   ].join('|')})`,
 );
 
 const RAILS = {
+  img: {
+    selector: 'JSXOpeningElement[name.name="img"]',
+    message:
+      'Only FileImage, FileThumb, RemoteImage and Avatar draw <img>: use a reviewed image boundary.',
+  },
   tauri: {
     pattern: /^@tauri-apps\//,
     message:
@@ -88,7 +95,7 @@ const RAILS = {
     // `typeof import('…')` names a module too, so the engine checks types.
     types: true,
     message:
-      'engine/ is the pure core: it imports engine modules, yaml, the lib leaves deepEqual, slug, templates, sha256, policy/table, policy/tools and policy/toolApproval, views/viewKinds, JSON tables under shared/policy, shared/schema, shared/calendar, shared/files and shared/import, and the scene libraries perfect-freehand and fractional-indexing. Move the code into engine/, or have the caller pass the value in.',
+      'engine/ is the pure core: it imports engine modules, yaml, the lib leaves deepEqual, slug, templates, sha256, policy/table, policy/tools and policy/toolApproval, views/viewKinds, JSON tables under shared/policy, shared/schema, shared/calendar, shared/files and shared/import, the scene libraries perfect-freehand and fractional-indexing, and the pure URL parser whatwg-url. Move the code into engine/, or have the caller pass the value in.',
   },
 };
 
@@ -100,19 +107,27 @@ function rails(...names) {
     'no-restricted-imports': [
       'error',
       {
-        patterns: picked.map(({ pattern, message }) => ({
-          regex: pattern.source,
-          caseSensitive: true,
-          message,
-        })),
+        patterns: picked
+          .filter(({ pattern }) => pattern)
+          .map(({ pattern, message }) => ({
+            regex: pattern.source,
+            caseSensitive: true,
+            message,
+          })),
       },
     ],
     'no-restricted-syntax': [
       'error',
-      ...picked.flatMap(({ pattern, message, types }) => [
-        { selector: `ImportExpression[source.value=/${pattern.source}/]`, message },
-        ...(types ? [{ selector: `TSImportType[source.value=/${pattern.source}/]`, message }] : []),
-      ]),
+      ...picked.flatMap(({ pattern, message, types, selector }) =>
+        selector
+          ? [{ selector, message }]
+          : [
+              { selector: `ImportExpression[source.value=/${pattern.source}/]`, message },
+              ...(types
+                ? [{ selector: `TSImportType[source.value=/${pattern.source}/]`, message }]
+                : []),
+            ],
+      ),
     ],
   };
 }
@@ -130,6 +145,8 @@ export default tseslint.config(
       'demo-vault/**',
       'node_modules/**',
       'src-tauri/target/**',
+      'src-tauri/.bundle-resources/**',
+      'scripts/sheet-values/target/**',
       'src-tauri/gen/**',
       'test-results/**',
       'playwright-report/**',
@@ -193,39 +210,48 @@ export default tseslint.config(
   // ones before it, and the specialized classes below never overlap.
   {
     files: ['src/**/*.{ts,tsx}'],
-    rules: rails('pdfjs', 'ironcalc', 'tauri', 'mermaid', 'mockParse', 'comments'),
+    rules: rails('img', 'pdfjs', 'ironcalc', 'tauri', 'mermaid', 'mockParse', 'comments'),
   },
   {
     files: ADAPTERS,
-    rules: rails('pdfjs', 'ironcalc', 'mermaid', 'mockParse', 'comments'),
+    rules: rails('img', 'pdfjs', 'ironcalc', 'mermaid', 'mockParse', 'comments'),
   },
   {
     files: ['src/mermaid/render.ts', 'src/**/*.mermaid.test.ts'],
-    rules: rails('pdfjs', 'ironcalc', 'tauri', 'mockParse', 'comments'),
+    rules: rails('img', 'pdfjs', 'ironcalc', 'tauri', 'mockParse', 'comments'),
   },
   {
     // The mock backend and the two tests that hold its parser to Rust.
     files: ['src/lib/mockIpc.ts', 'src/lib/mockParse.test.ts', 'src/lib/scanGolden.test.ts'],
-    rules: rails('pdfjs', 'ironcalc', 'tauri', 'mermaid', 'comments'),
+    rules: rails('img', 'pdfjs', 'ironcalc', 'tauri', 'mermaid', 'comments'),
   },
   {
     // Engine tests may import a fixture or a store; the engine itself may not.
     files: ['src/engine/**/*.{ts,tsx}'],
     ignores: ['src/engine/**/*.test.{ts,tsx}'],
-    rules: rails('pdfjs', 'ironcalc', 'tauri', 'mermaid', 'mockParse', 'comments', 'engine'),
+    rules: rails('img', 'pdfjs', 'ironcalc', 'tauri', 'mermaid', 'mockParse', 'comments', 'engine'),
   },
   {
     files: ['src/lib/mockSheet.ts', 'src/**/*.ironcalc.test.ts'],
-    rules: rails('pdfjs', 'tauri', 'mermaid', 'mockParse', 'comments'),
+    rules: rails('img', 'pdfjs', 'tauri', 'mermaid', 'mockParse', 'comments'),
   },
   {
     files: ['src/workspace/viewers/pdf/pdfjs.ts', 'src/**/*.pdf.test.ts'],
-    rules: rails('ironcalc', 'tauri', 'mermaid', 'mockParse', 'comments'),
+    rules: rails('img', 'ironcalc', 'tauri', 'mermaid', 'mockParse', 'comments'),
   },
   {
     // The M70.1 spike measures BlockNote's comments extension; nothing else
     // loads it.
     files: ['src/editor/commentSpike.test.ts'],
-    rules: rails('pdfjs', 'ironcalc', 'tauri', 'mermaid', 'mockParse'),
+    rules: rails('img', 'pdfjs', 'ironcalc', 'tauri', 'mermaid', 'mockParse'),
+  },
+  {
+    files: [
+      'src/components/FileImage.tsx',
+      'src/components/FileThumb.tsx',
+      'src/components/RemoteImage.tsx',
+      'src/components/ui/Avatar.tsx',
+    ],
+    rules: rails('pdfjs', 'ironcalc', 'tauri', 'mermaid', 'mockParse', 'comments'),
   },
 );

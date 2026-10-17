@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, showDatabases, openAgents } from './boot';
 
 test('a Work item links an existing Agent and opens its page', async ({ page }, testInfo) => {
   await boot(page);
@@ -42,6 +42,7 @@ test('a Work item links an existing Agent and opens its page', async ({ page }, 
 
 test('the property catalog declares Agent only as a one-way Relation', async ({ page }) => {
   await boot(page);
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
   await page.getByRole('button', { name: 'Add a column', exact: true }).click();
   await page.getByTestId('property-kind-relation').click();
@@ -58,6 +59,7 @@ test('an assigned trigger drains three bulk-linked pages and a re-add wakes agai
 }, testInfo) => {
   await boot(page, { autoLearn: true });
   const scout = 'records/agents/release-scout.md';
+  await openAgents(page);
   await page.getByTestId('nav-agent').filter({ hasText: 'Release scout' }).click();
   await page.getByTestId('agent-add-trigger').click();
   const editor = page.getByTestId('agent-editor-trigger-new');
@@ -69,6 +71,8 @@ test('an assigned trigger drains three bulk-linked pages and a re-add wakes agai
   await editor.getByRole('button', { name: 'Done', exact: true }).click();
   await expect.poll(() => readMockFile(page, scout)).toContain('event: assigned');
   await expect.poll(() => readMockFile(page, scout)).toContain('field: agent');
+
+  await showDatabases(page);
 
   await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
   const rows = page.getByTestId('table-row');
@@ -96,6 +100,7 @@ test('an assigned trigger drains three bulk-linked pages and a re-add wakes agai
   expect((await wakes()).map((wake) => wake.cause.subject).sort()).toEqual([...paths].sort());
   expect(new Set((await wakes()).map((wake) => wake.wakeKey)).size).toBe(3);
   expect((await wakes()).every((wake) => wake.cause.detail === 'via agent')).toBe(true);
+  await openAgents(page);
   await page.getByTestId('nav-agent').filter({ hasText: 'Release scout' }).click();
   await page.getByRole('tab', { name: 'Runs', exact: true }).click();
   await expect(page.getByTestId('agent-wake-cause').first()).toHaveText(
@@ -108,6 +113,7 @@ test('an assigned trigger drains three bulk-linked pages and a re-add wakes agai
     .toEqual(['succeeded', 'succeeded', 'succeeded']);
 
   // A human removal writes no new wake; a later re-add admits a fourth.
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
   const first = page.locator(`[data-testid="table-row"][data-path="${paths[0]}"]`);
   await first.getByRole('checkbox').click();

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot } from './boot';
+import { boot, openAssistantPanel, openAgents } from './boot';
 
 /**
  * Durable wakes (M63.1): a change that matches an agent's trigger is admitted
@@ -71,7 +71,7 @@ test('agent wakes: a change wakes its agent once, the next waits under the coold
     { path: AGENT, md: RISK_WATCH },
   );
   await boot(page, { autoLearn: true });
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   await expect(page.getByTestId('ai-panel')).toBeVisible();
 
   // One change: one wake, claimed by one run, which finishes it.
@@ -85,6 +85,7 @@ test('agent wakes: a change wakes its agent once, the next waits under the coold
     .toEqual([`${RISK} finished succeeded`, `${RISK} pending`]);
 
   // Attribution comes from the panel write receipt, not from a guessed author.
+  await openAgents(page);
   await page.getByTestId('nav-agent').filter({ hasText: 'Risk watch' }).click();
   await page.getByRole('tab', { name: 'Runs', exact: true }).click();
   await page.getByTestId('agent-wake-author').scrollIntoViewIfNeeded();
@@ -93,6 +94,7 @@ test('agent wakes: a change wakes its agent once, the next waits under the coold
   await page.screenshot({ path: test.info().outputPath('wake-author.png') });
 
   // Pause on the agent's page cancels the waiting wake, saying why.
+  await openAgents(page);
   await page.getByTestId('nav-agent').filter({ hasText: 'Risk watch' }).click();
   await expect(page.getByTestId('agent-dossier')).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('agent-duty-toggle').click();

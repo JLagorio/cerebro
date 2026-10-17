@@ -704,3 +704,26 @@ it('offers a calendar import on a database with a declared date', () => {
   expect((screen.getByLabelText('Calendar database') as HTMLSelectElement).value).toBe('Work item');
   expect((screen.getByTestId('ics-import-submit') as HTMLButtonElement).disabled).toBe(true);
 });
+
+it('offers unfiled correspondents only by email capability and reads no count until opened', async () => {
+  const ipc = await import('@/lib/ipc');
+  const read = vi.spyOn(ipc, 'mailDismissalsRead').mockResolvedValue([]);
+  try {
+    const doc = makeEntry({
+      path: 'types/contact.md',
+      title: 'Contact',
+      type: 'Type',
+      properties: { fields: { email: 'email' } } as never,
+    });
+    useVaultStore.setState({ entries: [doc], entriesVault: '/demo-vault' });
+    render(<TypePage selection={{ kind: 'type', name: 'Contact' }} />);
+    expect(screen.getByTestId('unfiled-open').textContent).toBe('Unfiled correspondents');
+    expect(read).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('unfiled-open'));
+    expect(await screen.findByText('No mail cached.')).toBeTruthy();
+    expect(read).toHaveBeenCalledOnce();
+    expect(screen.getByTestId('unfiled-open').textContent).toBe('Unfiled correspondents');
+  } finally {
+    read.mockRestore();
+  }
+});

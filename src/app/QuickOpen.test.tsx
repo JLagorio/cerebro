@@ -127,6 +127,32 @@ describe('QuickOpen', () => {
     expect(useUiStore.getState().quickOpenVisible).toBe(false);
   });
 
+  it('keeps the typed match selected when layout puts a row under a stationary pointer', () => {
+    render(<QuickOpen />);
+    const input = screen.getByPlaceholderText(PLACEHOLDER);
+    fireEvent.change(input, { target: { value: 'settings' } });
+    const settings = screen.getByRole('option', { name: /Settings.*Go to/ });
+    const ask = screen.getByTestId('quick-open-ask');
+    expect(settings.getAttribute('aria-selected')).toBe('true');
+    // Browsers emit enter when the filtered list reflows under the old cursor.
+    // That is not a new pointer choice and must not replace the keyboard result.
+    fireEvent.mouseEnter(ask);
+    expect(settings.getAttribute('aria-selected')).toBe('true');
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(useNavStore.getState().selection).toEqual({ kind: 'settings' });
+  });
+
+  it('still follows a real pointer move to the Ask row', () => {
+    render(<QuickOpen />);
+    const input = screen.getByPlaceholderText(PLACEHOLDER);
+    fireEvent.change(input, { target: { value: 'settings' } });
+    const ask = screen.getByTestId('quick-open-ask');
+    fireEvent.mouseMove(ask, { clientX: 40, clientY: 80 });
+    expect(ask.getAttribute('aria-selected')).toBe('true');
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(useUiStore.getState().handoffs.at(-1)?.text).toBe('settings');
+  });
+
   it('Enter opens the top result and closes the palette', async () => {
     const user = userEvent.setup();
     render(<QuickOpen />);

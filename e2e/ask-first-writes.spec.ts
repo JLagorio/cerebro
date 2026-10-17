@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, openKnowledgeTab } from './boot';
+import { boot, openKnowledgeTab, openAssistantPanel, openDestination } from './boot';
 
 /**
  * An ask-first agent's page writes wait for the person (M57.4), against the
@@ -22,7 +22,7 @@ const fileAt = (page: Page, path: string) =>
 
 /** Release scout's page, from the Library's agent shelf (M55.12). */
 async function openScout(page: Page) {
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Library' }).click();
+  await openDestination(page, 'Library');
   await page.getByTestId('library-tab-agent').click();
   await page.getByTestId('library-card').filter({ hasText: 'Release scout' }).click();
   await expect(page.getByTestId('agent-properties')).toBeVisible();
@@ -42,7 +42,7 @@ async function askFirst(page: Page) {
 }
 
 async function send(page: Page, text: string) {
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   const panel = page.getByTestId('ai-panel');
   await expect(panel).toBeVisible();
   await panel.getByLabel('Message the assistant').fill(text);

@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "artifact_version": 27,
+  "artifact_version": 32,
   "rule_version": "tools/2026-10-15",
   "server": "cerebro",
   "tokens": {
@@ -21,6 +21,18 @@
     },
     {
       "id": "note",
+      "writes": true,
+      "kinds": [
+        "additive",
+        "destructive"
+      ],
+      "axes": [
+        "write",
+        "read_write"
+      ]
+    },
+    {
+      "id": "canvas",
       "writes": true,
       "kinds": [
         "additive",
@@ -153,7 +165,10 @@
   ],
   "clients": {
     "default": "read",
-    "grantable": ["write", "comment"],
+    "grantable": [
+      "write",
+      "comment"
+    ],
     "why": "A personal token always reads. It may also hold toolsets whose every row a folder scope bounds; never one that writes Knowledge, proposes, starts agents or moves the app."
   },
   "prefix_exceptions": [
@@ -1447,6 +1462,245 @@
       }
     },
     {
+      "name": "create_canvas",
+      "surface": "base",
+      "title": "Create a whiteboard",
+      "summary": "Create a new whiteboard, optionally with cards and connections",
+      "toolset": "write",
+      "kind": "additive",
+      "idempotent": false,
+      "open_world": false,
+      "door": "canvas",
+      "axis": "write",
+      "target": {
+        "arg": "folder",
+        "kind": "folder"
+      },
+      "exempt": null,
+      "renderer": "change",
+      "fold": null,
+      "icon": "square-plus",
+      "always_load": false,
+      "confirmable": true,
+      "search_hint": "create a new whiteboard canvas with cards",
+      "description": "Create a new whiteboard: a `.canvas` file in the open JSON Canvas format, which Obsidian also opens. It is written to `folder` (default: the vault root) as `<slug>.canvas`; if that name is taken, -2, -3 and so on are added, and the reply gives the path it wrote and its hash. `ops`, optional, fills the new board in the same call with up to 25 operations: `add_node` and `add_edge` as a change to a board takes them (whole-number x, y, width and height; text, file, link or group nodes; edges between nodes added earlier in the call), and `update_node` or `update_edge` on those. If any op is invalid, nothing is created and the reply names it. The new board opens as a page in the app. knowledge/ and hidden folders are refused, and the run needs write access to the folder.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string",
+            "description": "Vault folder; the vault root when omitted.",
+            "default": ""
+          },
+          "slug": {
+            "type": "string"
+          },
+          "ops": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "add_node",
+                    "update_node",
+                    "add_edge",
+                    "update_edge"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "text",
+                    "file",
+                    "link",
+                    "group"
+                  ]
+                },
+                "x": {
+                  "type": "integer"
+                },
+                "y": {
+                  "type": "integer"
+                },
+                "width": {
+                  "type": "integer"
+                },
+                "height": {
+                  "type": "integer"
+                },
+                "color": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "file": {
+                  "type": "string"
+                },
+                "subpath": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "fromNode": {
+                  "type": "string"
+                },
+                "toNode": {
+                  "type": "string"
+                },
+                "fromSide": {
+                  "type": "string"
+                },
+                "toSide": {
+                  "type": "string"
+                },
+                "fromEnd": {
+                  "type": "string"
+                },
+                "toEnd": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "op"
+              ]
+            }
+          }
+        },
+        "required": [
+          "slug"
+        ]
+      }
+    },
+    {
+      "name": "edit_canvas",
+      "surface": "base",
+      "title": "Edit a whiteboard",
+      "summary": "Add or change cards and connections on a whiteboard, in one checked batch",
+      "toolset": "write",
+      "kind": "destructive",
+      "idempotent": false,
+      "open_world": false,
+      "door": "canvas",
+      "axis": "read_write",
+      "target": {
+        "arg": "path",
+        "kind": "canvas"
+      },
+      "exempt": null,
+      "renderer": "change",
+      "fold": null,
+      "icon": "pen-tool",
+      "always_load": false,
+      "confirmable": true,
+      "search_hint": "add, move or change cards and connections on a whiteboard",
+      "description": "Change a whiteboard (a `.canvas` file) in one checked batch. `ops` holds 1 to 25 operations, applied in order to a copy of the board. `add_node` takes `type` (text, file, link or group), whole-number `x`, `y`, `width` and `height`, and its content: `text` (markdown), `file` (a vault path such as notes/plan.md, with an optional `subpath` starting with #), `url` (an http or https address) or a group's optional `label`; plus an optional `color` (a preset 1 to 6, or #rrggbb) and an optional new `id`, else one is made and reported. `update_node` takes an `id` and the fields to change; an empty string clears `color`, `subpath` or `label`, and a node never changes type. `add_edge` takes `fromNode` and `toNode`, ids of nodes on the board or added earlier in this call, with optional `fromSide` and `toSide` (top, right, bottom or left), `fromEnd` and `toEnd` (none or arrow), `color`, `label` and `id`. `update_edge` takes an `id` and the fields to change. Nothing is removed, and moving a group moves only the group. If every op is valid, the board is written once and keeps every key it already held; otherwise nothing is written and the reply names the first op that failed. An edge to a node that is not on the board refuses the whole call. The reply lists what each op did, the ids it made, and warnings, such as a card whose file does not exist (the card keeps its path). Pass the board's hash, from a read of the board, as `expect_hash`: if the board changed since, nothing is written, and you should read it again. Boards in knowledge/ are refused, and the run needs read access to the board as well as write access.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "ops": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "add_node",
+                    "update_node",
+                    "add_edge",
+                    "update_edge"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "text",
+                    "file",
+                    "link",
+                    "group"
+                  ]
+                },
+                "x": {
+                  "type": "integer"
+                },
+                "y": {
+                  "type": "integer"
+                },
+                "width": {
+                  "type": "integer"
+                },
+                "height": {
+                  "type": "integer"
+                },
+                "color": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "file": {
+                  "type": "string"
+                },
+                "subpath": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "fromNode": {
+                  "type": "string"
+                },
+                "toNode": {
+                  "type": "string"
+                },
+                "fromSide": {
+                  "type": "string"
+                },
+                "toSide": {
+                  "type": "string"
+                },
+                "fromEnd": {
+                  "type": "string"
+                },
+                "toEnd": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "op"
+              ]
+            }
+          },
+          "expect_hash": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "ops"
+        ]
+      }
+    },
+    {
       "name": "import_notion_page",
       "surface": "base",
       "title": "Import a Notion page",
@@ -1795,24 +2049,24 @@
       "always_load": false,
       "confirmable": false,
       "search_hint": "save fetched external material",
-      "description": "Write down external material you just fetched — a Jira ticket, a Confluence page, a web page — as a local working doc under sources/. Call this after fetching a ticket or a page through a connector. Never for mail: a message, a thread or a mail link is not cached as a web page. The point is that the next question about the same thing reads a file instead of spending another round trip, so the copy has to exist locally before the conversation moves on. Check with search_notes whether a copy already exists before fetching at all.",
+      "description": "Write down external material you just fetched — a Jira ticket, a Confluence page, a web page — as a local working doc under sources/. Call this after fetching a ticket or a page through a connector. Never for mail: a message, a thread or a mail link is not cached as a web page. The point is that the next question about the same thing reads a file instead of spending another round trip, so the copy has to exist locally before the conversation moves on. Check with search_notes whether a copy already exists before fetching at all. With the accepted Gmail gate, an attended conversation may cache thread headers as kind thread: pass messages with id, from, to, cc, date and labels, and optional owner_addresses. Labels determine direction but are not stored; omit drafts and bcc. Only when the person asked about this thread in this conversation, and the separate message-text gate is open, include plain-text body on the requested messages. Text is kept in its own private page, cut to the reply and made inert. Mail is kept under its private mail folder, outside git.",
       "input_schema": {
         "type": "object",
         "properties": {
           "id": {
             "type": "string",
-            "description": "Issue key (PHX-421) or the URL you fetched"
+            "description": "Issue key, the URL fetched, or a mail thread id"
           },
           "kind": {
             "type": "string",
-            "description": "issue | web"
+            "description": "issue | web | thread"
           },
           "title": {
             "type": "string"
           },
           "body": {
             "type": "string",
-            "description": "The content, as markdown"
+            "description": "Required markdown content for issue or web; omitted for thread"
           },
           "source_url": {
             "type": "string",
@@ -1821,13 +2075,71 @@
           "stale_after": {
             "type": "string",
             "description": "YYYY-MM-DD after which the copy should be refetched. Default: 30 days out."
+          },
+          "owner_addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Your own addresses, when known; SENT senders are also recorded as yours."
+          },
+          "messages": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "cc": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "date": {
+                  "description": "RFC 3339, RFC 2822, or a 13-digit Unix timestamp in milliseconds",
+                  "type": [
+                    "string",
+                    "integer"
+                  ]
+                },
+                "labels": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "body": {
+                  "type": "string",
+                  "description": "Plain message text, only when the person asked about this thread in this conversation; requires the separate thread_text gate."
+                }
+              },
+              "required": [
+                "id",
+                "from",
+                "date",
+                "labels"
+              ]
+            }
           }
         },
         "required": [
           "id",
           "kind",
-          "title",
-          "body"
+          "title"
         ]
       }
     },
@@ -2208,5 +2520,54 @@
       "fold": null,
       "icon": "clipboard-check"
     }
-  ]
+  ],
+  "never_call": {
+    "why": "D15: mail is drafted for the person to review and send. These verified mail-send spellings are denied on every connector the run loads; a connector allow cannot remove them.",
+    "tools": [
+      {
+        "name": "GMAIL_FORWARD_MESSAGE",
+        "source": "Composio Gmail toolkit 20261010_00: https://docs.composio.dev/toolkits/gmail"
+      },
+      {
+        "name": "GMAIL_REPLY_TO_THREAD",
+        "source": "Composio Gmail toolkit 20261010_00: https://docs.composio.dev/toolkits/gmail"
+      },
+      {
+        "name": "GMAIL_SEND_DRAFT",
+        "source": "Composio Gmail toolkit 20261010_00: https://docs.composio.dev/toolkits/gmail"
+      },
+      {
+        "name": "GMAIL_SEND_EMAIL",
+        "source": "Composio Gmail toolkit 20261010_00: https://docs.composio.dev/toolkits/gmail"
+      },
+      {
+        "name": "forward_email",
+        "source": "klodr/gmail-mcp 1.4.2: https://github.com/klodr/gmail-mcp/blob/main/src/tools.ts"
+      },
+      {
+        "name": "reply_all",
+        "source": "klodr/gmail-mcp 1.4.2: https://github.com/klodr/gmail-mcp/blob/main/src/tools.ts"
+      },
+      {
+        "name": "reply_to_email",
+        "source": "klodr/gmail-mcp 1.4.2: https://github.com/klodr/gmail-mcp/blob/main/src/tools.ts"
+      },
+      {
+        "name": "send_draft",
+        "source": "jimsimoy/gmail-mcp 0.1.0: https://github.com/jimsimoy/gmail-mcp#tools"
+      },
+      {
+        "name": "send_email",
+        "source": "GongRzhe/Gmail-MCP-Server 1.1.11: https://github.com/GongRzhe/Gmail-MCP-Server#available-tools"
+      },
+      {
+        "name": "send_gmail_message",
+        "source": "workspace-mcp 1.26.0: https://github.com/taylorwilsdon/google_workspace_mcp/releases/tag/v1.26.0"
+      },
+      {
+        "name": "send_message",
+        "source": "jimsimoy/gmail-mcp 0.1.0: https://github.com/jimsimoy/gmail-mcp#tools"
+      }
+    ]
+  }
 }

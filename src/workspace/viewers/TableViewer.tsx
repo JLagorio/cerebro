@@ -24,17 +24,19 @@ export function TableViewer({ path, content }: { path: string; content: string }
         <Button size="sm" variant="ghost" onClick={() => setText(!text)}>
           {text ? 'View as table' : 'View as text'}
         </Button>
+        {!text && problem === undefined && (
+          <span className="file-viewer-hint file-viewer-count">
+            {table.rowCount > 1000
+              ? `Showing the first 1,000 of ${table.rowCount.toLocaleString()} rows.`
+              : `${table.rowCount} ${table.rowCount === 1 ? 'row' : 'rows'}`}
+          </span>
+        )}
       </div>
       {problem !== undefined && <p role="status">{csvProblemText(problem)}</p>}
       {text || problem !== undefined ? (
         <CodeViewer path={path} content={content} />
       ) : (
         <>
-          <p className="file-viewer-hint">
-            {table.rowCount > 1000
-              ? `Showing the first 1,000 of ${table.rowCount.toLocaleString()} rows.`
-              : `${table.rowCount} ${table.rowCount === 1 ? 'row' : 'rows'}`}
-          </p>
           <div className="file-table-scroll">
             <table>
               <thead>

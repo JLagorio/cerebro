@@ -240,6 +240,15 @@ deliberately does not do — with your machine is most of its security story.
   after it ends or after its waiting card closes. They are never written to
   disk, and are dropped at a vault switch and at quit. A re-attach names the
   run's durable id, so a run number reused after a restart reads nothing.
+- **A vault checkpoint cannot commit a parent repository's staged files.**
+  For a vault nested in a repository, its checkpoint builds a private index
+  from the current commit and replaces only the vault's entries with their
+  staged state. Outside staged and unstaged files stay untouched. Publishing
+  compares HEAD atomically and refuses if another process moved it; an active
+  parent merge, rebase, cherry-pick, revert or sequencer also refuses before
+  staging. Tree/index path streams are byte-exact and must reach EOF without
+  a read error. A changed filename that cannot be represented as UTF-8 is
+  refused for handling in Git, rather than silently renamed.
 - **Untrusted vaults cannot add callable servers.** A vault's
   `.cerebro/connectors.json` travels with the vault, so a stdio connector
   entry could name an arbitrary command, and an http one a server of the
@@ -654,7 +663,6 @@ captions join the header before its separator; body bytes stay unchanged.
 Unscoped reads retain their prior answer exactly. Decoder/read failures are
 counted explicitly, rather than presented as no pictures.
 
-
 ## Mail storage and admission
 
 Mail pages under `sources/mail/` and their `.comments/sources/mail/` sidecars
@@ -663,6 +671,15 @@ from the index while keeping the files on disk. Case variants are also
 excluded. Run commits report how many mail files they kept out. This does
 not erase content from older commits.
 
+Correspondence is derived from declared email/domain fields and readable mail
+headers; opening the unfiled lane writes no addresses into the vault. “Not a
+person” and “Not a company” store normalized address/domain dismissals in this
+Mac's runtime.db, scoped to the vault, never in tracked files or the ledger.
+Restore removes that local row. Explicit “Create page” writes the chosen
+address into a tracked page; its button title explains that change. The lane
+measures matching sent-to threads, not per-address message counts or names
+that the header cache does not record.
+
 The shared mail artifact ships with its Gmail gate closed. The draft evidence
 pack at `docs/superpowers/evidence/triggers/R14/2026-10-15-gmail.md` describes
 header digests and explicitly requested message text. Opening the gate
@@ -670,6 +687,38 @@ requires the owner's dated, fired pack, R14 registration and an identical
 vault-store scope; build tests check that agreement. Runtime code does not
 consult the evidence registry. Acceptance is separate from implementing the
 closed-gate features.
+
+Thread header digests hold normalized participants, SENT-derived direction,
+message ids and timestamps; BCC, drafts, labels and message bodies are excluded.
+Headers are escaped before entering markdown. The gate binds the exact vault
+store and attendance, and ordinary agent note doors cannot write the mail
+folder. A refresh compares under its path lock, skips unchanged metadata/body,
+and refuses an existing page with another source identity. The source writer
+checks the actual landing before directory creation and again under the lock:
+a symlink cannot redirect private mail into a public folder or a web cache into
+mail. Metadata must remain readable under the scanner's size limit.
+
+Requested message text needs the separately listed `thread_text` kind in the
+same scoped gate and an attended conversation. The request requirement is a
+prompt rule; the gate, attendance, limits and private folder are enforced by
+Rust. Text is cut to the reply (forwards stay whole), escaped, and written to
+its own `-text.md` page. An over-limit call or conflicting page identity writes
+nothing. Both paths are locked before checking for existing text and building
+the header link. Each changed file lands by atomic rename with its own receipt;
+an I/O failure between the two renames can leave the text page without the
+header update, which a subsequent refresh repairs. A header-only refresh never
+rewrites the text page.
+
+The optional Mail sweep record is born paused, with no trigger or schedule. It
+grants only the selected connector's `search_threads` and `get_thread`, and
+only the vault's source cache door can write. The prompt requests metadata
+only and reports connector failures and limits. Its explicit denial list
+includes draft, label, trash and spam operations; the positive allow-list also
+withholds unlisted tools. Legacy denial names remain compatibility guards and
+are not claims that every current server provides those tools. No background
+mail sync is installed. Retention runs only from the person's Settings action:
+one hash-checked batch moves old digests and matching text pages into vault
+Trash, with one Undo. Undated, unreadable and mismatched pages are retained.
 
 Unattended runs and token clients cannot read `sources/mail/` through
 Cerebro's targeted readers; listings withhold the pages and report the count.
@@ -684,3 +733,145 @@ mail readers named in `mail.v1.json`. This is an exact-name boundary: a
 server spelling a reader otherwise, or legacy mode without `connectors.json`,
 is not covered. Mail URLs are refused before the ticket/web cache scans or
 writes, and external-reference discovery never asks to fetch those links.
+
+### Derived file previews (M66.9)
+
+Thumbnails use contained descriptors and live only in the app cache, outside
+vault writes and runtime history. Cache identity includes canonical path, byte
+length, nanosecond modification time and snapped size; an external replacement
+preserving those values can reuse the prior preview. The cache prunes oldest
+entries past 256 MiB. Typed permanent negatives are cached; missing files,
+missing tools and timeouts are retried. Preview input is capped at 64 MiB.
+Embedded PSD and Figma previews use checked lengths, and ZIP entries pass the
+same bounded package reader as Office extraction. Raster decoding stays in
+`images.rs`, with 16,384-pixel sides and a 512 MiB allocation limit. Outputs are
+at most 512 pixels and 512 KiB. At most four decodes and two Quick Look workers
+run together. Quick Look receives a private, non-executable copy, never a
+replaceable vault pathname; it runs only for the closed extension list and
+never a denied kind. Its output is capped at 4 MiB; a five-second timeout kills
+and reaps its process group. Ordinary completion removes the private copy;
+before another Quick Look job, stale work directories older than a minute are
+removed without following symlinks, recovering copies left by a crash.
+
+### Notion imports (M69.5)
+
+The live CLI fold captures only the exact `notion-fetch` name of a connector
+server granted to a run that also holds `import_notion_page`. Server and exact
+tool denials both prevent capture. Results remain in memory under that run's
+lease: at most eight captures per run, 4 MiB each and 16 MiB across runs. Debug
+output and transcript events never carry this retained copy; normal existing
+bounded tool previews remain. Run completion, stop/drain, init refusal and
+unwind retire the lease. Session-file replay never arms it.
+
+The import tool accepts a page identity and landing folder, then reads that
+run's latest matching capture. Unknown markup, failed fetches, databases and
+incomplete envelopes refuse before writing. Only a composable refusal can
+license a model-authored fallback, and only for the same captured generation;
+that fallback is visibly stamped `import_method: agent_composed`. Refusals
+record one operational row per run, reason and page, without captured text.
+
+Imported copies are selected by canonical source identity; their actual
+landing must pass read, write, corpus and provenance checks. Both lexical and
+resolved locations obey the mail read boundary, and an alias cannot land an
+import in `sources/`. Existing files compare their scanned bytes under the
+path lock. Automatic link repair changes only prose on readable, writable,
+unchanged imports; edited or unreachable citers remain untouched. No media
+bytes are downloaded. Browser tests use explicit Rust-normalized outcomes;
+they do not claim to prove a live connector's envelope or packaged rendering.
+
+`edit_canvas` requires read and write scope on its board, refuses Knowledge
+and hidden paths, validates every operation before one path-locked write,
+and preserves unknown JSON keys and Cerebro extras. `expect_hash` compares
+under that lock. New or repointed edges must name existing nodes, including
+nodes added earlier in the batch. File-card existence is checked only in
+read scope; no linked bytes or web content are fetched. A missing file keeps
+its pointer with a warning. A canonical path outside the vault refuses.
+`create_canvas` applies the same planner to the empty board after choosing
+and locking its final free filename. Its folder is write-scoped, Knowledge,
+mail and hidden destinations refuse, and file-card probes remain read-scoped.
+A failed operation creates no file or receipt. An allowed batch records one
+create, including when a taken name requires a numbered suffix. Both canvas
+writers use the same ask-first admission and queued-review boundaries as
+other confirmable writes.
+
+### Remote images (M66.9b)
+
+HTTPS image loads require a person's click for that exact URL in the current
+session. The allow-set is memory only. HTTP and protocol-relative image URLs
+never load. Requests have no referrer and use the browser directly; Cerebro
+runs no image proxy and Rust makes no remote-image request. Page icons and
+avatars keep their glyph/initial fallback for remote sources; gallery URL
+covers remain named tiles. The editor's live node has the same gate, while
+save/copy/drag exports assign lazy loading before the source. The original
+markdown image URL is preserved. Request-count tests cover Chromium and WebKit.
+
+Diagrams never fetch remote images. Before Mermaid lays out in the live DOM,
+shape attributes are parsed with bounded, alias-free YAML so quoted/escaped
+image keys cannot bypass replacement. Resource-bearing HTML and escaped CSS
+style commands are removed; the label sanitizer forbids resource tags and
+style/source attributes. Diagram directives cannot replace that sanitizer or
+inject theme CSS/font settings. The returned SVG is checked again for external
+resource references. These controls precede the CSP change: only `img-src`
+gains `https:`; HTTP, connection, media and navigation policies stay bounded.
+
+### Pull requests (D16, M69.11)
+
+Opening a page with a GitHub PR link can run the person's own `gh` against
+GitHub using its existing login. Cerebro does not read a token. Only a validated,
+canonical `https://github.com/owner/repo/pull/number` reaches the one command:
+`gh pr view <url> --json <fixed fields>`. Credentials, ports, encoded paths,
+other hosts and non-PR routes never reach argv. The response URL and number
+must describe the requested PR. This read is available to the human page only;
+it is not an agent tool and writes no vault, runtime or diagnostic record.
+
+The process starts in the system temporary directory, with repository/host
+overrides removed and prompts, paging, color and update checks disabled. Its
+stdout is capped at 2 MiB, its stderr tail is bounded by the shared supervisor,
+and its 15-second deadline ends and reaps the process group. A nonblocking
+reader also exits when a descendant keeps stdout open. At most two reads run,
+and concurrent requests for the same canonical link share one child. Successful
+reads are reused for 60 seconds and failures for 10; expired entries are removed
+on access. Memory caching is limited to 64 entries and 16 MiB of serialized
+results. A rollup above 10,000 checks is unreadable. Unknown or missing status
+information remains unknown, never a successful check.
+
+The command and environment contract follows the official
+[PR view](https://cli.github.com/manual/gh_pr_view) and
+[environment](https://cli.github.com/manual/gh_help_environment) documentation.
+Tests invoke generated toy scripts only; they never authenticate, inspect a
+real PR or modify the person's GitHub session.
+
+### Mail is drafted, never sent (D15)
+
+Cerebro has no mail-sending MCP tool. Every run holding a configured connector
+adds the shared tool manifest's `never_call` names on each loaded server to its
+one CLI deny flag. Names are ASCII-only and source-attributed; server names
+pass the existing CLI normalization and collision checks. Record and skill
+allows cannot remove these denials, including on unattended runs. The shared
+server instructions also tell every run to leave a draft for the person to
+review and send.
+
+This is an exact-name boundary, not a claim that arbitrary connectors are safe.
+A third-party server can expose another spelling or a general execution tool;
+those are outside this inventory. Legacy attended runs that inherit global CLI
+connectors without a vault connector list do not disclose their server names to
+Cerebro, so this argv join cannot bind them. A shell-granted run can also reach
+external services through its shell. Use configured, approved connectors and
+least privilege; the prompt alone is not the boundary. The owner still owes the
+isolated toy-server check proving the pinned CLI hides denied send tools while
+leaving draft creation available. No test sends mail or calls an owner's account.
+
+Foreign transcript calls show the CLI server spelling and a connector chip;
+they are never styled as vault changes and offer no vault diff. The structured
+native imports remain their own local write cards.
+
+The editable `/draft-reply` recipe narrows an attended turn to Gmail and the
+declared thread/draft tools, plus two read-only vault tools. A skill's connector
+names intersect with an addressed agent's; denials union. These restrictions
+are copied before asynchronous work and frozen in queued turns. The recipe
+treats thread text as untrusted, asks when identity or recipients are unclear,
+limits recipients to the thread, omits bcc, attachments and HTML, and keeps the
+signature on its skill page. A placeholder signature is omitted and named in
+the reply. It writes no vault file. The scripted browser proof uses only
+example.com addresses; a real signed-in draft and Gmail's own signature behavior
+still need the owner's isolated check. No test uses a live mail account.

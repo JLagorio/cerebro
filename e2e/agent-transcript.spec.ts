@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test, expect, type Page } from '@playwright/test';
-import { boot, seedBeforeBoot } from './boot';
+import { boot, seedBeforeBoot, openAssistantPanel } from './boot';
 
 /**
  * Threads come back from Claude Code's own session file (M56.3).
@@ -44,7 +44,7 @@ const thread = (over: Record<string, unknown>) => ({
 });
 
 async function openPanel(page: Page) {
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   const panel = page.getByTestId('ai-panel');
   await expect(panel).toBeVisible();
   return panel;

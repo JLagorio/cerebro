@@ -274,9 +274,11 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--n-200);
+  gap: var(--sp-2);
+  min-height: 44px;
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--n-100);
+  background: var(--surface-app);
   flex: none;
 }
 .file-actions,
@@ -287,10 +289,17 @@
   gap: 8px;
 }
 .file-viewer-controls {
-  padding: 8px 16px;
+  min-height: 44px;
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--n-100);
+  background: var(--surface-board);
+}
+.file-viewer-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
 }
 .file-viewer-hint {
-  color: var(--n-500);
+  color: var(--text-meta);
   font-size: var(--fs-xs);
 }
 .image-viewer,
@@ -303,6 +312,7 @@
 }
 .image-viewer-frame {
   position: relative;
+  background: var(--surface-sunken);
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -325,6 +335,7 @@
   max-height: none;
 }
 .media-viewer {
+  background: var(--surface-sunken);
   flex: 1;
   min-height: 0;
   display: grid;
@@ -377,6 +388,74 @@
 .file-table-scroll th {
   position: sticky;
   top: 0;
-  background: var(--surface-raised);
-  font-weight: 500;
+  z-index: 1;
+  background: var(--surface-board);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  font-weight: 550;
+}
+.file-table-scroll tbody tr:hover {
+  background: var(--surface-board);
+}
+
+/* The active Work pane lends its Explorer to the shell (M79). The inline
+   fallback keeps standalone and inactive panes fully usable. */
+.workspace-explorer {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  min-height: 0;
+  width: 240px;
+  border-right: 1px solid var(--n-100);
+  background: var(--surface-board);
+}
+.workspace-explorer-context {
+  flex: 1;
+  width: 100%;
+  border-right: 0;
+  background: transparent;
+}
+.workspace-explorer-heading {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 40px;
+  padding: var(--sp-2);
+}
+.workspace-explorer-heading button {
+  display: grid;
+  place-items: center;
+  min-width: 28px;
+  min-height: 28px;
+  border-radius: var(--r-md);
+}
+.workspace-explorer-heading button:hover {
+  background: var(--surface-sunken);
+}
+.workspace-heading {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 52px;
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--n-200);
+}
+.workspace-heading h1 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  font-weight: 550;
+  letter-spacing: -0.015em;
+}
+.workspace-heading-divider {
+  height: 16px;
+  border-left: 1px solid var(--n-200);
+}
+.workspace-heading-meta {
+  margin-left: auto;
+  color: var(--text-meta);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
 }

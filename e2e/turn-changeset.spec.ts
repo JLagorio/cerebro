@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot } from './boot';
+import { boot, openAssistantPanel } from './boot';
 
 /**
  * A run commits only what it wrote (M58.3, CV-34), in the browser.
@@ -70,7 +70,7 @@ test('a turn commits exactly the two notes it wrote, and View diff opens its com
   await page.keyboard.type('Typed while the turn runs.');
 
   // The turn: two appends, chained.
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   const panel = page.getByTestId('ai-panel');
   await expect(panel).toBeVisible();
   await panel
@@ -103,7 +103,7 @@ test('a turn commits exactly the two notes it wrote, and View diff opens its com
   await expect(diff).not.toContainText('No uncommitted changes to this note.');
 });
 
-test('a mail-only turn keeps its page out of the commit and names the count', async ({
+test('an ordinary append cannot change a mail digest or create a commit', async ({
   page,
 }, info) => {
   await boot(page);
@@ -111,19 +111,65 @@ test('a mail-only turn keeps its page out of the commit and names the count', as
     window.__cerebroMockFs.set('sources/mail/synthetic.md', '# Synthetic header\n'),
   );
   const before = (await mockGit(page)).commits.length;
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   const panel = page.getByTestId('ai-panel');
   await panel
     .getByLabel('Message the assistant')
     .fill('append "Reviewed." to sources/mail/synthetic.md');
   await panel.getByRole('button', { name: 'Send' }).click();
+  await expect(
+    panel.getByTestId('chat-message').filter({ hasText: 'I could not append' }),
+  ).toContainText('sources/mail/ holds mail digests, which only cache_source writes.', {
+    timeout: 10_000,
+  });
+  await expect(panel.getByTestId('turn-changeset-kept-out')).toHaveCount(0);
+  expect((await mockGit(page)).commits.length).toBe(before);
+  expect(await page.evaluate(() => window.__cerebroMockFs.get('sources/mail/synthetic.md'))).toBe(
+    '# Synthetic header\n',
+  );
+  await page.screenshot({
+    path: info.outputPath('mail-append-refused.png'),
+    animations: 'disabled',
+  });
+});
+
+test('a restored mail-only turn names the file kept out of git', async ({ page }, info) => {
+  // The native cache door and mockGit receipt tests prove withholding. Here
+  // restore its recorded result through the real conversation store; ordinary
+  // note writers are deliberately unable to manufacture a mail write.
+  await page.addInitScript(() => {
+    const thread = {
+      id: 'mail-cache-result',
+      title: 'Cache a thread header',
+      usesDefaultTitle: false,
+      sessionId: null,
+      createdAt: '2026-07-20T12:00:00.000Z',
+      archived: false,
+      vault: '/demo-vault',
+      messages: [
+        { id: 'mail-ask', role: 'user', text: 'Cache this thread header.', tools: [] },
+        {
+          id: 'mail-result',
+          role: 'assistant',
+          text: 'The thread header is cached.',
+          tools: [],
+          changesets: [
+            { state: 'nothing', run_id: 'mail-only', shell_unrecorded: false, kept_out_of_git: 1 },
+          ],
+        },
+      ],
+    };
+    localStorage.setItem('cerebro.conversations', JSON.stringify([thread]));
+    localStorage.setItem('cerebro.activeConversation', thread.id);
+  });
+  await boot(page);
+  const before = (await mockGit(page)).commits.length;
+  await openAssistantPanel(page);
+  const panel = page.getByTestId('ai-panel');
   await expect(panel.getByTestId('turn-changeset-kept-out')).toHaveText(
     'Kept 1 mail file out of git.',
-    { timeout: 10_000 },
   );
+  await expect(panel.getByTestId('turn-changeset-view-diff')).toHaveCount(0);
   expect((await mockGit(page)).commits.length).toBe(before);
-  expect(
-    await page.evaluate(() => window.__cerebroMockFs.get('sources/mail/synthetic.md')),
-  ).toContain('Reviewed.');
   await page.screenshot({ path: info.outputPath('mail-kept-out.png'), animations: 'disabled' });
 });

@@ -577,7 +577,14 @@ describe('the :::ai container', () => {
         type: 'ai',
         props: { prompt: 'Summarise "the plan"', generated: '2026-10-12' },
         children: [
-          { type: 'bulletListItem', content: 'Ship the [[kickoff]] notes first' },
+          {
+            type: 'bulletListItem',
+            content: [
+              { type: 'text', text: 'Ship the ', styles: {} },
+              { type: 'wikilink', props: { target: 'kickoff', alias: '' } },
+              { type: 'text', text: ' notes first', styles: {} },
+            ],
+          },
           { type: 'codeBlock', props: { language: 'ts' }, content: 'const x = 1;' },
         ],
       },
@@ -2384,6 +2391,82 @@ describe('chips inside emphasis', () => {
   });
 });
 
+describe('literal chip syntax', () => {
+  it.each([
+    ['&#91;&#91;Launch&#93;&#93;', '[[Launch]]'],
+    ['&#x5b;&#x5b;Launch&#x5d;&#x5d;', '[[Launch]]'],
+    ['&lbrack;&lbrack;Launch&rbrack;&rbrack;', '[[Launch]]'],
+    ['\\[\\[Launch\\]\\]', '[[Launch]]'],
+    ['&#64;[[maya]]', '@[[maya]]'],
+    ['&#91;^source&#93;', '[^source]'],
+    ['&#128197; 2026-10-15', '📅 2026-10-15'],
+  ])('keeps %s inert and visible through repeated real editor saves', async (source, visible) => {
+    const parsed = await markdownToBlocks(editor, source + '\n');
+    expect(JSON.stringify(parsed)).not.toMatch(/"type":"(wikilink|assignee|due|citation)"/);
+    expect(JSON.stringify(parsed)).toContain(visible);
+    editor.replaceBlocks(editor.document, parsed);
+    const once = blocksToMarkdownNow(editor);
+    const reopened = await markdownToBlocks(editor, once);
+    expect(JSON.stringify(reopened)).not.toMatch(/"type":"(wikilink|assignee|due|citation)"/);
+    expect(JSON.stringify(reopened)).toContain(visible);
+    expect(await blocksToMarkdown(editor, reopened)).toBe(once);
+    expect(isLossyImport(source, once)).toBe(false);
+  });
+
+  it('keeps a live link beside literal text and preserves escapes inside code', async () => {
+    const source =
+      '[[Live]] and &#91;&#91;Literal&#93;&#93;. `&#91;[[Code]]`\n\n```\n&#91;[[Code]]\n```\n';
+    const blocks = await markdownToBlocks(editor, source);
+    expect(JSON.stringify(blocks).match(/"type":"wikilink"/g)).toHaveLength(1);
+    expect(JSON.stringify(blocks)).toContain('[[Literal]]');
+    const once = await blocksToMarkdown(editor, blocks);
+    expect(once).toContain('[[Live]]');
+    expect(once).toContain('`&#91;[[Code]]`');
+    expect(once).toContain('```\n&#91;[[Code]]\n```');
+    expect(await roundTrip(once)).toBe(once);
+  });
+
+  it('keeps literal links in toggle summaries, child paragraphs and table cells', async () => {
+    const source =
+      ':::toggle &#91;&#91;Summary&#93;&#93;\n\n&#91;&#91;Child&#93;&#93;\n:::\n\n| Value |\n| --- |\n| &#91;&#91;Cell&#93;&#93; |\n';
+    const blocks = await markdownToBlocks(editor, source);
+    expect(JSON.stringify(blocks)).not.toContain('"type":"wikilink"');
+    for (const label of ['Summary', 'Child', 'Cell'])
+      expect(JSON.stringify(blocks)).toContain(`[[${label}]]`);
+    const once = await blocksToMarkdown(editor, blocks);
+    expect(JSON.stringify(await markdownToBlocks(editor, once))).not.toContain('"type":"wikilink"');
+    expect(await roundTrip(once)).toBe(once);
+  });
+
+  it('preserves styles and the untouched code of a rich fence', async () => {
+    const source =
+      '**&#91;&#91;Bold&#93;&#93;** and [label](https://example.test/?a=1&amp;b=2)\n\n```cerebro-sheet\n# A\n"&#91;[[literal]]"\n```\n';
+    const blocks = await markdownToBlocks(editor, source);
+    expect(JSON.stringify(blocks)).not.toContain('"type":"wikilink"');
+    expect(JSON.stringify(blocks)).toContain('"bold":true');
+    expect(JSON.stringify(blocks)).toContain('https://example.test/?a=1&b=2');
+    const once = await blocksToMarkdown(editor, blocks);
+    expect(once).toContain('&#91;[[literal]]');
+    expect(await roundTrip(once)).toBe(once);
+    expect(isLossyImport(source, once)).toBe(false);
+  });
+
+  it('still detects a changed entity spelling inside a code sample', () => {
+    expect(isLossyImport('`&#65;`', '`A`')).toBe(true);
+    expect(isLossyImport('~~~\n&#65;\n~~~', '~~~\nA\n~~~')).toBe(true);
+    expect(isLossyImport('&#65;', 'A')).toBe(false);
+  });
+
+  it('does not change code-span boundaries at a backslash before a backtick', async () => {
+    const source = '`a\\` after [[Live]]\n';
+    const blocks = await markdownToBlocks(editor, source);
+    expect(JSON.stringify(blocks)).toContain('"type":"wikilink"');
+    const once = await blocksToMarkdown(editor, blocks);
+    expect(await roundTrip(once)).toBe(once);
+    expect(isLossyImport(source, once)).toBe(false);
+  });
+});
+
 describe('normalizeParsedBlocks', () => {
   it('halves doubled break runs in text nodes, including nested content', () => {
     const blocks = [
@@ -2541,4 +2624,10 @@ it('root-anchored attachment carriers reopen with their kinds and stay byte-stab
   const once = await blocksToMarkdown(editor, blocks);
   expect(once).toBe(markdown);
   expect(await roundTrip(once)).toBe(once);
+});
+
+it('a remote image keeps its exact carrier across two saves', async () => {
+  const markdown = '![](https://images.example/hero.png)\n';
+  expect(await roundTrip(markdown)).toBe(markdown);
+  expect(await roundTrip(await roundTrip(markdown))).toBe(markdown);
 });

@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 import type { CsvTable } from '../src/engine/csv';
-import { boot } from './boot';
+import { boot, showDatabases } from './boot';
 
 async function downloadTab(page: Page, id: string) {
   await page.getByTestId(`view-tab-${id}`).click({ button: 'right' });
@@ -25,6 +25,7 @@ test('exports each tab’s saved rows and columns, including a closed filtered t
   page,
 }) => {
   await boot(page);
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
   await expect(page.getByTestId('table-row')).toHaveCount(45);
   const all = await downloadTab(page, 'all');

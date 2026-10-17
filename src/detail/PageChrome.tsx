@@ -1,3 +1,5 @@
+import { imageSource } from '@/engine/imageSource';
+import { RemoteImage } from '@/components/RemoteImage';
 import { FileImage } from '@/components/FileImage';
 import { keysText } from '@/components/ui/Keycaps';
 import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
@@ -361,7 +363,9 @@ function FileCover({ path }: { path: string }) {
   const vault = useVaultStore((s) => s.vaultPath);
   const key = JSON.stringify([vault, path]);
   const [failed, setFailed] = useState<string | null>(null);
-  if (failed === key || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(path))
+  if (imageSource(path) !== 'vault')
+    return <RemoteImage src={path} fit="cover" className="h-full w-full" />;
+  if (failed === key)
     return (
       <span className="inline-flex items-center gap-1.5 text-xs text-n-500">
         <Icon name="image" size={14} color="var(--n-500)" />
@@ -399,24 +403,33 @@ export function PageCoverBand({
   const background = cover.kind === 'color' ? resolveOptionColor(cover.raw).solid : 'var(--n-100)';
   const content = cover.kind === 'file' ? <FileCover path={cover.path} /> : null;
   const className = [
-    'flex w-full flex-none items-center justify-center overflow-hidden border-0 p-0',
+    'relative flex w-full flex-none items-center justify-center overflow-hidden border-0 p-0',
     height,
     canSet ? 'cursor-pointer' : '',
   ].join(' ');
   return (
     <>
       {canSet ? (
-        <button
-          type="button"
+        <div
           data-testid="page-cover"
-          aria-label="Change cover"
           title={cover.kind === 'file' ? cover.path : undefined}
           className={className}
           style={{ background }}
           onClick={(e) => picker.show('cover', e.currentTarget)}
         >
           {content}
-        </button>
+          <button
+            type="button"
+            aria-label="Change cover"
+            className="absolute right-3 top-3 rounded-sm border border-n-200 bg-n-0 px-2 py-1 text-xs text-n-700"
+            onClick={(e) => {
+              e.stopPropagation();
+              picker.show('cover', e.currentTarget);
+            }}
+          >
+            Change cover
+          </button>
+        </div>
       ) : (
         <div
           data-testid="page-cover"

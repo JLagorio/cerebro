@@ -88,6 +88,7 @@ pub(crate) fn records(ws: &GitWorkspaceInfo) -> Result<Vec<StatusRecord>, String
     }
     let dir = ws.dir();
     let mut args: Vec<String> = vec![
+        "--literal-pathspecs".into(),
         "status".into(),
         "--porcelain=v1".into(),
         "-z".into(),
@@ -95,7 +96,8 @@ pub(crate) fn records(ws: &GitWorkspaceInfo) -> Result<Vec<StatusRecord>, String
     ];
     args.extend(ws.pathspec_args());
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let out = command::run_str(&dir, &refs)?;
+    let bytes = command::run_bounded_bytes(&dir, &refs).map_err(|e| e.message())?;
+    let out = String::from_utf8(bytes).map_err(|_| "A changed filename is not valid UTF-8; handle it in Git before checkpointing this vault.".to_owned())?;
     Ok(parse_records(&out))
 }
 

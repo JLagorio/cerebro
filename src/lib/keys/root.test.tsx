@@ -42,6 +42,30 @@ function mountScopes() {
 const PAGE = { id: 'page:1', name: 'page' };
 const PEEK = { id: 'peek:1', name: 'peek' };
 
+it('a page portal inside neutral chrome owns keys while its nested neutral controls keep the last scope', () => {
+  const { host, at } = mountScopes();
+  host
+    .querySelector('nav')!
+    .insertAdjacentHTML(
+      'beforeend',
+      '<div data-key-scope="page" data-key-scope-id="page:1"><button id="portaled">capture</button><div data-key-neutral><button id="portal-neutral">utility</button></div></div>',
+    );
+  const page = vi.fn();
+  const peek = vi.fn();
+  bind(PAGE, 'list.down', { run: page });
+  host.querySelector('aside')!.setAttribute('data-key-scope', 'page');
+  bind({ ...PEEK, name: 'page' }, 'list.down', { run: peek });
+  at('in-peek').focus();
+  at('portaled').focus();
+  expect(activeChain()).toEqual(['page:1', 'app']);
+  keydown(at('portaled'), { key: 'j' });
+  expect(page).toHaveBeenCalledOnce();
+  expect(peek).not.toHaveBeenCalled();
+  at('in-peek').focus();
+  at('portal-neutral').focus();
+  expect(activeChain()).toEqual(['peek:1', 'app']);
+});
+
 describe('the capture-phase listener', () => {
   // The M29.53 regression: a blanket React stopPropagation starved App.tsx's
   // old bubble-phase window listener, so ⌘K was dead inside a source box.
@@ -317,4 +341,19 @@ it('falls back to the active pane and forgets a parked pointer scope', () => {
   expect(activeChain()[0]).toBe('second');
   fireEvent.pointerDown(document.getElementById('parked')!);
   expect(activeChain()[0]).toBe('second');
+});
+
+it('does not route keys to a retained page hidden behind canvas chat', () => {
+  const { at, host } = mountScopes();
+  const page = host.querySelector('main')!;
+  at('in-page').focus();
+  expect(activeChain()).toContain('page:1');
+  for (const attribute of ['inert', 'hidden', 'aria-hidden']) {
+    page.setAttribute(attribute, attribute === 'aria-hidden' ? 'true' : '');
+    fireEvent.pointerDown(at('nav'));
+    at('nav').focus();
+    expect(activeChain()).toEqual(['app']);
+    page.removeAttribute(attribute);
+    at('in-page').focus();
+  }
 });

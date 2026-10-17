@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, openKnowledgeTab } from './boot';
+import { boot, openKnowledgeTab, openAssistantPanel } from './boot';
 
 /**
  * Up next (M57.5): text sent while a turn runs waits under the composer, in
@@ -13,7 +13,7 @@ const RISKS_REPLY = 'Two risks are open';
 
 async function openPanel(page: Page) {
   await boot(page);
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   const panel = page.getByTestId('ai-panel');
   await expect(panel).toBeVisible();
   return panel;
@@ -133,7 +133,7 @@ test('agent: Steer with a card open cancels it and runs the entry at once', asyn
   await page.evaluate(() => {
     (window as unknown as { __cerebroMockAsk?: string[] }).__cerebroMockAsk = ['append_to_note'];
   });
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   const panel = page.getByTestId('ai-panel');
   await enter(page, `append "- call the vendor" to ${PAGE}`);
   const card = panel.getByTestId('interaction-card');

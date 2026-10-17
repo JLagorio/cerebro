@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, openDestination } from './boot';
 
 /**
  * The AI block survives being written (M53.9).
@@ -103,7 +103,7 @@ test('an AI block asked from the / menu is written as its carrier and opens agai
   // holds the flush path itself.)
   await caretToEndOf(editor.getByText(ANSWER, { exact: false }));
   await page.keyboard.type(' Checked by hand.');
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home' }).click();
+  await openDestination(page, 'Home');
   await expect
     .poll(() => readMockFile(page, PAGE), { timeout: 6_000 })
     .toContain('Checked by hand.');

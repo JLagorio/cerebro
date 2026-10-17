@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, seedFileBeforeBoot } from './boot';
+import { boot, seedFileBeforeBoot, openDestination, showPages } from './boot';
 const frame = (page: Page, index: number) =>
   page.locator(`[data-testid="pane"][data-pane-index="${index}"]`);
 async function openPage(page: Page, title: string, beside = false) {
@@ -20,7 +20,7 @@ test('reload restores two panes and the first focus, without the peek', async ({
   await openPage(page, 'How we schedule');
   await openPage(page, 'Systems map', true);
   await frame(page, 0).getByTestId('pane-bar').click();
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'My work' }).click();
+  await openDestination(page, 'My work');
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.keyboard.press('j');
   await page.keyboard.press('Enter');
@@ -74,6 +74,7 @@ test('a rename moves the open pane, favorite, Recent and saved layout together',
   await openPage(page, 'Systems map', true);
   await frame(page, 1).getByRole('button', { name: 'Add to favorites' }).click();
   await openPage(page, 'Systems map');
+  await showPages(page);
   const tree = page.getByTestId('file-tree');
   const folder = tree.getByTestId('tree-folder').filter({ hasText: 'Strategy' });
   if ((await folder.getAttribute('aria-expanded')) !== 'true') await folder.click();

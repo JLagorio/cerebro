@@ -1,4 +1,5 @@
 import type { TurnContext } from './useAgentChat';
+import type { SkillNarrowing } from '@/engine/skills';
 
 /**
  * Up next (M57.5): the messages a conversation holds for after its turn.
@@ -31,7 +32,7 @@ export interface ResolvedText {
   skill: { path: string } | null;
   /** The skill's expansion, started at enqueue; absent for plain text. */
   expansion?: Promise<string>;
-  allowedTools: string[] | null;
+  narrowing: SkillNarrowing;
 }
 
 export interface UpNextEntry {
@@ -47,7 +48,7 @@ export interface UpNextEntry {
   notes?: { ids: readonly string[] };
   skill: { path: string } | null;
   expansion?: Promise<string>;
-  allowedTools: string[] | null;
+  narrowing: SkillNarrowing;
   /** The context the entry was sent in, frozen then. */
   turn: TurnContext;
   /** The vault it was queued in: a vault switch drops the others. */
@@ -85,7 +86,7 @@ export function edit(
     ...kept,
     text: trimmed,
     skill: resolved.skill,
-    allowedTools: resolved.allowedTools,
+    narrowing: structuredClone(resolved.narrowing),
     ...(resolved.expansion === undefined ? {} : { expansion: resolved.expansion }),
   };
   return next;

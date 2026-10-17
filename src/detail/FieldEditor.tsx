@@ -1,3 +1,5 @@
+import { parsePullRequestUrl } from '@/engine/pullRequest';
+import { PullRequestChip } from './PullRequestChip';
 import { useState } from 'react';
 import { RepeatEditor } from './RepeatEditor';
 import { repeatAnchor, repeatFieldFor } from '@/engine/recurrence';
@@ -730,14 +732,18 @@ export function FieldEditor({
       const href = url.startsWith('www.') ? `https://${url}` : url;
       return (
         <span className="inline-flex min-w-0 items-center gap-1">
-          <a
-            href={href}
-            target="_blank"
-            rel="noreferrer"
-            className="truncate text-sm text-cortex-600 hover:underline"
-          >
-            {url}
-          </a>
+          {chrome !== 'cell' && onPatch === undefined && parsePullRequestUrl(url) !== null ? (
+            <PullRequestChip key={url} url={url} />
+          ) : (
+            <a
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+              className="truncate text-sm text-cortex-600 hover:underline"
+            >
+              {url}
+            </a>
+          )}
           <button
             type="button"
             aria-label={`Edit ${humanize(def.name)}`}

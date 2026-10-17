@@ -36,7 +36,16 @@ describe('renderMermaid', () => {
     const result = await renderMermaid('graph TD\n  A --> B');
     expect(result).toEqual({ ok: true, svg: '<svg data-fake="1"></svg>' });
     expect(initializeSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ securityLevel: 'strict', theme: 'base', startOnLoad: false }),
+      expect.objectContaining({
+        securityLevel: 'strict',
+        theme: 'base',
+        startOnLoad: false,
+        secure: expect.arrayContaining(['themeCSS', 'themeVariables', 'dompurifyConfig']),
+        dompurifyConfig: expect.objectContaining({
+          FORBID_TAGS: expect.arrayContaining(['style', 'img', 'image']),
+          FORBID_ATTR: expect.arrayContaining(['style', 'src', 'srcset']),
+        }),
+      }),
     );
     expect(registerSpy).toHaveBeenCalledTimes(1);
   });
@@ -49,6 +58,16 @@ describe('renderMermaid', () => {
       ok: false,
       message: 'Parse error on line 3:\n...bad...',
       line: 3,
+    });
+  });
+
+  it('reports an unreadable SVG instead of returning an invisible successful render', async () => {
+    renderSpy.mockResolvedValue({ svg: 'not an svg' });
+    const { renderMermaid } = await freshModule();
+    expect(await renderMermaid('graph TD\n A --> B')).toEqual({
+      ok: false,
+      message: 'The diagram returned invalid SVG.',
+      line: null,
     });
   });
 

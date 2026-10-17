@@ -240,6 +240,7 @@ function fieldToSpec(def: FieldDef): unknown {
   if (def.options !== undefined && def.options.length > 0) {
     spec.options = def.options.map(optionToSpec);
   }
+  if (def.source !== undefined) spec.source = def.source;
   if (def.target !== undefined) spec.target = def.target;
   if (def.limit !== undefined) spec.limit = def.limit;
   if (def.relation !== undefined) spec.relation = def.relation;

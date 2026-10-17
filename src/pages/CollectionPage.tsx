@@ -147,7 +147,7 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
             />
           </span>
           <div className="min-w-0 flex-1">
-            <h1 className="m-0 truncate text-2xl font-bold leading-[30px] tracking-[-0.02em] text-n-900">
+            <h1 className="m-0 [overflow-wrap:anywhere] text-2xl font-[550] leading-[30px] tracking-[-0.02em] text-n-900">
               {collection.definition.name}
             </h1>
             <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-n-400">

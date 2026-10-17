@@ -8,15 +8,16 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M59. House style and rails: the 
 
 ## Status
 
-- **Precondition:** M53–M57, M70 and M58 are closed, in that order: gates green, roadmap statuses updated. Today they are being built, unstaged, in this checkout (fc510e6 plus drafts), so this plan names their finished functions, never today's lines.
+- **Dependencies:** M53–M58 and M70. Implementation is present; milestone closure still requires the outstanding acceptance below.
 - **M58 had no plan doc** when this was written, so no M58 function is named here. Re-read its plan before wave 1:
   - .5's new row copies any manifest field M58 added;
   - .4 re-checks lib.rs, ipc.ts and mockIpc.ts against M58.1's receipts;
   - .3's prune guard is re-checked if M58.2 reorders rescans.
-- **Built:** nothing. All 7 roadmap parts were scouted against the plans and today's tree; all 7 build.
+- **Implementation (2026-10-15):** All seven parts have implementations: destination routing, truthful agent search, name ranking and recency, the page-text search tier, browse/search modes, in-page find/replace and hover previews.
+- **Integrated evidence:** see the [roadmap execution update](2026-10-12-macro-port-roadmap.md#execution-update--2026-10-15) for the final unit, coverage, browser, native and static gates, plus their limits. These results do not substitute for packaged or authenticated live acceptance.
 - **Effort:** 4 M + 3 L ≈ 5 L; the roadmap said ≈3.3 L. Re-measured: .1 S → M; .2, .3 and .4 M → L.
 - **Crash risk:** none. No spawn, process-termination or schema change.
-- **Packaged checks:** .1, .4, .6, .7. **Live check:** .2 (dev, real CLI, optional).
+- **Packaged acceptance still outstanding:** .1, .4, .6, .7. **Live acceptance still outstanding:** .2 (dev, real CLI, optional).
 - **Schema steps:** none. One found necessary takes the next free `runtime.db` `user_version` at build time. **New refusal codes:** none. **New CV ids:** none.
 - **New dependency:** `@leeoniya/ufuzzy` 1.0.19 (MIT, published 2025-08-22), an upstream library Macro uses (.3).
 

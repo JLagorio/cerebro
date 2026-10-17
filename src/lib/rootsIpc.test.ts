@@ -11,6 +11,7 @@ import { initialRootsState, useRootsStore } from '@/stores/rootsStore';
 import { useUiStore } from '@/stores/uiStore';
 import {
   fileUrl,
+  fileThumbnail,
   openFileOutside,
   revealFile,
   quickLookFile,
@@ -249,5 +250,18 @@ describe('pickDirectory', () => {
     delete (window as unknown as Record<string, unknown>)[TAURI];
     await expect(pickDirectory()).resolves.toBeNull();
     expect(openSpy).not.toHaveBeenCalled();
+  });
+});
+
+it('thumbnail IPC preserves the command keys and typed result', async () => {
+  invokeSpy.mockResolvedValue({ state: 'none', reason: 'timedOut' });
+  expect(await fileThumbnail('root-2', 'design.fig', 256)).toEqual({
+    state: 'none',
+    reason: 'timedOut',
+  });
+  expect(invokeSpy).toHaveBeenCalledWith('file_thumbnail', {
+    rootId: 'root-2',
+    path: 'design.fig',
+    size: 256,
   });
 });

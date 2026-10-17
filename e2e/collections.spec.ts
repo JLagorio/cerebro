@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { boot } from './boot';
+import { boot, showDatabases, showPages } from './boot';
 
 /** Expand a Collection row in the sidebar tree. */
 async function expand(page: Page, name: string): Promise<void> {
@@ -34,6 +34,7 @@ async function switchLayout(page: Page, kind: string): Promise<void> {
  * layouts, nesting, the date axes — only the route to them.
  */
 async function openDatabaseView(page: Page, database: string, view: string): Promise<void> {
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: database }).first().click();
   const tab = page.getByTestId('view-tabs').getByRole('tab', { name: view });
   await expect(tab).toBeVisible();
@@ -49,12 +50,13 @@ test('collections: a container is a page that holds docs and databases', async (
 
   // The sidebar's top-level concept is Collections, not Views. (Scoped to
   // the sidebar: since M12.5 Home's grid carries the same heading.)
-  const sidebar = page.getByLabel('Sidebar', { exact: true });
+  const sidebar = page.getByTestId('sidebar');
   await expect(sidebar.getByText('Collections', { exact: true })).toBeVisible();
 
   // M47.5: `delivery/` is a PAGE — `delivery/delivery.md` carrying
   // `type: Collection` — holding a doc and, in its own body, the three views
   // that used to be three `*.list.yml` files sitting beside it.
+  await showPages(page);
   const delivery = page.getByTestId('collection-node-collection').filter({ hasText: 'Delivery' });
   await expect(delivery).toBeVisible();
 
@@ -93,7 +95,7 @@ test('collections: nothing sits outside a Collection — there is no Lists bucke
   // The one and only top-level grouping. A folder holding Lists IS a Collection,
   // so no List can be orphaned and no home-of-last-resort is needed. (Scoped
   // to the sidebar: since M12.5 Home's grid carries the same heading.)
-  const sidebar = page.getByLabel('Sidebar', { exact: true });
+  const sidebar = page.getByTestId('sidebar');
   await expect(sidebar.getByText('Collections', { exact: true })).toBeVisible();
   await expect(sidebar.getByText('Lists', { exact: true })).toHaveCount(0);
 
@@ -336,6 +338,7 @@ test('calendar: the embedded calendar on the Delivery page creates on a day too 
   page,
 }) => {
   await boot(page);
+  await showPages(page);
   const delivery = page.getByTestId('collection-node-collection').filter({ hasText: 'Delivery' });
   await delivery.getByRole('button', { name: 'Delivery', exact: true }).click();
   await expect(page.getByTestId('collection-page')).toBeVisible();

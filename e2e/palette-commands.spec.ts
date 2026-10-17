@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot } from './boot';
+import { boot, openDestination } from './boot';
 async function palette(page: Page) {
   await page.keyboard.press('Meta+k');
   const input = page.getByRole('combobox', { name: 'Quick open' });
@@ -60,7 +60,7 @@ test('Open favorite opens its page, and an unmatched query waits for an explicit
 });
 test('the command snapshot offers filing on Inbox and not on Home', async ({ page }) => {
   await boot(page);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Inbox' }).click();
+  await openDestination(page, 'Inbox');
   await page.getByTestId('inbox-row').first().click();
   await (await palette(page)).fill('file');
   await expect(
@@ -70,7 +70,7 @@ test('the command snapshot offers filing on Inbox and not on Home', async ({ pag
       .locator('[data-keys]'),
   ).toHaveAttribute('data-keys', 'mod+e');
   await page.keyboard.press('Escape');
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home' }).click();
+  await openDestination(page, 'Home');
   await (await palette(page)).fill('file');
   await expect(page.getByRole('option', { name: /File the open capture/ })).toHaveCount(0);
 });

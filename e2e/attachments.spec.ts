@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, seedFileBeforeBoot, readMockFile } from './boot';
+import { boot, seedFileBeforeBoot, readMockFile, showDatabases } from './boot';
 
 const TYPE = `---
 type: Type
@@ -47,8 +47,10 @@ test('gallery and page images load, image chips open a lightbox and other attach
   page,
 }) => {
   await start(page);
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Asset' }).click();
   const cover = page.getByTestId('gallery-cover');
+  await expect(cover.getByTestId('file-thumb-image')).toHaveAttribute('src', /^data:image\/png/);
   await expect(cover).toHaveAttribute('data-fit', 'contain');
   await expect
     .poll(() => cover.locator('img').evaluate((img: HTMLImageElement) => img.naturalWidth))
@@ -85,6 +87,11 @@ test('gallery and page images load, image chips open a lightbox and other attach
   });
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
+  const pdfThumb = page
+    .getByTestId('file-thumb')
+    .filter({ has: page.locator('[aria-label^="brief.pdf:"]') });
+  await expect(pdfThumb.locator('img')).toHaveCount(0);
+  await expect(pdfThumb).toHaveCount(1);
   await page.getByRole('button', { name: 'Open brief.pdf' }).click();
   await expect(
     page.getByTestId('file-page').getByRole('heading', { name: 'brief.pdf', level: 1 }),

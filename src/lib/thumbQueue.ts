@@ -24,7 +24,7 @@ type Read = (root: string, path: string, size: number) => Promise<Thumbnail>;
 export function makeThumbQueue(read: Read, concurrency = 4) {
   let running = 0;
   const pending: (() => void)[] = [];
-  const active = new Map<string, Promise<Thumbnail>>();
+  const active = new Map<string, { promise: Promise<Thumbnail>; readers: (() => boolean)[] }>();
   const pump = () => {
     while (running < concurrency && pending.length > 0) pending.shift()!();
   };
@@ -38,13 +38,17 @@ export function makeThumbQueue(read: Read, concurrency = 4) {
     const snapped = snapThumbSize(size);
     const key = JSON.stringify([visit, root, path, snapped]);
     const existing = active.get(key);
-    if (existing) return existing;
+    if (existing) {
+      existing.readers.push(current);
+      return existing.promise;
+    }
+    const readers = [current];
     const result = new Promise<Thumbnail>((resolve, reject) => {
       pending.push(() => {
         running += 1;
         void Promise.resolve()
           .then(() =>
-            current()
+            readers.some((reader) => reader())
               ? read(root, path, snapped)
               : { state: 'none' as const, reason: 'notFound' as const },
           )
@@ -56,9 +60,9 @@ export function makeThumbQueue(read: Read, concurrency = 4) {
           });
       });
     });
-    active.set(key, result);
+    active.set(key, { promise: result, readers });
     pump();
     return result;
   };
 }
-export const requestThumb = makeThumbQueue(fileThumbnail);
+export const requestThumb = makeThumbQueue((root, path, size) => fileThumbnail(root, path, size));

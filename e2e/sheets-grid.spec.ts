@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { boot, readMockFile, seedFileBeforeBoot } from './boot';
+import { boot, readMockFile, seedFileBeforeBoot, openDestination } from './boot';
 const PATH = 'notes/grid-budget.md';
 const SOURCE =
   '# Grid budget\n\nBefore grid.\n\n```cerebro-sheet\n---\nformat: 1\nname: Budget\n---\n1,10\n2,20\n3,30\n```\n\n```cerebro-sheet\n---\nformat: 1\nname: Summary\n---\n=Budget!B2\n```\n\nClosing notes.\n';
@@ -181,7 +181,7 @@ test('/sheet makes stable named fences and an open draft flushes when leaving', 
   await expect(grids.nth(2).getByTestId('sheet-name')).toHaveText('Sheet1');
   await expect(grids.nth(2)).toBeFocused();
   await page.keyboard.type('kept draft');
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home', exact: true }).click();
+  await openDestination(page, 'Home');
   await expect.poll(() => readMockFile(page, PATH)).toContain('kept draft');
   await page.keyboard.press('ControlOrMeta+k');
   await page.getByTestId('quick-open-input').fill('Grid budget');
@@ -192,7 +192,7 @@ test('/sheet makes stable named fences and an open draft flushes when leaving', 
 });
 test('New Sheet creates a root page whose first grid accepts typing', async ({ page }) => {
   await boot(page);
-  await page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByTestId('app-rail').getByRole('button', { name: 'New', exact: true }).click();
   await page.getByRole('option', { name: 'Sheet', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'New sheet' });
   await dialog.getByPlaceholder('Name the page').fill('Plan numbers');

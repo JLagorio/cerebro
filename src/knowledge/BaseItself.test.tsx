@@ -563,6 +563,7 @@ describe('What the base knows about itself', () => {
     const card = (risk: string): ReviewCard =>
       ({
         proposal_id: risk,
+        actor: 'process:scout',
         effective_risk: risk,
         op: `op_${risk}`,
         queued_for: [],

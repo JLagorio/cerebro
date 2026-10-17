@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, openDestination } from './boot';
 
 /**
  * Page comments end to end (M70.2b), on the mock backend: a selection takes a
@@ -62,7 +62,7 @@ async function openSchedule(page: Page): Promise<void> {
 
 /** Home, then Back (⌘[): the page is mounted afresh and reads its threads again. */
 async function homeAndBack(page: Page): Promise<void> {
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home' }).click();
+  await openDestination(page, 'Home');
   await expect(page.getByTestId('markdown-editor')).toHaveCount(0);
   // Not while typing: ⌘[ is outdent inside an editor.
   await page.locator('body').press('ControlOrMeta+BracketLeft');

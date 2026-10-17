@@ -1,9 +1,18 @@
 {
   "format": 1,
-  "artifact_version": 1,
+  "artifact_version": 2,
   "read": {
     "nodes": 500,
     "bytes": 100000,
     "ids": 500
+  },
+  "edit": {
+    "ops": 25,
+    "id_chars": 64,
+    "text_chars": 10000,
+    "label_chars": 500,
+    "file_chars": 1024,
+    "subpath_chars": 512,
+    "url_chars": 2048
   }
 }

@@ -133,8 +133,6 @@ describe('the derived readers', () => {
     expect(kindFor('clip.mKv').kind).toBe('unknown');
     expect(extOf('CLIP.MKV')).toBe('mkv');
   });
-
-
 });
 
 /*

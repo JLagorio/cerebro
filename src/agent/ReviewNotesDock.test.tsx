@@ -32,7 +32,7 @@ const entry = (id: string): UpNextEntry => ({
   text: 'notes',
   notes: { ids: [] },
   skill: null,
-  allowedTools: null,
+  narrowing: {},
   turn: { systemPrompt: () => '', place: null, conversationId: 'c-1' },
   vault: '/vault',
   queuedAt: 0,

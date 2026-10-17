@@ -1,0 +1,115 @@
+.canvas-page-heading {
+  display: flex;
+  flex: none;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  min-width: 0;
+  min-height: 64px;
+  padding: var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--n-200);
+  background: var(--surface-app);
+}
+
+.canvas-page-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-lg);
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+}
+
+.canvas-page-title {
+  min-width: 0;
+  max-width: 50%;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-lg);
+  font-weight: 550;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.canvas-page-kind,
+.canvas-page-summary,
+.canvas-page-save {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-meta);
+}
+
+.canvas-page-kind {
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-md);
+  padding: var(--sp-1) var(--sp-2);
+}
+
+.canvas-page-summary {
+  margin-left: auto;
+}
+
+.canvas-page-save {
+  flex: none;
+}
+
+.canvas-page-save[data-failed] {
+  color: var(--danger-600);
+}
+
+.wb-inspector {
+  position: absolute;
+  top: 56px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 10;
+  width: 224px;
+  max-width: calc(100% - 24px);
+  overflow-y: auto;
+  padding: var(--sp-4);
+  border: 1px solid var(--n-200);
+  border-radius: var(--r-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.wb-inspector[data-empty] {
+  bottom: auto;
+}
+
+.wb-inspector-heading {
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-sm);
+  font-weight: 550;
+  color: var(--text-primary);
+}
+
+.wb-inspector-empty p {
+  margin: 0 0 var(--sp-1);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+.wb-inspector-empty span {
+  display: block;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-meta);
+}
+
+@media (width < 600px) {
+  .canvas-page-heading {
+    gap: var(--sp-2);
+    padding-right: var(--sp-3);
+    padding-left: var(--sp-3);
+  }
+
+  .canvas-page-summary {
+    width: 100%;
+    margin-left: 40px;
+  }
+}

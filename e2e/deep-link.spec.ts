@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { boot } from './boot';
+import { boot, openDestination } from './boot';
 const PATH = 'projects/phoenix-warehouse-rollout/cutover-prd.md';
 test('a cold link wins over last place and opens exactly once', async ({ page }) => {
   await page.addInitScript((path) => {
@@ -12,7 +12,7 @@ test('a cold link wins over last place and opens exactly once', async ({ page })
   await boot(page);
   await expect(page.getByTestId('doc-title')).toBeVisible();
   await expect(page.getByTestId('doc-title')).toContainText('Phoenix cutover — go-live PRD');
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Home', exact: true }).click();
+  await openDestination(page, 'Home');
   await page.waitForTimeout(500);
   await expect(page.getByRole('listbox', { name: 'Home lanes' })).toBeVisible();
   await page.keyboard.press('Meta+[');

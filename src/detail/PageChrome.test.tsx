@@ -47,9 +47,10 @@ beforeEach(() => {
   });
   useUiStore.setState({ toasts: [] });
   useVaultStore.setState({ vaultPath: '/vault', patchFrontmatter });
-  ipc.importAttachment
-    .mockReset()
-    .mockImplementation(async (_v, source) => ({ path: `attachments/${source.split('/').pop() ?? 'file'}`, reused: false }));
+  ipc.importAttachment.mockReset().mockImplementation(async (_v, source) => ({
+    path: `attachments/${source.split('/').pop() ?? 'file'}`,
+    reused: false,
+  }));
   ipc.canPickFiles.mockReturnValue(true);
   ipc.pickFiles.mockResolvedValue([]);
 });
@@ -307,7 +308,7 @@ describe('PageCoverBand', () => {
     expect(image.style.objectFit).toBe('cover');
     expect(patchFrontmatter).not.toHaveBeenCalled();
   });
-  it('a missing or remote cover keeps its named fallback', async () => {
+  it('a missing cover names the path and a remote cover waits at a host gate', async () => {
     const { rerender, container } = render(
       <PageCoverBand entry={page({ cover: 'attachments/missing.png' })} editable={false} />,
     );
@@ -318,7 +319,8 @@ describe('PageCoverBand', () => {
       <PageCoverBand entry={page({ cover: 'https://example.com/c.png' })} editable={false} />,
     );
     expect(container.querySelector('img')).toBeNull();
-    expect(screen.getByTestId('page-cover').textContent).toContain('https://example.com/c.png');
+    expect(screen.getByTestId('page-cover').textContent).toContain('example.com');
+    expect(screen.getByRole('button', { name: 'Load image' })).toBeTruthy();
   });
 
   it('a cover that is no colour takes the neutral swatch', () => {

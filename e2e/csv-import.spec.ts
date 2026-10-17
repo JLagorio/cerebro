@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { parse } from 'yaml';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, showDatabases } from './boot';
 
 const csv =
   'Title,Notes,Pages,Read\r\nDune,"A desert\r\nplanet",412,true\r\n"One, two","Say ""hello""",255,false\r\nSolaris,Ocean,204,true\r\n';
@@ -11,6 +11,7 @@ test('imports quoted CSV into a database in one batch and removes it with one Un
   page,
 }) => {
   await boot(page);
+  await showDatabases(page);
   await page.getByRole('button', { name: 'Import CSV', exact: true }).click();
   await page
     .getByTestId('csv-file-input')
@@ -73,6 +74,7 @@ test('imports quoted CSV into a database in one batch and removes it with one Un
 test('a long row shows its record number and writes nothing', async ({ page }) => {
   await boot(page);
   const before = await page.evaluate(() => [...window.__cerebroMockFs]);
+  await showDatabases(page);
   await page.getByRole('button', { name: 'Import CSV', exact: true }).click();
   await page.getByTestId('csv-file-input').setInputFiles({
     name: 'books.csv',

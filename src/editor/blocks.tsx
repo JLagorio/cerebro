@@ -1,7 +1,14 @@
 import { WhiteboardBlock as WhiteboardBlockView } from '@/whiteboard/WhiteboardBlock';
 import { WHITEBOARD_FENCE } from '@/engine/whiteboardRef';
 import { useEffect, useRef, useState } from 'react';
-import type { BlockNoteEditor } from '@blocknote/core';
+import { createBlockSpec, defaultBlockSpecs, type BlockNoteEditor } from '@blocknote/core';
+import { imageSource } from '@/engine/imageSource';
+import {
+  allowRemoteImage,
+  imageHost,
+  remoteImageAllowed,
+  subscribeRemoteImages,
+} from '@/lib/remoteImages';
 import { createReactBlockSpec, useEditorChange } from '@blocknote/react';
 import { ColumnGutter } from './ColumnGutter';
 import { Icon } from '@/components/ui/Icon';
@@ -26,6 +33,102 @@ import {
 } from '@/engine/pageColumns';
 import { formatAiMarker } from './markdown';
 import { SubPageList } from './SubPageList';
+
+const upstreamImage = defaultBlockSpecs.image;
+/** Keep BlockNote's carrier and local renderer. A remote image creates no img
+ * until the person grants its exact URL. The gate is native DOM because this
+ * node view lives outside React's delegated event root. */
+export const GatedImageBlock = createBlockSpec(upstreamImage.config, {
+  ...upstreamImage.implementation,
+  render(block, editor) {
+    const source = block.props.url.trim();
+    const kind = imageSource(source);
+    if (kind === 'vault' || kind === 'data' || !source)
+      return upstreamImage.implementation.render.call(this, block, editor);
+    const dom = document.createElement('div');
+    dom.className =
+      'cb-remote-image inline-flex max-w-full items-center gap-2 rounded-md border border-n-200 px-3 py-2 text-xs text-n-600';
+    dom.contentEditable = 'false';
+    let opened: ReturnType<typeof upstreamImage.implementation.render> | undefined;
+    let dead = false;
+    const show = () => {
+      if (dead || opened || kind !== 'remote' || !remoteImageAllowed(source)) return;
+      // Always resolve asynchronously, so referrerPolicy precedes src even
+      // in a standalone editor that supplied no attachment resolver.
+      const safeEditor = new Proxy(editor, {
+        get(target, key) {
+          if (key === 'resolveFileUrl') return async () => source;
+          const value = Reflect.get(target, key, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      opened = upstreamImage.implementation.render.call(this, block, safeEditor);
+      for (const image of opened.dom.querySelectorAll('img')) {
+        image.referrerPolicy = 'no-referrer';
+        image.loading = 'lazy';
+        image.draggable = false;
+        image.addEventListener('error', () => {
+          if (!dead) dom.textContent = "This image couldn't be loaded.";
+        });
+      }
+      dom.replaceChildren(opened.dom);
+    };
+    if (kind === 'remote') {
+      const host = document.createElement('span');
+      host.textContent = imageHost(source);
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = 'Load image';
+      button.className = 'rounded-sm border border-n-200 px-2 py-1 text-n-800';
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        allowRemoteImage(source);
+      });
+      dom.append(host, button);
+    } else
+      dom.textContent =
+        kind === 'insecure' ? 'HTTP images are not allowed.' : 'This image address is not allowed.';
+    const unsubscribe = subscribeRemoteImages(show);
+    show();
+    return {
+      dom,
+      destroy() {
+        dead = true;
+        unsubscribe();
+        opened?.destroy?.();
+      },
+    };
+  },
+  toExternalHTML(block) {
+    // Upstream assigns src immediately. Setting lazy first keeps save/copy/
+    // drag serialization inert while retaining the original image carrier.
+    if (!block.props.url) {
+      const dom = document.createElement('p');
+      dom.textContent = 'Add image';
+      return { dom };
+    }
+    let media: HTMLImageElement | HTMLAnchorElement;
+    if (block.props.showPreview) {
+      media = document.createElement('img');
+      media.setAttribute('loading', 'lazy');
+      media.setAttribute('referrerpolicy', 'no-referrer');
+      media.src = block.props.url;
+      media.alt = block.props.name || block.props.caption || 'BlockNote image';
+      if (block.props.previewWidth) media.width = block.props.previewWidth;
+    } else {
+      media = document.createElement('a');
+      media.href = block.props.url;
+      media.textContent = block.props.name || block.props.url;
+    }
+    if (!block.props.caption) return { dom: media };
+    const dom = document.createElement(block.props.showPreview ? 'figure' : 'div');
+    const caption = document.createElement(block.props.showPreview ? 'figcaption' : 'p');
+    caption.textContent = block.props.caption;
+    dom.append(media, caption);
+    return { dom };
+  },
+});
 
 /**
  * Custom blocks (M2.x docs polish). All of them stay plain markdown on disk:

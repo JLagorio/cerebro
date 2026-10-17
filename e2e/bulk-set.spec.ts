@@ -1,10 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, showDatabases } from './boot';
 
 test('bulk Set and Delete leave changed rows selected and preserve their newer bytes', async ({
   page,
 }) => {
   await boot(page);
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
   await expect(page.getByTestId('table-row')).toHaveCount(45);
   const rows = page.getByTestId('table-row');

@@ -32,7 +32,12 @@ vi.mock('@/status/RunDetailPanel', () => ({
     </div>
   ),
 }));
-const host = makeEntry({ path: 'project.md', filename: 'project.md', title: 'Launch', type: 'Project' });
+const host = makeEntry({
+  path: 'project.md',
+  filename: 'project.md',
+  title: 'Launch',
+  type: 'Project',
+});
 const scout = makeEntry({
   path: 'agents/scout.md',
   title: 'Scout',

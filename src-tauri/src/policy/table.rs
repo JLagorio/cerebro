@@ -1497,6 +1497,33 @@ mod tests {
     }
 
     #[test]
+    fn import_refused_is_an_operational_transport_code() {
+        // The import door refuses one call before any byte or claim.
+        use crate::ledger::schema::TypedValue;
+        use crate::policy::rejection::{OperationalRefusal, Rejection};
+        let table = PolicyTable::load().unwrap();
+        let code = "import_refused";
+        assert_eq!(table.destiny(code), Some(Destiny::Operational));
+        assert!(table.transport_rejections.iter().any(|c| c == code));
+        for (name, op) in &table.ops {
+            assert!(
+                !op.possible_rejections.iter().any(|c| c == code),
+                "{name} lists {code}"
+            );
+        }
+        assert_eq!(table.retry_verdict(code, 0), RetryVerdict::NotRetryable);
+        assert!(OperationalRefusal::new(&table, code, "import_notion_page", "taken").is_ok());
+        let proposal = Rejection::new(
+            &table,
+            code,
+            "target_version",
+            TypedValue::string("free"),
+            TypedValue::string("taken"),
+        );
+        assert!(proposal.is_err_and(|e| e.contains("transport failure")));
+    }
+
+    #[test]
     fn note_exists_is_an_operational_transport_code() {
         // M61.6b. A create told to refuse a taken name stops at the write
         // door, under the name's lock, before a byte: it bounds one call and

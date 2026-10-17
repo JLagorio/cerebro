@@ -1,8 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, openStateLab, seedBeforeBoot } from './boot';
+import { chooseSettingsSection, boot, openStateLab, seedBeforeBoot, openDestination } from './boot';
 async function settings(page: Page) {
   await boot(page);
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await openDestination(page, 'Settings');
+  await chooseSettingsSection(page, 'Other apps');
   await expect(page.getByTestId('client-access')).toBeVisible();
   return page.getByTestId('client-access');
 }

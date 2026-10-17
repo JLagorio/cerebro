@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile, seedFileBeforeBoot } from './boot';
+import { boot, readMockFile, seedFileBeforeBoot, openDestination } from './boot';
 const CALENDAR = [
   'BEGIN:VCALENDAR',
   'VERSION:2.0',
@@ -25,10 +25,7 @@ const CALENDAR = [
   'END:VCALENDAR',
 ].join('\r\n');
 async function drop(page: Page) {
-  await page
-    .getByTestId('nav-surfaces')
-    .getByRole('button', { name: /^Inbox/ })
-    .click();
+  await openDestination(page, 'Inbox');
   const box = await page.getByTestId('inbox-page').boundingBox();
   if (!box) throw new Error('Inbox has no bounds');
   await page.evaluate(

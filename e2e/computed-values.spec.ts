@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, showDatabases } from './boot';
 
 /**
  * Computed values filter like stored ones (M60.1).
@@ -35,6 +35,7 @@ async function pickDay(page: Page, day: string) {
 
 test('a Last edited time filter returns the rows edited in the last week', async ({ page }) => {
   await boot(page);
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
   await expect(page.getByTestId('table-row').first()).toBeVisible();
 

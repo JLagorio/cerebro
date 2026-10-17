@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, openAssistantPanel } from './boot';
 
 /**
  * An agent's edit lands in the open page in place (M55.6).
@@ -51,7 +51,7 @@ async function openSchedule(page: Page): Promise<void> {
   await node.getByRole('button', { name: 'How we schedule' }).click();
   await expect(page.getByTestId('markdown-editor')).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId('markdown-editor').getByText(SECOND)).toBeVisible();
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   await expect(page.getByTestId('ai-panel')).toBeVisible();
 }
 

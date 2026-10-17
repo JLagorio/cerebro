@@ -8,11 +8,12 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M54. House style and rails: `202
 
 ## Status
 
-- **Precondition:** M53 is closed, meaning its gate is green and the roadmap's M53 status is updated. Today M53 is in progress on `m53-macro-port`: M53.4, .7, .8 and .9 are committed, and the rest are uncommitted drafts.
-- **Built:** nothing yet. All 11 roadmap parts were scouted on today's tree (fc510e6 plus M53's drafts), and all 11 stay.
+- **Dependencies:** M53. Implementation is present; milestone closure still requires the outstanding acceptance below.
+- **Implementation (2026-10-15):** The shared tool manifest, both readers, IPC contract, grant-shaped listing, early readiness, loopback guards, grant-aware prompts, product brief, connector grants/status and typed refusals are implemented.
+- **Integrated evidence:** see the [roadmap execution update](2026-10-12-macro-port-roadmap.md#execution-update--2026-10-15) for the final unit, coverage, browser, native and static gates, plus their limits. These results do not substitute for packaged or authenticated live acceptance.
 - **Effort:** 3 S + 6 M + 2 L ≈ 5.8 L; the roadmap said ≈3.8 L. Re-measured: .1 from M to L; .2, .5, .6, .7, .8 and .9 from S to M.
 - **Crash risk:** .5 (process termination) and .11 (schema step).
-- **Packaged or live checks:** .1, .4, .5, .6, .7 (dev only), .9 and .11.
+- **Packaged or live acceptance still outstanding:** .1, .4, .5, .6, .7 (dev only), .9 and .11.
 
 ## Decisions
 

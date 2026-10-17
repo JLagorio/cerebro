@@ -89,3 +89,18 @@ it.each([
   expect(patch).not.toHaveBeenCalled();
   expect(onPatch).not.toHaveBeenCalled();
 });
+
+it('shows a PR chip in page fields while table and caller-owned drafts keep plain links', () => {
+  const entry = makeEntry({
+    path: 'pr.md',
+    properties: { url: 'https://github.com/acme/notes/pull/1' },
+  });
+  const props = { entry, def: { name: 'url', kind: 'url' as const }, schema: buildSchema([entry]) };
+  const { rerender } = render(<FieldEditor {...props} chrome="panel" />);
+  expect(screen.getByTestId('pr-chip')).toBeTruthy();
+  rerender(<FieldEditor {...props} chrome="cell" />);
+  expect(screen.queryByTestId('pr-chip')).toBeNull();
+  expect(screen.getByRole('link').textContent).toBe(entry.properties.url);
+  rerender(<FieldEditor {...props} chrome="panel" onPatch={() => {}} />);
+  expect(screen.queryByTestId('pr-chip')).toBeNull();
+});

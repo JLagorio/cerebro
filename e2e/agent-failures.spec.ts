@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { boot } from './boot';
+import { boot, openAssistantPanel } from './boot';
 
 /**
  * A failed turn reads as a card with its fix (M56.4).
@@ -12,7 +12,7 @@ import { boot } from './boot';
  */
 
 async function send(page: Page, message: string) {
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   const panel = page.getByTestId('ai-panel');
   await expect(panel).toBeVisible();
   await panel.getByLabel('Message the assistant').fill(message);

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, readMockFile, openAssistantPanel } from './boot';
 
 test('a suggested calendar places file times and cannot write them through arrow keys', async ({
   page,
@@ -8,7 +8,7 @@ test('a suggested calendar places file times and cannot write them through arrow
   await boot(page);
   const path = 'projects/guided-onboarding-ga/items/fld-4.md';
   const before = await readMockFile(page, path);
-  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  await openAssistantPanel(page);
   const panel = page.getByTestId('ai-panel');
   await panel.getByLabel('Message the assistant').fill(
     'suggest view ' +

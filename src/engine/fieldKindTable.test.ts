@@ -40,6 +40,7 @@ const statusJson = (s: StatusDef) => ({ ...optionJson(s), group: s.group });
 
 /** A FieldDef as the cases spell it: the parts Rust parses too. */
 const defJson = (d: FieldDef) => ({
+  source: d.source ?? null,
   kind: d.kind,
   formula: d.formula ?? null,
   options: d.options === undefined ? null : d.options.map(optionJson),

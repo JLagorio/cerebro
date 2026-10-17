@@ -8,12 +8,13 @@ Roadmap: `2026-10-12-macro-port-roadmap.md`, § M57. House style and rails: the 
 
 ## Status
 
-- **Precondition:** M53–M56 are closed: gates green, roadmap statuses updated, the D4 record written. Today all four are being built, unstaged, in this checkout (fc510e6 plus drafts: AGENTS.md at CV-17, `runtime.db` v18, policy.v3 `artifact_version` 7, no `tools.v1.json`, no `agent/fold.rs`, no D4 record). This plan names their finished functions, never today's lines.
-- **Built:** nothing. All 7 roadmap parts were scouted against the four plans; all build. M57.4 splits by its own bullets into .4, .4b and .4c.
+- **Dependencies:** M53–M56 and the D4 transport record. Implementation is present; milestone closure still requires the outstanding acceptance below.
+- **Implementation (2026-10-15):** All nine split parts have implementations: the ask seam, shell approval, question cards, ask-first writes and editable drafts, unattended Review queue, Up next/Steer, detached turns and the web ceiling.
+- **Integrated evidence:** see the [roadmap execution update](2026-10-12-macro-port-roadmap.md#execution-update--2026-10-15) for the final unit, coverage, browser, native and static gates, plus their limits. These results do not substitute for packaged or authenticated live acceptance.
 - **Effort:** 2 M + 7 L ≈ 8 L; the roadmap said ≈4 L. Re-measured: .1 M → L; .3 S → M; .4 L → 3 L (.4, .4b, .4c); .5 M → L; .6 M → L; .7 S → M.
 - **CLI:** 2.1.250, M54's pin.
 - **Crash risk:** .1 (stream()'s reader, spawn_run, deferred ambient runs into `dispatch::finalize`), .2 (every spawn's argv, the init stop), .4c (schema v22), .6 (the journal on the reader's per-event path).
-- **Packaged checks:** .1, .2, .4, .4b, .4c, .6, .7. **Live checks** (the owner's isolated login): .1, .3, .4, .4b, .4c, .5, .7.
+- **Packaged acceptance still outstanding:** .1, .2, .4, .4b, .4c, .6, .7. **Live acceptance still outstanding** (the owner's isolated login): .1, .3, .4, .4b, .4c, .5, .7.
 - **Transport facts** (Appendix A): derived from the 2.1.250 bundle unless the D4 record marks them measured. The owner's login is an end-of-build step, so each part names the fact that would change it, and how.
 
 ## Decisions

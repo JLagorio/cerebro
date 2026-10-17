@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot } from './boot';
+import { boot, showDatabases, openDestination } from './boot';
 
 async function offEditor(page: Page) {
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
@@ -21,6 +21,7 @@ async function createPage(page: Page, title: string) {
 
 test('Back restores the database search and scroll for that visit', async ({ page }, testInfo) => {
   await boot(page);
+  await showDatabases(page);
   await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).click();
   await page.getByTestId('view-control-search').click();
   await page.getByTestId('view-search-input').fill('e');
@@ -29,7 +30,7 @@ test('Back restores the database search and scroll for that visit', async ({ pag
     node.scrollTop = 300;
   });
   await expect.poll(() => table.evaluate((node) => node.scrollTop)).toBe(300);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Settings' }).click();
+  await openDestination(page, 'Settings');
   await offEditor(page);
   await page.keyboard.press('ControlOrMeta+[');
   await expect(page.getByTestId('view-search-input')).toHaveValue('e');
@@ -49,7 +50,7 @@ test('reload restores the current page and its saved Back history', async ({ pag
 
 test('reload restores the place but never the record peek', async ({ page }) => {
   await boot(page);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'My work' }).click();
+  await openDestination(page, 'My work');
   await offEditor(page);
   await page.keyboard.press('j');
   await page.keyboard.press('Enter');
